@@ -1,0 +1,62 @@
+# Web 框架与服务器
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.0.0
+
+# 环境变量
+python-dotenv>=1.0.0
+
+# 大模型与 AI 框架
+openai>=1.0.0
+langchain>=0.3.13
+langchain-openai>=0.2.14
+langchain-community>=0.3.13
+langchain-core>=0.3.0
+langchain-text-splitters>=0.3.0
+
+# 文档处理
+pymupdf>=1.24.0
+docx2txt>=0.8
+
+# 工具与搜索
+duckduckgo-search>=6.0.0
+
+# 数据库
+psycopg2-binary>=2.9.0
+
+# 缓存
+redis>=5.0.0
+
+# 认证
+pyjwt>=2.8.0
+
+# 日志
+loguru>=0.7.0
+
+# 监控
+prometheus-client>=0.20.0
+
+# WebSocket
+websockets>=12.0
+
+# 测试与压测（后续用到）
+httpx>=0.27.0
+pytest>=8.0.0
+locust>=2.30.0
+
+# RAG深度优化
+rank-bm25>=0.2.2
+jieba>=0.42.1
+sentence-transformers>=3.0.0
+ragas>=0.1.18
+
+# RAG
+pdfplumber>=0.11.0
+camelot-py[cv]>=0.11.0
+opencv-python>=4.8.0
+python-docx>=1.1.0
+markdown>=3.7.0
+beautifulsoup4>=4.12.0
+lxml>=5.3.0
+
+python-multipart>=0.0.9

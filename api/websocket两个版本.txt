@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Agent WebSocket 实时监控</title>
+    <style>
+        body { font-family: Arial; max-width: 900px; margin: 50px auto; padding: 20px; }
+        #message { width: 70%; padding: 10px; font-size: 16px; }
+        button { padding: 10px 20px; font-size: 16px; cursor: pointer; margin: 5px; }
+        #output { margin-top: 20px; padding: 15px; background: #1e1e1e; color: #d4d4d4; border-radius: 5px; min-height: 200px; font-family: monospace; white-space: pre-wrap; max-height: 500px; overflow-y: auto; }
+        .thinking { color: #569cd6; }
+        .action { color: #dcdcaa; }
+        .observation { color: #4ec9b0; }
+        .final { color: #fad4c5; font-weight: bold; }
+        .done { color: #6a9955; }
+    </style>
+</head>
+<body>
+    <h1>🤖 Agent WebSocket 实时监控</h1>
+    <input type="text" id="message" placeholder="输入你的问题..." value="今天天气怎么样？">
+    <button onclick="sendMessage()">发送</button>
+    <button onclick="disconnect()">断开</button>
+    <button onclick="connect()">重新连接</button>
+    <span>状态：<span id="status">未连接</span></span>
+    <div id="output"></div>
+
+    <script>
+        let ws = null;
+
+        function connect() {
+            if (ws && ws.readyState === WebSocket.OPEN) return;
+            
+            ws = new WebSocket('ws://localhost:8000/ws/agent');
+            
+            ws.onopen = () => {
+                document.getElementById('status').textContent = '已连接';
+                document.getElementById('status').style.color = 'green';
+            };
+            
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                const output = document.getElementById('output');
+                let className = '';
+                let text = '';
+
+                switch(data.type) {
+                    case 'thinking':
+                        className = 'thinking';
+                        text = data.content;
+                        break;
+                    case 'action':
+                        className = 'action';
+                        text = `[${data.tool}] ${data.input}`;
+                        break;
+                    case 'observation':
+                        className = 'observation';
+                        text = data.content;
+                        break;
+                    case 'final':
+                        className = 'final';
+                        text = data.content;
+                        break;
+                    case 'done':
+                        className = 'done';
+                        text = '✅ 任务完成';
+                        break;
+                    case 'error':
+                        className = 'error'; // 在CSS中添加 .error { color: red; }
+                        text = '❌ ' + data.content;
+                        break;
+                }
+
+                if (text) {
+                    output.innerHTML += `<div class="${className}">${text}</div>`;
+                    output.scrollTop = output.scrollHeight;
+                }
+            };
+            
+            ws.onclose = () => {
+                document.getElementById('status').textContent = '已断开';
+                document.getElementById('status').style.color = 'red';
+            };
+            
+            ws.onerror = (err) => {
+                console.error('WebSocket错误:', err);
+            };
+        }
+
+        function sendMessage() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                alert('请先连接');
+                return;
+            }
+            const message = document.getElementById('message').value;
+            ws.send(JSON.stringify({ message: message }));
+        }
+
+        function disconnect() {
+            if (ws) {
+                ws.close();
+            }
+        }
+
+        // 页面加载时自动连接
+        connect();
+    </script>
+</body>
+</html>
+
+
+
+=======================
+
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Agent WebSocket 实时监控</title>
+    <style>
+        body { font-family: Arial; max-width: 900px; margin: 50px auto; padding: 20px; }
+        #message { width: 70%; padding: 10px; font-size: 16px; }
+        button { padding: 10px 20px; font-size: 16px; cursor: pointer; margin: 5px; }
+        #output { margin-top: 20px; padding: 15px; background: #1e1e1e; color: #d4d4d4; border-radius: 5px; min-height: 200px; font-family: monospace; white-space: pre-wrap; max-height: 500px; overflow-y: auto; }
+        .thinking { color: #569cd6; }
+        .action { color: #dcdcaa; }
+        .observation { color: #4ec9b0; }
+        .final { color: #ce9178; font-weight: bold; }
+        .done { color: #6a9955; }
+    </style>
+</head>
+<body>
+    <h1>🤖 Agent WebSocket 实时监控</h1>
+    <input type="text" id="message" placeholder="输入你的问题..." value="今天天气怎么样？">
+    <button onclick="sendMessage()">发送</button>
+    <button onclick="disconnect()">断开</button>
+    <button onclick="connect()">重新连接</button>
+    <span>状态：<span id="status">未连接</span></span>
+    <div id="output"></div>
+
+    <script>
+        let ws = null;
+
+        function connect() {
+            if (ws && ws.readyState === WebSocket.OPEN) return;
+            
+            ws = new WebSocket('ws://localhost:8000/ws/agent');
+            
+            ws.onopen = () => {
+                document.getElementById('status').textContent = '已连接';
+                document.getElementById('status').style.color = 'green';
+            };
+            
+            ws.onmessage = (event) => {
+                const output = document.getElementById('output');
+                try {
+                    const data = JSON.parse(event.data);
+                } catch (e) {
+                    output.innerHTML += `<div>${event.data}</div>`;
+                }
+                output.scrollTop = output.scrollHeight;
+            };
+            
+            ws.onclose = () => {
+                document.getElementById('status').textContent = '已断开';
+                document.getElementById('status').style.color = 'red';
+            };
+            
+            ws.onerror = (err) => {
+                console.error('WebSocket错误:', err);
+            };
+        }
+
+        function sendMessage() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                alert('请先连接');
+                return;
+            }
+            const message = document.getElementById('message').value;
+            ws.send(JSON.stringify({ message: message }));
+        }
+
+        function disconnect() {
+            if (ws) {
+                ws.close();
+            }
+        }
+
+        // 页面加载时自动连接
+        connect();
+    </script>
+</body>
+</html>
+
+==========================
+
+
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Agent WebSocket 实时监控</title>
+    <style>
+        body { font-family: Arial; max-width: 900px; margin: 50px auto; padding: 20px; }
+        #message { width: 70%; padding: 10px; font-size: 16px; }
+        button { padding: 10px 20px; font-size: 16px; cursor: pointer; margin: 5px; }
+        #output { margin-top: 20px; padding: 15px; background: #1e1e1e; color: #d4d4d4; border-radius: 5px; min-height: 200px; font-family: monospace; white-space: pre-wrap; max-height: 500px; overflow-y: auto; }
+        .thinking { color: #569cd6; }
+        .action { color: #dcdcaa; }
+        .observation { color: #4ec9b0; }
+        .final { color: #ce9178; font-weight: bold; }
+        .done { color: #6a9955; }
+    </style>
+</head>
+<body>
+    <h1>🤖 Agent WebSocket 实时监控</h1>
+    <input type="text" id="message" placeholder="输入你的问题..." value="今天天气怎么样？">
+    <button onclick="sendMessage()">发送</button>
+    <button onclick="disconnect()">断开</button>
+    <button onclick="connect()">重新连接</button>
+    <span>状态：<span id="status">未连接</span></span>
+    <div id="output"></div>
+
+    <script>
+        let ws = null;
+
+        function connect() {
+            if (ws && ws.readyState === WebSocket.OPEN) return;
+            
+            ws = new WebSocket('ws://localhost:8000/ws/agent');
+            
+            ws.onopen = () => {
+                document.getElementById('status').textContent = '已连接';
+                document.getElementById('status').style.color = 'green';
+            };
+            
+            ws.onmessage = (event) => {
+                const output = document.getElementById('output');
+                try {
+                    const data = JSON.parse(event.data);
+                    let className = '';
+                    let text = '';
+
+                    switch(data.type) {
+                        case 'thinking':
+                            className = 'thinking';
+                            text = data.content;
+                            break;
+                        case 'action':
+                            className = 'action';
+                            text = `[${data.tool}] ${data.input}`;
+                            break;
+                        case 'observation':
+                            className = 'observation';
+                            text = data.content;
+                            break;
+                        case 'final':
+                            className = 'final';
+                            text = data.content;
+                            break;
+                        case 'done':
+                            className = 'done';
+                            text = '✅ 任务完成';
+                            break;
+                        case 'error':
+                            className = 'error'; // 在CSS中添加 .error { color: red; }
+                            text = '❌ ' + data.content;
+                            break;
+                    }
+                    if (text) {
+                        output.innerHTML += `<div class="${className}">${text}</div>`;
+                    }
+                }catch (e) {
+                    output.innerHTML += `<div>${event.data}</div>`;
+                }
+                output.scrollTop = output.scrollHeight;
+            };
+            
+            ws.onclose = () => {
+                document.getElementById('status').textContent = '已断开';
+                document.getElementById('status').style.color = 'red';
+            };
+            
+            ws.onerror = (err) => {
+                console.error('WebSocket错误:', err);
+            };
+        }
+
+        function sendMessage() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                alert('请先连接');
+                return;
+            }
+            const message = document.getElementById('message').value;
+            ws.send(JSON.stringify({ message: message }));
+        }
+
+        function disconnect() {
+            if (ws) {
+                ws.close();
+            }
+        }
+
+        // 页面加载时自动连接
+        connect();
+    </script>
+</body>
+</html>

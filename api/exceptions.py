@@ -1,0 +1,66 @@
+"""
+统一异常与错误码定义
+所有业务异常和错误码在此集中管理，其他模块从此导入。
+"""
+from enum import Enum
+from fastapi import Request
+from fastapi.responses import JSONResponse
+
+
+# ==================== 业务错误码枚举 ====================
+class ErrorCode(str, Enum):
+    # 通用
+    UNKNOWN = "UNKNOWN"
+    INTERNAL_ERROR = "INTERNAL_ERROR"
+    SERVICE_UNAVAILABLE = "SERVICE_UNAVAILABLE"
+
+    # 参数校验
+    PARAM_INVALID = "PARAM_INVALID"
+    PARAM_MISSING = "PARAM_MISSING"
+
+    # 认证与授权
+    AUTH_MISSING = "AUTH_MISSING"
+    AUTH_INVALID = "AUTH_INVALID"
+    AUTH_EXPIRED = "AUTH_EXPIRED"
+    AUTH_WRONG_TYPE = "AUTH_WRONG_TYPE"
+    FORBIDDEN = "FORBIDDEN"
+
+    # 资源
+    RESOURCE_NOT_FOUND = "RESOURCE_NOT_FOUND"
+    RESOURCE_CONFLICT = "RESOURCE_CONFLICT"
+
+    # 限流与配额
+    RATE_LIMITED = "RATE_LIMITED"
+    QUOTA_EXCEEDED = "QUOTA_EXCEEDED"
+
+    # 外部服务
+    EXTERNAL_API_ERROR = "EXTERNAL_API_ERROR"
+
+
+# 错误码到 HTTP 状态码的映射
+ERROR_CODE_TO_HTTP_STATUS = {
+    ErrorCode.UNKNOWN: 500,
+    ErrorCode.INTERNAL_ERROR: 500,
+    ErrorCode.SERVICE_UNAVAILABLE: 503,
+    ErrorCode.PARAM_INVALID: 422,
+    ErrorCode.PARAM_MISSING: 422,
+    ErrorCode.AUTH_MISSING: 401,
+    ErrorCode.AUTH_INVALID: 401,
+    ErrorCode.AUTH_EXPIRED: 401,
+    ErrorCode.AUTH_WRONG_TYPE: 401,
+    ErrorCode.FORBIDDEN: 403,
+    ErrorCode.RESOURCE_NOT_FOUND: 404,
+    ErrorCode.RESOURCE_CONFLICT: 409,
+    ErrorCode.RATE_LIMITED: 429,
+    ErrorCode.QUOTA_EXCEEDED: 429,
+    ErrorCode.EXTERNAL_API_ERROR: 502,
+}
+
+
+# ==================== 统一业务异常类 ====================
+class AppException(Exception):
+    """自定义业务异常，附带错误码，由全局异常处理器统一捕获"""
+    def __init__(self, error_code: ErrorCode, message: str = None):
+        self.error_code = error_code
+        self.message = message or error_code.value  # 未提供消息则使用错误码名称
+        self.status_code = ERROR_CODE_TO_HTTP_STATUS.get(error_code, 500)

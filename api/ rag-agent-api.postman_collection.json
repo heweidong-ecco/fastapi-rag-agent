@@ -1,0 +1,3332 @@
+{
+  "info": {
+    "_postman_id": "d44fa5db-1769-4a46-b2e6-a1f9ac357102",
+    "name": "RAG Agent API",
+    "description": "```\n# RAG Agent API\n## 概述\n生产级RAG+Agent API，支持文档管理、语义检索、多用户认证和配额控制。\n## 核心功能：\n- **文档管理**：上传、向量化、批量导入文档\n- **智能检索**：基于pgvector的语义搜索\n- **认证系统**：支持 API Key 和 JWT 双认证\n- **配额控制**：免费/付费/管理员三级权限\n## 技术栈：\nFastAPI · PostgreSQL+pgvector · Redis · Docker · Prometheus+Grafana\n## 快速开始\n1. 选择右上角的 `Local` 环境\n2. 确认 `base_url` 指向你的API服务\n3. 如需管理员操作，确保 `admin_api_key` 已配置\n4. 如需JWT认证，先调用 `POST /auth/login` 获取Token\n## 认证方式\n- **API Key**：在请求头中携带 `X-API-Key`\n- **JWT**：在请求头中携带 `Authorization: Bearer <token>`\n## 常见问题\n- 429：触发限流或配额用完，请稍后重试\n- 401：缺少认证凭证\n- 403：凭证无效或已过期\n\n ```\n\nContact Support:  \nName: hwd",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "56061035"
+  },
+  "item": [
+    {
+      "name": "公共接口",
+      "item": [
+        {
+          "name": "/",
+          "item": [
+            {
+              "name": "Root",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    ""
+                  ]
+                }
+              },
+              "response": [
+                {
+                  "name": "Successful Response",
+                  "originalRequest": {
+                    "method": "GET",
+                    "header": [
+                      {
+                        "key": "Accept",
+                        "value": "application/json"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{baseUrl}}/",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        ""
+                      ]
+                    }
+                  },
+                  "status": "OK",
+                  "code": 200,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "cookie": [],
+                  "body": ""
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "metrics",
+          "item": [
+            {
+              "name": "Metrics",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/metrics",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "metrics"
+                  ]
+                }
+              },
+              "response": [
+                {
+                  "name": "Successful Response",
+                  "originalRequest": {
+                    "method": "GET",
+                    "header": [
+                      {
+                        "key": "Accept",
+                        "value": "application/json"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{baseUrl}}/metrics",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "metrics"
+                      ]
+                    }
+                  },
+                  "status": "OK",
+                  "code": 200,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "cookie": [],
+                  "body": ""
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "认证",
+      "item": [
+        {
+          "name": "auth",
+          "item": [
+            {
+              "name": "login",
+              "item": [
+                {
+                  "name": "获取短期令牌和长期令牌",
+                  "event": [
+                    {
+                      "listen": "prerequest",
+                      "script": {
+                        "exec": [
+                          ""
+                        ],
+                        "type": "text/javascript",
+                        "packages": {},
+                        "requests": {}
+                      }
+                    },
+                    {
+                      "listen": "test",
+                      "script": {
+                        "exec": [
+                          "if (pm.response.code === 200) {",
+                          "    var jsonData = pm.response.json();",
+                          "    pm.environment.set(\"access_token\", jsonData.access_token);",
+                          "    pm.environment.set(\"refresh_token\", jsonData.refresh_token);",
+                          "    console.log(\"Token 已自动保存到环境变量\");",
+                          "}"
+                        ],
+                        "type": "text/javascript",
+                        "packages": {},
+                        "requests": {}
+                      }
+                    }
+                  ],
+                  "request": {
+                    "method": "POST",
+                    "header": [
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      },
+                      {
+                        "key": "Accept",
+                        "value": "application/json"
+                      }
+                    ],
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\n  \"user_name\": \"admin\",\n  \"password\": \"admin123\"\n}",
+                      "options": {
+                        "raw": {
+                          "headerFamily": "json",
+                          "language": "json"
+                        }
+                      }
+                    },
+                    "url": {
+                      "raw": "{{baseUrl}}/auth/login",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "auth",
+                        "login"
+                      ]
+                    },
+                    "description": "用户登录，返回 access_token短期令牌 和 refresh_token长期令牌"
+                  },
+                  "response": [
+                    {
+                      "name": "新创建的短期令牌时效15分钟，长期令牌30天",
+                      "originalRequest": {
+                        "method": "POST",
+                        "header": [
+                          {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                          },
+                          {
+                            "key": "Accept",
+                            "value": "application/json"
+                          }
+                        ],
+                        "body": {
+                          "mode": "raw",
+                          "raw": "{\n  \"user_name\": \"admin\",\n  \"password\": \"admin123\"\n}",
+                          "options": {
+                            "raw": {
+                              "headerFamily": "json",
+                              "language": "json"
+                            }
+                          }
+                        },
+                        "url": {
+                          "raw": "{{baseUrl}}/auth/login",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "auth",
+                            "login"
+                          ]
+                        }
+                      },
+                      "status": "OK",
+                      "code": 200,
+                      "_postman_previewlanguage": "json",
+                      "header": [
+                        {
+                          "key": "Content-Type",
+                          "value": "application/json"
+                        }
+                      ],
+                      "cookie": [],
+                      "body": ""
+                    },
+                    {
+                      "name": "用户名或密码错误",
+                      "originalRequest": {
+                        "method": "POST",
+                        "header": [
+                          {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                          }
+                        ],
+                        "body": {
+                          "mode": "raw",
+                          "raw": "{\n  \"user_name\": \"admin\",\n  \"password\": \"admin123\"\n}",
+                          "options": {
+                            "raw": {
+                              "headerFamily": "json",
+                              "language": "json"
+                            }
+                          }
+                        },
+                        "url": {
+                          "raw": "{{baseUrl}}/auth/login",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "auth",
+                            "login"
+                          ]
+                        }
+                      },
+                      "status": "Unauthorized",
+                      "code": 401,
+                      "_postman_previewlanguage": "text",
+                      "header": [],
+                      "cookie": [],
+                      "body": ""
+                    },
+                    {
+                      "name": "Validation Error",
+                      "originalRequest": {
+                        "method": "POST",
+                        "header": [
+                          {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                          },
+                          {
+                            "key": "Accept",
+                            "value": "application/json"
+                          }
+                        ],
+                        "body": {
+                          "mode": "raw",
+                          "raw": "{\n  \"user_name\": \"admin\",\n  \"password\": \"admin123\"\n}",
+                          "options": {
+                            "raw": {
+                              "headerFamily": "json",
+                              "language": "json"
+                            }
+                          }
+                        },
+                        "url": {
+                          "raw": "{{baseUrl}}/auth/login",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "auth",
+                            "login"
+                          ]
+                        }
+                      },
+                      "status": "Unprocessable Entity (WebDAV) (RFC 4918)",
+                      "code": 422,
+                      "_postman_previewlanguage": "json",
+                      "header": [
+                        {
+                          "key": "Content-Type",
+                          "value": "application/json"
+                        }
+                      ],
+                      "cookie": [],
+                      "body": "{\n  \"detail\": [\n    {\n      \"loc\": [\n        \"string\",\n        6740\n      ],\n      \"msg\": \"string\",\n      \"type\": \"string\"\n    },\n    {\n      \"loc\": [\n        1394,\n        \"string\"\n      ],\n      \"msg\": \"string\",\n      \"type\": \"string\"\n    }\n  ]\n}"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "refresh",
+              "item": [
+                {
+                  "name": "换取新的短期令牌",
+                  "request": {
+                    "method": "POST",
+                    "header": [
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      },
+                      {
+                        "key": "Accept",
+                        "value": "application/json"
+                      }
+                    ],
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\n  \"refresh_token\": \"string\"\n}",
+                      "options": {
+                        "raw": {
+                          "headerFamily": "json",
+                          "language": "json"
+                        }
+                      }
+                    },
+                    "url": {
+                      "raw": "{{baseUrl}}/auth/refresh",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "auth",
+                        "refresh"
+                      ]
+                    },
+                    "description": "输入refresh_token，用 refresh_token 换取新的 access_token"
+                  },
+                  "response": [
+                    {
+                      "name": "新创建的短期令牌时效15分钟",
+                      "originalRequest": {
+                        "method": "POST",
+                        "header": [
+                          {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                          },
+                          {
+                            "key": "Accept",
+                            "value": "application/json"
+                          }
+                        ],
+                        "body": {
+                          "mode": "raw",
+                          "raw": "{\n  \"refresh_token\": \"string\"\n}",
+                          "options": {
+                            "raw": {
+                              "headerFamily": "json",
+                              "language": "json"
+                            }
+                          }
+                        },
+                        "url": {
+                          "raw": "{{baseUrl}}/auth/refresh",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "auth",
+                            "refresh"
+                          ]
+                        }
+                      },
+                      "status": "OK",
+                      "code": 200,
+                      "_postman_previewlanguage": "json",
+                      "header": [
+                        {
+                          "key": "Content-Type",
+                          "value": "application/json"
+                        }
+                      ],
+                      "cookie": [],
+                      "body": ""
+                    },
+                    {
+                      "name": "无效或过期的刷新令牌",
+                      "originalRequest": {
+                        "method": "POST",
+                        "header": [
+                          {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                          }
+                        ],
+                        "body": {
+                          "mode": "raw",
+                          "raw": "{\n  \"refresh_token\": \"string\"\n}",
+                          "options": {
+                            "raw": {
+                              "headerFamily": "json",
+                              "language": "json"
+                            }
+                          }
+                        },
+                        "url": {
+                          "raw": "{{baseUrl}}/auth/refresh",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "auth",
+                            "refresh"
+                          ]
+                        }
+                      },
+                      "status": "Unauthorized",
+                      "code": 401,
+                      "_postman_previewlanguage": "text",
+                      "header": [],
+                      "cookie": [],
+                      "body": ""
+                    },
+                    {
+                      "name": "Validation Error",
+                      "originalRequest": {
+                        "method": "POST",
+                        "header": [
+                          {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                          },
+                          {
+                            "key": "Accept",
+                            "value": "application/json"
+                          }
+                        ],
+                        "body": {
+                          "mode": "raw",
+                          "raw": "{\n  \"refresh_token\": \"string\"\n}",
+                          "options": {
+                            "raw": {
+                              "headerFamily": "json",
+                              "language": "json"
+                            }
+                          }
+                        },
+                        "url": {
+                          "raw": "{{baseUrl}}/auth/refresh",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "auth",
+                            "refresh"
+                          ]
+                        }
+                      },
+                      "status": "Unprocessable Entity (WebDAV) (RFC 4918)",
+                      "code": 422,
+                      "_postman_previewlanguage": "json",
+                      "header": [
+                        {
+                          "key": "Content-Type",
+                          "value": "application/json"
+                        }
+                      ],
+                      "cookie": [],
+                      "body": "{\n  \"detail\": [\n    {\n      \"loc\": [\n        \"string\",\n        6740\n      ],\n      \"msg\": \"string\",\n      \"type\": \"string\"\n    },\n    {\n      \"loc\": [\n        1394,\n        \"string\"\n      ],\n      \"msg\": \"string\",\n      \"type\": \"string\"\n    }\n  ]\n}"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "用户管理",
+      "item": [
+        {
+          "name": "admin",
+          "item": [
+            {
+              "name": "create_user",
+              "item": [
+                {
+                  "name": "创建新用户并生成API Key",
+                  "request": {
+                    "method": "POST",
+                    "header": [
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      },
+                      {
+                        "key": "Accept",
+                        "value": "application/json"
+                      }
+                    ],
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\n  \"user_name\": \"test_user\",\n  \"expire_days\": 90\n}",
+                      "options": {
+                        "raw": {
+                          "headerFamily": "json",
+                          "language": "json"
+                        }
+                      }
+                    },
+                    "url": {
+                      "raw": "{{baseUrl}}/admin/create_user",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "admin",
+                        "create_user"
+                      ]
+                    },
+                    "description": "**这个系统内还没有加入初始管理员，此文档仅作为标注记录，参考使用，生成的API Key是30天有效期。**\n    **管理员专用接口**：输入用户名和有效期，生成一个全新的 API Key。\n    \n    **安全注意**：\n    - API Key **仅在此次响应中返回一次**，系统不会存储明文Key。\n    - 请立即复制并妥善保存，关闭页面后将无法找回。\n    - 数据库仅存储 Key 的 SHA256 哈希值，即使数据库泄露也无法还原明文。\n    \n    **认证要求**：当前版本暂未强制校验管理员身份，生产环境中应限制仅管理员可调用。"
+                  },
+                  "response": [
+                    {
+                      "name": "用户创建成功，返回API Key明文",
+                      "originalRequest": {
+                        "method": "POST",
+                        "header": [
+                          {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                          },
+                          {
+                            "key": "Accept",
+                            "value": "application/json"
+                          }
+                        ],
+                        "body": {
+                          "mode": "raw",
+                          "raw": "{\n  \"user_name\": \"test_user\",\n  \"expire_days\": 90\n}",
+                          "options": {
+                            "raw": {
+                              "headerFamily": "json",
+                              "language": "json"
+                            }
+                          }
+                        },
+                        "url": {
+                          "raw": "{{baseUrl}}/admin/create_user",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "admin",
+                            "create_user"
+                          ]
+                        }
+                      },
+                      "status": "OK",
+                      "code": 200,
+                      "_postman_previewlanguage": "json",
+                      "header": [
+                        {
+                          "key": "Content-Type",
+                          "value": "application/json"
+                        }
+                      ],
+                      "cookie": [],
+                      "body": ""
+                    },
+                    {
+                      "name": "请求参数格式错误，如用户名包含非法字符",
+                      "originalRequest": {
+                        "method": "POST",
+                        "header": [
+                          {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                          }
+                        ],
+                        "body": {
+                          "mode": "raw",
+                          "raw": "{\n  \"user_name\": \"test_user\",\n  \"expire_days\": 90\n}",
+                          "options": {
+                            "raw": {
+                              "headerFamily": "json",
+                              "language": "json"
+                            }
+                          }
+                        },
+                        "url": {
+                          "raw": "{{baseUrl}}/admin/create_user",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "admin",
+                            "create_user"
+                          ]
+                        }
+                      },
+                      "status": "Unprocessable Entity (WebDAV) (RFC 4918)",
+                      "code": 422,
+                      "_postman_previewlanguage": "text",
+                      "header": [],
+                      "cookie": [],
+                      "body": ""
+                    },
+                    {
+                      "name": "服务器内部错误，如数据库写入失败",
+                      "originalRequest": {
+                        "method": "POST",
+                        "header": [
+                          {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                          }
+                        ],
+                        "body": {
+                          "mode": "raw",
+                          "raw": "{\n  \"user_name\": \"test_user\",\n  \"expire_days\": 90\n}",
+                          "options": {
+                            "raw": {
+                              "headerFamily": "json",
+                              "language": "json"
+                            }
+                          }
+                        },
+                        "url": {
+                          "raw": "{{baseUrl}}/admin/create_user",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "admin",
+                            "create_user"
+                          ]
+                        }
+                      },
+                      "status": "Internal Server Error",
+                      "code": 500,
+                      "_postman_previewlanguage": "text",
+                      "header": [],
+                      "cookie": [],
+                      "body": ""
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "users",
+          "item": [
+            {
+              "name": "{user_id}",
+              "item": [
+                {
+                  "name": "获取用户信息",
+                  "request": {
+                    "method": "GET",
+                    "header": [
+                      {
+                        "key": "Accept",
+                        "value": "application/json"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{baseUrl}}/users/:user_id?include_detail=true",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "users",
+                        ":user_id"
+                      ],
+                      "query": [
+                        {
+                          "key": "include_detail",
+                          "value": "true",
+                          "description": "是否返回详细信息（如邮箱、注册时间等），默认仅返回基础信息"
+                        }
+                      ],
+                      "variable": [
+                        {
+                          "key": "user_id",
+                          "value": "123",
+                          "description": "用户的唯一数字ID"
+                        }
+                      ]
+                    },
+                    "description": "根据用户ID查询用户基本资料。可选择是否返回详细信息。"
+                  },
+                  "response": [
+                    {
+                      "name": "查询成功",
+                      "originalRequest": {
+                        "method": "GET",
+                        "header": [
+                          {
+                            "key": "Accept",
+                            "value": "application/json"
+                          }
+                        ],
+                        "url": {
+                          "raw": "{{baseUrl}}/users/:user_id?include_detail=true",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "users",
+                            ":user_id"
+                          ],
+                          "query": [
+                            {
+                              "description": "是否返回详细信息（如邮箱、注册时间等），默认仅返回基础信息",
+                              "key": "include_detail",
+                              "value": "true"
+                            }
+                          ],
+                          "variable": [
+                            {
+                              "key": "user_id",
+                              "value": "123",
+                              "description": "用户的唯一数字ID"
+                            }
+                          ]
+                        }
+                      },
+                      "status": "OK",
+                      "code": 200,
+                      "_postman_previewlanguage": "json",
+                      "header": [
+                        {
+                          "key": "Content-Type",
+                          "value": "application/json"
+                        }
+                      ],
+                      "cookie": [],
+                      "body": ""
+                    },
+                    {
+                      "name": "参数格式错误，如 user_id 不是整数",
+                      "originalRequest": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                          "raw": "{{baseUrl}}/users/:user_id?include_detail=true",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "users",
+                            ":user_id"
+                          ],
+                          "query": [
+                            {
+                              "description": "是否返回详细信息（如邮箱、注册时间等），默认仅返回基础信息",
+                              "key": "include_detail",
+                              "value": "true"
+                            }
+                          ],
+                          "variable": [
+                            {
+                              "key": "user_id",
+                              "value": "123",
+                              "description": "用户的唯一数字ID"
+                            }
+                          ]
+                        }
+                      },
+                      "status": "Unprocessable Entity (WebDAV) (RFC 4918)",
+                      "code": 422,
+                      "_postman_previewlanguage": "text",
+                      "header": [],
+                      "cookie": [],
+                      "body": ""
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "检索",
+      "item": [
+        {
+          "name": "rag",
+          "item": [
+            {
+              "name": "jwt_ask",
+              "item": [
+                {
+                  "name": "JWT认证的问答接口",
+                  "request": {
+                    "auth": {
+                      "type": "bearer",
+                      "bearer": [
+                        {
+                          "key": "token",
+                          "value": "{{access_token}}",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "method": "POST",
+                    "header": [
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      },
+                      {
+                        "key": "Accept",
+                        "value": "application/json"
+                      }
+                    ],
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\n  \"question\": \"FastAPI是什么？\",\n  \"top_k\": 5\n}",
+                      "options": {
+                        "raw": {
+                          "headerFamily": "json",
+                          "language": "json"
+                        }
+                      }
+                    },
+                    "url": {
+                      "raw": "{{baseUrl}}/rag/jwt_ask",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "rag",
+                        "jwt_ask"
+                      ]
+                    },
+                    "description": "输入JWT_SECRET_KEY，获得回答结果"
+                  },
+                  "response": [
+                    {
+                      "name": "返回搜索结果：创建JWT_SECRET_KEY，用户名，下的数据结果",
+                      "originalRequest": {
+                        "method": "POST",
+                        "header": [
+                          {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                          },
+                          {
+                            "key": "Accept",
+                            "value": "application/json"
+                          },
+                          {
+                            "description": "Added as a part of security scheme: bearer",
+                            "key": "Authorization",
+                            "value": "Bearer <token>"
+                          }
+                        ],
+                        "body": {
+                          "mode": "raw",
+                          "raw": "{\n  \"question\": \"FastAPI是什么？\",\n  \"top_k\": 5\n}",
+                          "options": {
+                            "raw": {
+                              "headerFamily": "json",
+                              "language": "json"
+                            }
+                          }
+                        },
+                        "url": {
+                          "raw": "{{baseUrl}}/rag/jwt_ask",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "rag",
+                            "jwt_ask"
+                          ]
+                        }
+                      },
+                      "status": "OK",
+                      "code": 200,
+                      "_postman_previewlanguage": "json",
+                      "header": [
+                        {
+                          "key": "Content-Type",
+                          "value": "application/json"
+                        }
+                      ],
+                      "cookie": [],
+                      "body": ""
+                    },
+                    {
+                      "name": "Validation Error",
+                      "originalRequest": {
+                        "method": "POST",
+                        "header": [
+                          {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                          },
+                          {
+                            "key": "Accept",
+                            "value": "application/json"
+                          },
+                          {
+                            "description": "Added as a part of security scheme: bearer",
+                            "key": "Authorization",
+                            "value": "Bearer <token>"
+                          }
+                        ],
+                        "body": {
+                          "mode": "raw",
+                          "raw": "{\n  \"question\": \"FastAPI是什么？\",\n  \"top_k\": 5\n}",
+                          "options": {
+                            "raw": {
+                              "headerFamily": "json",
+                              "language": "json"
+                            }
+                          }
+                        },
+                        "url": {
+                          "raw": "{{baseUrl}}/rag/jwt_ask",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "rag",
+                            "jwt_ask"
+                          ]
+                        }
+                      },
+                      "status": "Unprocessable Entity (WebDAV) (RFC 4918)",
+                      "code": 422,
+                      "_postman_previewlanguage": "json",
+                      "header": [
+                        {
+                          "key": "Content-Type",
+                          "value": "application/json"
+                        }
+                      ],
+                      "cookie": [],
+                      "body": "{\n  \"detail\": [\n    {\n      \"loc\": [\n        \"string\",\n        6740\n      ],\n      \"msg\": \"string\",\n      \"type\": \"string\"\n    },\n    {\n      \"loc\": [\n        1394,\n        \"string\"\n      ],\n      \"msg\": \"string\",\n      \"type\": \"string\"\n    }\n  ]\n}"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "ask",
+              "item": [
+                {
+                  "name": "原有同步接口（需API Key）",
+                  "request": {
+                    "method": "POST",
+                    "header": [
+                      {
+                        "key": "x-api-key",
+                        "value": "string"
+                      },
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      },
+                      {
+                        "key": "Accept",
+                        "value": "application/json"
+                      }
+                    ],
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\n  \"question\": \"FastAPI是什么？\",\n  \"top_k\": 5\n}",
+                      "options": {
+                        "raw": {
+                          "headerFamily": "json",
+                          "language": "json"
+                        }
+                      }
+                    },
+                    "url": {
+                      "raw": "{{baseUrl}}/rag/ask",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "rag",
+                        "ask"
+                      ]
+                    }
+                  },
+                  "response": [
+                    {
+                      "name": "Successful Response",
+                      "originalRequest": {
+                        "method": "POST",
+                        "header": [
+                          {
+                            "key": "x-api-key",
+                            "value": "string"
+                          },
+                          {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                          },
+                          {
+                            "key": "Accept",
+                            "value": "application/json"
+                          }
+                        ],
+                        "body": {
+                          "mode": "raw",
+                          "raw": "{\n  \"question\": \"FastAPI是什么？\",\n  \"top_k\": 5\n}",
+                          "options": {
+                            "raw": {
+                              "headerFamily": "json",
+                              "language": "json"
+                            }
+                          }
+                        },
+                        "url": {
+                          "raw": "{{baseUrl}}/rag/ask",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "rag",
+                            "ask"
+                          ]
+                        }
+                      },
+                      "status": "OK",
+                      "code": 200,
+                      "_postman_previewlanguage": "json",
+                      "header": [
+                        {
+                          "key": "Content-Type",
+                          "value": "application/json"
+                        }
+                      ],
+                      "cookie": [],
+                      "body": ""
+                    },
+                    {
+                      "name": "Validation Error",
+                      "originalRequest": {
+                        "method": "POST",
+                        "header": [
+                          {
+                            "key": "x-api-key",
+                            "value": "string"
+                          },
+                          {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                          },
+                          {
+                            "key": "Accept",
+                            "value": "application/json"
+                          }
+                        ],
+                        "body": {
+                          "mode": "raw",
+                          "raw": "{\n  \"question\": \"FastAPI是什么？\",\n  \"top_k\": 5\n}",
+                          "options": {
+                            "raw": {
+                              "headerFamily": "json",
+                              "language": "json"
+                            }
+                          }
+                        },
+                        "url": {
+                          "raw": "{{baseUrl}}/rag/ask",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "rag",
+                            "ask"
+                          ]
+                        }
+                      },
+                      "status": "Unprocessable Entity (WebDAV) (RFC 4918)",
+                      "code": 422,
+                      "_postman_previewlanguage": "json",
+                      "header": [
+                        {
+                          "key": "Content-Type",
+                          "value": "application/json"
+                        }
+                      ],
+                      "cookie": [],
+                      "body": "{\n  \"detail\": [\n    {\n      \"loc\": [\n        \"string\",\n        6740\n      ],\n      \"msg\": \"string\",\n      \"type\": \"string\"\n    },\n    {\n      \"loc\": [\n        1394,\n        \"string\"\n      ],\n      \"msg\": \"string\",\n      \"type\": \"string\"\n    }\n  ]\n}"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "pg_search",
+              "item": [
+                {
+                  "name": "向量语义检索",
+                  "request": {
+                    "method": "POST",
+                    "header": [
+                      {
+                        "key": "x-api-key",
+                        "value": "sk-5df1827d6d024aee8946d883f3a872d0"
+                      },
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      },
+                      {
+                        "key": "Accept",
+                        "value": "application/json"
+                      }
+                    ],
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\n    \"question\": \"FastAPI是什么？\",\n    \"top_k\": 5\n}",
+                      "options": {
+                        "raw": {
+                          "headerFamily": "json",
+                          "language": "json"
+                        }
+                      }
+                    },
+                    "url": {
+                      "raw": "{{baseUrl}}/rag/pg_search",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "rag",
+                        "pg_search"
+                      ]
+                    },
+                    "description": "使用阿里百炼 text-embedding-v2 将问题转为向量，在 pgvector 中检索最相关的文档块，返回按相似度降序排列的结果。"
+                  },
+                  "response": [
+                    {
+                      "name": "检索成功",
+                      "originalRequest": {
+                        "method": "POST",
+                        "header": [
+                          {
+                            "key": "x-api-key",
+                            "value": "string"
+                          },
+                          {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                          },
+                          {
+                            "key": "Accept",
+                            "value": "application/json"
+                          }
+                        ],
+                        "body": {
+                          "mode": "raw",
+                          "raw": "{\n  \"question\": \"FastAPI是什么？\",\n  \"top_k\": 5\n}",
+                          "options": {
+                            "raw": {
+                              "headerFamily": "json",
+                              "language": "json"
+                            }
+                          }
+                        },
+                        "url": {
+                          "raw": "{{baseUrl}}/rag/pg_search",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "rag",
+                            "pg_search"
+                          ]
+                        }
+                      },
+                      "status": "OK",
+                      "code": 200,
+                      "_postman_previewlanguage": "json",
+                      "header": [
+                        {
+                          "key": "Content-Type",
+                          "value": "application/json"
+                        }
+                      ],
+                      "cookie": [],
+                      "body": ""
+                    },
+                    {
+                      "name": "缺少或无效的 API Key",
+                      "originalRequest": {
+                        "method": "POST",
+                        "header": [
+                          {
+                            "key": "x-api-key",
+                            "value": "string"
+                          },
+                          {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                          }
+                        ],
+                        "body": {
+                          "mode": "raw",
+                          "raw": "{\n  \"question\": \"FastAPI是什么？\",\n  \"top_k\": 5\n}",
+                          "options": {
+                            "raw": {
+                              "headerFamily": "json",
+                              "language": "json"
+                            }
+                          }
+                        },
+                        "url": {
+                          "raw": "{{baseUrl}}/rag/pg_search",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "rag",
+                            "pg_search"
+                          ]
+                        }
+                      },
+                      "status": "Unauthorized",
+                      "code": 401,
+                      "_postman_previewlanguage": "text",
+                      "header": [],
+                      "cookie": [],
+                      "body": ""
+                    },
+                    {
+                      "name": "API Key 已过期",
+                      "originalRequest": {
+                        "method": "POST",
+                        "header": [
+                          {
+                            "key": "x-api-key",
+                            "value": "string"
+                          },
+                          {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                          }
+                        ],
+                        "body": {
+                          "mode": "raw",
+                          "raw": "{\n  \"question\": \"FastAPI是什么？\",\n  \"top_k\": 5\n}",
+                          "options": {
+                            "raw": {
+                              "headerFamily": "json",
+                              "language": "json"
+                            }
+                          }
+                        },
+                        "url": {
+                          "raw": "{{baseUrl}}/rag/pg_search",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "rag",
+                            "pg_search"
+                          ]
+                        }
+                      },
+                      "status": "Forbidden",
+                      "code": 403,
+                      "_postman_previewlanguage": "text",
+                      "header": [],
+                      "cookie": [],
+                      "body": ""
+                    },
+                    {
+                      "name": "Validation Error",
+                      "originalRequest": {
+                        "method": "POST",
+                        "header": [
+                          {
+                            "key": "x-api-key",
+                            "value": "string"
+                          },
+                          {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                          },
+                          {
+                            "key": "Accept",
+                            "value": "application/json"
+                          }
+                        ],
+                        "body": {
+                          "mode": "raw",
+                          "raw": "{\n  \"question\": \"FastAPI是什么？\",\n  \"top_k\": 5\n}",
+                          "options": {
+                            "raw": {
+                              "headerFamily": "json",
+                              "language": "json"
+                            }
+                          }
+                        },
+                        "url": {
+                          "raw": "{{baseUrl}}/rag/pg_search",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "rag",
+                            "pg_search"
+                          ]
+                        }
+                      },
+                      "status": "Unprocessable Entity (WebDAV) (RFC 4918)",
+                      "code": 422,
+                      "_postman_previewlanguage": "json",
+                      "header": [
+                        {
+                          "key": "Content-Type",
+                          "value": "application/json"
+                        }
+                      ],
+                      "cookie": [],
+                      "body": "{\n  \"detail\": [\n    {\n      \"loc\": [\n        \"string\",\n        6740\n      ],\n      \"msg\": \"string\",\n      \"type\": \"string\"\n    },\n    {\n      \"loc\": [\n        1394,\n        \"string\"\n      ],\n      \"msg\": \"string\",\n      \"type\": \"string\"\n    }\n  ]\n}"
+                    },
+                    {
+                      "name": "请求过于频繁或配额已用完",
+                      "originalRequest": {
+                        "method": "POST",
+                        "header": [
+                          {
+                            "key": "x-api-key",
+                            "value": "string"
+                          },
+                          {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                          }
+                        ],
+                        "body": {
+                          "mode": "raw",
+                          "raw": "{\n  \"question\": \"FastAPI是什么？\",\n  \"top_k\": 5\n}",
+                          "options": {
+                            "raw": {
+                              "headerFamily": "json",
+                              "language": "json"
+                            }
+                          }
+                        },
+                        "url": {
+                          "raw": "{{baseUrl}}/rag/pg_search",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "rag",
+                            "pg_search"
+                          ]
+                        }
+                      },
+                      "status": "Too Many Requests",
+                      "code": 429,
+                      "_postman_previewlanguage": "text",
+                      "header": [],
+                      "cookie": [],
+                      "body": ""
+                    },
+                    {
+                      "name": "服务器内部错误",
+                      "originalRequest": {
+                        "method": "POST",
+                        "header": [
+                          {
+                            "key": "x-api-key",
+                            "value": "string"
+                          },
+                          {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                          }
+                        ],
+                        "body": {
+                          "mode": "raw",
+                          "raw": "{\n  \"question\": \"FastAPI是什么？\",\n  \"top_k\": 5\n}",
+                          "options": {
+                            "raw": {
+                              "headerFamily": "json",
+                              "language": "json"
+                            }
+                          }
+                        },
+                        "url": {
+                          "raw": "{{baseUrl}}/rag/pg_search",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "rag",
+                            "pg_search"
+                          ]
+                        }
+                      },
+                      "status": "Internal Server Error",
+                      "code": 500,
+                      "_postman_previewlanguage": "text",
+                      "header": [],
+                      "cookie": [],
+                      "body": ""
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "parallel_ask",
+              "item": [
+                {
+                  "name": "并行检索（模拟）",
+                  "request": {
+                    "method": "POST",
+                    "header": [
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      },
+                      {
+                        "key": "Accept",
+                        "value": "application/json"
+                      }
+                    ],
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\n  \"question\": \"FastAPI是什么？\",\n  \"top_k\": 5\n}",
+                      "options": {
+                        "raw": {
+                          "headerFamily": "json",
+                          "language": "json"
+                        }
+                      }
+                    },
+                    "url": {
+                      "raw": "{{baseUrl}}/rag/parallel_ask",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "rag",
+                        "parallel_ask"
+                      ]
+                    }
+                  },
+                  "response": [
+                    {
+                      "name": "Successful Response",
+                      "originalRequest": {
+                        "method": "POST",
+                        "header": [
+                          {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                          },
+                          {
+                            "key": "Accept",
+                            "value": "application/json"
+                          }
+                        ],
+                        "body": {
+                          "mode": "raw",
+                          "raw": "{\n  \"question\": \"FastAPI是什么？\",\n  \"top_k\": 5\n}",
+                          "options": {
+                            "raw": {
+                              "headerFamily": "json",
+                              "language": "json"
+                            }
+                          }
+                        },
+                        "url": {
+                          "raw": "{{baseUrl}}/rag/parallel_ask",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "rag",
+                            "parallel_ask"
+                          ]
+                        }
+                      },
+                      "status": "OK",
+                      "code": 200,
+                      "_postman_previewlanguage": "json",
+                      "header": [
+                        {
+                          "key": "Content-Type",
+                          "value": "application/json"
+                        }
+                      ],
+                      "cookie": [],
+                      "body": ""
+                    },
+                    {
+                      "name": "Validation Error",
+                      "originalRequest": {
+                        "method": "POST",
+                        "header": [
+                          {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                          },
+                          {
+                            "key": "Accept",
+                            "value": "application/json"
+                          }
+                        ],
+                        "body": {
+                          "mode": "raw",
+                          "raw": "{\n  \"question\": \"FastAPI是什么？\",\n  \"top_k\": 5\n}",
+                          "options": {
+                            "raw": {
+                              "headerFamily": "json",
+                              "language": "json"
+                            }
+                          }
+                        },
+                        "url": {
+                          "raw": "{{baseUrl}}/rag/parallel_ask",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "rag",
+                            "parallel_ask"
+                          ]
+                        }
+                      },
+                      "status": "Unprocessable Entity (WebDAV) (RFC 4918)",
+                      "code": 422,
+                      "_postman_previewlanguage": "json",
+                      "header": [
+                        {
+                          "key": "Content-Type",
+                          "value": "application/json"
+                        }
+                      ],
+                      "cookie": [],
+                      "body": "{\n  \"detail\": [\n    {\n      \"loc\": [\n        \"string\",\n        6740\n      ],\n      \"msg\": \"string\",\n      \"type\": \"string\"\n    },\n    {\n      \"loc\": [\n        1394,\n        \"string\"\n      ],\n      \"msg\": \"string\",\n      \"type\": \"string\"\n    }\n  ]\n}"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "async_ask",
+              "item": [
+                {
+                  "name": "异步检索（模拟，无需API Key）",
+                  "request": {
+                    "method": "POST",
+                    "header": [
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      },
+                      {
+                        "key": "Accept",
+                        "value": "application/json"
+                      }
+                    ],
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\n  \"question\": \"FastAPI是什么？\",\n  \"top_k\": 5\n}",
+                      "options": {
+                        "raw": {
+                          "headerFamily": "json",
+                          "language": "json"
+                        }
+                      }
+                    },
+                    "url": {
+                      "raw": "{{baseUrl}}/rag/async_ask",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "rag",
+                        "async_ask"
+                      ]
+                    }
+                  },
+                  "response": [
+                    {
+                      "name": "Successful Response",
+                      "originalRequest": {
+                        "method": "POST",
+                        "header": [
+                          {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                          },
+                          {
+                            "key": "Accept",
+                            "value": "application/json"
+                          }
+                        ],
+                        "body": {
+                          "mode": "raw",
+                          "raw": "{\n  \"question\": \"FastAPI是什么？\",\n  \"top_k\": 5\n}",
+                          "options": {
+                            "raw": {
+                              "headerFamily": "json",
+                              "language": "json"
+                            }
+                          }
+                        },
+                        "url": {
+                          "raw": "{{baseUrl}}/rag/async_ask",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "rag",
+                            "async_ask"
+                          ]
+                        }
+                      },
+                      "status": "OK",
+                      "code": 200,
+                      "_postman_previewlanguage": "json",
+                      "header": [
+                        {
+                          "key": "Content-Type",
+                          "value": "application/json"
+                        }
+                      ],
+                      "cookie": [],
+                      "body": ""
+                    },
+                    {
+                      "name": "Validation Error",
+                      "originalRequest": {
+                        "method": "POST",
+                        "header": [
+                          {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                          },
+                          {
+                            "key": "Accept",
+                            "value": "application/json"
+                          }
+                        ],
+                        "body": {
+                          "mode": "raw",
+                          "raw": "{\n  \"question\": \"FastAPI是什么？\",\n  \"top_k\": 5\n}",
+                          "options": {
+                            "raw": {
+                              "headerFamily": "json",
+                              "language": "json"
+                            }
+                          }
+                        },
+                        "url": {
+                          "raw": "{{baseUrl}}/rag/async_ask",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "rag",
+                            "async_ask"
+                          ]
+                        }
+                      },
+                      "status": "Unprocessable Entity (WebDAV) (RFC 4918)",
+                      "code": 422,
+                      "_postman_previewlanguage": "json",
+                      "header": [
+                        {
+                          "key": "Content-Type",
+                          "value": "application/json"
+                        }
+                      ],
+                      "cookie": [],
+                      "body": "{\n  \"detail\": [\n    {\n      \"loc\": [\n        \"string\",\n        6740\n      ],\n      \"msg\": \"string\",\n      \"type\": \"string\"\n    },\n    {\n      \"loc\": [\n        1394,\n        \"string\"\n      ],\n      \"msg\": \"string\",\n      \"type\": \"string\"\n    }\n  ]\n}"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "调试",
+      "item": [
+        {
+          "name": "rag",
+          "item": [
+            {
+              "name": "benchmark-embedding",
+              "item": [
+                {
+                  "name": "对比测试：缓存命中和无缓存命中 时间差距 ，正常生产级数据库大概是5倍，看数据库大小",
+                  "request": {
+                    "method": "POST",
+                    "header": [
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      },
+                      {
+                        "key": "Accept",
+                        "value": "application/json"
+                      }
+                    ],
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\n  \"question\": \"FastAPI是什么？\",\n  \"top_k\": 5\n}",
+                      "options": {
+                        "raw": {
+                          "headerFamily": "json",
+                          "language": "json"
+                        }
+                      }
+                    },
+                    "url": {
+                      "raw": "{{baseUrl}}/rag/benchmark-embedding",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "rag",
+                        "benchmark-embedding"
+                      ]
+                    }
+                  },
+                  "response": [
+                    {
+                      "name": "Successful Response",
+                      "originalRequest": {
+                        "method": "POST",
+                        "header": [
+                          {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                          },
+                          {
+                            "key": "Accept",
+                            "value": "application/json"
+                          }
+                        ],
+                        "body": {
+                          "mode": "raw",
+                          "raw": "{\n  \"question\": \"FastAPI是什么？\",\n  \"top_k\": 5\n}",
+                          "options": {
+                            "raw": {
+                              "headerFamily": "json",
+                              "language": "json"
+                            }
+                          }
+                        },
+                        "url": {
+                          "raw": "{{baseUrl}}/rag/benchmark-embedding",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "rag",
+                            "benchmark-embedding"
+                          ]
+                        }
+                      },
+                      "status": "OK",
+                      "code": 200,
+                      "_postman_previewlanguage": "json",
+                      "header": [
+                        {
+                          "key": "Content-Type",
+                          "value": "application/json"
+                        }
+                      ],
+                      "cookie": [],
+                      "body": ""
+                    },
+                    {
+                      "name": "Validation Error",
+                      "originalRequest": {
+                        "method": "POST",
+                        "header": [
+                          {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                          },
+                          {
+                            "key": "Accept",
+                            "value": "application/json"
+                          }
+                        ],
+                        "body": {
+                          "mode": "raw",
+                          "raw": "{\n  \"question\": \"FastAPI是什么？\",\n  \"top_k\": 5\n}",
+                          "options": {
+                            "raw": {
+                              "headerFamily": "json",
+                              "language": "json"
+                            }
+                          }
+                        },
+                        "url": {
+                          "raw": "{{baseUrl}}/rag/benchmark-embedding",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "rag",
+                            "benchmark-embedding"
+                          ]
+                        }
+                      },
+                      "status": "Unprocessable Entity (WebDAV) (RFC 4918)",
+                      "code": 422,
+                      "_postman_previewlanguage": "json",
+                      "header": [
+                        {
+                          "key": "Content-Type",
+                          "value": "application/json"
+                        }
+                      ],
+                      "cookie": [],
+                      "body": "{\n  \"detail\": [\n    {\n      \"loc\": [\n        \"string\",\n        6740\n      ],\n      \"msg\": \"string\",\n      \"type\": \"string\"\n    },\n    {\n      \"loc\": [\n        1394,\n        \"string\"\n      ],\n      \"msg\": \"string\",\n      \"type\": \"string\"\n    }\n  ]\n}"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "debug",
+          "item": [
+            {
+              "name": "cache_stats",
+              "item": [
+                {
+                  "name": "调试接口，用来查看当前缓存中有多少个 Embedding 键",
+                  "request": {
+                    "method": "GET",
+                    "header": [
+                      {
+                        "key": "Accept",
+                        "value": "application/json"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{baseUrl}}/debug/cache_stats",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "debug",
+                        "cache_stats"
+                      ]
+                    }
+                  },
+                  "response": [
+                    {
+                      "name": "Successful Response",
+                      "originalRequest": {
+                        "method": "GET",
+                        "header": [
+                          {
+                            "key": "Accept",
+                            "value": "application/json"
+                          }
+                        ],
+                        "url": {
+                          "raw": "{{baseUrl}}/debug/cache_stats",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "debug",
+                            "cache_stats"
+                          ]
+                        }
+                      },
+                      "status": "OK",
+                      "code": 200,
+                      "_postman_previewlanguage": "json",
+                      "header": [
+                        {
+                          "key": "Content-Type",
+                          "value": "application/json"
+                        }
+                      ],
+                      "cookie": [],
+                      "body": ""
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "rate_limit",
+              "item": [
+                {
+                  "name": "{user_name}",
+                  "item": [
+                    {
+                      "name": "调试接口，查询某用户的剩余令牌数",
+                      "request": {
+                        "method": "GET",
+                        "header": [
+                          {
+                            "key": "Accept",
+                            "value": "application/json"
+                          }
+                        ],
+                        "url": {
+                          "raw": "{{baseUrl}}/debug/rate_limit/:user_name",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "debug",
+                            "rate_limit",
+                            ":user_name"
+                          ],
+                          "variable": [
+                            {
+                              "key": "user_name",
+                              "value": "string"
+                            }
+                          ]
+                        },
+                        "description": "查询某用户的剩余令牌数"
+                      },
+                      "response": [
+                        {
+                          "name": "Successful Response",
+                          "originalRequest": {
+                            "method": "GET",
+                            "header": [
+                              {
+                                "key": "Accept",
+                                "value": "application/json"
+                              }
+                            ],
+                            "url": {
+                              "raw": "{{baseUrl}}/debug/rate_limit/:user_name",
+                              "host": [
+                                "{{baseUrl}}"
+                              ],
+                              "path": [
+                                "debug",
+                                "rate_limit",
+                                ":user_name"
+                              ],
+                              "variable": [
+                                {
+                                  "key": "user_name",
+                                  "value": "string"
+                                }
+                              ]
+                            }
+                          },
+                          "status": "OK",
+                          "code": 200,
+                          "_postman_previewlanguage": "json",
+                          "header": [
+                            {
+                              "key": "Content-Type",
+                              "value": "application/json"
+                            }
+                          ],
+                          "cookie": [],
+                          "body": ""
+                        },
+                        {
+                          "name": "Validation Error",
+                          "originalRequest": {
+                            "method": "GET",
+                            "header": [
+                              {
+                                "key": "Accept",
+                                "value": "application/json"
+                              }
+                            ],
+                            "url": {
+                              "raw": "{{baseUrl}}/debug/rate_limit/:user_name",
+                              "host": [
+                                "{{baseUrl}}"
+                              ],
+                              "path": [
+                                "debug",
+                                "rate_limit",
+                                ":user_name"
+                              ],
+                              "variable": [
+                                {
+                                  "key": "user_name",
+                                  "value": "string"
+                                }
+                              ]
+                            }
+                          },
+                          "status": "Unprocessable Entity (WebDAV) (RFC 4918)",
+                          "code": 422,
+                          "_postman_previewlanguage": "json",
+                          "header": [
+                            {
+                              "key": "Content-Type",
+                              "value": "application/json"
+                            }
+                          ],
+                          "cookie": [],
+                          "body": "{\n  \"detail\": [\n    {\n      \"loc\": [\n        \"string\",\n        6740\n      ],\n      \"msg\": \"string\",\n      \"type\": \"string\"\n    },\n    {\n      \"loc\": [\n        1394,\n        \"string\"\n      ],\n      \"msg\": \"string\",\n      \"type\": \"string\"\n    }\n  ]\n}"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "quota",
+              "item": [
+                {
+                  "name": "{user_name}",
+                  "item": [
+                    {
+                      "name": "权限分流的测试接口",
+                      "request": {
+                        "method": "GET",
+                        "header": [
+                          {
+                            "key": "Accept",
+                            "value": "application/json"
+                          }
+                        ],
+                        "url": {
+                          "raw": "{{baseUrl}}/debug/quota/:user_name",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "debug",
+                            "quota",
+                            ":user_name"
+                          ],
+                          "variable": [
+                            {
+                              "key": "user_name",
+                              "value": "string"
+                            }
+                          ]
+                        },
+                        "description": "权限分流的测试接口，限流（按角色不同限额）"
+                      },
+                      "response": [
+                        {
+                          "name": "Successful Response",
+                          "originalRequest": {
+                            "method": "GET",
+                            "header": [
+                              {
+                                "key": "Accept",
+                                "value": "application/json"
+                              }
+                            ],
+                            "url": {
+                              "raw": "{{baseUrl}}/debug/quota/:user_name",
+                              "host": [
+                                "{{baseUrl}}"
+                              ],
+                              "path": [
+                                "debug",
+                                "quota",
+                                ":user_name"
+                              ],
+                              "variable": [
+                                {
+                                  "key": "user_name",
+                                  "value": "string"
+                                }
+                              ]
+                            }
+                          },
+                          "status": "OK",
+                          "code": 200,
+                          "_postman_previewlanguage": "json",
+                          "header": [
+                            {
+                              "key": "Content-Type",
+                              "value": "application/json"
+                            }
+                          ],
+                          "cookie": [],
+                          "body": ""
+                        },
+                        {
+                          "name": "Validation Error",
+                          "originalRequest": {
+                            "method": "GET",
+                            "header": [
+                              {
+                                "key": "Accept",
+                                "value": "application/json"
+                              }
+                            ],
+                            "url": {
+                              "raw": "{{baseUrl}}/debug/quota/:user_name",
+                              "host": [
+                                "{{baseUrl}}"
+                              ],
+                              "path": [
+                                "debug",
+                                "quota",
+                                ":user_name"
+                              ],
+                              "variable": [
+                                {
+                                  "key": "user_name",
+                                  "value": "string"
+                                }
+                              ]
+                            }
+                          },
+                          "status": "Unprocessable Entity (WebDAV) (RFC 4918)",
+                          "code": 422,
+                          "_postman_previewlanguage": "json",
+                          "header": [
+                            {
+                              "key": "Content-Type",
+                              "value": "application/json"
+                            }
+                          ],
+                          "cookie": [],
+                          "body": "{\n  \"detail\": [\n    {\n      \"loc\": [\n        \"string\",\n        6740\n      ],\n      \"msg\": \"string\",\n      \"type\": \"string\"\n    },\n    {\n      \"loc\": [\n        1394,\n        \"string\"\n      ],\n      \"msg\": \"string\",\n      \"type\": \"string\"\n    }\n  ]\n}"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "count",
+              "item": [
+                {
+                  "name": "调试：查看数据库中文档数量",
+                  "request": {
+                    "method": "GET",
+                    "header": [
+                      {
+                        "key": "Accept",
+                        "value": "application/json"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{baseUrl}}/debug/count",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "debug",
+                        "count"
+                      ]
+                    }
+                  },
+                  "response": [
+                    {
+                      "name": "Successful Response",
+                      "originalRequest": {
+                        "method": "GET",
+                        "header": [
+                          {
+                            "key": "Accept",
+                            "value": "application/json"
+                          }
+                        ],
+                        "url": {
+                          "raw": "{{baseUrl}}/debug/count",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "debug",
+                            "count"
+                          ]
+                        }
+                      },
+                      "status": "OK",
+                      "code": 200,
+                      "_postman_previewlanguage": "json",
+                      "header": [
+                        {
+                          "key": "Content-Type",
+                          "value": "application/json"
+                        }
+                      ],
+                      "cookie": [],
+                      "body": ""
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "tool",
+          "item": [
+            {
+              "name": "benchmark",
+              "item": [
+                {
+                  "name": "调试接口，对比缓存前后的工具调用耗时s",
+                  "request": {
+                    "method": "GET",
+                    "header": [
+                      {
+                        "key": "Accept",
+                        "value": "application/json"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{baseUrl}}/tool/benchmark",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "tool",
+                        "benchmark"
+                      ]
+                    },
+                    "description": "对比缓存前后的工具调用耗时"
+                  },
+                  "response": [
+                    {
+                      "name": "Successful Response",
+                      "originalRequest": {
+                        "method": "GET",
+                        "header": [
+                          {
+                            "key": "Accept",
+                            "value": "application/json"
+                          }
+                        ],
+                        "url": {
+                          "raw": "{{baseUrl}}/tool/benchmark",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "tool",
+                            "benchmark"
+                          ]
+                        }
+                      },
+                      "status": "OK",
+                      "code": 200,
+                      "_postman_previewlanguage": "json",
+                      "header": [
+                        {
+                          "key": "Content-Type",
+                          "value": "application/json"
+                        }
+                      ],
+                      "cookie": [],
+                      "body": ""
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "文档管理",
+      "item": [
+        {
+          "name": "rag",
+          "item": [
+            {
+              "name": "insert_batch",
+              "item": [
+                {
+                  "name": "批量插入文档",
+                  "request": {
+                    "method": "POST",
+                    "header": [
+                      {
+                        "key": "x-api-key",
+                        "value": "string"
+                      },
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      },
+                      {
+                        "key": "Accept",
+                        "value": "application/json"
+                      }
+                    ],
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\n  \"documents\": [\n    {\n      \"content\": \"Python是一种广泛使用的编程语言。\",\n      \"source\": \"tech_docs\"\n    },\n    {\n      \"content\": \"Python是一种广泛使用的编程语言。\",\n      \"source\": \"tech_docs\"\n    }\n  ]\n}",
+                      "options": {
+                        "raw": {
+                          "headerFamily": "json",
+                          "language": "json"
+                        }
+                      }
+                    },
+                    "url": {
+                      "raw": "{{baseUrl}}/rag/insert_batch",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "rag",
+                        "insert_batch"
+                      ]
+                    },
+                    "description": "批量插入文档，自动调用阿里百炼 text-embedding-v2 模型将其转换为 1536 维向量，\n    然后存入 PostgreSQL(pgvector) 数据库。\n    \n    文档入库后即可被 `/rag/pg_search` 接口检索。\n    \n    **认证要求**：需要在请求头中携带 `X-API-Key` 或 `Authorization: Bearer <JWT>`。"
+                  },
+                  "response": [
+                    {
+                      "name": "文档插入成功",
+                      "originalRequest": {
+                        "method": "POST",
+                        "header": [
+                          {
+                            "key": "x-api-key",
+                            "value": "string"
+                          },
+                          {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                          },
+                          {
+                            "key": "Accept",
+                            "value": "application/json"
+                          }
+                        ],
+                        "body": {
+                          "mode": "raw",
+                          "raw": "{\n  \"documents\": [\n    {\n      \"content\": \"Python是一种广泛使用的编程语言。\",\n      \"source\": \"tech_docs\"\n    },\n    {\n      \"content\": \"Python是一种广泛使用的编程语言。\",\n      \"source\": \"tech_docs\"\n    }\n  ]\n}",
+                          "options": {
+                            "raw": {
+                              "headerFamily": "json",
+                              "language": "json"
+                            }
+                          }
+                        },
+                        "url": {
+                          "raw": "{{baseUrl}}/rag/insert_batch",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "rag",
+                            "insert_batch"
+                          ]
+                        }
+                      },
+                      "status": "OK",
+                      "code": 200,
+                      "_postman_previewlanguage": "json",
+                      "header": [
+                        {
+                          "key": "Content-Type",
+                          "value": "application/json"
+                        }
+                      ],
+                      "cookie": [],
+                      "body": ""
+                    },
+                    {
+                      "name": "缺少或无效的 API Key / JWT",
+                      "originalRequest": {
+                        "method": "POST",
+                        "header": [
+                          {
+                            "key": "x-api-key",
+                            "value": "string"
+                          },
+                          {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                          }
+                        ],
+                        "body": {
+                          "mode": "raw",
+                          "raw": "{\n  \"documents\": [\n    {\n      \"content\": \"Python是一种广泛使用的编程语言。\",\n      \"source\": \"tech_docs\"\n    },\n    {\n      \"content\": \"Python是一种广泛使用的编程语言。\",\n      \"source\": \"tech_docs\"\n    }\n  ]\n}",
+                          "options": {
+                            "raw": {
+                              "headerFamily": "json",
+                              "language": "json"
+                            }
+                          }
+                        },
+                        "url": {
+                          "raw": "{{baseUrl}}/rag/insert_batch",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "rag",
+                            "insert_batch"
+                          ]
+                        }
+                      },
+                      "status": "Unauthorized",
+                      "code": 401,
+                      "_postman_previewlanguage": "text",
+                      "header": [],
+                      "cookie": [],
+                      "body": ""
+                    },
+                    {
+                      "name": "API Key 已过期或无权访问",
+                      "originalRequest": {
+                        "method": "POST",
+                        "header": [
+                          {
+                            "key": "x-api-key",
+                            "value": "string"
+                          },
+                          {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                          }
+                        ],
+                        "body": {
+                          "mode": "raw",
+                          "raw": "{\n  \"documents\": [\n    {\n      \"content\": \"Python是一种广泛使用的编程语言。\",\n      \"source\": \"tech_docs\"\n    },\n    {\n      \"content\": \"Python是一种广泛使用的编程语言。\",\n      \"source\": \"tech_docs\"\n    }\n  ]\n}",
+                          "options": {
+                            "raw": {
+                              "headerFamily": "json",
+                              "language": "json"
+                            }
+                          }
+                        },
+                        "url": {
+                          "raw": "{{baseUrl}}/rag/insert_batch",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "rag",
+                            "insert_batch"
+                          ]
+                        }
+                      },
+                      "status": "Forbidden",
+                      "code": 403,
+                      "_postman_previewlanguage": "text",
+                      "header": [],
+                      "cookie": [],
+                      "body": ""
+                    },
+                    {
+                      "name": "Validation Error",
+                      "originalRequest": {
+                        "method": "POST",
+                        "header": [
+                          {
+                            "key": "x-api-key",
+                            "value": "string"
+                          },
+                          {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                          },
+                          {
+                            "key": "Accept",
+                            "value": "application/json"
+                          }
+                        ],
+                        "body": {
+                          "mode": "raw",
+                          "raw": "{\n  \"documents\": [\n    {\n      \"content\": \"Python是一种广泛使用的编程语言。\",\n      \"source\": \"tech_docs\"\n    },\n    {\n      \"content\": \"Python是一种广泛使用的编程语言。\",\n      \"source\": \"tech_docs\"\n    }\n  ]\n}",
+                          "options": {
+                            "raw": {
+                              "headerFamily": "json",
+                              "language": "json"
+                            }
+                          }
+                        },
+                        "url": {
+                          "raw": "{{baseUrl}}/rag/insert_batch",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "rag",
+                            "insert_batch"
+                          ]
+                        }
+                      },
+                      "status": "Unprocessable Entity (WebDAV) (RFC 4918)",
+                      "code": 422,
+                      "_postman_previewlanguage": "json",
+                      "header": [
+                        {
+                          "key": "Content-Type",
+                          "value": "application/json"
+                        }
+                      ],
+                      "cookie": [],
+                      "body": "{\n  \"detail\": [\n    {\n      \"loc\": [\n        \"string\",\n        6740\n      ],\n      \"msg\": \"string\",\n      \"type\": \"string\"\n    },\n    {\n      \"loc\": [\n        1394,\n        \"string\"\n      ],\n      \"msg\": \"string\",\n      \"type\": \"string\"\n    }\n  ]\n}"
+                    },
+                    {
+                      "name": "请求过于频繁或今日配额已用完",
+                      "originalRequest": {
+                        "method": "POST",
+                        "header": [
+                          {
+                            "key": "x-api-key",
+                            "value": "string"
+                          },
+                          {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                          }
+                        ],
+                        "body": {
+                          "mode": "raw",
+                          "raw": "{\n  \"documents\": [\n    {\n      \"content\": \"Python是一种广泛使用的编程语言。\",\n      \"source\": \"tech_docs\"\n    },\n    {\n      \"content\": \"Python是一种广泛使用的编程语言。\",\n      \"source\": \"tech_docs\"\n    }\n  ]\n}",
+                          "options": {
+                            "raw": {
+                              "headerFamily": "json",
+                              "language": "json"
+                            }
+                          }
+                        },
+                        "url": {
+                          "raw": "{{baseUrl}}/rag/insert_batch",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "rag",
+                            "insert_batch"
+                          ]
+                        }
+                      },
+                      "status": "Too Many Requests",
+                      "code": 429,
+                      "_postman_previewlanguage": "text",
+                      "header": [],
+                      "cookie": [],
+                      "body": ""
+                    },
+                    {
+                      "name": "服务器内部错误（如 Embedding API 调用失败）",
+                      "originalRequest": {
+                        "method": "POST",
+                        "header": [
+                          {
+                            "key": "x-api-key",
+                            "value": "string"
+                          },
+                          {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                          }
+                        ],
+                        "body": {
+                          "mode": "raw",
+                          "raw": "{\n  \"documents\": [\n    {\n      \"content\": \"Python是一种广泛使用的编程语言。\",\n      \"source\": \"tech_docs\"\n    },\n    {\n      \"content\": \"Python是一种广泛使用的编程语言。\",\n      \"source\": \"tech_docs\"\n    }\n  ]\n}",
+                          "options": {
+                            "raw": {
+                              "headerFamily": "json",
+                              "language": "json"
+                            }
+                          }
+                        },
+                        "url": {
+                          "raw": "{{baseUrl}}/rag/insert_batch",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "rag",
+                            "insert_batch"
+                          ]
+                        }
+                      },
+                      "status": "Internal Server Error",
+                      "code": 500,
+                      "_postman_previewlanguage": "text",
+                      "header": [],
+                      "cookie": [],
+                      "body": ""
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "insert",
+              "item": [
+                {
+                  "name": "插入单条文档",
+                  "request": {
+                    "method": "POST",
+                    "header": [
+                      {
+                        "key": "x-api-key",
+                        "value": "string"
+                      },
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      },
+                      {
+                        "key": "Accept",
+                        "value": "application/json"
+                      }
+                    ],
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\n  \"content\": \"Python是一种广泛使用的编程语言。\",\n  \"source\": \"tech_docs\"\n}",
+                      "options": {
+                        "raw": {
+                          "headerFamily": "json",
+                          "language": "json"
+                        }
+                      }
+                    },
+                    "url": {
+                      "raw": "{{baseUrl}}/rag/insert",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "rag",
+                        "insert"
+                      ]
+                    },
+                    "description": "接收一段文本，自动调用阿里百炼 text-embedding-v2 模型将其转换为 1536 维向量，\n    然后存入 PostgreSQL(pgvector) 数据库。\n    \n    文档入库后即可被 `/rag/pg_search` 接口检索。\n    \n    **认证要求**：需要在请求头中携带 `X-API-Key` 或 `Authorization: Bearer <JWT>`。"
+                  },
+                  "response": [
+                    {
+                      "name": "文档插入成功",
+                      "originalRequest": {
+                        "method": "POST",
+                        "header": [
+                          {
+                            "key": "x-api-key",
+                            "value": "string"
+                          },
+                          {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                          },
+                          {
+                            "key": "Accept",
+                            "value": "application/json"
+                          }
+                        ],
+                        "body": {
+                          "mode": "raw",
+                          "raw": "{\n  \"content\": \"Python是一种广泛使用的编程语言。\",\n  \"source\": \"tech_docs\"\n}",
+                          "options": {
+                            "raw": {
+                              "headerFamily": "json",
+                              "language": "json"
+                            }
+                          }
+                        },
+                        "url": {
+                          "raw": "{{baseUrl}}/rag/insert",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "rag",
+                            "insert"
+                          ]
+                        }
+                      },
+                      "status": "OK",
+                      "code": 200,
+                      "_postman_previewlanguage": "json",
+                      "header": [
+                        {
+                          "key": "Content-Type",
+                          "value": "application/json"
+                        }
+                      ],
+                      "cookie": [],
+                      "body": ""
+                    },
+                    {
+                      "name": "缺少或无效的 API Key / JWT",
+                      "originalRequest": {
+                        "method": "POST",
+                        "header": [
+                          {
+                            "key": "x-api-key",
+                            "value": "string"
+                          },
+                          {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                          }
+                        ],
+                        "body": {
+                          "mode": "raw",
+                          "raw": "{\n  \"content\": \"Python是一种广泛使用的编程语言。\",\n  \"source\": \"tech_docs\"\n}",
+                          "options": {
+                            "raw": {
+                              "headerFamily": "json",
+                              "language": "json"
+                            }
+                          }
+                        },
+                        "url": {
+                          "raw": "{{baseUrl}}/rag/insert",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "rag",
+                            "insert"
+                          ]
+                        }
+                      },
+                      "status": "Unauthorized",
+                      "code": 401,
+                      "_postman_previewlanguage": "text",
+                      "header": [],
+                      "cookie": [],
+                      "body": ""
+                    },
+                    {
+                      "name": "API Key 已过期或无权访问",
+                      "originalRequest": {
+                        "method": "POST",
+                        "header": [
+                          {
+                            "key": "x-api-key",
+                            "value": "string"
+                          },
+                          {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                          }
+                        ],
+                        "body": {
+                          "mode": "raw",
+                          "raw": "{\n  \"content\": \"Python是一种广泛使用的编程语言。\",\n  \"source\": \"tech_docs\"\n}",
+                          "options": {
+                            "raw": {
+                              "headerFamily": "json",
+                              "language": "json"
+                            }
+                          }
+                        },
+                        "url": {
+                          "raw": "{{baseUrl}}/rag/insert",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "rag",
+                            "insert"
+                          ]
+                        }
+                      },
+                      "status": "Forbidden",
+                      "code": 403,
+                      "_postman_previewlanguage": "text",
+                      "header": [],
+                      "cookie": [],
+                      "body": ""
+                    },
+                    {
+                      "name": "Validation Error",
+                      "originalRequest": {
+                        "method": "POST",
+                        "header": [
+                          {
+                            "key": "x-api-key",
+                            "value": "string"
+                          },
+                          {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                          },
+                          {
+                            "key": "Accept",
+                            "value": "application/json"
+                          }
+                        ],
+                        "body": {
+                          "mode": "raw",
+                          "raw": "{\n  \"content\": \"Python是一种广泛使用的编程语言。\",\n  \"source\": \"tech_docs\"\n}",
+                          "options": {
+                            "raw": {
+                              "headerFamily": "json",
+                              "language": "json"
+                            }
+                          }
+                        },
+                        "url": {
+                          "raw": "{{baseUrl}}/rag/insert",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "rag",
+                            "insert"
+                          ]
+                        }
+                      },
+                      "status": "Unprocessable Entity (WebDAV) (RFC 4918)",
+                      "code": 422,
+                      "_postman_previewlanguage": "json",
+                      "header": [
+                        {
+                          "key": "Content-Type",
+                          "value": "application/json"
+                        }
+                      ],
+                      "cookie": [],
+                      "body": "{\n  \"detail\": [\n    {\n      \"loc\": [\n        \"string\",\n        6740\n      ],\n      \"msg\": \"string\",\n      \"type\": \"string\"\n    },\n    {\n      \"loc\": [\n        1394,\n        \"string\"\n      ],\n      \"msg\": \"string\",\n      \"type\": \"string\"\n    }\n  ]\n}"
+                    },
+                    {
+                      "name": "请求过于频繁或今日配额已用完",
+                      "originalRequest": {
+                        "method": "POST",
+                        "header": [
+                          {
+                            "key": "x-api-key",
+                            "value": "string"
+                          },
+                          {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                          }
+                        ],
+                        "body": {
+                          "mode": "raw",
+                          "raw": "{\n  \"content\": \"Python是一种广泛使用的编程语言。\",\n  \"source\": \"tech_docs\"\n}",
+                          "options": {
+                            "raw": {
+                              "headerFamily": "json",
+                              "language": "json"
+                            }
+                          }
+                        },
+                        "url": {
+                          "raw": "{{baseUrl}}/rag/insert",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "rag",
+                            "insert"
+                          ]
+                        }
+                      },
+                      "status": "Too Many Requests",
+                      "code": 429,
+                      "_postman_previewlanguage": "text",
+                      "header": [],
+                      "cookie": [],
+                      "body": ""
+                    },
+                    {
+                      "name": "服务器内部错误（如 Embedding API 调用失败）",
+                      "originalRequest": {
+                        "method": "POST",
+                        "header": [
+                          {
+                            "key": "x-api-key",
+                            "value": "string"
+                          },
+                          {
+                            "key": "Content-Type",
+                            "value": "application/json"
+                          }
+                        ],
+                        "body": {
+                          "mode": "raw",
+                          "raw": "{\n  \"content\": \"Python是一种广泛使用的编程语言。\",\n  \"source\": \"tech_docs\"\n}",
+                          "options": {
+                            "raw": {
+                              "headerFamily": "json",
+                              "language": "json"
+                            }
+                          }
+                        },
+                        "url": {
+                          "raw": "{{baseUrl}}/rag/insert",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "rag",
+                            "insert"
+                          ]
+                        }
+                      },
+                      "status": "Internal Server Error",
+                      "code": 500,
+                      "_postman_previewlanguage": "text",
+                      "header": [],
+                      "cookie": [],
+                      "body": ""
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "documents",
+              "item": [
+                {
+                  "name": "{doc_id}",
+                  "item": [
+                    {
+                      "name": "删除指定文档",
+                      "request": {
+                        "method": "DELETE",
+                        "header": [
+                          {
+                            "key": "x-api-key",
+                            "value": "string"
+                          },
+                          {
+                            "key": "Accept",
+                            "value": "application/json"
+                          }
+                        ],
+                        "url": {
+                          "raw": "{{baseUrl}}/rag/documents/:doc_id",
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "path": [
+                            "rag",
+                            "documents",
+                            ":doc_id"
+                          ],
+                          "variable": [
+                            {
+                              "key": "doc_id",
+                              "value": "1",
+                              "description": "要删除的文档唯一数字ID"
+                            }
+                          ]
+                        },
+                        "description": "根据文档的唯一数字ID，从 PostgreSQL(pgvector) 数据库中永久删除该文档记录。\n    \n    删除后该文档将不再出现在 `/rag/pg_search` 的检索结果中。\n    \n    **认证要求**：需要在请求头中携带 `X-API-Key` 或 `Authorization: Bearer <JWT>`。\n    **权限要求**：仅管理员用户可执行此操作（当前版本暂未强制校验，后续会完善）。"
+                      },
+                      "response": [
+                        {
+                          "name": "文档删除成功",
+                          "originalRequest": {
+                            "method": "DELETE",
+                            "header": [
+                              {
+                                "key": "x-api-key",
+                                "value": "string"
+                              },
+                              {
+                                "key": "Accept",
+                                "value": "application/json"
+                              }
+                            ],
+                            "url": {
+                              "raw": "{{baseUrl}}/rag/documents/:doc_id",
+                              "host": [
+                                "{{baseUrl}}"
+                              ],
+                              "path": [
+                                "rag",
+                                "documents",
+                                ":doc_id"
+                              ],
+                              "variable": [
+                                {
+                                  "key": "doc_id",
+                                  "value": "1",
+                                  "description": "要删除的文档唯一数字ID"
+                                }
+                              ]
+                            }
+                          },
+                          "status": "OK",
+                          "code": 200,
+                          "_postman_previewlanguage": "json",
+                          "header": [
+                            {
+                              "key": "Content-Type",
+                              "value": "application/json"
+                            }
+                          ],
+                          "cookie": [],
+                          "body": ""
+                        },
+                        {
+                          "name": "缺少或无效的 API Key / JWT",
+                          "originalRequest": {
+                            "method": "DELETE",
+                            "header": [
+                              {
+                                "key": "x-api-key",
+                                "value": "string"
+                              }
+                            ],
+                            "url": {
+                              "raw": "{{baseUrl}}/rag/documents/:doc_id",
+                              "host": [
+                                "{{baseUrl}}"
+                              ],
+                              "path": [
+                                "rag",
+                                "documents",
+                                ":doc_id"
+                              ],
+                              "variable": [
+                                {
+                                  "key": "doc_id",
+                                  "value": "1",
+                                  "description": "要删除的文档唯一数字ID"
+                                }
+                              ]
+                            }
+                          },
+                          "status": "Unauthorized",
+                          "code": 401,
+                          "_postman_previewlanguage": "text",
+                          "header": [],
+                          "cookie": [],
+                          "body": ""
+                        },
+                        {
+                          "name": "API Key 已过期或无权访问",
+                          "originalRequest": {
+                            "method": "DELETE",
+                            "header": [
+                              {
+                                "key": "x-api-key",
+                                "value": "string"
+                              }
+                            ],
+                            "url": {
+                              "raw": "{{baseUrl}}/rag/documents/:doc_id",
+                              "host": [
+                                "{{baseUrl}}"
+                              ],
+                              "path": [
+                                "rag",
+                                "documents",
+                                ":doc_id"
+                              ],
+                              "variable": [
+                                {
+                                  "key": "doc_id",
+                                  "value": "1",
+                                  "description": "要删除的文档唯一数字ID"
+                                }
+                              ]
+                            }
+                          },
+                          "status": "Forbidden",
+                          "code": 403,
+                          "_postman_previewlanguage": "text",
+                          "header": [],
+                          "cookie": [],
+                          "body": ""
+                        },
+                        {
+                          "name": "指定 ID 的文档不存在",
+                          "originalRequest": {
+                            "method": "DELETE",
+                            "header": [
+                              {
+                                "key": "x-api-key",
+                                "value": "string"
+                              }
+                            ],
+                            "url": {
+                              "raw": "{{baseUrl}}/rag/documents/:doc_id",
+                              "host": [
+                                "{{baseUrl}}"
+                              ],
+                              "path": [
+                                "rag",
+                                "documents",
+                                ":doc_id"
+                              ],
+                              "variable": [
+                                {
+                                  "key": "doc_id",
+                                  "value": "1",
+                                  "description": "要删除的文档唯一数字ID"
+                                }
+                              ]
+                            }
+                          },
+                          "status": "Not Found",
+                          "code": 404,
+                          "_postman_previewlanguage": "text",
+                          "header": [],
+                          "cookie": [],
+                          "body": ""
+                        },
+                        {
+                          "name": "参数格式错误，如 doc_id 不是整数",
+                          "originalRequest": {
+                            "method": "DELETE",
+                            "header": [
+                              {
+                                "key": "x-api-key",
+                                "value": "string"
+                              }
+                            ],
+                            "url": {
+                              "raw": "{{baseUrl}}/rag/documents/:doc_id",
+                              "host": [
+                                "{{baseUrl}}"
+                              ],
+                              "path": [
+                                "rag",
+                                "documents",
+                                ":doc_id"
+                              ],
+                              "variable": [
+                                {
+                                  "key": "doc_id",
+                                  "value": "1",
+                                  "description": "要删除的文档唯一数字ID"
+                                }
+                              ]
+                            }
+                          },
+                          "status": "Unprocessable Entity (WebDAV) (RFC 4918)",
+                          "code": 422,
+                          "_postman_previewlanguage": "text",
+                          "header": [],
+                          "cookie": [],
+                          "body": ""
+                        },
+                        {
+                          "name": "请求过于频繁或今日配额已用完",
+                          "originalRequest": {
+                            "method": "DELETE",
+                            "header": [
+                              {
+                                "key": "x-api-key",
+                                "value": "string"
+                              }
+                            ],
+                            "url": {
+                              "raw": "{{baseUrl}}/rag/documents/:doc_id",
+                              "host": [
+                                "{{baseUrl}}"
+                              ],
+                              "path": [
+                                "rag",
+                                "documents",
+                                ":doc_id"
+                              ],
+                              "variable": [
+                                {
+                                  "key": "doc_id",
+                                  "value": "1",
+                                  "description": "要删除的文档唯一数字ID"
+                                }
+                              ]
+                            }
+                          },
+                          "status": "Too Many Requests",
+                          "code": 429,
+                          "_postman_previewlanguage": "text",
+                          "header": [],
+                          "cookie": [],
+                          "body": ""
+                        },
+                        {
+                          "name": "服务器内部错误",
+                          "originalRequest": {
+                            "method": "DELETE",
+                            "header": [
+                              {
+                                "key": "x-api-key",
+                                "value": "string"
+                              }
+                            ],
+                            "url": {
+                              "raw": "{{baseUrl}}/rag/documents/:doc_id",
+                              "host": [
+                                "{{baseUrl}}"
+                              ],
+                              "path": [
+                                "rag",
+                                "documents",
+                                ":doc_id"
+                              ],
+                              "variable": [
+                                {
+                                  "key": "doc_id",
+                                  "value": "1",
+                                  "description": "要删除的文档唯一数字ID"
+                                }
+                              ]
+                            }
+                          },
+                          "status": "Internal Server Error",
+                          "code": 500,
+                          "_postman_previewlanguage": "text",
+                          "header": [],
+                          "cookie": [],
+                          "body": ""
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "auth": {
+    "type": "apikey",
+    "apikey": [
+      {
+        "key": "key",
+        "value": "sk-5df1827d6d024aee8946d883f3a872d0",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "packages": {},
+        "requests": {},
+        "exec": [
+          ""
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "packages": {},
+        "requests": {},
+        "exec": [
+          ""
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "/"
+    },
+    {
+      "key": "admin_api_key",
+      "value": ""
+    }
+  ]
+}

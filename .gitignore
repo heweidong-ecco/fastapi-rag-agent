@@ -1,0 +1,10 @@
+.env
+venv/
+.venv/
+__pycache__/
+*.pyc
+logs/
+*.log
+chroma_db/
+.DS_Store
+重构目录表.txt

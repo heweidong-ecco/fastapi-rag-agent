@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>RAG 流式问答测试</title>
+    <style>
+        body { font-family: Arial; max-width: 800px; margin: 50px auto; padding: 20px; }
+        #loginBox { margin: 20px 0; padding: 15px; background: #eef; border-radius: 5px; }
+        #loginBox input { display: block; margin: 10px 0; padding: 10px; width: 200px; font-size: 16px; }
+        #mainApp { display: none; }
+        #question { width: 100%; padding: 10px; font-size: 16px; }
+        button { padding: 10px 20px; font-size: 16px; cursor: pointer; margin-right: 10px; }
+        #answer { margin-top: 20px; padding: 15px; background: #f5f5f5; border-radius: 5px; min-height: 100px; white-space: pre-wrap; }
+        #sources { margin-top: 10px; padding: 10px; background: #fff9c4; border-radius: 5px; }
+        #stopBtn { background-color: #e74c3c; color: white; border: none; }
+        #pauseBtn { background-color: #f39c12; color: white; border: none; }
+        #logoutBtn { background-color: #95a5a6; color: white; border: none; }
+        #loginStatus { margin-bottom: 10px; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <h1>RAG 流式问答测试</h1>
+
+    <!-- 登录区域 -->
+    <div id="loginBox">
+        <h3>🔐 请先登录</h3>
+        <input type="text" id="loginUser" placeholder="用户名">
+        <input type="password" id="loginPass" placeholder="密码">
+        <button onclick="doLogin()">登录</button>
+        <p id="loginError" style="color: red;"></p>
+    </div>
+
+    <!-- 主应用区域（默认隐藏） -->
+    <div id="mainApp">
+        <div id="loginStatus">已登录：未知</div>
+        <button id="logoutBtn" onclick="doLogout()">退出登录</button>
+        <input type="text" id="question" placeholder="输入你的问题..." value="Docker 能解决什么问题？">
+        <button onclick="ask()">提问</button>
+        <button id="pauseBtn" onclick="togglePause()">暂停</button>
+        <button id="stopBtn" onclick="stop()">停止生成</button>
+        <div id="answer"></div>
+        <div id="sources"></div>
+    </div>
+
+    <script>
+        // ========== 认证配置 ==========
+        const LOGIN_URL = '/api/v1/auth/login';
+        const API_URL = '/api/v1/rag/stream_search';
+        let authToken = null;
+        let currentUser = null;
+
+        // ========== 登录逻辑 ==========
+        async function doLogin() {
+            const user = document.getElementById('loginUser').value;
+            const pass = document.getElementById('loginPass').value;
+            const errorEl = document.getElementById('loginError');
+            errorEl.textContent = '';
+
+            try {
+                const resp = await fetch(LOGIN_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_name: user, password: pass })
+                });
+                if (!resp.ok) {
+                    const errData = await resp.json().catch(() => ({}));
+                    throw new Error(errData.error || `登录失败 (${resp.status})`);
+                }
+                const data = await resp.json();
+                authToken = data.access_token;
+                currentUser = user;
+
+                // 隐藏登录框，显示主界面
+                document.getElementById('loginBox').style.display = 'none';
+                document.getElementById('mainApp').style.display = 'block';
+                document.getElementById('loginStatus').textContent = `✅ 已登录：${user}`;
+            } catch (err) {
+                errorEl.textContent = '❌ ' + err.message;
+            }
+        }
+
+        function doLogout() {
+            authToken = null;
+            currentUser = null;
+            document.getElementById('loginBox').style.display = 'block';
+            document.getElementById('mainApp').style.display = 'none';
+            document.getElementById('loginUser').value = '';
+            document.getElementById('loginPass').value = '';
+        }
+
+        // ========== 流式问答逻辑 ==========
+        let currentController = null;
+        let reader = null;
+        let paused = false;
+        let resumeResolve = null;
+        let generatedContent = '';
+        let originalQuestion = '';
+
+        async function ask() {
+            if (!authToken) { alert('请先登录'); return; }
+            if (currentController) currentController.abort();
+            paused = false;
+            document.getElementById('pauseBtn').textContent = '暂停';
+            generatedContent = '';
+            originalQuestion = document.getElementById('question').value;
+            document.getElementById('answer').textContent = '';
+            document.getElementById('sources').innerHTML = '';
+            await askWithHistory([]);
+        }
+
+        async function askWithHistory(history) {
+            currentController = new AbortController();
+            const signal = currentController.signal;
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${authToken}`
+                    },
+                    body: JSON.stringify({
+                        question: originalQuestion,
+                        top_k: 3,
+                        conversation_history: history,
+                        citations: false
+                    }),
+                    signal: signal
+                });
+                if (!response.ok) {
+                    const errText = await response.text();
+                    throw new Error(`HTTP ${response.status}: ${errText}`);
+                }
+                reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                while (true) {
+                    if (paused) {
+                        await new Promise(resolve => { resumeResolve = resolve; });
+                        if (!reader) return;
+                    }
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    const text = decoder.decode(value, { stream: true });
+                    const lines = text.split('\n');
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            const data = line.slice(6);
+                            if (data === '[DONE]') continue;
+                            try {
+                                const json = JSON.parse(data);
+                                if (json.content) {
+                                    generatedContent += json.content;
+                                    document.getElementById('answer').textContent += json.content;
+                                }
+                                if (json.sources) {
+                                    let html = '<h3>📚 信息来源</h3>';
+                                    json.sources.forEach((src, idx) => {
+                                        html += `<div><strong>[来源:${idx+1}]</strong> ${src.source}: ${src.content_preview}...</div>`;
+                                    });
+                                    document.getElementById('sources').innerHTML = html;
+                                }
+                                if (json.error) {
+                                    document.getElementById('answer').textContent += `\n[错误: ${json.error}]`;
+                                }
+                            } catch (e) {
+                                document.getElementById('answer').textContent += data;
+                            }
+                        }
+                    }
+                }
+            } catch (err) {
+                if (err.name === 'AbortError') { /* 正常中断 */ }
+                else { document.getElementById('answer').textContent = '请求失败: ' + err.message; }
+            } finally {
+                reader = null;
+                currentController = null;
+            }
+        }
+
+        function togglePause() {
+            const btn = document.getElementById('pauseBtn');
+            if (!reader) return;
+            if (paused) {
+                paused = false;
+                btn.textContent = '暂停';
+                if (resumeResolve) { resumeResolve(); resumeResolve = null; }
+            } else {
+                paused = true;
+                btn.textContent = '继续';
+                if (reader) { reader.cancel(); reader = null; }
+                if (currentController) { currentController.abort(); currentController = null; }
+                const history = [
+                    { role: 'user', content: originalQuestion },
+                    { role: 'assistant', content: generatedContent }
+                ];
+                askWithHistory(history);
+            }
+        }
+
+        function stop() {
+            if (currentController) { currentController.abort(); currentController = null; }
+            if (reader) { reader.cancel(); reader = null; }
+            paused = false;
+            document.getElementById('pauseBtn').textContent = '暂停';
+            document.getElementById('answer').textContent += '\n[已中断生成]';
+        }
+
+        async function clearHistory() {
+            if (!authToken) return;
+            await fetch('/api/v1/user/chat_history', {
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${authToken}` }
+            });
+            document.getElementById('answer').textContent = '';
+            document.getElementById('sources').innerHTML = '';
+            alert('服务端对话历史已清除');
+        }
+    </script>
+</body>
+</html>
