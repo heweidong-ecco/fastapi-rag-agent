@@ -40,6 +40,7 @@ class BatchDocumentInsert(BaseModel):
             [
                 {"content": "Python是一种广泛使用的编程语言，常用于数据分析和AI开发。", "source": "tech_docs"},
                 {"content": "今天中午吃什么呢？这是一个让人纠结的哲学问题。", "source": "life_docs"},
+                {"content": "FastAPI是一个高性能的Python Web框架，支持异步处理。", "source": "tech_docs"},
             ]
         ]
     )
