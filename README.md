@@ -13,6 +13,8 @@
 | **多格式文档支持** | PDF, Word, Markdown, HTML |
 
 ## 🏗 技术架构
+
+```mermaid
 graph TB
     subgraph "客户端层 (Client Layer)"
         A[浏览器 / Postman]
@@ -77,6 +79,8 @@ graph TB
     G3 --> G1
     G3 --> G2
     G4 --> G3
+```
+
 ┌─────────────┐ ┌──────────────┐ ┌─────────────────┐
 │ 用户/前端 │────▶│ FastAPI │────▶│ PostgreSQL │
 │ │ │ :8000 │ │ (pgvector) :5432 │
