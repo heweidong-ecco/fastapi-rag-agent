@@ -14,7 +14,12 @@
 
 ## 🏗 技术架构
 
-```mermaid
+![系统架构图](docs/architecture.png)
+
+<details>
+<summary>点击查看 Mermaid 源码</summary>
+
+\`\`\`mermaid
 graph TB
     subgraph "客户端层 (Client Layer)"
         A[浏览器 / Postman]
@@ -79,7 +84,7 @@ graph TB
     G3 --> G1
     G3 --> G2
     G4 --> G3
-```
+\`\`\`
 
 ┌─────────────┐ ┌──────────────┐ ┌─────────────────┐
 │ 用户/前端 │────▶│ FastAPI │────▶│ PostgreSQL │
