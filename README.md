@@ -13,6 +13,70 @@
 | **多格式文档支持** | PDF, Word, Markdown, HTML |
 
 ## 🏗 技术架构
+graph TB
+    subgraph "客户端层 (Client Layer)"
+        A[浏览器 / Postman]
+        B[其他微服务]
+    end
+
+    subgraph "API 网关层 (API Gateway)"
+        C[FastAPI :8000]
+        C1[认证 (API Key / JWT)]
+        C2[限流 (令牌桶)]
+        C3[配额检查]
+        C4[日志中间件]
+        C5[全局文本规范化]
+    end
+
+    subgraph "检索管线 (Retrieval Pipeline)"
+        D1[查询改写 (LLM)]
+        D2[向量检索 (pgvector)]
+        D3[BM25 关键词检索]
+        D4[RRF 融合]
+        D5[Cross-Encoder 重排序 (BGE-Reranker)]
+    end
+
+    subgraph "数据层 (Data Layer)"
+        E1[(PostgreSQL + pgvector)]
+        E2[(Redis 缓存)]
+    end
+
+    subgraph "模型层 (Model Layer)"
+        F1[阿里百炼 Embedding API]
+        F2[阿里百炼 LLM API]
+        F3[本地 BGE-Reranker 模型]
+    end
+
+    subgraph "监控与运维 (Monitoring & DevOps)"
+        G1[Prometheus :9090]
+        G2[Grafana :3000]
+        G3[Docker Compose]
+        G4[GitLab CI/CD]
+    end
+
+    A --> C
+    B --> C
+    C --> C1 --> C2 --> C3 --> C4 --> C5
+    C5 --> D1
+    D1 --> D2
+    D1 --> D3
+    D2 --> D4
+    D3 --> D4
+    D4 --> D5
+    D5 --> E1
+    D2 --> F1
+    D5 --> F3
+    D1 --> F2
+    E2 --> F1
+    E2 --> F2
+    G1 --> C
+    G2 --> G1
+    G3 --> C
+    G3 --> E1
+    G3 --> E2
+    G3 --> G1
+    G3 --> G2
+    G4 --> G3
 ┌─────────────┐ ┌──────────────┐ ┌─────────────────┐
 │ 用户/前端 │────▶│ FastAPI │────▶│ PostgreSQL │
 │ │ │ :8000 │ │ (pgvector) :5432 │
