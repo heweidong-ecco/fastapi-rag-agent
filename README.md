@@ -98,10 +98,11 @@ Mermaid 源码:```
 
 text
 
+
 ## ❓ 常见问题
 
-    遇到问题请先查阅 [FAQ 与故障排查](docs/FAQ.md)。
-[常见问题与故障排查 (FAQ)](docs/FAQ.md)
+遇到问题请先查阅 [FAQ 与故障排查](docs/FAQ.md)。
+
 
 ## 🛠 技术栈
 
