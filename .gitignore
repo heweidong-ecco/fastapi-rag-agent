@@ -8,3 +8,5 @@ logs/
 chroma_db/
 .DS_Store
 重构目录表.txt
+userkey_from_test.md
+

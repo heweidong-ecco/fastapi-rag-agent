@@ -9,8 +9,8 @@ from exceptions import AppException, ErrorCode
 from auth import verify_api_key as verify_key
 from jwt_handler import verify_access_token
 
-# HTTPBearer 安全方案（用于 JWT）
-security = HTTPBearer()
+# 全局 Bearer 认证方案实例（替换原来的 security）
+oauth2_scheme = HTTPBearer()
 
 # ------------------ 纯 Token 验证函数（供内部调用） ------------------
 def verify_jwt_token(token: str) -> str:
@@ -37,20 +37,25 @@ async def get_current_user(x_api_key: str = Header(None)) -> str:
 
 # ==================== 依赖注入： JWT 认证 （与API Key共存）====================
 async def get_current_user_jwt(
-    credentials: HTTPAuthorizationCredentials = Depends(security)
+    credentials: HTTPAuthorizationCredentials = Depends(oauth2_scheme)
 ) -> str:
-    return verify_jwt_token(credentials.credentials)
+    token = credentials.credentials
+    user_name = verify_access_token(token)
+    if user_name is None:
+        raise AppException(ErrorCode.AUTH_EXPIRED, "access token 无效或已过期")
+    return user_name
 
 # ------------------ 新：Hybrid 认证（自动识别 API Key / JWT） ------------------
+# 新的 Hybrid 认证依赖
 async def get_current_user_hybrid(
     x_api_key: str = Header(None),
-    authorization: str = Header(None)
+    credentials: HTTPAuthorizationCredentials = Depends(oauth2_scheme)
 ) -> str:
-    """支持 X-API-Key 或 Authorization: Bearer <token> 两种认证方式"""
+    """支持 X-API-Key 或 Bearer Token 两种认证方式"""
     if x_api_key:
         return await get_current_user(x_api_key)
-    if authorization and authorization.startswith("Bearer "):
-        token = authorization[7:]
+    if credentials:
+        token = credentials.credentials
         return verify_jwt_token(token)
     raise AppException(ErrorCode.AUTH_MISSING, "请提供 API Key 或 Bearer Token")
 

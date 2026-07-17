@@ -8,7 +8,9 @@ from dotenv import load_dotenv
 from config import validate_config
 from logger_config import logger,setup_logger
 from exceptions import AppException, ErrorCode
-from api_v1 import router as v1_router
+from api_v1 import router as public_router
+from api_v1_rag import router as rag_router
+from api_v1_agent import router as agent_router
 from db import create_table, init_pool, close_pool
 from auth import ensure_admin_exists
 
@@ -289,7 +291,7 @@ async def app_exception_handler(request: Request, exc: AppException):
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     request_id = request_id_var.get()
-    logger.bind(request_id=request_id).error(f"未捕获异常: {str(exc)}", exc_info=True)
+    logger.opt(exception=True).bind(request_id=request_id).error("未捕获异常: {}", str(exc))
     return JSONResponse(
         status_code=500,
         content={
@@ -301,11 +303,37 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 # ==================== 挂载路由/路由定义 ====================
-app.include_router(v1_router)
+app.include_router(public_router)
+app.include_router(rag_router)
+app.include_router(agent_router)
+'''
+未来版本升级（v2、v3）的扩展方式
 
+当你要升级到 v2 时，只需要：
+新建路由文件，例如 api_v2_rag.py：
+python
+router = APIRouter(prefix="/api/v2")
+@router.post("/rag/search", tags=["检索"])
+async def unified_search_v2(...): ...
+
+在 main.py 中增加一行挂载：
+python
+from api_v2_rag import router as rag_v2
+app.include_router(rag_v2)  # 新增这一行
+
+v1 的接口完全不受影响，继续运行。Swagger 文档中会同时出现 /api/v1/rag/search 和 /api/v2/rag/search，调用方可以通过 URL 前缀选择使用哪个版本。
+'''
 @app.get("/")
 async def root():
-    return {"status": "ok", "versions": {"v1": "/api/v1"}}
+    return {
+        "status": "ok",
+        "version": "2.0.0",
+        "services": {
+            "public":"/api/v1",
+            "rag": "/api/v1/rag",
+            "agent": "/api/v1/agent",
+        },
+    }
 
 # 新增  嵌入了 Prometheus 指标采集
 # 指标暴露接口
@@ -398,6 +426,14 @@ async def readiness_check():
 
 
 # ==================== 应用启动时建表 ====================
+import asyncio
+from tool_health import run_health_check
+async def scheduled_health_check():
+    """定时健康检查后台任务"""
+    while True:
+        await asyncio.sleep(120)  # 每 2 分钟检查一次
+        run_health_check()
+
 @app.on_event("startup")
 async def startup_event():
     validate_config()
@@ -406,6 +442,10 @@ async def startup_event():
     ensure_admin_exists(logger)
     warmup_cache()  # ← 新增这一行
     logger.info("应用启动完成")
+    # 新增 Agent 工具 健康检查 启动时
+    run_health_check() 
+    # 新增 Agent 工具 启动后台定时健康检查
+    asyncio.create_task(scheduled_health_check())
 
 
 @app.on_event("shutdown")
@@ -443,4 +483,11 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 static_dir = os.path.join(current_dir, "static")
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 # 访问路径：http://localhost:8000/static/stream_test.html
+
+# ==================== 挂载Gradio成本统计可视化面板 ====================
+from cost_dashboard import create_dashboard
+import gradio as gr
+# 访问面板 启动服务后，浏览器打开 http://localhost:8000/dashboard。
+dashboard = create_dashboard()
+app = gr.mount_gradio_app(app, dashboard, path="/dashboard")
 

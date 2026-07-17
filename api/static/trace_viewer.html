@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Agent 执行轨迹时间线</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #1a1a2e; color: #eee; padding: 30px; max-width: 900px; margin: 0 auto; }
+        h1 { text-align: center; margin-bottom: 10px; color: #e94560; }
+        .subtitle { text-align: center; color: #888; margin-bottom: 30px; font-size: 14px; }
+
+        /* 搜索栏 */
+        .search-bar { display: flex; gap: 10px; margin-bottom: 30px; }
+        .search-bar input { flex: 1; padding: 12px 16px; border-radius: 8px; border: 1px solid #333; background: #16213e; color: #eee; font-size: 16px; outline: none; }
+        .search-bar input:focus { border-color: #e94560; }
+        .search-bar button { padding: 12px 24px; border-radius: 8px; border: none; background: #e94560; color: white; font-size: 16px; cursor: pointer; font-weight: bold; }
+        .search-bar button:hover { background: #c23152; }
+
+        /* 概览卡片 */
+        .overview { display: flex; gap: 15px; margin-bottom: 30px; }
+        .card { flex: 1; padding: 20px; background: #16213e; border-radius: 10px; text-align: center; border: 1px solid #0f3460; }
+        .card .value { font-size: 28px; font-weight: bold; color: #e94560; margin-bottom: 5px; }
+        .card .label { font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 1px; }
+
+        /* 时间线 */
+        .timeline { position: relative; padding-left: 40px; }
+        .timeline::before { content: ''; position: absolute; left: 18px; top: 0; bottom: 0; width: 2px; background: #0f3460; }
+        .node { position: relative; margin-bottom: 25px; }
+        .node::before { content: ''; position: absolute; left: -27px; top: 8px; width: 16px; height: 16px; border-radius: 50%; border: 3px solid; z-index: 1; }
+        .node.decision::before { background: #4d96ff; border-color: #4d96ff; }
+        .node.tool-success::before { background: #6bcb77; border-color: #6bcb77; }
+        .node.tool-error::before { background: #e94560; border-color: #e94560; }
+        .node .time-label { font-size: 11px; color: #666; margin-bottom: 5px; }
+        .node .title { font-size: 15px; font-weight: bold; margin-bottom: 8px; }
+        .node .title .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; margin-left: 8px; font-weight: normal; }
+        .badge.success { background: #6bcb7722; color: #6bcb77; }
+        .badge.error { background: #e9456022; color: #e94560; }
+        .badge.decision { background: #4d96ff22; color: #4d96ff; }
+        .node .detail { background: #16213e; border-radius: 8px; padding: 15px; border: 1px solid #0f3460; }
+        .node .detail .row { display: flex; margin-bottom: 8px; font-size: 13px; }
+        .node .detail .row:last-child { margin-bottom: 0; }
+        .node .detail .key { color: #888; min-width: 70px; flex-shrink: 0; }
+        .node .detail .val { color: #ccc; word-break: break-all; }
+        .node .detail .val pre { background: #1a1a2e; padding: 10px; border-radius: 5px; color: #6bcb77; max-height: 200px; overflow-y: auto; font-size: 12px; white-space: pre-wrap; }
+
+        /* 空状态 */
+        .empty { text-align: center; padding: 60px; color: #666; font-size: 16px; }
+    </style>
+</head>
+<body>
+    <h1>🔍 Agent 执行轨迹</h1>
+    <p class="subtitle">可视化每个工具调用的完整过程</p>
+
+    <div class="search-bar">
+        <input type="text" id="threadInput" placeholder="输入 thread_id（如 test-trace-001）" value="default">
+        <button onclick="loadTrace()">🔎 查询轨迹</button>
+    </div>
+
+    <div class="overview" id="overview" style="display:none;">
+        <div class="card"><div class="value" id="ovDuration">--</div><div class="label">总耗时 (ms)</div></div>
+        <div class="card"><div class="value" id="ovTools">--</div><div class="label">工具调用次数</div></div>
+        <div class="card"><div class="value" id="ovCost">--</div><div class="label">总花费 (元)</div></div>
+        <div class="card"><div class="value" id="ovTokens">--</div><div class="label">总 Token</div></div>
+    </div>
+
+    <div id="timelineContainer">
+        <div class="empty">请输入 thread_id 并点击查询</div>
+    </div>
+
+    <script>
+        async function loadTrace() {
+            const threadId = document.getElementById('threadInput').value.trim();
+            if (!threadId) return;
+
+            const container = document.getElementById('timelineContainer');
+            container.innerHTML = '<div class="empty">加载中...</div>';
+
+            try {
+                const resp = await fetch(`/api/v1/agent/trace/${threadId}`);
+                if (!resp.ok) throw new Error('查询失败');
+                const data = await resp.json();
+                if (!data.trace) {
+                    container.innerHTML = '<div class="empty">未找到该线程的执行轨迹</div>';
+                    return;
+                }
+                renderTrace(data.trace);
+            } catch (e) {
+                container.innerHTML = `<div class="empty">❌ ${e.message}</div>`;
+            }
+        }
+
+        function renderTrace(trace) {
+            // 概览卡片
+            document.getElementById('ovDuration').textContent = trace.duration_ms || '--';
+            document.getElementById('ovTools').textContent = trace.tool_calls ? trace.tool_calls.length : 0;
+            document.getElementById('ovCost').textContent = '¥' + (trace.total_cost || 0).toFixed(4);
+            document.getElementById('ovTokens').textContent = trace.total_tokens || '--';
+            document.getElementById('overview').style.display = 'flex';
+
+            // 时间线
+            let html = '<div class="timeline">';
+
+            // Agent 决策节点
+            if (trace.agent_decisions && trace.agent_decisions.length > 0) {
+                trace.agent_decisions.forEach((d, i) => {
+                    html += `
+                        <div class="node decision">
+                            <div class="time-label">决策 #${i + 1}</div>
+                            <div class="title">🧠 Agent 决策 <span class="badge decision">decision</span></div>
+                            <div class="detail">
+                                <div class="row"><span class="key">工具名</span><span class="val">${d.tool_name || '-'}</span></div>
+                                <div class="row"><span class="key">参数</span><span class="val"><pre>${JSON.stringify(d.arguments, null, 2)}</pre></span></div>
+                            </div>
+                        </div>`;
+                });
+            }
+
+            // 工具调用节点
+            if (trace.tool_calls && trace.tool_calls.length > 0) {
+                trace.tool_calls.forEach(tc => {
+                    const cls = tc.status === 'error' ? 'tool-error' : 'tool-success';
+                    const badgeCls = tc.status === 'error' ? 'error' : 'success';
+                    const badgeText = tc.status === 'error' ? '失败' : '成功';
+                    html += `
+                        <div class="node ${cls}">
+                            <div class="time-label">耗时 ${tc.duration_ms}ms</div>
+                            <div class="title">🔧 ${tc.tool_name} <span class="badge ${badgeCls}">${badgeText}</span></div>
+                            <div class="detail">
+                                <div class="row"><span class="key">参数</span><span class="val"><pre>${JSON.stringify(tc.arguments, null, 2)}</pre></span></div>
+                                <div class="row"><span class="key">结果</span><span class="val"><pre>${tc.result || (tc.error_message || '无')}</pre></span></div>
+                            </div>
+                        </div>`;
+                });
+            }
+
+            // 最终输出
+            if (trace.final_output) {
+                html += `
+                    <div class="node decision">
+                        <div class="time-label">完成</div>
+                        <div class="title">📝 最终输出</div>
+                        <div class="detail">
+                            <div class="row"><span class="val">${trace.final_output}</span></div>
+                        </div>
+                    </div>`;
+            }
+
+            html += '</div>';
+            document.getElementById('timelineContainer').innerHTML = html;
+        }
+
+        // 页面加载时自动查询默认线程
+        window.onload = () => loadTrace();
+    </script>
+</body>
+</html>

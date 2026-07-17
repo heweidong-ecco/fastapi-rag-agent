@@ -1,5 +1,22 @@
 # 📋 常见问题与故障排查 (FAQ)
 
+将 FAQ 整合到项目中
+
+1.  将以上内容保存为 `docs/FAQ.md`。
+2.  在 `README.md` 中添加链接：
+    ```markdown
+    ## ❓ 常见问题
+
+    遇到问题请先查阅 [FAQ 与故障排查](docs/FAQ.md)。
+
+
+-----------------------
+提交并推送：
+bash
+git add docs/FAQ.md README.md
+git commit -m "docs: 添加FAQ与故障排查文档"
+git push
+
 ## 一、部署相关
 
 ### Q1：执行 `docker compose up -d` 后，API 容器一直在重启？
@@ -118,19 +135,40 @@ docker compose exec postgres psql -U postgres -d rag_db -c "SELECT count(*) FROM
 检查阿里百炼 API 是否被限流。
 text
 
-#### 三、将 FAQ 整合到项目中
+### Q2 ：Swagger UI 的 Authorize 按钮授权无效，接口仍返回 401？
 
-1.  将以上内容保存为 `docs/FAQ.md`。
-2.  在 `README.md` 中添加链接：
-    ```markdown
-    ## ❓ 常见问题
+**现象：**
+- 用 curl 或 Python 脚本调用接口，JWT 认证正常。
+- 但在 Swagger UI 中，点击顶部 **Authorize** 按钮填入 Token 后，接口仍返回 `AUTH_MISSING`。
 
-    遇到问题请先查阅 [FAQ 与故障排查](docs/FAQ.md)。
+**原因：**
+接口中手动定义了 `authorization: str = Header(None)` 参数，导致 Swagger 生成的 UI 与内置的 Authorize 机制冲突。Swagger 无法正确地将 Authorize 按钮设置的 Token 映射到手动定义的 Header 参数上。
+
+**解决方法：**
+使用 FastAPI 原生的 `HTTPBearer` 安全方案替代手动 Header 解析。
+
+1.  在 `deps.py` 中，使用 `HTTPBearer` 定义认证方案：
+    ```python
+    from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+
+    oauth2_scheme = HTTPBearer()
+
+    async def get_current_user_hybrid(
+        x_api_key: str = Header(None),
+        credentials: HTTPAuthorizationCredentials = Depends(oauth2_scheme)
+    ) -> str:
+        if x_api_key:
+            return await get_current_user(x_api_key)
+        if credentials:
+            token = credentials.credentials
+            return verify_jwt_token(token)
+        raise AppException(ErrorCode.AUTH_MISSING, "请提供 API Key 或 Bearer Token")
+
+2. 在接口定义中，删除手动定义的 authorization 参数，仅依赖 Depends(get_current_user_hybrid) 进行认证。
+3. 重启服务后，Swagger 的 Authorize 按钮即可正常工作。
+注意： 这是一个开发调试工具的兼容性问题，不影响生产环境中 API 的实际认证功能。用 curl、Postman 或其他代码调用 API 不受任何影响。
 
 
------------------------
-提交并推送：
-bash
-git add docs/FAQ.md README.md
-git commit -m "docs: 添加FAQ与故障排查文档"
-git push
+
+
+

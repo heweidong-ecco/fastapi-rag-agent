@@ -66,7 +66,7 @@ def expand_query(original_query: str, num_variants: int = 3) -> list[str]:
     redis_client.set(cache_key, json.dumps(result, ensure_ascii=False), ex=CACHE_TTL)
     return result
 
-
+from token_tracker import record_usage # Token统计模块
 def rewrite_query(original_query: str, conversation_history: list[str] = None) -> str:
     """优化查询（带缓存）"""
     # 将历史序列化成字符串作为缓存键的一部分
@@ -104,8 +104,21 @@ def rewrite_query(original_query: str, conversation_history: list[str] = None) -
         temperature=0.1,  # 低温以确保语义不变
         max_tokens=200
     )
+    '''
+    # 统计 Token
+    if hasattr(response, "usage_metadata"):
+    usage = response.usage_metadata
+    record_usage(
+        model="qwen-turbo",
+        prompt_tokens=usage.get("input_tokens", 0),
+        completion_tokens=usage.get("output_tokens", 0),
+        purpose="agent_decision",  # 根据实际用途修改
+        user_name=state.get("user_name", "unknown"),
+        thread_id=state.get("thread_id", "unknown"),
+    )
+    '''
     result = response.choices[0].message.content.strip()
-
+    
     # 写入缓存
     redis_client.set(cache_key, result, ex=CACHE_TTL)
     return result

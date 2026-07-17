@@ -118,6 +118,68 @@ def create_table():
                     CREATE INDEX IF NOT EXISTS documents_requested_by_idx 
                     ON documents (requested_by);
                 """)
+                # Token使用日志表
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS token_usage_logs (
+                        id SERIAL PRIMARY KEY,
+                        user_name TEXT NOT NULL,
+                        thread_id TEXT DEFAULT 'unknown',
+                        model TEXT NOT NULL,
+                        purpose TEXT NOT NULL,
+                        prompt_tokens INTEGER NOT NULL,
+                        completion_tokens INTEGER NOT NULL,
+                        total_tokens INTEGER NOT NULL,
+                        cost REAL NOT NULL DEFAULT 0.0,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    );
+                """)
+                # 为常用查询字段创建索引
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_token_usage_user ON token_usage_logs(user_name);")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_token_usage_date ON token_usage_logs(created_at);")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_token_usage_thread ON token_usage_logs(thread_id);")   
+                # 新增：花费明细表
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS cost_records (
+                        id SERIAL PRIMARY KEY,
+                        user_name TEXT NOT NULL,
+                        thread_id TEXT DEFAULT 'unknown',
+                        model TEXT NOT NULL,
+                        purpose TEXT NOT NULL,
+                        prompt_tokens INTEGER NOT NULL DEFAULT 0,
+                        completion_tokens INTEGER NOT NULL DEFAULT 0,
+                        total_tokens INTEGER NOT NULL DEFAULT 0,
+                        input_cost REAL NOT NULL DEFAULT 0.0,
+                        output_cost REAL NOT NULL DEFAULT 0.0,
+                        total_cost REAL NOT NULL DEFAULT 0.0,
+                        tool_name TEXT,
+                        tool_args TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    );
+                """)
+                # 索引
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_cost_records_user ON cost_records(user_name);")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_cost_records_date ON cost_records(created_at);")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_cost_records_thread ON cost_records(thread_id);")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_cost_records_purpose ON cost_records(purpose);")
+                # 增加归档表 建表语句：    
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS cost_records_archive (
+                        id SERIAL PRIMARY KEY,
+                        user_name TEXT NOT NULL,
+                        thread_id TEXT DEFAULT 'unknown',
+                        model TEXT NOT NULL,
+                        purpose TEXT NOT NULL,
+                        prompt_tokens INTEGER NOT NULL DEFAULT 0,
+                        completion_tokens INTEGER NOT NULL DEFAULT 0,
+                        total_tokens INTEGER NOT NULL DEFAULT 0,
+                        input_cost REAL NOT NULL DEFAULT 0.0,
+                        output_cost REAL NOT NULL DEFAULT 0.0,
+                        total_cost REAL NOT NULL DEFAULT 0.0,
+                        tool_name TEXT,
+                        tool_args TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    );
+                """)                    
             # 🔥 关键：显式提交，防止上下文管理器未提交
             conn.commit()
         print("✅ 表创建/确认成功，表结构更新成功,已包含 owner的requested_by 字段")
@@ -159,7 +221,7 @@ def search_similar(query_embedding: list, top_k: int = 3):
             return cur.fetchall()
 
 # db.py 末尾添加
-from sqlalchemy import MetaData, Table, Column, Integer, Text, String, DateTime
+from sqlalchemy import MetaData, Table, Column, Integer, Text, String, DateTime, Float
 from sqlalchemy.sql import func
 
 metadata = MetaData()
@@ -185,7 +247,46 @@ api_keys_table = Table(
     Column("expires_at", DateTime, nullable=False),
     Column("is_active", Integer, server_default="1"),  # 新增字段，默认1表示激活
 )
-    
+# 新增：花费明细表
+# 定义 cost_records 表的结构
+cost_records_table = Table(
+    "cost_records",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("user_name", Text, nullable=False),
+    Column("thread_id", Text, default="unknown"),
+    Column("model", Text, nullable=False),
+    Column("purpose", Text, nullable=False),
+    Column("prompt_tokens", Integer, nullable=False, default=0),
+    Column("completion_tokens", Integer, nullable=False, default=0),
+    Column("total_tokens", Integer, nullable=False, default=0),
+    Column("input_cost", Float, nullable=False, default=0.0),
+    Column("output_cost", Float, nullable=False, default=0.0),
+    Column("total_cost", Float, nullable=False, default=0.0),
+    Column("tool_name", Text),
+    Column("tool_args", Text),
+    Column("created_at", DateTime, server_default=func.now()),
+)
+# 在 metadata 定义区域增加 增加归档表
+# 定义 cost_records_archive 增加归档表的结构
+cost_records_archive_table = Table(
+    "cost_records_archive",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("user_name", Text, nullable=False),
+    Column("thread_id", Text, default="unknown"),
+    Column("model", Text, nullable=False),
+    Column("purpose", Text, nullable=False),
+    Column("prompt_tokens", Integer, nullable=False, default=0),
+    Column("completion_tokens", Integer, nullable=False, default=0),
+    Column("total_tokens", Integer, nullable=False, default=0),
+    Column("input_cost", Float, nullable=False, default=0.0),
+    Column("output_cost", Float, nullable=False, default=0.0),
+    Column("total_cost", Float, nullable=False, default=0.0),
+    Column("tool_name", Text),
+    Column("tool_args", Text),
+    Column("created_at", DateTime, server_default=func.now()),
+)
 # ==================== BM25 关键词检索 ====================
 import numpy as np
 import jieba
