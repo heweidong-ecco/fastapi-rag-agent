@@ -44,7 +44,7 @@ async def _check_tool_via_mcp(tool_name: str, test_args: dict) -> bool:
         print(f"通过 MCP 检查工具 {tool_name} 失败: {e}")
         return False
 
-def update_tool_health(tool_name: str):
+async def update_tool_health(tool_name: str):
     """
     更新单个工具的健康状态（通用版本）。
     通过 MCP 协议进行探测，无需单独编写检查函数。
@@ -55,11 +55,10 @@ def update_tool_health(tool_name: str):
         return
 
     old_health = _tool_health.get(tool_name, {}).get("status", UNKNOWN)
-    
-    # 使用 asyncio.run 在同步上下文中执行异步检查
-    import asyncio
+
+    # 直接 await 异步检查（避免在事件循环内使用 asyncio.run 导致 RuntimeError）
     try:
-        is_healthy = asyncio.run(_check_tool_via_mcp(tool_name, test_args))
+        is_healthy = await _check_tool_via_mcp(tool_name, test_args)
     except Exception as e:
         print(f"健康检查异常 ({tool_name}): {e}")
         is_healthy = False
@@ -83,10 +82,10 @@ def get_tool_health(tool_name: str) -> str:
 def get_fallback_tool(tool_name: str) -> str:
     return FALLBACK_MAP.get(tool_name, "chat")
 
-def run_health_check():
+async def run_health_check():
     """
     启动时运行一次全面的健康检查。
     自动遍历 TEST_ARGS_MAP 中定义的所有工具。
     """
     for tool_name in TEST_ARGS_MAP:
-        update_tool_health(tool_name)
+        await update_tool_health(tool_name)

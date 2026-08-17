@@ -52,7 +52,7 @@ def web_search(query: str) -> str:
         # 如果搜索API失败，回退到简单的LLM回答
         try:
             fallback_response = client.chat.completions.create(
-                model="qwen3.7-plus",
+                model="qwen-plus",
                 messages=[
                     {"role": "user", "content": f"请根据你的知识回答以下问题：{query}"}
                 ],

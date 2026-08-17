@@ -6,9 +6,11 @@ from mem0 import Memory
 
 # 初始化 Mem0 客户端
 # Mem0 支持本地模式（数据存储在本地文件）和云端模式，这里使用本地模式进行开发
-mem0_client = Memory(
+# 注意：mem0ai>=2.0 的 Memory.__init__ 只接受 MemoryConfig 对象，不再接受 dict，
+# 需使用 Memory.from_config(dict) 构造。
+mem0_client = Memory.from_config(
     # 本地模式配置，数据存储在当前目录下的 .mem0 文件夹中
-    config={
+    {
         "vector_store": {
             "provider": "qdrant",
             "config": {

@@ -37,7 +37,7 @@ class AgentState(TypedDict):
 
 # ==================== 初始化模型 ====================
 llm = ChatOpenAI(
-    model="qwen3.7-plus",
+    model="qwen-plus",
     api_key=os.getenv("DASHSCOPE_API_KEY"),
     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
     temperature=0
@@ -148,25 +148,6 @@ async def close_all_sessions():
         _session_pool.clear()
     print("所有 MCP 会话已关闭")
 
-'''原代码：_mcp_session 是一个全局单例，所有请求共享同一个会话，
-_mcp_session = None
-
-async def get_mcp_session():
-    """获取或创建 MCP 会话（懒加载）"""
-    global _mcp_session
-    if _mcp_session is None:
-        # 通过 stdio 连接到 MCP Server
-        server_params = StdioServerParameters(
-            command="python",
-            args=["api/mcp_server.py"]
-        )
-        transport = await stdio_client(server_params)
-        _mcp_session = await ClientSession(transport[0], transport[1])
-        await _mcp_session.initialize()
-        print("MCP 会话已建立")
-    return _mcp_session
-'''
-
 async def get_mcp_tools():
     """通过 MCP Client 获取所有可用工具"""
     session = await get_mcp_session()
@@ -184,9 +165,11 @@ import os
 from functools import wraps
 
 # 复用现有的 Redis 客户端（与 cache.py 相同配置）
+# 从 config 导入 host/port，以正确应用本地开发时 localhost 的覆盖
+from config import REDIS_HOST, REDIS_PORT
 redis_client = redis.Redis(
-    host=os.getenv("REDIS_HOST", "redis"),
-    port=int(os.getenv("REDIS_PORT", "6379")),
+    host=REDIS_HOST,
+    port=REDIS_PORT,
     db=0,
     decode_responses=True
 )
@@ -276,9 +259,9 @@ async def tool_execute(state: AgentState):
         # 新增 带缓存的调用。
         result = await call_mcp_tool_with_cache(tool_name, tool_args)
 
-        # 记录工具调用结束
-        record_tool_end(tool_name, "", thread_id, "error", f"未找到工具: {tool_name}")
-        
+        # 记录工具调用结束（成功状态；原代码在此误记录为“未找到工具”错误）
+        record_tool_end(tool_name, result, thread_id, "success")
+
         tool_msg = ToolMessage(content=str(result), tool_call_id=tc["id"], name=tool_name)
         tool_messages.append(tool_msg)
 

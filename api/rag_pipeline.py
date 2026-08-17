@@ -132,12 +132,13 @@ class RAGPipeline:
         timing["rerank_ms"] = round((time.time() - t_rerank_start) * 1000, 2)
 
 
-        SIMILARITY_THRESHOLD =0.7
-        if candidates:
+        # 过滤明显不相关的文档。
+        # 注意：RRF 分数本身很小（约 1/(k+rank)，k=60），不能用 0.7 这种余弦阈值判断；
+        # 重排序分数为 Cross-Encoder logits，正数视为可接受。
+        if self.enable_rerank and candidates:
             candidates = [
                 doc for doc in candidates
-                if doc.get("rrf_score",0) >= SIMILARITY_THRESHOLD
-                or doc.get("rerank_score",0) >= 0 # 重排序分数是 logits，正数即可
+                if doc.get("rerank_score", 0) >= 0
             ]
         # 如果所有文档都被过滤掉，返回空列表
         if not candidates:

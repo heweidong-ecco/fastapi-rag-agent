@@ -48,6 +48,9 @@ locust>=2.30.0
 rank-bm25>=0.2.2
 jieba>=0.42.1
 sentence-transformers>=3.0.0
+# 重排序兼容性约束：transformers 5.x 与 torch 2.2 不兼容（已实测）
+transformers>=4.41,<5
+numpy>=1.24,<2
 ragas>=0.1.18
 
 # RAG
@@ -65,7 +68,8 @@ langgraph
 langchain-core
 langgraph-checkpoint
 langgraph-checkpoint-sqlite
-mem0ai>=0.1.0
+# mem0 2.x 起 Memory.__init__ 不再接受 dict，代码使用 Memory.from_config(dict)，需 >=2.0
+mem0ai>=2.0.0
 
 # Gradio
 matplotlib
@@ -74,3 +78,12 @@ playwright>=1.48.0
 
 # MCP Server
 mcp>=1.0.0
+
+# 成本可视化面板（main.py 挂载 Gradio）
+gradio>=4.0.0
+
+# Alembic / 元数据定义（db.py 使用 sqlalchemy）
+sqlalchemy>=2.0.0
+
+# RAGAS 评估脚本依赖 datasets
+datasets>=2.0.0

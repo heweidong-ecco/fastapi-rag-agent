@@ -97,8 +97,9 @@ class DocumentPreprocessor:
         # 控制字符规则 留在 Python 代码中更合适,
         # 理由：控制字符是不可见、不可打印的，配置文件里写出来反而容易出错。
         # 这类规则是底层基础清洗，与领域无关，不应该频繁修改。放在代码中一目了然，维护成本更低。
-        text = re.sub(r'!\\[([^\\]]*)\\]\\([^)]+\\)', r'\\1', text)  # Markdown图片语法
-        text = re.sub(r'[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f]', '', text)  # 去除控制字符
+        # 注意：raw string 中括号不需要双重转义（\\[ 是字面反斜杠+开括号，会损坏正则）
+        text = re.sub(r'!\[([^\]]*)\]\([^)]+\)', r'\1', text)  # Markdown图片语法
+        text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', text)  # 去除控制字符
         return text
 
     def normalize_text(self, text: str) -> str:

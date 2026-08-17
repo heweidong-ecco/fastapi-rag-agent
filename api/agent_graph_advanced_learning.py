@@ -17,7 +17,7 @@ from datetime import datetime
 
 # ==================== 初始化模型 ====================
 llm = ChatOpenAI(
-    model="qwen3.7-plus",
+    model="qwen-plus",
     api_key=os.getenv("DASHSCOPE_API_KEY"),
     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
     temperature=0
@@ -58,9 +58,9 @@ llm_with_tools = llm.bind_tools(tools)
 
 
 # 为每个工具创建模型实例（用于子图）
-llm_search = ChatOpenAI(model="qwen3.7-plus", api_key=os.getenv("DASHSCOPE_API_KEY"), base_url="https://dashscope.aliyuncs.com/compatible-mode/v1", temperature=0)
-llm_calc = ChatOpenAI(model="qwen3.7-plus", api_key=os.getenv("DASHSCOPE_API_KEY"), base_url="https://dashscope.aliyuncs.com/compatible-mode/v1", temperature=0)
-llm_date = ChatOpenAI(model="qwen3.7-plus", api_key=os.getenv("DASHSCOPE_API_KEY"), base_url="https://dashscope.aliyuncs.com/compatible-mode/v1", temperature=0)
+llm_search = ChatOpenAI(model="qwen-plus", api_key=os.getenv("DASHSCOPE_API_KEY"), base_url="https://dashscope.aliyuncs.com/compatible-mode/v1", temperature=0)
+llm_calc = ChatOpenAI(model="qwen-plus", api_key=os.getenv("DASHSCOPE_API_KEY"), base_url="https://dashscope.aliyuncs.com/compatible-mode/v1", temperature=0)
+llm_date = ChatOpenAI(model="qwen-plus", api_key=os.getenv("DASHSCOPE_API_KEY"), base_url="https://dashscope.aliyuncs.com/compatible-mode/v1", temperature=0)
 
 # ==================== 定义全局 State ====================
 class AgentState(TypedDict):
@@ -194,7 +194,7 @@ def create_react_subgraph():
 
     # 为子图单独绑定工具的模型
     llm_react = ChatOpenAI(
-        model="qwen3.7-plus",
+        model="qwen-plus",
         api_key=os.getenv("DASHSCOPE_API_KEY"),
         base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
         temperature=0
@@ -210,7 +210,7 @@ def create_react_subgraph():
         system_prompt = inject_memories_to_prompt(system_prompt, state)
         # 将 system prompt 和消息列表合并
         messages = [SystemMessage(content=system_prompt)] + state["messages"]
-        response = llm_react_with_tools.invoke(state["messages"])
+        response = llm_react_with_tools.invoke(messages)
         return {"messages": [response]}
     ''' 创建了MCP 服务 把健康检查和降级逻辑移动到mcp_server.py中
     # 执行工具前加入健康检查和降级逻辑：
@@ -238,78 +238,7 @@ def create_react_subgraph():
             tool_messages.append(tool_msg)
 
         return {"messages": tool_messages}
-    ''' 
-    原工具调用请求，手动调用工具 代码。
-    def tool_execute(state: AgentState):
-        """执行节点：解析模型的工具调用请求，执行工具，并返回ToolMessage。"""
-        last_message = state["messages"][-1]
-        tool_messages = []
-
-        for tc in last_message.tool_calls:
-            tool_name = tc["name"]
-            tool_args = tc["args"]
-
-            # 新增：检查工具健康状态
-            health = get_tool_health(tool_name)
-            if health == UNHEALTHY:
-                # 工具不健康，尝试降级
-                fallback = get_fallback_tool(tool_name)
-                print(f"工具 {tool_name} 不可用，降级为 {fallback}")
-                if fallback == "chat":
-                    result = "抱歉，当前搜索服务暂时不可用。请稍后重试或尝试其他方式。"
-                elif fallback == "web_search":
-                    # 降级为普通搜索
-                    tool_name = "web_search"
-                    result = web_search.invoke(tool_args)
-                else:
-                    result = f"工具 {tool_name} 不可用，且无备选方案。"
-            else:
-                # 工具健康，正常执行
-                if tool_name == "web_search":# 改为新工具名
-                    result = web_search.invoke(tool_args["query"])
-                elif tool_name == "calculator":
-                    result = calculator.invoke(tool_args)
-                elif tool_name == "date_today":
-                    result = date_today.invoke(tool_args)
-                elif tool_name == "fetch_webpage":
-                    result = fetch_webpage.invoke(tool_args)
-                elif tool_name == "fetch_webpage_html":
-                    result = fetch_webpage_html.invoke(tool_args)
-                elif tool_name == "screenshot_webpage":
-                    result = screenshot_webpage.invoke(tool_args)
-                elif tool_name == "execute_python":
-                    result = execute_python.invoke(tool_args)
-                else:
-                    result = f"未找到工具: {tool_name}"
-
-            tool_msg = ToolMessage(
-                content=str(result),
-                tool_call_id=tc["id"],
-                name=tool_name
-            )
-            tool_messages.append(tool_msg)
-
-        return {"messages": tool_messages}
-    '''
-    '''
-# 修改 agent_graph_advanced.py，将原有的工具调用切换为通过MCP Client。
-import asyncio
-import httpx
-
-# 新增：MCP 工具调用函数
-async def call_mcp_tool(tool_name: str, tool_args: dict) -> str:
-    """通过 MCP 协议调用工具"""
-    # 注意：这里先用直接映射的方式，后续第72天会接入真正的 MCP Client
-    TOOL_MAP = {
-        "calculator": lambda: calculator.invoke(tool_args.get("expression", "")),
-        "date_today": lambda: date_today.invoke({}),
-        "web_search": lambda: web_search.invoke(tool_args.get("query", "")),
-        "screenshot_webpage": lambda: screenshot_webpage.invoke(tool_args.get("url", "")),
-    }
-    if tool_name not in TOOL_MAP:
-        return f"未找到工具: {tool_name}"
-    return TOOL_MAP[tool_name]()
-    '''
+    
 
     def should_continue(state: AgentState):
         """路由函数：检查最后一条消息是否包含tool_calls。"""

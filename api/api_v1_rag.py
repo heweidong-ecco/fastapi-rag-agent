@@ -291,17 +291,7 @@ async def upload_document(
     for chunk in chunks:
         embedding = get_embedding(chunk)
         insert_document(chunk, file.filename, embedding, user_name)  # user_name 作为 requested_by
-    '''
-    如果你需要更灵活的分块（如第34天实验中那样手动指定参数）
-    也可以直接调用底层函数，不用文档类型配置：
-    python
-    from langchain_text_splitters import RecursiveCharacterTextSplitter
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=500,
-        chunk_overlap=50,
-        separators=["\n\n", "\n", "。", "，", " ", ""]
-    )
-    chunks = splitter.split_text(cleaned_text)'''
+
     # 清理临时文件
     os.unlink(tmp_path)
     
@@ -430,37 +420,7 @@ async def hybrid_search_api(
         "docs": docs,
         "requested_by": user_name,
     }
-'''
-# 测试k值影响使用,通过修改 RRF 的 k 值，观察排序结果的变化，理解 k 值对融合结果的影响
-@router.post("/rag/hybrid_search")
-async def hybrid_search_api(
-    req: QuestionRequest,
-    k: int = 60,  # 新增参数，默认 60
-    user_name: str = Depends(get_current_user_hybrid),
-):
-    """混合检索：向量 + BM25 关键词，使用 RRF 融合"""
-    from hybrid_search import reciprocal_rank_fusion
-    from embedding_client import get_embedding
-    from db import search_similar, bm25_search
 
-    query_embedding = get_embedding(req.question)
-    vector_results = search_similar(query_embedding, top_k=req.top_k * 2)
-    bm25_results = bm25_search(req.question, top_k=req.top_k * 2)
-
-    docs = reciprocal_rank_fusion(
-        vector_docs=vector_results,
-        bm25_docs=bm25_results,
-        k=k,
-        top_k=req.top_k
-    )
-    return {
-        "question": req.question,
-        "method": f"hybrid (vector + bm25, RRF k={k})",
-        "docs": docs,
-        "requested_by": user_name,
-    }
-    具体测试步骤和方法在第32天，选做中查看。
-'''
 # 添加重排序检索接口
 @router.post("/rag/rerank_search")
 async def rerank_search_api(
@@ -568,7 +528,7 @@ import json
 
 # 初始化流式LLM
 llm_stream = ChatOpenAI(
-    model="qwen3.7-plus",
+    model="qwen-plus",
     api_key=os.getenv("DASHSCOPE_API_KEY"),
     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
     temperature=0.3,
@@ -723,7 +683,7 @@ from datetime import datetime
 
 #一 初始化模型
 llm=ChatOpenAI(
-    model=("qwen3.7-plus"),
+    model="qwen-plus",
     api_key=os.getenv("DASHSCOPE_API_KEY"),
     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
     temperature=0,
@@ -787,14 +747,14 @@ async def agent_websocket(websocket: WebSocket):
             callback = WebSocketAgentCallback(websocket)
             
             try:
-                # 使用回调的 ainvoke
-                result = await agent.ainvoke(
-                    {"messages": [("user", user_message)]},
+                # 使用回调的 ainvoke（create_tool_calling_agent 的输入键是 "input"，输出键是 "output"）
+                result = await agent_executor.ainvoke(
+                    {"input": user_message},
                     config={"callbacks": [callback]}
                 )
-                
+
                 # 如果 on_agent_finish 没有被触发，手动发送最终结果
-                final_message = result["messages"][-1].content
+                final_message = result.get("output", "")
                 await websocket.send_text(json.dumps({
                     "type": "final",
                     "content": final_message
@@ -809,80 +769,6 @@ async def agent_websocket(websocket: WebSocket):
                 await websocket.send_text(json.dumps({"type": "done"}))
     except WebSocketDisconnect:
         print("客户端断开连接")
-
-'''
-# 模拟Agent客户端 思考的一个过程模拟演示。
-@app.websocket("/ws/agent")
-async def agent_websocket(websocket: WebSocket):
-    """
-    WebSocket 端点：实时展示 Agent 的思考过程。
-    
-    客户端发送用户问题，服务端模拟 Agent 的思考-行动-观察循环，
-    每一步都实时推送，让用户看到 Agent 的完整决策过程。
-    """
-    await websocket.accept()
-    active_connections.append(websocket)
-    
-    try:
-        while True:
-            # 等待客户端发送消息
-            data = await websocket.receive_text()
-            request = json.loads(data)
-            user_message = request.get("message", "")
-            
-            # 模拟 Agent 的 Think-Action-Observation 循环
-            await websocket.send_text(json.dumps({
-                "type": "thinking",
-                "content": f"收到问题：{user_message}，开始分析..."
-            }))
-            await asyncio.sleep(0.5)
-            
-            await websocket.send_text(json.dumps({
-                "type": "thinking",
-                "content": "我需要搜索相关信息..."
-            }))
-            await asyncio.sleep(0.5)
-            
-            await websocket.send_text(json.dumps({
-                "type": "action",
-                "tool": "search",
-                "input": user_message,
-                "content": "正在调用搜索工具..."
-            }))
-            await asyncio.sleep(1)
-            
-            await websocket.send_text(json.dumps({
-                "type": "observation",
-                "content": "搜索完成，找到3条相关结果"
-            }))
-            await asyncio.sleep(0.5)
-            
-            await websocket.send_text(json.dumps({
-                "type": "thinking",
-                "content": "正在整合搜索结果，生成最终回答..."
-            }))
-            await asyncio.sleep(0.5)
-            
-            # 最终回答
-            await websocket.send_text(json.dumps({
-                "type": "final",
-                "content": f"关于 '{user_message}' 的回答：这是一个由 Agent 实时生成的模拟回答，展示了完整的思考-行动-观察循环。"
-            }))
-            
-            await websocket.send_text(json.dumps({
-                "type": "done"
-            }))
-            
-    except WebSocketDisconnect:
-        print("客户端断开连接")
-    finally:
-        active_connections.remove(websocket)
-
-@app.get("/ws/status")
-async def websocket_status():
-    """查看当前活跃的 WebSocket 连接数"""
-    return {"active_connections": len(active_connections)}
-'''
 
 # 测试 WebSocket 基础通信正常端点
 @router.websocket("/ws/test")
@@ -912,8 +798,8 @@ async def ask_question(
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT content FROM documents WHERE requested_by = %s  LIMIT %s   -- 只检索当前用户的文档", 
-                (req.top_k,user_name))
+                "SELECT content FROM documents WHERE requested_by = %s  LIMIT %s   -- 只检索当前用户的文档",
+                (user_name, req.top_k))
             rows = cur.fetchall()
     docs = [r[0] for r in rows]
     duration = time.time() - start

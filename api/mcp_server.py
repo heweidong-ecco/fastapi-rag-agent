@@ -29,17 +29,7 @@ TOOLS = [
     {"func": screenshot_webpage, "version": "1.0.0"},
     {"func": execute_python, "version": "1.5.0"},  # 已迭代多次
 ]
-''' 原工具列表，不带版本号。
-# 将所有工具放入一个列表（新增工具只需在这里加一行！）
-TOOLS = [
-    calculator,
-    date_today,
-    web_search,
-    fetch_webpage,
-    screenshot_webpage,
-    execute_python,
-]
-'''
+
 
 # 工具定义和处理器由工厂函数自动生成（不再需要手动维护映射表）
 # 新增 版本号
@@ -51,10 +41,7 @@ TOOL_HANDLERS = {
     tool["func"].name: create_mcp_tool_handler(tool["func"])
     for tool in TOOLS
 }
-''' 原代码，不包含版本号。
-TOOLS_DEFINITION = {tool.name: create_mcp_tool_definition(tool) for tool in TOOLS}
-TOOL_HANDLERS = {tool.name: create_mcp_tool_handler(tool) for tool in TOOLS}
-'''
+
 
 # 增加健康检查过滤。
 from tool_health import get_tool_health, UNHEALTHY

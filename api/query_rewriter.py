@@ -11,9 +11,11 @@ from openai import OpenAI
 import redis
 
 # 复用现有的 Redis 客户端（与 cache.py 中相同配置）
+# 从 config 导入 host/port，以正确应用本地开发时 localhost 的覆盖
+from config import REDIS_HOST, REDIS_PORT
 redis_client = redis.Redis(
-    host=os.getenv("REDIS_HOST", "redis"),
-    port=int(os.getenv("REDIS_PORT", "6379")),
+    host=REDIS_HOST,
+    port=REDIS_PORT,
     db=0,
     decode_responses=True
 )
@@ -104,19 +106,7 @@ def rewrite_query(original_query: str, conversation_history: list[str] = None) -
         temperature=0.1,  # 低温以确保语义不变
         max_tokens=200
     )
-    '''
-    # 统计 Token
-    if hasattr(response, "usage_metadata"):
-    usage = response.usage_metadata
-    record_usage(
-        model="qwen-turbo",
-        prompt_tokens=usage.get("input_tokens", 0),
-        completion_tokens=usage.get("output_tokens", 0),
-        purpose="agent_decision",  # 根据实际用途修改
-        user_name=state.get("user_name", "unknown"),
-        thread_id=state.get("thread_id", "unknown"),
-    )
-    '''
+
     result = response.choices[0].message.content.strip()
     
     # 写入缓存

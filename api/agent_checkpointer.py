@@ -1,18 +1,4 @@
-'''# 查看当前状态
-current_state = checkpointer_agent.get_state(config)
-print(current_state.values["messages"])
 
-# 查看状态历史
-state_history = list(checkpointer_agent.get_state_history(config))
-for snapshot in state_history:
-    print(f"步骤: {snapshot.next}, 消息数: {len(snapshot.values['messages'])}")
-'''
-
-"""
-带 Checkpointer 持久化的 LangGraph Agent
-(支持 SQLite 持久化)
-(支持 Redis 持久化)
-"""
 import os
 from typing import TypedDict, List, Annotated
 import operator
@@ -100,30 +86,15 @@ def should_continue(state: AgentState):
     return END
 
 # ==================== 构建图（支持选择 Checkpointer 后端） ====================
-# ======= 下面的的是混合经典的典型架构：混合架构后端，目前学习阶段，暂时用不到 =======
-'''
-# ======= 支持 MemorySaver SqliteSaver RedisSaver 混合架构后端 =======
-# 典型架构：API 实例写 Redis，后台任务定期将过期数据迁移到 SQLite/PostgreSQL。
-# 混合架构示例
-from langgraph.checkpoint.redis import RedisSaver
-from langgraph.checkpoint.sqlite import SqliteSaver
-
-class HybridCheckpointer:
-    def __init__(self):
-        self.hot_store = RedisSaver.from_conn_string("redis://localhost:6379/0")
-        ⭐️，这里要修改保存地址，单sqlite，本地保存地址是：agent_history.db，混合架构是：archive.db
-        self.cold_store = SqliteSaver.from_conn_string("./archive.db")
-    
-    def put(self, config, checkpoint, metadata):
-        # 写入热存储
-        self.hot_store.put(config, checkpoint, metadata)
-        # 异步写入冷存储（简化示例，实际应用使用任务队列）
-        self.cold_store.put(config, checkpoint, metadata)
-'''
 # ======= 支持 MemorySaver SqliteSaver RedisSaver 自主选择架构后端 =======
 def build_checkpointer_agent(backend: str = "memory"): # 默认memory即MemorySaver
     workflow = StateGraph(AgentState)
-    # ... 添加节点和边的代码保持不变 ...
+    # 添加节点和边（与基础 Agent 一致：决策 → 工具 → 决策循环）
+    workflow.add_node("agent", agent_decide)
+    workflow.add_node("tools", tool_execute)
+    workflow.set_entry_point("agent")
+    workflow.add_conditional_edges("agent", should_continue, {"tools": "tools", END: END})
+    workflow.add_edge("tools", "agent")
 
     # 根据后端选择 Checkpointer
     if backend == "sqlite":
@@ -135,6 +106,7 @@ def build_checkpointer_agent(backend: str = "memory"): # 默认memory即MemorySa
         redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
         # 新增,RedisSaver 版本不兼容问题还没解决，现在暂时不用
         # checkpointer = RedisSaver.from_conn_string(redis_url)
+        checkpointer = MemorySaver()  # 暂以内存兜底，避免编译空图
     else:  # 默认 memory
         checkpointer = MemorySaver()
 
@@ -143,42 +115,3 @@ def build_checkpointer_agent(backend: str = "memory"): # 默认memory即MemorySa
 # 全局实例（可通过环境变量 AGENT_CHECKPOINT_BACKEND 切换）
 backend = os.getenv("AGENT_CHECKPOINT_BACKEND", "memory")
 checkpointer_agent = build_checkpointer_agent(backend=backend)
-'''支持 SqliteSaver 和 MemorySaver 后端的代码
-def build_checkpointer_agent(use_sqlite: bool = True):
-    workflow = StateGraph(AgentState)
-    workflow.add_node("agent", agent_decide)
-    workflow.add_node("tools", tool_execute)
-    workflow.set_entry_point("agent")
-    workflow.add_conditional_edges("agent", should_continue, {"tools": "tools", END: END})
-    workflow.add_edge("tools", "agent")
-
-    # 创建 Checkpointer
-    if use_sqlite:
-        # SQLite 持久化，保存在本地文件中
-        db_path = os.path.join(os.path.dirname(__file__), "agent_history.db")
-        checkpointer = SqliteSaver.from_conn_string(db_path)
-    else:
-        checkpointer = MemorySaver()
-    
-    return workflow.compile(checkpointer=checkpointer)
-
-# 全局实例（默认使用 SQLite）
-checkpointer_agent = build_checkpointer_agent(use_sqlite=True)
-'''
-'''支持 MemorySaver 后端的代码
-# ==================== 构建图（关键：传入 checkpointer） ====================
-def build_checkpointer_agent():
-    workflow = StateGraph(AgentState)
-    workflow.add_node("agent", agent_decide)
-    workflow.add_node("tools", tool_execute)
-    workflow.set_entry_point("agent")
-    workflow.add_conditional_edges("agent", should_continue, {"tools": "tools", END: END})
-    workflow.add_edge("tools", "agent")
-
-    # 创建 Checkpointer（内存版，后续可换成 SqliteSaver）
-    checkpointer = MemorySaver()
-    return workflow.compile(checkpointer=checkpointer)
-
-# 全局实例
-checkpointer_agent = build_checkpointer_agent()
-'''

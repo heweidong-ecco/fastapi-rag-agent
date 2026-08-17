@@ -10,7 +10,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 # ==================== 初始化规划专用 LLM ====================
 planner_llm = ChatOpenAI(
-    model="qwen3.7-plus",
+    model="qwen-plus",
     api_key=os.getenv("DASHSCOPE_API_KEY"),
     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
     temperature=0  # 规划需要确定性，不能有随机性
@@ -79,7 +79,7 @@ def plan_task(user_goal: str) -> List[Dict]:
 # ==================== 任务执行器 ====================
 # 执行器专用模型，温度稍高，以便在动态调整时具备一定灵活性
 executor_llm = ChatOpenAI(
-    model="qwen3.7-plus",
+    model="qwen-plus",
     api_key=os.getenv("DASHSCOPE_API_KEY"),
     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
     temperature=0.1
@@ -187,34 +187,6 @@ def execute_plan(plan: List[Dict], user_goal: str = "") -> str:
     执行计划（默认启用动态重规划）。
     """
     return execute_plan_with_replan(plan, user_goal)
-'''原执行函数，不带动态 重规划
-# 核心执行函数
-def execute_plan(plan: List[Dict], user_goal: str = "") -> str:
-    """
-    按顺序执行计划，具备动态调整能力。
-    每一步都会根据当前上下文（前面步骤的结果），重新决定最优的输入参数。
-    """
-    context = ""  # 上下文，即工作记忆
-    results = []  # 存放每一步的最终结果
-
-    for step in plan:
-        step_num = step["step"]
-        action_desc = step["action"]
-        tool_name = step["tool"]
-
-        # 1. 根据上下文动态生成当前步骤的具体执行输入
-        dynamic_input = generate_dynamic_input(step, context, user_goal)
-
-        # 2. 用动态生成的输入去执行，并处理可能的失败
-        step_result = execute_step_with_retry(step, dynamic_input, context)
-
-        # 3. 更新上下文和工作记忆
-        result_summary = f"步骤{step_num}完成：{step_result[:200]}"
-        results.append(result_summary)
-        context += f"\n{result_summary}"
-
-    return "\n".join(results)
-'''
 
 def generate_dynamic_input(step: Dict, context: str, user_goal: str) -> str:
     """
@@ -244,7 +216,7 @@ quality_checker_llm = ChatOpenAI(
     # 用最轻量的模型，节省成本和延迟，
     # 推荐使用一个小型、快速的本地模型（比如Qwen3-1.7B），专门做这种简单的通过/不通过判断。
     # 因为没有本地部署，因为没额定暂时用qwen3.7-plus
-    model="qwen3.7-plus",  
+    model="qwen-plus",  
     api_key=os.getenv("DASHSCOPE_API_KEY"),
     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
     temperature=0  # 评估需要确定性

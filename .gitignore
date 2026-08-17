@@ -10,3 +10,16 @@ chroma_db/
 重构目录表.txt
 userkey_from_test.md
 
+# ===== 不入库的文档与清单 =====
+CLAUDE.md
+GIT_CHECKLIST.md
+
+# ===== 归档目录（未使用代码/产物，如需要随仓库保留请强制添加） =====
+archive/
+
+# ===== 运行期产物（不入库） =====
+.pytest_cache/
+.mem0/
+screenshots/
+*.db
+

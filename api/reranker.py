@@ -2,16 +2,16 @@
 重排序模块
 使用 Cross-Encoder 模型对候选文档进行精细排序。
 """
-from sentence_transformers import CrossEncoder
-
-# 全局加载模型（首次调用时自动下载，之后缓存）
-# 使用 BGE-Reranker v2-m3，中文效果优秀
+# 注意：sentence_transformers 在此处延迟导入（懒加载），
+# 避免模块导入时就必须依赖它（模型体积大且不是所有请求路径都需要），
+# 只有真正调用重排序时才会加载。
 _reranker = None
 
 def get_reranker():
     """懒加载重排序模型，只加载一次"""
     global _reranker
     if _reranker is None:
+        from sentence_transformers import CrossEncoder  # 延迟导入
         print("正在加载重排序模型 BGE-Reranker-v2-m3...")
         _reranker = CrossEncoder(
             "BAAI/bge-reranker-v2-m3",

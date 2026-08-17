@@ -36,16 +36,7 @@ def extract_text_with_layout(pdf_path: str) -> List[Dict]:
         
         # 当前在用：简化版（lambda 排序）按 y 坐标排序（从上到下），同行的按 x 坐标排序（从左到右）
         text_blocks.sort(key=lambda b: (round(b["bbox"][1] / 10) * 10, b["bbox"][0]))
-        '''
-        # 备用方案：精细版（如果需要替换，就注释掉上面那行，换成下面这行）text_blocks = sort_blocks_by_reading_order(text_blocks)
-        具体代码在下面=== 文本块排序辅助函数 ====
-        什么时候用它？
-        当你发现简化版排序对某些复杂排版（三栏、不规则分栏、大量图文混排）效果不好时，就换用精细版。保留这个函数是为了让你有“一键升级”的选项，而不是因为写错了。
-        它还可能在哪里被调用？
-        如果你未来写一个新的解析函数，或者对 extract_text_with_layout 进行改进，可以直接调用 sort_blocks_by_reading_order。它作为独立函数存在，就是为了复用。
-        一句话总结
-        sort_blocks_by_reading_order 是阅读顺序排序的“豪华版”，当前代码用“标准版”（lambda 排序）已经够用，但豪华版随时待命，等你遇到更复杂的 PDF 时可以替换上去。
-        '''
+
         ordered_text = "\n\n".join([b["text"] for b in text_blocks])
         
         pages_content.append({

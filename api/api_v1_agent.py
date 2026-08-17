@@ -9,34 +9,28 @@ from exceptions import ErrorCode, AppException
 from deps import get_current_user_hybrid, get_current_user_jwt, require_admin
 
 from agent_graph import agent_graph
-from langchain_core.messages import HumanMessage
 from langchain_core.messages import HumanMessage, ToolMessage
-from agent_graph_advanced import build_advanced_agent
-from agent_graph import agent_graph
+# 多分支路由（意图分类）高级 Agent：定义在 agent_graph_advanced_learning.py
+from agent_graph_advanced_learning import build_advanced_agent
 from plan_execute import plan_task, execute_plan
 from agent_checkpointer import checkpointer_agent
 from memory_store import add_user_memory, search_user_memory
-from browser_tools import fetch_webpage
-from browser_tools import screenshot_webpage
+from browser_tools import fetch_webpage, screenshot_webpage
 from code_executor import execute_python
-from tool_health import run_health_check, _tool_health
+from tool_health import run_health_check, get_tool_health, UNHEALTHY, _tool_health
 from mcp_server import TOOLS_DEFINITION
-from tool_health import get_tool_health, UNHEALTHY
-from token_tracker import check_token_budget, get_token_budget_info
-from exceptions import AppException, ErrorCode
-from agent_graph_advanced import mcp_agent, get_mcp_tools
+from token_tracker import (
+    check_token_budget, get_token_budget_info, check_budget_warning,
+    get_user_summary, get_purpose_summary, get_thread_summary, get_recent_usage,
+    get_user_history, generate_monthly_report,
+    check_budget_before_call, estimate_tool_cost,
+    TOOL_ESTIMATED_COST, PURPOSE_ESTIMATED_COST,
+    get_intercept_count, record_cost,
+)
 # 记录工具 开始追踪 结束追踪
-from tool_visualizer import  start_trace, finish_trace
-# token 预算通知（80% 阈值提醒）
-from token_tracker import check_budget_warning
-from token_tracker import get_user_summary, get_purpose_summary, get_recent_usage,get_thread_summary
-from token_tracker import get_user_summary, get_purpose_summary, get_thread_summary, get_recent_usage
-from token_tracker import get_user_history
-from token_tracker import generate_monthly_report
-from token_tracker import check_budget_before_call, estimate_tool_cost, TOOL_ESTIMATED_COST, PURPOSE_ESTIMATED_COST
-from token_tracker import get_intercept_count
-from token_tracker import record_cost
-from tool_visualizer import get_trace, get_all_traces
+from tool_visualizer import start_trace, finish_trace, get_trace, get_all_traces
+# MCP Client 高级 Agent（会话池版）及动态工具列表
+from agent_graph_advanced import mcp_agent, get_mcp_tools
 
 import os
 
@@ -272,20 +266,9 @@ async def agent_tool_health_refresh(
     user_name: str = Depends(get_current_user_hybrid),
 ):
     """手动刷新工具健康检查"""
-    run_health_check()
+    await run_health_check()
     return {"tools": _tool_health, "requested_by": user_name}
 
-'''
-# ==================== Agent mcp_tools 工具  测试接口 ====================
-from mcp_server import TOOLS_DEFINITION
-
-@router.get("/agent/mcp_tools")
-async def agent_mcp_tools(
-    user_name: str = Depends(get_current_user_hybrid),
-):
-    """获取所有 MCP 注册的工具列表"""
-    return {"tools": TOOLS_DEFINITION, "requested_by": user_name}
-'''
 
 # ==================== Agent 工具 版本查询 接口 ====================
 # 查看所有工具及其版本号

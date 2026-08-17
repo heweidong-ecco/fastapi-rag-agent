@@ -69,6 +69,9 @@ def record_usage(
 ):
     """记录一次 LLM 调用的 Token 消耗，同时写入内存缓存和数据库。"""
     total = prompt_tokens + completion_tokens
+    # 计算成本（必须先于 TokenUsage 构造，否则引用未定义变量）
+    pricing = PRICING.get(model, {"prompt": 0.001, "completion": 0.002})
+    cost = (prompt_tokens / 1000) * pricing["prompt"] + (completion_tokens / 1000) * pricing["completion"]
     usage = TokenUsage(
         model=model,
         prompt_tokens=prompt_tokens,
@@ -79,11 +82,6 @@ def record_usage(
         thread_id=thread_id,
         cost=cost,
     )
-    
-    
-    # 计算成本
-    pricing = PRICING.get(model, {"prompt": 0.001, "completion": 0.002})
-    cost = (prompt_tokens / 1000) * pricing["prompt"] + (completion_tokens / 1000) * pricing["completion"]
     
     # 1. 写入内存缓存
     with _lock:
@@ -200,34 +198,7 @@ def get_daily_token_usage(user_name: str) -> float:
         # 降级：返回内存缓存中的值
         with _lock:
             return _user_summary.get(user_name, {}).get("total_tokens", 0)
-'''原方案从内存中读取
-def get_daily_token_usage(user_name: str) -> float:
-    """
-    获取用户今日已消耗的Token总数。
-    通过查询 PostgreSQL 或 Redis 中的当日记录来计算。
-    
-    当前实现：从内存中的 _user_summary 读取（重启后会丢失）。
-    生产环境建议：写入数据库，按日期过滤。
-    """
-    # 从内存汇总中读取（临时方案）
-    summary = _user_summary.get(user_name, {})
-    return summary.get("total_tokens", 0)
-def check_token_budget(user_name: str, estimated_tokens: int = 0) -> bool:
-    budget = get_user_token_budget(user_name)
-    if budget == float("inf"):
-        return True
-    used = get_daily_token_usage(user_name)
-    remaining = budget - used
-        
-    if remaining <= 0:
-        return False
-        
-    # 如果预估消耗超过剩余预算，也拒绝
-    if estimated_tokens > 0 and estimated_tokens > remaining:
-        return False
-        
-    return True
-'''
+
 # ==================== 从数据库查询历史统计（用于趋势分析） ====================
 def get_user_history(user_name: str, days: int = 30) -> list:
     """获取用户最近N天的每日Token消耗历史"""
@@ -288,41 +259,8 @@ def get_recent_usage(limit: int = 20):
             }
             for u in _usage_records[-limit:]
         ]
-'''在get_recent_usage内置了 字典转行 
-def _usage_to_dict(u: TokenUsage) -> dict:
-    """将 TokenUsage 对象转为可序列化的字典"""
-    return {
-        "model": u.model,
-        "prompt_tokens": u.prompt_tokens,
-        "completion_tokens": u.completion_tokens,
-        "total_tokens": u.total_tokens,
-        "purpose": u.purpose,
-        "user_name": u.user_name,
-        "thread_id": u.thread_id,
-        "timestamp": u.timestamp,
-    }
-'''
+
 # ==================== 预算控制 ====================
-'''
- 在 main.py 启动事件中设置每日重置（可选）
-
-如果使用 Redis 做持久化，可以依赖 Redis 的 TTL 自动过期。如果是内存存储，可以在启动时添加一个简单的定时任务来每日重置。
-
-python
-import asyncio
-from token_tracker import _user_summary, _lock
-
-async def daily_reset_task():
-    """每日重置Token统计（简化版，生产环境建议用Redis TTL）"""
-    last_reset_date = None
-    while True:
-        today = time.strftime("%Y-%m-%d")
-        if today != last_reset_date:
-            with _lock:
-                _user_summary.clear()
-            last_reset_date = today
-        await asyncio.sleep(60)  # 每分钟检查一次
-'''
 # ==================== 预算控制函数（已改用数据库查询） ====================
 # 1. 成本计算与预算控制
 # 在 Token 统计的基础上，你可以实现预算控制：为每个用户设置每日 Token 上限，
@@ -577,16 +515,7 @@ def check_budget_before_call(
         return False, f"预估花费 ¥{cost:.4f} 超过剩余预算 ¥{remaining:.4f}"
     
     return True, f"预算充足（剩余 ¥{remaining:.4f}，预估花费 ¥{cost:.4f}）"
-    '''原判断模块
-    # 3. 判断
-    if remaining <= 0:
-        return False, f"今日预算已用完（已使用 ¥{used_cost:.4f}，预算 ¥{budget:.4f}）"
-    
-    if cost > remaining:
-        return False, f"预估花费 ¥{cost:.4f} 超过剩余预算 ¥{remaining:.4f}"
-    
-    return True, f"预算充足（剩余 ¥{remaining:.4f}，预估花费 ¥{cost:.4f}）"
-    '''
+
 
 def get_daily_usage_cost(user_name: str) -> float:
     """从数据库查询用户今日已消耗的总花费"""

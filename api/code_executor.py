@@ -64,22 +64,6 @@ def create_safe_globals() -> dict:
 
 @tool
 def execute_python(code: str) -> str:
-    # 新增：代码意图检测
-    # 如果代码看起来像是一个需求描述而非可执行代码，直接拒绝
-    non_code_patterns = [
-        "帮我", "请写", "生成", "写一段", "写一个", "创建",
-        "help me", "generate", "write", "create",
-    ]
-    first_line = code.strip().split('\n')[0].lower()
-    for pattern in non_code_patterns:
-        if pattern in first_line:
-            return (
-                f"错误：传入的不是可执行的 Python 代码。\n"
-                f"看起来你传入的是一个需求描述（包含'{pattern}'）。\n"
-                f"execute_python 只能执行已编写好的代码，不能生成代码。\n"
-                f"请先生成代码文本，再将代码作为参数传入。"
-            )
-        
     """
     执行一段已编写好的 Python 代码，并返回执行结果。
 
@@ -106,6 +90,22 @@ def execute_python(code: str) -> str:
 
     输入必须是一段完整的、可立即执行的 Python 代码字符串。
     """
+    # 新增：代码意图检测
+    # 如果代码看起来像是一个需求描述而非可执行代码，直接拒绝
+    non_code_patterns = [
+        "帮我", "请写", "生成", "写一段", "写一个", "创建",
+        "help me", "generate", "write", "create",
+    ]
+    first_line = code.strip().split('\n')[0].lower()
+    for pattern in non_code_patterns:
+        if pattern in first_line:
+            return (
+                f"错误：传入的不是可执行的 Python 代码。\n"
+                f"看起来你传入的是一个需求描述（包含'{pattern}'）。\n"
+                f"execute_python 只能执行已编写好的代码，不能生成代码。\n"
+                f"请先生成代码文本，再将代码作为参数传入。"
+            )
+
     try:
         safe_env = create_safe_globals()
         output_buffer = io.StringIO()
@@ -126,54 +126,3 @@ def execute_python(code: str) -> str:
     except Exception as e:
         return f"代码执行出错: {type(e).__name__}: {str(e)}"
     
-'''
-以下只是最基础的 简单的Docker 容器隔离 代码，不够完整，只是基础的代码。
-更详细完整的代码和方案在“第68天：⭐️代码执行器 安全沙箱执行Python代码”“将代码执行器升级为 Docker 容器隔离 执行方案和代码。”
-
-Docker 容器隔离
-
-原理：为每次代码执行启动一个全新的、最小化的 Docker 容器（如 python:3.10-slim），将代码注入容器，执行后立即销毁。容器天然提供进程、文件系统、网络和内存的隔离。
-优点：
-
-近乎完美的隔离性，即使代码有恶意也几乎无法影响宿主机。
-可自由配置容器环境（预装库、资源限制等）。
-生态成熟，工具链丰富。
-缺点：
-
-启动延迟高：容器启动需要1-3秒，不适合高频实时调用。
-资源消耗较大（每个容器占用内存、CPU）。
-需要管理 Docker 环境和镜像。
-推荐实现：
-
-python
-import docker
-import tempfile
-import os
-
-client = docker.from_env()
-
-def run_code_in_docker(code: str) -> str:
-    # 将代码写入临时文件
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
-        f.write(code)
-        tmp_path = f.name
-    
-    try:
-        # 启动容器执行代码
-        container = client.containers.run(
-            image='python:3.10-slim',
-            command=f'python /code/{os.path.basename(tmp_path)}',
-            volumes={os.path.dirname(tmp_path): {'bind': '/code', 'mode': 'ro'}},
-            network_disabled=True,      # 禁用网络
-            mem_limit='128m',           # 内存限制
-            cpu_period=100000,
-            cpu_quota=50000,            # 限制CPU使用
-            remove=True,                # 执行后自动删除
-            timeout=10,                 # 超时10秒
-            stderr=True,
-        )
-        return container.decode('utf-8')
-    finally:
-        os.unlink(tmp_path)
-
-'''

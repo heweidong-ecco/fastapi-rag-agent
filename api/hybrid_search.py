@@ -31,10 +31,11 @@ def reciprocal_rank_fusion(
     rrf_scores = defaultdict(float)
     doc_info = {}
     
-    # 1. 处理向量检索结果
-    for rank, (content, source, similarity) in enumerate(vector_docs, start=1):
+    # 1. 处理向量检索结果（db.search_similar 返回 (id, content, source, similarity)）
+    for rank, (doc_id, content, source, similarity) in enumerate(vector_docs, start=1):
         rrf_scores[content] += 1.0 / (k + rank)
         doc_info[content] = {
+            "id": doc_id,
             "content": content,
             "source": source,
             "from": "vector"
@@ -87,38 +88,6 @@ def hybrid_search(query: str, top_k: int = 5):
         top_k=top_k
     )
     
-'''
-"""
-混合检索模块
-融合向量检索（稠密）+ BM25关键词检索（稀疏），取长补短。
-"""
-    # 3. 合并去重（按内容去重）
-    seen_contents = set()
-    merged = []
-
-    for content, source, similarity in vector_results:
-        if content not in seen_contents:
-            seen_contents.add(content)
-            merged.append({
-                "content": content,
-                "source": source,
-                "score": round(similarity, 4),
-                "from": "vector"
-            })
-
-    for doc_id, content, source, bm25_score in bm25_results:
-        if content not in seen_contents:
-            seen_contents.add(content)
-            merged.append({
-                "content": content,
-                "source": source,
-                "score": round(bm25_score, 4),
-                "from": "bm25"
-            })
-
-    merged.sort(key=lambda x: x["score"], reverse=True)
-    return merged[:top_k]
-'''
 
 # 在 RRF 融合后，增加重排序步骤：
 def rerank_search(query: str, top_k: int = 3) -> list[dict]:

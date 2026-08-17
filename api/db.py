@@ -48,24 +48,13 @@ def get_db():
 
 DB_CONFIG = {
     "dbname": POSTGRES_DB,
-    "user": "postgres",
+    "user": POSTGRES_USER,
     "password": POSTGRES_PASSWORD,
     "host": POSTGRES_HOST,
     "port": POSTGRES_PORT
 }
-
-@contextmanager
-def get_db():
-    """提供数据库连接上下文管理器，自动关闭连接"""
-    #上下文管理器 = 自动关门：你进房间用完东西，出门时门会自动锁上，绝不会忘。
-    conn = psycopg2.connect(**DB_CONFIG)
-    try:
-        yield conn
-    finally:
-        conn.close()
-#借助 Python 的 with 语句使用：with get_db() as conn: ...
-#进入 with 块时，执行 yield 之前的代码，获得连接对象。
-#退出 with 块时（即使发生异常），finally 中的 conn.close() 一定会执行，自动释放连接。
+# 注意：仅保留上方基于连接池的 get_db()（自动提交/回滚/归还连接）。
+# 历史版本曾在下方重复定义 get_db() 覆盖连接池版本，导致写入不提交、连接池失效，已删除。
 
 def create_table():
     try:

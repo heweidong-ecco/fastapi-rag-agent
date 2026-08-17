@@ -101,8 +101,12 @@ async def log_and_track_request(request: Request, call_next):
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """限流中间件：对所有受保护接口生效"""
     async def dispatch(self, request: Request, call_next):
-        # 跳过公开接口
-        if request.url.path in ["/", "/docs", "/openapi.json", "/admin/create_user"]:
+        # 跳过公开接口（与 QuotaMiddleware 的 public_paths 保持一致，避免登录被 anonymous 桶限死）
+        # 健康检查/就绪/指标必须豁免，否则被限流会导致 K8s/Docker 健康探针误判为不健康
+        if request.url.path in [
+            "/", "/docs", "/openapi.json", "/health", "/ready", "/metrics",
+            "/auth/login", "/auth/refresh", "/admin/create_user",
+        ]:
             return await call_next(request)
         # ----- 第一层：全局限流（所有请求共享） -----
         if not global_limiter.is_allowed("global"):
@@ -119,9 +123,20 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return response
         
         # ----- 第二层：用户级限流 -----
-        # 从请求头获取 API Key（可能为 None）
+        # 从请求头获取用户标识：优先 X-API-Key，其次 Bearer JWT（避免所有 JWT 用户共用 anonymous 桶）
         x_api_key = request.headers.get("X-API-Key")
-        user_name = f"user:{x_api_key[:8]}" if x_api_key else "anonymous"
+        user_name = None
+        if x_api_key:
+            user_name = f"user:{x_api_key[:8]}"
+        else:
+            auth_header = request.headers.get("Authorization")
+            if auth_header and auth_header.startswith("Bearer "):
+                from jwt_handler import verify_access_token
+                jwt_user = verify_access_token(auth_header[7:])
+                if jwt_user:
+                    user_name = f"user:{jwt_user}"
+        if not user_name:
+            user_name = "anonymous"
 
         # 获取用户限流信息（用于响应头）
         # 获取当前限流信息（无论是否被拒绝，都需要构造头部）
@@ -136,7 +151,22 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 f"用户 {user_name} 触发限流"
             )
             # =====================================
-            raise AppException(ErrorCode.RATE_LIMITED, "请求过于频繁")
+            # 注意：中间件中抛出的异常不会被 @app.exception_handler(AppException) 捕获
+            # （会落到 ServerErrorMiddleware 的通用 Exception 处理器，返回 500），
+            # 因此这里必须直接返回 429 响应。
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "error": "请求过于频繁",
+                    "code": ErrorCode.RATE_LIMITED.value,
+                    "status_code": 429,
+                },
+                headers={
+                    "X-RateLimit-Limit": str(info["limit"]),
+                    "X-RateLimit-Remaining": "0",
+                    "X-RateLimit-Reset": str(info["reset"]),
+                },
+            )
         
         # 两层都通过，放行
         response = await call_next(request)
@@ -157,8 +187,9 @@ class QuotaMiddleware(BaseHTTPMiddleware):
     """检查用户配额，超出限制返回429"""
     
     async def dispatch(self, request: Request, call_next):
-        # 跳过公开接口
-        public_paths = ["/", "/docs", "/openapi.json", "/auth/login", "/auth/refresh", "/admin/create_user"]
+        # 跳过公开接口（健康检查/就绪/指标不计配额）
+        public_paths = ["/", "/docs", "/openapi.json", "/health", "/ready", "/metrics",
+                        "/auth/login", "/auth/refresh", "/admin/create_user"]
         if request.url.path in public_paths:
             return await call_next(request)
         
@@ -306,23 +337,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 app.include_router(public_router)
 app.include_router(rag_router)
 app.include_router(agent_router)
-'''
-未来版本升级（v2、v3）的扩展方式
 
-当你要升级到 v2 时，只需要：
-新建路由文件，例如 api_v2_rag.py：
-python
-router = APIRouter(prefix="/api/v2")
-@router.post("/rag/search", tags=["检索"])
-async def unified_search_v2(...): ...
-
-在 main.py 中增加一行挂载：
-python
-from api_v2_rag import router as rag_v2
-app.include_router(rag_v2)  # 新增这一行
-
-v1 的接口完全不受影响，继续运行。Swagger 文档中会同时出现 /api/v1/rag/search 和 /api/v2/rag/search，调用方可以通过 URL 前缀选择使用哪个版本。
-'''
 @app.get("/")
 async def root():
     return {
@@ -432,7 +447,7 @@ async def scheduled_health_check():
     """定时健康检查后台任务"""
     while True:
         await asyncio.sleep(120)  # 每 2 分钟检查一次
-        run_health_check()
+        await run_health_check()
 
 @app.on_event("startup")
 async def startup_event():
@@ -443,7 +458,7 @@ async def startup_event():
     warmup_cache()  # ← 新增这一行
     logger.info("应用启动完成")
     # 新增 Agent 工具 健康检查 启动时
-    run_health_check() 
+    await run_health_check()
     # 新增 Agent 工具 启动后台定时健康检查
     asyncio.create_task(scheduled_health_check())
 

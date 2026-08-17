@@ -82,16 +82,3 @@ def create_mcp_tool_handler(tool_func):
             return error_msg
     
     return handler
-
-    '''原代码，没有异常错误，容易崩溃。
-        # 如果工具只有一个参数，直接传入值
-        if hasattr(tool_func, 'args_schema') and tool_func.args_schema:
-            input_obj = tool_func.args_schema(**arguments)
-            result = tool_func.invoke(input_obj)
-        else:
-            # 默认使用第一个参数的值
-            result = tool_func.invoke(arguments)
-        return str(result)
-    
-    return handler
-    '''
