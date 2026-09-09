@@ -11,6 +11,7 @@ from embedding_client import get_embedding
 from db import search_similar_async, bm25_search_async
 from collections import defaultdict
 from langchain_openai import ChatOpenAI
+from config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL_FAST
 import os
 
 import asyncio
@@ -45,9 +46,9 @@ class RAGPipeline:
         self.candidate_multiplier = candidate_multiplier
         # 增加一个用于生成答案的 LLM 实例
         self.answer_llm = answer_llm or ChatOpenAI(
-            model="qwen-turbo",
-            api_key=os.getenv("DASHSCOPE_API_KEY"),
-            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+            model=LLM_MODEL_FAST,
+            api_key=LLM_API_KEY,
+            base_url=LLM_BASE_URL,
             temperature=0
         )
 

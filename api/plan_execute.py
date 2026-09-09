@@ -6,13 +6,14 @@ import os
 import json
 from typing import List, Dict
 from langchain_openai import ChatOpenAI
+from config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL_CHAT
 from langchain_core.messages import HumanMessage, SystemMessage
 
 # ==================== 初始化规划专用 LLM ====================
 planner_llm = ChatOpenAI(
-    model="qwen-plus",
-    api_key=os.getenv("DASHSCOPE_API_KEY"),
-    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+    model=LLM_MODEL_CHAT,
+    api_key=LLM_API_KEY,
+    base_url=LLM_BASE_URL,
     temperature=0  # 规划需要确定性，不能有随机性
 )
 
@@ -79,9 +80,9 @@ def plan_task(user_goal: str) -> List[Dict]:
 # ==================== 任务执行器 ====================
 # 执行器专用模型，温度稍高，以便在动态调整时具备一定灵活性
 executor_llm = ChatOpenAI(
-    model="qwen-plus",
-    api_key=os.getenv("DASHSCOPE_API_KEY"),
-    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+    model=LLM_MODEL_CHAT,
+    api_key=LLM_API_KEY,
+    base_url=LLM_BASE_URL,
     temperature=0.1
 )
 
@@ -216,9 +217,9 @@ quality_checker_llm = ChatOpenAI(
     # 用最轻量的模型，节省成本和延迟，
     # 推荐使用一个小型、快速的本地模型（比如Qwen3-1.7B），专门做这种简单的通过/不通过判断。
     # 因为没有本地部署，因为没额定暂时用qwen3.7-plus
-    model="qwen-plus",  
-    api_key=os.getenv("DASHSCOPE_API_KEY"),
-    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+    model=LLM_MODEL_CHAT,
+    api_key=LLM_API_KEY,
+    base_url=LLM_BASE_URL,
     temperature=0  # 评估需要确定性
 )
 

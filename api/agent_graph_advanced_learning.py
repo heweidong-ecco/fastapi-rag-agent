@@ -10,6 +10,7 @@ import operator
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 from langchain_openai import ChatOpenAI
+from config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL_CHAT
 from search_tools import web_search
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage,SystemMessage
@@ -17,9 +18,9 @@ from datetime import datetime
 
 # ==================== 初始化模型 ====================
 llm = ChatOpenAI(
-    model="qwen-plus",
-    api_key=os.getenv("DASHSCOPE_API_KEY"),
-    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+    model=LLM_MODEL_CHAT,
+    api_key=LLM_API_KEY,
+    base_url=LLM_BASE_URL,
     temperature=0
 )
 
@@ -58,9 +59,9 @@ llm_with_tools = llm.bind_tools(tools)
 
 
 # 为每个工具创建模型实例（用于子图）
-llm_search = ChatOpenAI(model="qwen-plus", api_key=os.getenv("DASHSCOPE_API_KEY"), base_url="https://dashscope.aliyuncs.com/compatible-mode/v1", temperature=0)
-llm_calc = ChatOpenAI(model="qwen-plus", api_key=os.getenv("DASHSCOPE_API_KEY"), base_url="https://dashscope.aliyuncs.com/compatible-mode/v1", temperature=0)
-llm_date = ChatOpenAI(model="qwen-plus", api_key=os.getenv("DASHSCOPE_API_KEY"), base_url="https://dashscope.aliyuncs.com/compatible-mode/v1", temperature=0)
+llm_search = ChatOpenAI(model=LLM_MODEL_CHAT, api_key=LLM_API_KEY, base_url=LLM_BASE_URL, temperature=0)
+llm_calc = ChatOpenAI(model=LLM_MODEL_CHAT, api_key=LLM_API_KEY, base_url=LLM_BASE_URL, temperature=0)
+llm_date = ChatOpenAI(model=LLM_MODEL_CHAT, api_key=LLM_API_KEY, base_url=LLM_BASE_URL, temperature=0)
 
 # ==================== 定义全局 State ====================
 class AgentState(TypedDict):
@@ -194,9 +195,9 @@ def create_react_subgraph():
 
     # 为子图单独绑定工具的模型
     llm_react = ChatOpenAI(
-        model="qwen-plus",
-        api_key=os.getenv("DASHSCOPE_API_KEY"),
-        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        model=LLM_MODEL_CHAT,
+        api_key=LLM_API_KEY,
+        base_url=LLM_BASE_URL,
         temperature=0
     )
     llm_react_with_tools = llm_react.bind_tools(tools)

@@ -12,6 +12,7 @@ import operator
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 from langchain_openai import ChatOpenAI
+from config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL_CHAT
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage,SystemMessage
 from datetime import datetime
@@ -37,9 +38,9 @@ class AgentState(TypedDict):
 
 # ==================== 初始化模型 ====================
 llm = ChatOpenAI(
-    model="qwen-plus",
-    api_key=os.getenv("DASHSCOPE_API_KEY"),
-    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+    model=LLM_MODEL_CHAT,
+    api_key=LLM_API_KEY,
+    base_url=LLM_BASE_URL,
     temperature=0
 )
 # ==================== 导入 长期记忆Mem0 模块 ====================

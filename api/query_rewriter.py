@@ -13,6 +13,7 @@ import redis
 # 复用现有的 Redis 客户端（与 cache.py 中相同配置）
 # 从 config 导入 host/port，以正确应用本地开发时 localhost 的覆盖
 from config import REDIS_HOST, REDIS_PORT
+from config import REDIS_HOST, REDIS_PORT, LLM_API_KEY, LLM_BASE_URL, LLM_MODEL_FAST
 redis_client = redis.Redis(
     host=REDIS_HOST,
     port=REDIS_PORT,
@@ -21,11 +22,11 @@ redis_client = redis.Redis(
 )
 # 复用现有的 LLM 客户端配置
 client = OpenAI(
-    api_key=os.getenv("DASHSCOPE_API_KEY"),
-    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
+    api_key=LLM_API_KEY,
+    base_url=LLM_BASE_URL
 )
 
-REWRITE_MODEL = "qwen-turbo"
+REWRITE_MODEL = LLM_MODEL_FAST
 
 # 缓存过期时间：1小时
 CACHE_TTL = 3600

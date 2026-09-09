@@ -3,6 +3,7 @@
 """
 import os
 from mem0 import Memory
+from config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL_FAST
 
 # 初始化 Mem0 客户端
 # Mem0 支持本地模式（数据存储在本地文件）和云端模式，这里使用本地模式进行开发
@@ -21,9 +22,9 @@ mem0_client = Memory.from_config(
         "llm": {
             "provider": "openai",
             "config": {
-                "api_key": os.getenv("DASHSCOPE_API_KEY"),
-                "model": "qwen-turbo",
-                "openai_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "api_key": LLM_API_KEY,
+                "model": LLM_MODEL_FAST,
+                "openai_base_url": LLM_BASE_URL,
             }
         },
         "embedder": {

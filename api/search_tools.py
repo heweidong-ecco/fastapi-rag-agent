@@ -5,11 +5,12 @@ import os
 import json
 from openai import OpenAI
 from langchain_core.tools import tool
+from config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL_CHAT
 
 # 初始化阿里百炼客户端
 client = OpenAI(
-    api_key=os.getenv("DASHSCOPE_API_KEY"),
-    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+    api_key=LLM_API_KEY,
+    base_url=LLM_BASE_URL,
 )
 
 
@@ -23,7 +24,7 @@ def web_search(query: str) -> str:
     try:
         # 调用阿里百炼的搜索API
         response = client.chat.completions.create(
-            model="qwen-plus",  # 使用支持搜索的模型
+            model=LLM_MODEL_CHAT,  # 使用支持的模型
             messages=[
                 {
                     "role": "system",
@@ -34,7 +35,7 @@ def web_search(query: str) -> str:
                     "content": f"请搜索以下内容并给出详细结果：{query}"
                 }
             ],
-            # 开启搜索增强功能
+            # 注:enable_search 为阿里百炼私有扩展;切到 DeepSeek 等其它端点会被忽略,通常走下方兜底。
             extra_body={
                 "enable_search": True,
                 "search_options": {
@@ -52,7 +53,7 @@ def web_search(query: str) -> str:
         # 如果搜索API失败，回退到简单的LLM回答
         try:
             fallback_response = client.chat.completions.create(
-                model="qwen-plus",
+                model=LLM_MODEL_CHAT,
                 messages=[
                     {"role": "user", "content": f"请根据你的知识回答以下问题：{query}"}
                 ],

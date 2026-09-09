@@ -523,14 +523,15 @@ async def jwt_ask_question(
 # ==================== 流式输出（SSE） ====================
 from fastapi.responses import StreamingResponse
 from langchain_openai import ChatOpenAI
+from config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL_CHAT
 import asyncio
 import json
 
 # 初始化流式LLM
 llm_stream = ChatOpenAI(
-    model="qwen-plus",
-    api_key=os.getenv("DASHSCOPE_API_KEY"),
-    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+    model=LLM_MODEL_CHAT,
+    api_key=LLM_API_KEY,
+    base_url=LLM_BASE_URL,
     temperature=0.3,
     streaming=True  # 关键：开启流式模式
 )
@@ -683,9 +684,9 @@ from datetime import datetime
 
 #一 初始化模型
 llm=ChatOpenAI(
-    model="qwen-plus",
-    api_key=os.getenv("DASHSCOPE_API_KEY"),
-    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+    model=LLM_MODEL_CHAT,
+    api_key=LLM_API_KEY,
+    base_url=LLM_BASE_URL,
     temperature=0,
 )
 #二 定义工具

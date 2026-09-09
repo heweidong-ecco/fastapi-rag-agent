@@ -9,6 +9,7 @@ from langgraph.checkpoint.sqlite import SqliteSaver  # 新增
 # 新增,RedisSaver 版本不兼容问题还没解决，现在暂时不用
 # from langgraph.checkpoint.redis import RedisSaver  
 from langchain_openai import ChatOpenAI
+from config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL_FAST
 from langchain_community.tools import DuckDuckGoSearchRun
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
@@ -16,9 +17,9 @@ from datetime import datetime
 
 # ==================== 初始化模型 ====================
 llm = ChatOpenAI(
-    model="qwen-turbo",
-    api_key=os.getenv("DASHSCOPE_API_KEY"),
-    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+    model=LLM_MODEL_FAST,
+    api_key=LLM_API_KEY,
+    base_url=LLM_BASE_URL,
     temperature=0
 )
 

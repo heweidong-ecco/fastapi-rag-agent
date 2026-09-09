@@ -40,6 +40,14 @@ DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
 
+# ==================== 生成/对话 LLM 可配置(默认阿里云百炼;切任意 OpenAI 兼容端点请填 LLM_* 三键) ====================
+# embedding 固定走 DASHSCOPE(text-embedding-v2);本段只管 生成/对话 模型。
+# 切 DeepSeek 官方示例 → LLM_BASE_URL=https://api.deepseek.com · LLM_API_KEY=<sk-…> · LLM_MODEL_FAST/LLM_MODEL_CHAT=<其模型名>
+LLM_API_KEY    = os.getenv("LLM_API_KEY") or DASHSCOPE_API_KEY
+LLM_BASE_URL   = os.getenv("LLM_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+LLM_MODEL_FAST = os.getenv("LLM_MODEL_FAST", "qwen-turbo")
+LLM_MODEL_CHAT = os.getenv("LLM_MODEL_CHAT", "qwen-plus")
+
 
 def validate_config():
     """启动时调用，检查敏感配置是否存在"""
