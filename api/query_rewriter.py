@@ -9,6 +9,7 @@ import hashlib
 import json
 from openai import OpenAI
 import redis
+from loguru import logger
 
 # 复用现有的 Redis 客户端（与 cache.py 中相同配置）
 # 从 config 导入 host/port，以正确应用本地开发时 localhost 的覆盖
@@ -105,11 +106,23 @@ def rewrite_query(original_query: str, conversation_history: list[str] = None) -
         model=REWRITE_MODEL,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.1,  # 低温以确保语义不变
-        max_tokens=200
+        # 800 而非 200:REWRITE_MODEL 为**推理型**模型(如 deepseek-v4-flash),推理过程先吃
+        # 额度;200 一旦被推理吃满,响应即 finish_reason=length 且 **content 为空**
+        # (2026-09-11 实测:同一 prompt 15 次里 14 次为空)。
+        max_tokens=800
     )
 
-    result = response.choices[0].message.content.strip()
-    
-    # 写入缓存
+    result = (response.choices[0].message.content or "").strip()
+
+    # 改写成空必须**回退到原问题**:否则会拿「空查询」去检索 → 召回到无关文档 →
+    # 被判「资料中没有」而拒答。静默降级比报错更危险 —— 这里不再静默(留告警)。
+    if not result:
+        logger.warning(
+            "query_rewriter: 改写返回空(finish_reason={}),已回退原问题: {}",
+            response.choices[0].finish_reason, original_query,
+        )
+        return original_query
+
+    # 写入缓存(只缓存**非空**结果;空值不写,避免被当成"已缓存")
     redis_client.set(cache_key, result, ex=CACHE_TTL)
     return result
