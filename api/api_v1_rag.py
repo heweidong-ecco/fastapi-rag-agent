@@ -140,9 +140,11 @@ async def insert_single_doc(
             )
             new_id = cur.fetchone()[0]
             conn.commit()
+    # 文档已变更 → 必须**在函数内**失效 BM25 进程内缓存。
+    # (原先写在模块级 = 只在 import 时执行一次 ⇒ 插入后缓存不失效,新文档在 BM25 通路里
+    #  "不存在",必须重启进程才能检索到。2026-09-11 实测:重启前新文档不在 top10,重启后第 2 名)
+    invalidate_bm25_cache()
     return {"status": "inserted","id": new_id, "content": doc.content[:100], "source": doc.source,"requested_by":user_name}
-#_bm25_cache API进程内全局缓存字典 文档增删失效调用，
-invalidate_bm25_cache()
 
 @router.post(
     "/rag/insert_batch",    
@@ -240,9 +242,9 @@ async def insert_batch(
                 )
                 conn.commit()
         count += 1
+    # 同上：批量插入后也须失效，否则本批新文档检索不到
+    invalidate_bm25_cache()
     return {"status": "inserted", "count": count, "requested_by":user_name}
-#_bm25_cache API进程内全局缓存字典 文档增删失效调用，
-invalidate_bm25_cache()
 
 # 上传并解析复杂 PDF 文件
 # 文档上传接口，在解析后、入库前进行预处理：
@@ -330,9 +332,9 @@ async def delete_document(
             cur.execute("DELETE FROM documents WHERE id = %s", (doc_id,))
             conn.commit()
     
+    # 同上：删除后也须失效，否则已删文档仍会出现在 BM25 召回里
+    invalidate_bm25_cache()
     return {"status": "deleted", "id": doc_id, "requested_by": user_name}
-#_bm25_cache API进程内全局缓存字典 文档增删失效调用，
-invalidate_bm25_cache()
 
 # ==================== 检索接口 ====================
 # 新增 ：只检索 和 返回当前用户的文档
