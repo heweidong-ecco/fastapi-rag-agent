@@ -1156,7 +1156,7 @@
                     "header": [
                       {
                         "key": "x-api-key",
-                        "value": "sk-5df1827d6d024aee8946d883f3a872d0"
+                        "value": "{{admin_api_key}}"
                       },
                       {
                         "key": "Content-Type",
@@ -3290,7 +3290,7 @@
     "apikey": [
       {
         "key": "key",
-        "value": "sk-5df1827d6d024aee8946d883f3a872d0",
+        "value": "{{admin_api_key}}",
         "type": "string"
       }
     ]
