@@ -44,6 +44,13 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **中间件公开路径名单前缀写错**（`N1` · 2026-09-16）。`main.py` 的限流中间件与配额中间件**各写一份**跳过名单，两份都写的是 `/auth/login` / `/auth/refresh` / `/admin/create_user` —— 但三个 router **都带 `/api/v1` 前缀**（`api_v1.py:53` / `api_v1_rag.py:44` / `api_v1_agent.py:37`），真实路径是 `/api/v1/auth/login`。
+  - **后果**：名单**对不上，等于没跳过** ⇒ 登录/刷新/建用户实际会打到 Redis 限流（挤进 `anonymous` 桶，3 次/秒共享）；Redis 抖动时登录返回 500 而非按预期放行
+  - **修法**：提取为模块级 **`PUBLIC_PATHS`**（单一来源，两处中间件共用），修正三个路径的前缀，并补上 `/redoc` 与 `/docs/oauth2-redirect`
+  - **新增 `api/test_public_paths.py`**（6 条，**不需要 Redis、不需要 DB**）：断言"**名单 ⊆ 真实路由**"而不是硬编码字符串（以后改前缀也能自动抓到），并断言旧形态（缺前缀）不得回归
+  - ⚠️ **写这条测试时我第一版是错的**：只断言"名单里的 `/api/` 路径必须存在于真实路由"，而**旧名单里一条 `/api/` 路径都没有** ⇒ 空集恒过，**测不出任何东西**。已补"非空"判据，并加了一条 `test_would_have_caught_the_original_bug` **自证有效性**（把旧名单喂给判据，必须判它不过）
+  - **验证**：`pytest` **23 passed, 1 skipped**（17 旧 + 6 新）｜ 对照演示 —— 旧名单覆盖 auth/admin 路径 **0 条**，新名单 **3 条全覆**
+
 - **登录口令从硬编码字面量迁出到环境变量**（`#1` · 路线 C，决策见 `docs/decisions/DEC-001`）。`api/auth.py` 里那句 `_users_db = {"admin": "<明文口令>", "test_user": "<明文口令>"}` 是**公开仓库上的活凭据**，且被 `/api/v1/auth/login` 真实调用。
   - `api/config.py`：新增 `LOGIN_USER_NAME`（默认 `admin`）· `LOGIN_PASSWORD`（**必填，进 `validate_config`**）· `TEST_USER_PASSWORD`（**可选，不设则该账号不存在** —— fail-closed，不留默认口令）
   - `api/auth.py`：`_users_db` 字面量 → `_get_users_db()` **函数式读取**（刻意不缓存，便于测试 monkeypatch）；`authenticate_user` 签名与返回类型**未变**
