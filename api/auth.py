@@ -2,6 +2,7 @@ import uuid
 import hashlib
 from datetime import datetime, timedelta
 from db import get_db
+from config import LOGIN_USER_NAME, LOGIN_PASSWORD, TEST_USER_PASSWORD
 
 def generate_api_key() -> str:
     """生成一个API Key，格式：sk- + 随机字符串"""
@@ -83,12 +84,25 @@ def verify_api_key(api_key: str):
     return user_name
 
 
-# 模拟用户数据库（实际应从数据库查询）
-_users_db = {
-    "admin": "admin123",
-    "test_user": "test123"
-}
+# 登录凭据来自环境变量 —— 2026-09-15 从本文件的硬编码字面量迁出
+# （那曾是**公开仓库上的活凭据**；决策见 docs/decisions/DEC-001-认证口令处理路线.md）
+#
+# ⚠️ 每次调用都重新读环境变量（刻意不缓存到模块级）：这样测试可以 monkeypatch 干预。
+def _get_users_db() -> dict:
+    """从环境变量构造登录凭据表。
+
+    - `LOGIN_USER_NAME` / `LOGIN_PASSWORD`：主账号。`LOGIN_PASSWORD` 缺失时应用根本起不来
+      —— `config.validate_config()` 会在 startup 阶段抛 EnvironmentError。
+    - `TEST_USER_PASSWORD`：**可选**。未设则该账号不存在 —— fail-closed，不留任何默认口令。
+    """
+    db = {}
+    if LOGIN_PASSWORD:
+        db[LOGIN_USER_NAME] = LOGIN_PASSWORD
+    if TEST_USER_PASSWORD:
+        db["test_user"] = TEST_USER_PASSWORD
+    return db
+
 
 def authenticate_user(user_name: str, password: str) -> bool:
     """验证用户名和密码"""
-    return _users_db.get(user_name) == password
+    return _get_users_db().get(user_name) == password

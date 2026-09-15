@@ -1,4 +1,7 @@
 .env
+# ⚠️ 必须同时忽略 .env 的**备份** —— `.env` 这条规则**不匹配** `.env.bak-20260916`，
+#    而备份里含全部密钥（DASHSCOPE/LLM/JWT/POSTGRES/登录口令）。2026-09-16 实测它曾裸露为未跟踪文件。
+.env.bak*
 venv/
 .venv/
 __pycache__/

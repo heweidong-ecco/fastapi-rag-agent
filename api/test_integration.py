@@ -5,6 +5,7 @@
 import pytest
 from fastapi.testclient import TestClient
 from main import app
+from config import LOGIN_USER_NAME, LOGIN_PASSWORD
 
 
 @pytest.fixture
@@ -14,10 +15,16 @@ def client():
 
 @pytest.fixture
 def auth_headers(client):
-    """登录并获取 JWT Token"""
+    """登录并获取 JWT Token
+
+    口令从 `config` 读（= `.env` 的 `LOGIN_PASSWORD`），**不硬编码** —— 见 DEC-001。
+
+    ⚠️ 这是**第二份**重复的 `auth_headers`（另一份在 `api/conftest.py:11`，行为一致）。
+    本次只改口令来源；**是否 dedupe 另记**（已登记在 docs/CODE_INVENTORY.md 的重复项里）。
+    """
     response = client.post("/api/v1/auth/login", json={
-        "user_name": "admin",
-        "password": "admin123"
+        "user_name": LOGIN_USER_NAME,
+        "password": LOGIN_PASSWORD
     })
     assert response.status_code == 200
     token = response.json()["access_token"]

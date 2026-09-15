@@ -4,6 +4,11 @@ Locust 性能基准测试脚本
 """
 from locust import HttpUser, task, between
 import random
+import os
+from dotenv import load_dotenv
+
+# 从仓库根目录的 .env 读登录口令（locust 按 CLAUDE.md 的用法从仓库根启动）
+load_dotenv()
 
 
 class RAGAPIUser(HttpUser):
@@ -16,17 +21,30 @@ class RAGAPIUser(HttpUser):
     wait_time = between(1, 3)  # 每个请求之间等待1-3秒，模拟真实用户思考时间
 
     def on_start(self):
-        """用户初始化：登录获取 Token"""
+        """用户初始化：登录获取 Token
+
+        口令从 `.env` 读（不再硬编码）—— 见 docs/decisions/DEC-001-认证口令处理路线.md。
+        ⚠️ 登录失败必须**显式报错**：原写法只是把 headers 置空，于是整轮压测会跑出
+           一堆静默 401 却看不出原因 —— 与 #3 那个"mode 被静默忽略"是同一类坑。
+        """
+        user = os.getenv("LOGIN_USER_NAME", "admin")
+        password = os.getenv("LOGIN_PASSWORD")
+        if not password:
+            raise RuntimeError(
+                "未设置 LOGIN_PASSWORD —— 请在仓库根目录的 .env 里配置"
+                "（locust 需从仓库根启动，本文件顶部已 load_dotenv()）"
+            )
         response = self.client.post("/api/v1/auth/login", json={
-            "user_name": "admin",
-            "password": "admin123"
+            "user_name": user,
+            "password": password,
         })
-        if response.status_code == 200:
-            self.token = response.json()["access_token"]
-            self.headers = {"Authorization": f"Bearer {self.token}"}
-        else:
-            self.token = None
-            self.headers = {}
+        if response.status_code != 200:
+            raise RuntimeError(
+                f"登录失败: HTTP {response.status_code} — {response.text[:200]}\n"
+                f"请检查 .env 的 LOGIN_PASSWORD（用户名 {user!r}）"
+            )
+        self.token = response.json()["access_token"]
+        self.headers = {"Authorization": f"Bearer {self.token}"}
 
     @task(70)  # 权重80，占总请求的80%
     def search(self):
