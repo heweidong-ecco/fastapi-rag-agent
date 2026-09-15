@@ -59,7 +59,7 @@ class RAGPipeline:
         self,
         query: str,
         top_k: int = 5,
-        conversation_history: list[str] = None,
+        conversation_history: list[dict] = None,   # [{"role","content"}]；旧形态 list[str] 也兼容（见 query_rewriter._history_lines）
         generate_answer: bool = False,   # 新增
         strict_mode: bool = False,        # 新增
         citations: bool = False,          # 新增

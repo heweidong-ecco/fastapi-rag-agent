@@ -44,6 +44,16 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **压测脚本的请求形状与接口契约不符**（`#3` · 2026-09-16）。两处，同源 —— 都是"脚本没贴合被测系统"：
+  - **`locustfile_hybrid.py` 用 json body 打 `/api/v1/agent/mcp_chat`** —— 该端点**没有 Pydantic 请求体模型**，`question` / `thread_id` 都是 **query 参数** ⇒ 占该脚本 **25% 权重**的 Agent 任务**必然 422**。改为 `params=`。
+  - **`mode` 放在 json body 里** —— `/api/v1/rag/search` 把 `mode` 独立声明为 **query 参数**，**遮蔽了** body 里的 `QuestionRequest.mode` ⇒ 被**静默忽略**，所有请求恒走 `accurate_norerank` ⇒ **各 task 的 `name=` 标签全是假的**（不报错，比 422 更隐蔽）。`locustfile_hybrid.py`(2 处) 与 `locustfile_v2.py`(5 处) 全部改为 `params={"mode": "accurate_norerank"}`。
+    - **取值刻意统一为 `accurate_norerank`**（= 修复前的**实际**行为），以保证与历史基线**可比**。若日后要压 `accurate`（开 Cross-Encoder 重排），那是**口径变更**，须重跑基线并单独说明（见 DEC-003）。
+  - 顺带修 `locustfile_v2.py` 的 `conversation_history`：原传 `list[str]`，而 schema 声明 `list[dict]` ⇒ **422**；改为 schema 声明的形态。
+  - **连带修掉一个可达的 500**：改对之后，`query_rewriter.py` 的 `"|".join(history[-5:])` 收到 dict 会 **TypeError ⇒ 500**（默认模式 `accurate_norerank` 本身就开着改写 ⇒ 这条路径**可达**，不是边界情况）。新增 `_history_lines()` **两种类型都吃**，并同步 `hybrid_search.py` / `rag_pipeline.py` 的类型标注。
+  - **新增 `api/test_locust_payload.py`**（7 条，**不起服务、不打 LLM、零成本**）：断言"**脚本发的形状 == OpenAPI 声明的形状**" —— 以后写新 locustfile 时同一条测试能拦住同类错误。
+  - ⚠️ **这条测试我也写错过两次**：(a) 只在该请求块里搜 `"mode"` —— 而 `params={"mode":…}` 与 `json={"mode":…}` **写法一模一样**，把**已经改对**的地方误报成没改（已改用括号配对，只取 `json={…}` 的**内容**再搜）；(b) 没防"正则一条请求都匹配不到 ⇒ 断言恒过"（本仓 N1 刚踩过同样的坑）。两处都已补**自证用例**。
+  - **验证**：`pytest` **30 passed, 1 skipped**（23 旧 + 7 新）｜ `app.openapi()` 证实 `/agent/mcp_chat` **无 `requestBody`**、`/rag/search` 的 **`mode` 确在 query 参数里**。
+
 - **中间件公开路径名单前缀写错**（`N1` · 2026-09-16）。`main.py` 的限流中间件与配额中间件**各写一份**跳过名单，两份都写的是 `/auth/login` / `/auth/refresh` / `/admin/create_user` —— 但三个 router **都带 `/api/v1` 前缀**（`api_v1.py:53` / `api_v1_rag.py:44` / `api_v1_agent.py:37`），真实路径是 `/api/v1/auth/login`。
   - **后果**：名单**对不上，等于没跳过** ⇒ 登录/刷新/建用户实际会打到 Redis 限流（挤进 `anonymous` 桶，3 次/秒共享）；Redis 抖动时登录返回 500 而非按预期放行
   - **修法**：提取为模块级 **`PUBLIC_PATHS`**（单一来源，两处中间件共用），修正三个路径的前缀，并补上 `/redoc` 与 `/docs/oauth2-redirect`

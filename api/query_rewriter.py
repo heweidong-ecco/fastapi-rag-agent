@@ -71,12 +71,39 @@ def expand_query(original_query: str, num_variants: int = 3) -> list[str]:
     return result
 
 from token_tracker import record_usage # Token统计模块
-def rewrite_query(original_query: str, conversation_history: list[str] = None) -> str:
-    """优化查询（带缓存）"""
+
+
+def _history_lines(conversation_history) -> list:
+    """把对话历史规整成**字符串列表**（最多取最近 5 条）。
+
+    ⚠️ 为什么需要这个函数（2026-09-16 修）：
+        历史的**真值类型是 `list[dict]`** —— `schemas.py` 的 `QuestionRequest.conversation_history`
+        就是这么声明的，`cache.py:get_chat_history()` 从 Redis 读回来也是 dict 列表。
+        但本模块（以及 `hybrid_search.py`）的历史签名曾写成 `list[str]`，
+        于是**按 schema 传 dict 的调用方在这里 `"|".join([dict,…])` → TypeError ⇒ 500**。
+        （默认模式 `accurate_norerank` 本身就开着改写，所以这条路径是**可达的**，不是边界情况。）
+        两种形态都吃，即可消除这个 500。
+    """
+    lines = []
+    for item in conversation_history or []:
+        if isinstance(item, dict):
+            content = item.get("content")
+            if content:
+                lines.append(f"{item.get('role', 'user')}: {content}")
+        else:
+            lines.append(str(item))
+    return lines[-5:]          # 只取最近 5 轮
+
+
+def rewrite_query(original_query: str, conversation_history=None) -> str:
+    """优化查询（带缓存）
+
+    `conversation_history` 接受 `list[dict]`（`{"role","content"}`，= schema 声明的形态）
+    或 `list[str]`（旧形态）—— 两种都由 `_history_lines()` 规整。
+    """
     # 将历史序列化成字符串作为缓存键的一部分
-    history_str = ""
-    if conversation_history:
-        history_str = "|".join(conversation_history[-5:])
+    history_lines = _history_lines(conversation_history)
+    history_str = "|".join(history_lines)
     cache_key = _get_cache_key("rewrite", original_query, history_str)
     cached = redis_client.get(cache_key)
     if cached:
@@ -86,9 +113,8 @@ def rewrite_query(original_query: str, conversation_history: list[str] = None) -
     如果提供了对话历史，会尝试消解指代。
     """
     history_text = ""
-    if conversation_history:
-        history_lines = "\n".join(conversation_history[-5:])  # 只取最近5轮
-        history_text = f"\n对话历史：\n{history_lines}"
+    if history_lines:
+        history_text = "\n对话历史：\n" + "\n".join(history_lines)
 
     prompt = f"""你是一个查询优化助手。请将用户的问题改写成更适合文档检索的书面语形式。
 要求：
