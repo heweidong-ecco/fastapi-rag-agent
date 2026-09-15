@@ -10,6 +10,9 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **`docs/重构计划-2026-09-15.md`** —— **当前最高优先级**（业务方 2026-09-15 批准）。含一条**前提级更正**：本机**能跑测试**（曾误判为"做不了运行期验证"）。执行顺序 **基线 → 修 bug → 归档 → 切模块 → M6**，与旧计划相反。同时挂进 `CLAUDE.md` 顶部与 `ROADMAP.md`「当前指针」最上方。
+- **`api/requirements-test.txt`** —— `requirements.txt` 的**剔重版**（**只做减法，未加任何新包**）：剔除 `sentence-transformers`（拖 torch）、`transformers`、`camelot-py[cv]`、`opencv-python`、`ragas`、`datasets`、`locust`。剔除依据：`api/` 下**顶层 import 命中 0 次**（`sentence_transformers` 那 2 处是函数内懒加载：`reranker.py:14`、`document_preprocessor.py:171` 且带 try/except）。**代价**：`mode=accurate/full` 与 `rerank_search()` 在本环境跑不了（默认 `accurate_norerank` 不碰 torch）。
+- **本仓隔离测试环境** `venv/`（Python 3.10.10，**不入库** —— `.gitignore:2` 已覆盖）。用途：跑 `pytest api/` 与 `import main`。
 - **CI 骨架** `.github/workflows/ci.yml` —— 跑 `python -m compileall api/ -q`,Python 钉 **3.10**(与 `api/Dockerfile` 的基础镜像一致,否则"本机能跑、容器里 SyntaxError"拦不住)。**暂不含 pytest** —— 待本项目重构/裁决定案后接入。首次运行 `success`(run `34966390842`,commit `9c844aa`)。
 - **`ROADMAP.md`** —— 接续锚点:当前指针 / 交接 / 里程碑 M0–M7 / 已登记待办。格式对齐 `agent-eval-gate`、`product-agent-dev-os`。
 - **`docs/CODE_INVENTORY.md`** —— M5 代际盘点产出:**8 组**代际并存(最核心是 Agent 图 **4 套实现同时挂在线上**)、代码量(`api/*.py` 53 个文件 **8,294 行**;含 `locustfile*` 与 `archive/` 的 Python 合计 **≈9,280 行**)、工作量评估(删完约 −2,000 行 / 5–8 天)、逐处裁决建议。
@@ -23,6 +26,14 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **`api/requirements.txt` 修掉三个真实缺陷** —— 它们会让**任何一次全新安装/`docker build` 装出一个 import 阶段就崩的应用**（这解释了那张 2026-07-01 的镜像为何"不能随便重建"）：
+  | # | 缺陷 | 症状（2026-09-15 实测） | 修法 |
+  |---|---|---|---|
+  | 1 | `langchain>=0.3.13` 无上界 | 装到 **1.x** ⇒ `api_v1_rag.py:681` `from langchain.agents import create_tool_calling_agent` → **ImportError**（1.x 移到了 `langchain_classic`） | 全系列加 `<0.4`（`-core`/`-openai`/`-community`/`-text-splitters` 同） |
+  | 2 | `duckduckgo-search>=6.0.0` 包已改名 | 新版 `langchain_community` 要 **`ddgs`** ⇒ `api/agent_graph.py:43`（**模块级** `DuckDuckGoSearchRun()`）→ **ImportError** | 换 `ddgs>=9.0.0` |
+  | 3 | `mcp>=1.0.0` 无上界 | 装到 **2.2.0** ⇒ `api/mcp_server.py:49` `@server.list_tools()` → **AttributeError** | 加 `<2` |
+  - 顺带删掉两处**裸名重复条目**（`langgraph` / `langchain-core` 各出现两次，其一无约束）。
+  - **验证**：`pip install --dry-run -r api/requirements.txt` 完整解析成功（含 torch 等，无冲突）；两个依赖文件共享 39 包、**约束口径 0 差异**；三道验收门全过（语法 / 全链路导入 OpenAPI 59 路径 / **17 passed, 1 skipped**）。
 - **`ROADMAP.md`** —— M4(CI 骨架)状态 `▶ → ✔`;M5 由"项目重构"按业务方口径**重述**为「**代码盘点与裁决合并**」(盘点 → 逐处裁决 → 代码量/工作量评估 → 删到能跑);新增 **M6 单模块完整测试闭环**;M7 全量测试与评估接入延后。
 - **`docs/CODE_INVENTORY.md`** —— §0-1 中的口令**原文改为脱敏占位**(事实描述与风险说明全部保留)。
   ⚠️ 该文件位于 **PUBLIC 仓库**,初版直接引用了口令原文 —— 起因、根因与防错措施见 `docs/复盘/2026-09-15-为记录漏洞而制造新漏洞.md`。
