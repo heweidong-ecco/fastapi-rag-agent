@@ -1,0 +1,33 @@
+name: CI
+
+# ⚠️ 当前范围：只做**语法级**检查（compileall），不跑 pytest。
+#    pytest 需要 postgres/redis 与完整依赖，等本项目重构定案后再接入 —— 见 ROADMAP.md 的 M6。
+#    这个 workflow 故意保持"重构无关"：它只查语法，不管你怎么改目录和模块。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  syntax:
+    name: 语法检查（compileall）
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          # 与 api/Dockerfile 的基础镜像（python:3.10-slim）保持一致，
+          # 否则本机能跑通、容器里报 SyntaxError 的写法拦不住。
+          python-version: "3.10"
+
+      - name: 编译检查 api/ 下全部 Python 文件
+        run: python -m compileall api/ -q
