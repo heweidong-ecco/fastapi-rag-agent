@@ -294,16 +294,18 @@ def build_mcp_agent():
         # 导入长期记忆mem0模块
         system_prompt = inject_memories_to_prompt(system_prompt, state)
 
-        messages = [SystemMessage(content=system_prompt)] + state["messages"]
-        response = llm.invoke(messages)
-        
-         # 预估本次调用消耗（经验值：决策通常消耗200-500 tokens）
+        # ⚠️ 预算检查必须在 llm.invoke() **之前** —— 放在之后的话钱已经花了，只能丢弃结果、拦不住
+        #    （2026-09-16 上移；见 docs/decisions/DEC-002）
+        # 预估本次调用消耗（经验值：决策通常消耗200-500 tokens）
         user_name = state.get("user_name", "unknown")
         if not check_token_budget(user_name, estimated_tokens=500):
             return {
                 "final_output": "今日Token预算已用完，请明天再试。",
                 "messages": [AIMessage(content="今日Token预算已用完，请明天再试。")]
             }
+
+        messages = [SystemMessage(content=system_prompt)] + state["messages"]
+        response = llm.invoke(messages)
         
         # 新增 统计 Token 消耗
         if hasattr(response, "usage_metadata"):
@@ -324,6 +326,16 @@ def build_mcp_agent():
     # ==================== agent_decide 节点（保持原有逻辑） ====================
     # 定义 agent_decide 节点（异步版本，动态绑定工具）
     async def agent_decide(state: AgentState):
+        # ⚠️ 预算检查必须在 invoke() **之前** —— 放在之后钱已经花了，只能丢弃结果、拦不住
+        #    （2026-09-16 上移；见 docs/decisions/DEC-002）
+        # 预估本次调用消耗（经验值：决策通常消耗200-500 tokens）
+        user_name = state.get("user_name", "unknown")
+        if not check_token_budget(user_name, estimated_tokens=500):
+            return {
+                "final_output": "今日Token预算已用完，请明天再试。",
+                "messages": [AIMessage(content="今日Token预算已用完，请明天再试。")]
+            }
+
         llm_with_tools = await get_llm_with_mcp_tools()
         response = llm_with_tools.invoke(state["messages"])
         # 记录决策过程
@@ -335,13 +347,6 @@ def build_mcp_agent():
                     "arguments": tc["args"],
                     "reasoning": response.content if hasattr(response, "content") else "",
                 })
-        # 预估本次调用消耗（经验值：决策通常消耗200-500 tokens）
-        user_name = state.get("user_name", "unknown")
-        if not check_token_budget(user_name, estimated_tokens=500):
-            return {
-                "final_output": "今日Token预算已用完，请明天再试。",
-                "messages": [AIMessage(content="今日Token预算已用完，请明天再试。")]
-            }
         # 新增 统计 Token 消耗
         # 在 agent_decide 节点中调用 record_usage 时，传入 tool_name 和 tool_args
         if hasattr(response, "usage_metadata"):
