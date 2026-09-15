@@ -116,6 +116,11 @@ All notable changes to this project will be documented in this file.
 
 ### Security
 
+- ✅ **Postgres 口令已轮换**（2026-09-16）。`.env` 的 `POSTGRES_PASSWORD` 用的曾是 `.env.example` 里那个**示例占位符**，从未改过；而 5432 **绑定所有网卡** ⇒ 同网段可用该公开口令直连。现换成 32 位随机串。
+  - **决定性验证**：从**另一个容器**（源 `172.x`）连 —— 旧口令 → **`FATAL: password authentication failed`** ✅；新口令 → 成功 ✅；应用层（`config` 读 `.env`）连库正常，`documents` 70 行 ✅
+  - ⚠️ **验证方法论（我第一次就测错了，值得记）**：该容器的 `pg_hba.conf` 对 **`127.0.0.1/32` 与 `::1/128` 是 `trust`（免口令）**，只有"其他来源"才是 `scram-sha-256`。**在容器内连 `127.0.0.1` 时，新旧两个口令都能连上** —— 会误判成"口令根本没被校验、配置坏了"。**必须从非回环来源测。** 已写进 `docs/凭据轮换手册.md`。
+  - ⏸ **端口收窄暂缓**（业务方 2026-09-16 决定）：重建 `postgres-rag` 会让它与 `redis-rag` **分到不同网络**（compose 项目已在 `#3` 改名，网络名随之从 `my-fixed-name_app-net` 变为 `fastapi-rag-agent_app-net`），应用会连不上其中一个；且 `agent-eval-gate` 的 harness 默认用的也是旧网络名。**⇒ 待 ⑥ 切模块前与网络改名一并处理。** 当前暴露面已由"公开占位符口令"降为"随机口令 + 端口敞开"。
+
 凭据处置进度（**完整操作手册见 `docs/凭据轮换手册.md`**，决策见 `docs/decisions/DEC-001`）：
 
 - ✅ **Postman collection 里的硬编码 API Key 已移除**（`2fc3fc1`）：原 2 处（L3293 collection 级 `auth`、L1159 请求级 header `x-api-key`）改为 `{{admin_api_key}}` 变量引用。
