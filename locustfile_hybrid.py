@@ -71,12 +71,16 @@ class HybridUser(HttpUser):
         self.client.post(
             "/api/v1/rag/search",
             headers=self.headers,
+            # ⚠️ `mode` 是**查询参数**，不是请求体字段 ——
+            #    api_v1_rag.py 把它独立声明为 query 参数，**遮蔽了** body 里 QuestionRequest.mode，
+            #    所以原先放在 json 里的 mode 会被**静默忽略**，恒走默认的 accurate_norerank。
+            #    取值统一为 `accurate_norerank`（= 修复前的实际行为）以保证与历史基线可比 —— 见 DEC-003。
+            params={"mode": "accurate_norerank"},
             json={
                 "question": random.choice(RAG_QUESTIONS),
                 "top_k": 3,
-                "mode": "accurate",
             },
-            name="/rag/search (RAG检索)"
+            name="/rag/search (基础检索/norerank)"
         )
 
     @task(10)  # 权重 10：RAG 检索 + 生成答案
@@ -85,13 +89,13 @@ class HybridUser(HttpUser):
         self.client.post(
             "/api/v1/rag/search",
             headers=self.headers,
+            params={"mode": "accurate_norerank"},   # 同 rag_search：mode 是 query 参数
             json={
                 "question": random.choice(RAG_QUESTIONS),
                 "top_k": 3,
-                "mode": "accurate",
                 "generate_answer": True,
             },
-            name="/rag/search (RAG生成答案)"
+            name="/rag/search (生成答案/norerank)"
         )
 
     @task(15)  # 权重 15：Agent 基础对话
@@ -100,7 +104,11 @@ class HybridUser(HttpUser):
         self.client.post(
             "/api/v1/agent/mcp_chat",
             headers=self.headers,
-            json={
+            # ⚠️ 该端点**没有 Pydantic 请求体模型**（签名见 api_v1_agent.py:349-357），
+            #    `question` / `thread_id` 都是 **query 参数**。
+            #    原先发 json body ⇒ FastAPI 找不到必填 query 参数 ⇒ **必然 422**（占本脚本 25% 权重）。
+            #    已核过 app.openapi()：该 path 下 requestBody 不存在、parameters 含 question。
+            params={
                 "question": random.choice(AGENT_QUESTIONS),
                 "thread_id": f"perf-{random.randint(1, 100)}",
             },
@@ -114,11 +122,11 @@ class HybridUser(HttpUser):
         follow_up = random.choice(AGENT_FOLLOW_UPS)
         thread_id = f"perf-multi-{random.randint(1, 50)}"
 
-        # 第一轮
+        # 第一轮（query 参数，见 agent_chat 的说明）
         self.client.post(
             "/api/v1/agent/mcp_chat",
             headers=self.headers,
-            json={"question": question, "thread_id": thread_id},
+            params={"question": question, "thread_id": thread_id},
             name="/agent/mcp_chat (多轮-第一轮)"
         )
 
@@ -127,14 +135,15 @@ class HybridUser(HttpUser):
         time.sleep(0.5)
 
         # 追问
+        # ⚠️ 这里**刻意不传 `conversation_history`**：
+        #    该端点根本没有这个参数（签名见 api_v1_agent.py:349-357），传了只会被忽略；
+        #    多轮上下文靠 **同一个 thread_id + 服务端 checkpointer** 维持，客户端不需要携带历史。
+        #    ——原代码是从 locustfile_v2 抄过来的（那边打的是 /rag/search，参数才有效），
+        #      这份注释是防止下一个人又把它加回去。
         self.client.post(
             "/api/v1/agent/mcp_chat",
             headers=self.headers,
-            json={
-                "question": follow_up,
-                "thread_id": thread_id,
-                "conversation_history": [f"用户: {question}"],
-            },
+            params={"question": follow_up, "thread_id": thread_id},
             name="/agent/mcp_chat (多轮-追问)"
         )
 

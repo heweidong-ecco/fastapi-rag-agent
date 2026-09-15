@@ -105,7 +105,7 @@ def rerank_search(query: str, top_k: int = 3) -> list[dict]:
 def hybrid_search_with_rewrite(
     query: str,
     top_k: int = 5,
-    conversation_history: list[str] = None
+    conversation_history: list[dict] = None   # [{"role","content"}]；旧形态 list[str] 也兼容，见 query_rewriter._history_lines
 ) -> list[dict]:
     """
     带查询改写的完整检索流程：
