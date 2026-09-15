@@ -97,16 +97,27 @@ async def log_and_track_request(request: Request, call_next):
     return response
 
 # 新增 令牌桶 在 main.py 中集成限流中间件：
+# ==================== 公开路径（限流 / 配额中间件共用）====================
+# ⚠️ 2026-09-16 修正：原名单写的是 `/auth/login`、`/auth/refresh`、`/admin/create_user`，
+#    但三个 router **都带 `/api/v1` 前缀**（api_v1.py:53 / api_v1_rag.py:44 / api_v1_agent.py:37），
+#    真实路径是 `/api/v1/auth/login` —— **名单对不上，等于没跳过**。
+#    后果：登录/刷新/建用户实际会打到 Redis 限流；Redis 抖动时登录返回 500 而非按预期放行。
+#    两个中间件原先**各写一份**（其中一处注释还写着"与另一处保持一致"）—— 现提取为单一常量，
+#    并加了一条测试断言"名单里的 API 路径必须真的存在于 app.routes"（见 test_public_paths.py）。
+PUBLIC_PATHS = frozenset({
+    "/", "/docs", "/redoc", "/docs/oauth2-redirect", "/openapi.json",
+    "/health", "/ready", "/metrics",
+    "/api/v1/auth/login", "/api/v1/auth/refresh", "/api/v1/admin/create_user",
+})
+
+
 # 新增  在调用 is_allowed 之前获取限流信息，并在请求成功或失败时都设置对应的响应头。
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """限流中间件：对所有受保护接口生效"""
     async def dispatch(self, request: Request, call_next):
-        # 跳过公开接口（与 QuotaMiddleware 的 public_paths 保持一致，避免登录被 anonymous 桶限死）
+        # 跳过公开接口（名单见模块级 PUBLIC_PATHS —— 原先这里与 QuotaMiddleware 各写一份）
         # 健康检查/就绪/指标必须豁免，否则被限流会导致 K8s/Docker 健康探针误判为不健康
-        if request.url.path in [
-            "/", "/docs", "/openapi.json", "/health", "/ready", "/metrics",
-            "/auth/login", "/auth/refresh", "/admin/create_user",
-        ]:
+        if request.url.path in PUBLIC_PATHS:
             return await call_next(request)
         # ----- 第一层：全局限流（所有请求共享） -----
         if not global_limiter.is_allowed("global"):
@@ -187,10 +198,8 @@ class QuotaMiddleware(BaseHTTPMiddleware):
     """检查用户配额，超出限制返回429"""
     
     async def dispatch(self, request: Request, call_next):
-        # 跳过公开接口（健康检查/就绪/指标不计配额）
-        public_paths = ["/", "/docs", "/openapi.json", "/health", "/ready", "/metrics",
-                        "/auth/login", "/auth/refresh", "/admin/create_user"]
-        if request.url.path in public_paths:
+        # 跳过公开接口（名单见模块级 PUBLIC_PATHS —— 原先这里与 RateLimitMiddleware 各写一份）
+        if request.url.path in PUBLIC_PATHS:
             return await call_next(request)
         
         # 获取用户身份（支持API Key和JWT两种方式）
