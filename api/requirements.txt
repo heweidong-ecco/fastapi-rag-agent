@@ -7,19 +7,28 @@ pydantic>=2.0.0
 python-dotenv>=1.0.0
 
 # 大模型与 AI 框架
-openai>=1.0.0
-langchain>=0.3.13
-langchain-openai>=0.2.14
-langchain-community>=0.3.13
-langchain-core>=0.3.0
-langchain-text-splitters>=0.3.0
+# ⚠️ 必须加上界：本仓代码是按 langchain **0.3.x** 写的。原先只写 `>=0.3.13`（无上界），
+#    pip 会装到 **1.x**，而 1.x 把 classic agent 移到了 `langchain_classic`，导致
+#    api/api_v1_rag.py:681 `from langchain.agents import create_tool_calling_agent, AgentExecutor`
+#    → ImportError: cannot import name 'create_tool_calling_agent' from 'langchain.agents'
+#    ⇒ 应用在 **import 阶段**就崩（2026-09-15 实测）。
+openai>=1.0.0,<4
+langchain>=0.3.13,<0.4
+langchain-openai>=0.2.14,<0.3
+langchain-community>=0.3.13,<0.4
+langchain-core>=0.3.0,<0.4
+langchain-text-splitters>=0.3.0,<0.4
+langgraph>=1.0,<2
 
 # 文档处理
 pymupdf>=1.24.0
 docx2txt>=0.8
 
 # 工具与搜索
-duckduckgo-search>=6.0.0
+# ⚠️ `duckduckgo-search` 已**改名为 `ddgs`**，新版 langchain_community 要的是后者。
+#    旧名留着会导致 api/agent_graph.py:43（**模块级**调 DuckDuckGoSearchRun()）
+#    → ImportError: Could not import ddgs python package（2026-09-15 实测）。
+ddgs>=9.0.0
 
 # 数据库
 psycopg2-binary>=2.9.0
@@ -64,8 +73,8 @@ lxml>=5.3.0
 python-multipart>=0.0.9
 
 # Agent langGraph
-langgraph
-langchain-core
+# 注：langgraph 与 langchain-core 已在上方「大模型与 AI 框架」段声明**带约束**的版本，
+#     此处原先又裸名重复了一次（无约束）。重复条目会掩盖版本漂移，已删除。
 langgraph-checkpoint
 langgraph-checkpoint-sqlite
 # mem0 2.x 起 Memory.__init__ 不再接受 dict，代码使用 Memory.from_config(dict)，需 >=2.0
@@ -77,7 +86,9 @@ matplotlib
 playwright>=1.48.0
 
 # MCP Server
-mcp>=1.0.0
+# ⚠️ 必须加上界：mcp 2.x 的 `Server` 去掉了 `list_tools()` 方法，而
+#    api/mcp_server.py:49 用的是 `@server.list_tools()` → AttributeError（2026-09-15 实测）。
+mcp>=1.0.0,<2
 
 # 成本可视化面板（main.py 挂载 Gradio）
 gradio>=4.0.0
