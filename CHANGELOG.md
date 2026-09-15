@@ -10,6 +10,22 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **PR 纪律新增一道门**：⛔ **开 PR 前必须先跑 `/留痕-checks`**（用户级 skill，查 8 项：commit 规范 / 密钥 / 误提交 / CI / issue 关联 / **Agent 变更回归** / eval-gate / 敏感文件）。写在 `ROADMAP.md` 的 PR 纪律里。
+  - 起因：本会话此前 **8 个 PR 一次都没跑过它** —— 我手工维护了 CHANGELOG / `docs/复盘` / 计划进度，**却绕开了业务方为同一目的准备的现成机制**。根因是**门没挂在我会读到的纪律条目里**（PR 纪律我读了 8 遍、每遍都合规，但那条纪律里从头到尾没提这个 skill）。
+  - 复盘：`docs/复盘/2026-09-16-八个PR跳过了留痕门.md`（含 8 个 PR 的**回溯体检表**）
+- **eval 回归证据**（`agent-eval-gate` · `run=20260916-013720-0e97b254`）：
+
+  | 项 | 值 |
+  |---|---|
+  | 达标率 | **48/48 = 1.00**（阈值 ≥0.95） |
+  | 红队突破 | **0**（硬门） |
+  | 判分器 | `deepseek-v4-flash@https://api.deepseek.com`（45 次调用 / 34495 tokens） |
+  | SUT | `http://localhost:8000` · mode `accurate_norerank` · **当前代码**（OpenAPI 59 路径） |
+  | 结论 | **exit 0 · 通过评测门** —— 与历史基线同口径同结果 |
+
+  - ⚠️ **方法论留痕**：先用 `--offline`（FakeJudge）跑得 **47/48**，换回真实判分器后 **48/48** —— 差异**全部来自判分器口径**，与代码无关。**两轮不同判分器的结果不可比**，引用达标率必须同时给出判分器。
+  - 这是**本项目第一次让评测打到当前代码**（此前所有轮次打的是那张 2026-07-01 的镜像，它缺整个 Agent 子系统）。做法：`docker stop rag-api-eval` → 用本仓 venv 原生起 `uvicorn main:app --port 8000` → 评测指向 `localhost:8000`。
+
 - **`docs/重构计划-2026-09-15.md`** —— **当前最高优先级**（业务方 2026-09-15 批准）。含一条**前提级更正**：本机**能跑测试**（曾误判为"做不了运行期验证"）。执行顺序 **基线 → 修 bug → 归档 → 切模块 → M6**，与旧计划相反。同时挂进 `CLAUDE.md` 顶部与 `ROADMAP.md`「当前指针」最上方。
 - **`api/requirements-test.txt`** —— `requirements.txt` 的**剔重版**（**只做减法，未加任何新包**）：剔除 `sentence-transformers`（拖 torch）、`transformers`、`camelot-py[cv]`、`opencv-python`、`ragas`、`datasets`、`locust`。剔除依据：`api/` 下**顶层 import 命中 0 次**（`sentence_transformers` 那 2 处是函数内懒加载：`reranker.py:14`、`document_preprocessor.py:171` 且带 try/except）。**代价**：`mode=accurate/full` 与 `rerank_search()` 在本环境跑不了（默认 `accurate_norerank` 不碰 torch）。
 - **本仓隔离测试环境** `venv/`（Python 3.10.10，**不入库** —— `.gitignore:2` 已覆盖）。用途：跑 `pytest api/` 与 `import main`。
