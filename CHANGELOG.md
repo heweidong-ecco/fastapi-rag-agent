@@ -42,6 +42,18 @@ All notable changes to this project will be documented in this file.
 
 - 本地残留分支 `docs/api-doc-final-review`(已并入 `main`,远端无此分支)。
 
+### Fixed
+
+- **登录口令从硬编码字面量迁出到环境变量**（`#1` · 路线 C，决策见 `docs/decisions/DEC-001`）。`api/auth.py` 里那句 `_users_db = {"admin": "<明文口令>", "test_user": "<明文口令>"}` 是**公开仓库上的活凭据**，且被 `/api/v1/auth/login` 真实调用。
+  - `api/config.py`：新增 `LOGIN_USER_NAME`（默认 `admin`）· `LOGIN_PASSWORD`（**必填，进 `validate_config`**）· `TEST_USER_PASSWORD`（**可选，不设则该账号不存在** —— fail-closed，不留默认口令）
+  - `api/auth.py`：`_users_db` 字面量 → `_get_users_db()` **函数式读取**（刻意不缓存，便于测试 monkeypatch）；`authenticate_user` 签名与返回类型**未变**
+  - **牵连 13 处全部改完**：`conftest.py` · `test_auth.py` ×3 · `test_integration.py`（第二份重复 fixture）· `schemas.py:67` 的 **Swagger 示例** · 3 个 locustfile · Postman ×4
+  - 三个 locustfile 顺带修掉**静默失败**：原先登录失败只是把 `self.headers = {}`，会跑出整轮静默 401 —— 改为**显式 `raise RuntimeError`**（与 #3 的"mode 被静默忽略"是同一类坑）
+  - 删除死配置 `API_KEY`（`config.py:36`，全仓 0 调用方）及其在 `.env.example` 的条目
+  - **验证（决定性）**：新口令 → **200** ｜ **旧口令（原字面量，见 git 历史）→ 401**（旧凭据确已失效）｜ 旧 `test_user` 口令 → 401 ｜ 不存在账号 → 401 ｜ 未设 `LOGIN_PASSWORD` → `validate_config()` **抛 EnvironmentError** ｜ `TEST_USER_PASSWORD` 清空后 `test_user` **从凭据表消失**
+  - 回归：`pytest` **17 passed, 1 skipped**（与基线一致）；`api/` 与 3 个 locustfile 语法全过；**全仓明文口令 grep → 0 命中**
+  - ⚠️ **旧口令视为已泄露**：它在 `git log` 与任何已 fork 的克隆里永久留存 —— 本次改动换的是"当前生效的那一份"，不是"让它消失"
+
 ### Security
 
 凭据处置进度（**完整操作手册见 `docs/凭据轮换手册.md`**，决策见 `docs/decisions/DEC-001`）：
@@ -54,7 +66,7 @@ All notable changes to this project will be documented in this file.
 - ✅ **`api/alembic.ini` 的硬编码 Postgres 口令已移除**（`f105cbf`）：该行运行时并不被读取（`alembic/env.py:22` 无条件覆盖为 `config.py` 构造的 URL），改为 `CHANGE_ME` 占位符，零运行风险。
 - ✅ **云端 API Key（DashScope / DeepSeek）与 `JWT_SECRET_KEY` 已核实未泄露** —— 当前 108 个被跟踪文件 + **整个 git 历史**均无命中。
 - ⚠️ **仍未处理**：
-  - **`api/auth.py` 硬编码登录口令**（明文，原文见 git 历史），共散落 **10 处**（3 个 locustfile、`conftest.py`、`test_auth.py`、`test_integration.py`、Postman ×4、`schemas.py` 的 Swagger 示例）。它**在代码字面量里，无法独立轮换** —— 必须与 Part B 的 **S1**（口令移到 `LOGIN_PASSWORD` 环境变量）一起做。
+  - ✅ **`api/auth.py` 硬编码登录口令已迁出**（2026-09-16）—— 见下方 **`### Fixed`**。
   - **Postgres 口令仍是公开的示例占位符**，且 5432 **绑定所有网卡**（`TCP *:5432`）⇒ **同网段设备可直接连库**。改口令 + 收窄端口待评测空闲时做（两者耦合，见手册 §4）。
   - **`JWT_SECRET_KEY` 形状不对**（169 字符的 JWT，而非随机密钥）。换掉会使**所有已签发 token 失效**。
 - **改代码不等于止血**：上述凭据在 `git log -p` 与任何已 fork 的克隆里**永久留存**。轮换的作用是让**已泄露的那一份失效**，不是让它消失。

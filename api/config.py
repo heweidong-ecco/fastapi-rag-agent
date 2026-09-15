@@ -32,13 +32,19 @@ REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "15"))
 REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
 
-# API Key 认证（非敏感，可有一个开发用默认值）
-API_KEY = os.getenv("API_KEY", "test-key-123")
+# 登录用户名（非敏感，有合理默认值）
+LOGIN_USER_NAME = os.getenv("LOGIN_USER_NAME", "admin")
 
 # ==================== 敏感配置（禁止默认值，缺失则拒绝启动） ====================
 DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
+# 登录口令 —— 2026-09-15 从 api/auth.py 的硬编码字面量迁出（那曾是公开仓库上的活凭据），
+# 决策见 docs/decisions/DEC-001-认证口令处理路线.md。缺失则拒绝启动（见下方 validate_config）。
+LOGIN_PASSWORD = os.getenv("LOGIN_PASSWORD")
+# 可选：**设了才存在** test_user 账号（PREMIUM 角色，用于验证非 admin 的配额/预算路径）。
+# 不设 = 该账号不存在 —— fail-closed，不留任何默认口令。
+TEST_USER_PASSWORD = os.getenv("TEST_USER_PASSWORD")
 
 # ==================== 生成/对话 LLM 可配置(默认阿里云百炼;切任意 OpenAI 兼容端点请填 LLM_* 三键) ====================
 # embedding 固定走 DASHSCOPE(text-embedding-v2);本段只管 生成/对话 模型。
@@ -58,6 +64,8 @@ def validate_config():
         missing.append("POSTGRES_PASSWORD")
     if not JWT_SECRET_KEY:
         missing.append("JWT_SECRET_KEY")
+    if not LOGIN_PASSWORD:
+        missing.append("LOGIN_PASSWORD")
 
     if missing:
         raise EnvironmentError(

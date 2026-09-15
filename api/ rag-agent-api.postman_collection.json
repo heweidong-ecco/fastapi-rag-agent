@@ -186,7 +186,7 @@
                     ],
                     "body": {
                       "mode": "raw",
-                      "raw": "{\n  \"user_name\": \"admin\",\n  \"password\": \"admin123\"\n}",
+                      "raw": "{\n  \"user_name\": \"admin\",\n  \"password\": \"{{password}}\"\n}",
                       "options": {
                         "raw": {
                           "headerFamily": "json",
@@ -223,7 +223,7 @@
                         ],
                         "body": {
                           "mode": "raw",
-                          "raw": "{\n  \"user_name\": \"admin\",\n  \"password\": \"admin123\"\n}",
+                          "raw": "{\n  \"user_name\": \"admin\",\n  \"password\": \"{{password}}\"\n}",
                           "options": {
                             "raw": {
                               "headerFamily": "json",
@@ -266,7 +266,7 @@
                         ],
                         "body": {
                           "mode": "raw",
-                          "raw": "{\n  \"user_name\": \"admin\",\n  \"password\": \"admin123\"\n}",
+                          "raw": "{\n  \"user_name\": \"admin\",\n  \"password\": \"{{password}}\"\n}",
                           "options": {
                             "raw": {
                               "headerFamily": "json",
@@ -308,7 +308,7 @@
                         ],
                         "body": {
                           "mode": "raw",
-                          "raw": "{\n  \"user_name\": \"admin\",\n  \"password\": \"admin123\"\n}",
+                          "raw": "{\n  \"user_name\": \"admin\",\n  \"password\": \"{{password}}\"\n}",
                           "options": {
                             "raw": {
                               "headerFamily": "json",
@@ -3326,7 +3326,13 @@
     },
     {
       "key": "admin_api_key",
-      "value": ""
+      "value": "",
+      "type": "secret"
+    },
+    {
+      "key": "password",
+      "value": "",
+      "type": "secret"
     }
   ]
 }

@@ -64,7 +64,8 @@ class BatchDocumentInsert(BaseModel):
 class LoginRequest(BaseModel):
     """JWT 登录请求"""
     user_name: str = Field(..., description="用户名", example="admin")
-    password: str = Field(..., description="密码", example="admin123")
+    password: str = Field(..., description="密码（取值见环境变量 LOGIN_PASSWORD）",
+                          example="<your-login-password>")
 
 class RefreshRequest(BaseModel):
     """JWT Token 刷新请求"""
