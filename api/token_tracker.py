@@ -47,6 +47,13 @@ PRICING = {
     "text-embedding-v2": {"prompt": 0.0005, "completion": 0},
 }
 
+# 未在 PRICING 中的模型的**兜底单价**（元 / 1000 tokens）。
+# ⚠️ 2026-09-16 统一：此前 `record_usage` 与 `record_cost` **各写一份兜底值**
+#    （0.001/0.002 vs 0.003/0.006）—— 对未登记的模型，`token_usage_logs.cost` 与
+#    `cost_records.total_cost` 会算出**两个不同金额**，两张表从此对不上账。
+#    取**偏保守**的那组（不低报花费）。当前 PRICING 已覆盖全部在用模型，故这是**防御性**修复。
+_DEFAULT_PRICING = {"prompt": 0.003, "completion": 0.006}
+
 # ==================== 预算控制相关常量 ====================
 DEFAULT_DAILY_TOKEN_BUDGET = int(os.getenv("DEFAULT_DAILY_TOKEN_BUDGET", "100000"))
 
@@ -70,7 +77,7 @@ def record_usage(
     """记录一次 LLM 调用的 Token 消耗，同时写入内存缓存和数据库。"""
     total = prompt_tokens + completion_tokens
     # 计算成本（必须先于 TokenUsage 构造，否则引用未定义变量）
-    pricing = PRICING.get(model, {"prompt": 0.001, "completion": 0.002})
+    pricing = PRICING.get(model, _DEFAULT_PRICING)
     cost = (prompt_tokens / 1000) * pricing["prompt"] + (completion_tokens / 1000) * pricing["completion"]
     usage = TokenUsage(
         model=model,
@@ -152,7 +159,7 @@ def record_cost(
     这是花费数据持久化的核心函数。
     """
     # 计算费用
-    pricing = PRICING.get(model, {"prompt": 0.003, "completion": 0.006})
+    pricing = PRICING.get(model, _DEFAULT_PRICING)
     input_cost = (prompt_tokens / 1000) * pricing["prompt"]
     output_cost = (completion_tokens / 1000) * pricing["completion"]
     total_cost = input_cost + output_cost
@@ -285,28 +292,42 @@ def get_user_token_budget(user_name: str) -> float:
     role = get_user_role(user_name)
     return ROLE_TOKEN_BUDGET.get(role, DEFAULT_DAILY_TOKEN_BUDGET)
 
+def check_token_budget_detail(user_name: str, estimated_tokens: int = 0) -> tuple[bool, str]:
+    """每日 Token 预算检查 —— **唯一实现**，带原因说明。
+
+    ⚠️ 2026-09-16 抽出本函数：此前 `check_token_budget` / `check_budget_before_call` /
+    `check_multilevel_budget`(第三级) **各写一份**同样的判定，且后两份把单位写成「元」
+    去和 **Token 预算**相减 ⇒ **恒放行**（见 `docs/decisions/DEC-002`）。
+    本函数是**量纲正确**的那一份（Token vs Token），其余一律委托到这里。
+
+    **不含** `record_intercept` —— 拦截记录由调用方负责（各调用方要带上自己的 tool_name）。
+    """
+    budget = get_user_token_budget(user_name)
+    if budget == float("inf"):
+        return True, "管理员无限预算"
+    used = get_daily_token_usage(user_name)          # Token（权威数据源，不依赖内存缓存）
+    remaining = budget - used
+    if remaining <= 0:
+        return False, f"今日预算已用完（已使用 {used:.0f} tokens，预算 {budget:.0f} tokens）"
+    if estimated_tokens > 0 and estimated_tokens > remaining:
+        return False, (f"预估消耗 {estimated_tokens:.0f} tokens 超过剩余预算 "
+                       f"{remaining:.0f} tokens")
+    return True, f"预算充足（剩余 {remaining:.0f} tokens，预估 {estimated_tokens:.0f} tokens）"
+
+
 def check_token_budget(user_name: str, estimated_tokens: int = 0) -> bool:
     """
     检查用户是否还有Token预算。
-    
+
     参数:
         user_name: 用户名
         estimated_tokens: 本次调用预估消耗的Token数（可选）
-    
+
     返回:
         True: 预算充足，可以调用
         False: 预算已用完
     """
-    budget = get_user_token_budget(user_name)
-    if budget == float("inf"):
-        return True  # 管理员无限
-    used = get_daily_token_usage(user_name)  # 从数据库查
-    remaining = budget - used
-    if remaining <= 0:
-        return False
-    if estimated_tokens > 0 and estimated_tokens > remaining:
-        return False
-    return True
+    return check_token_budget_detail(user_name, estimated_tokens)[0]
 
 def get_token_budget_info(user_name: str) -> dict:
     """
@@ -470,51 +491,75 @@ PURPOSE_ESTIMATED_COST = {
 }
 
 def estimate_tool_cost(tool_name: str) -> float:
-    """预估单次工具调用的花费"""
+    """预估单次工具调用的花费（**元** —— 仅供展示，预算判定请用 estimate_tool_tokens）"""
     return TOOL_ESTIMATED_COST.get(tool_name, 0.01)
 
 def estimate_purpose_cost(purpose: str) -> float:
-    """预估单次 LLM 调用的花费（按用途）"""
+    """预估单次 LLM 调用的花费（**元** —— 仅供展示，预算判定请用 estimate_purpose_tokens）"""
     return PURPOSE_ESTIMATED_COST.get(purpose, 0.01)
 
+# ⚠️ 两套预估表**必须并存、不可互相替代**（2026-09-16）：
+#    · *_COST   → 单位「元」，供 `/agent/budget/estimates` 等**对外展示**用（api_v1_agent.py 暴露了它）
+#    · *_TOKENS → 单位「Token」，供**预算判定**用
+#    预算的权威单位是 **Token**（ROLE_TOKEN_BUDGET / get_daily_token_usage 都是 Token）。
+#    历史上判定逻辑误用了「元」表去和 Token 预算相减 ⇒ 三处闸门恒放行（见 DEC-002）。
+TOOL_ESTIMATED_TOKENS = {
+    "web_search": 800,           # 搜索工具：通常需要一次 LLM 辅助总结
+    "calculator": 0,             # 计算器：本地执行，无 API 调用
+    "date_today": 0,             # 日期查询：本地执行
+    "fetch_webpage": 600,        # 网页抓取：可能触发 LLM 总结
+    "screenshot_webpage": 600,   # 截图：类似网页抓取
+    "execute_python": 0,         # 代码执行：本地执行，无 API 调用
+}
+
+# 不同用途的单次调用预估 Token 消耗
+PURPOSE_ESTIMATED_TOKENS = {
+    "agent_decision": 500,       # 对齐 agent_graph_advanced.py:302/340 已在用的经验值
+    "answer_generation": 800,
+    "query_rewrite": 300,
+    "embedding": 100,
+}
+
+# 未知工具/用途时的保守兜底（Token）
+DEFAULT_ESTIMATED_TOKENS = 500
+
+def estimate_tool_tokens(tool_name: str) -> int:
+    """预估单次工具调用的 **Token** 消耗（预算判定的单位）"""
+    return TOOL_ESTIMATED_TOKENS.get(tool_name, DEFAULT_ESTIMATED_TOKENS)
+
+def estimate_purpose_tokens(purpose: str) -> int:
+    """预估单次 LLM 调用的 **Token** 消耗（预算判定的单位）"""
+    return PURPOSE_ESTIMATED_TOKENS.get(purpose, DEFAULT_ESTIMATED_TOKENS)
+
 def check_budget_before_call(
-    user_name: str, 
-    tool_name: str = None, 
+    user_name: str,
+    tool_name: str = None,
     purpose: str = None,
-    estimated_cost: float = None
+    estimated_tokens: int = None
 ) -> tuple[bool, str]:
     """
     在调用前检查预算是否充足。
     返回: (是否允许, 原因说明)
+
+    ⚠️ 参数单位是 **Token**（自 2026-09-16 起；旧名 `estimated_cost` 单位是「元」）。
+    那个旧参数正是本函数此前**恒放行**的原因之一 —— 它把「元」和 **Token 预算**相减。
+    见 `docs/decisions/DEC-002-预算闸门失效修法.md`。
     """
-    # 1. 计算预估花费
-    if estimated_cost is not None:
-        cost = estimated_cost
+    # 1. 计算预估 Token（不再是「元」）
+    if estimated_tokens is not None:
+        est = estimated_tokens
     elif tool_name:
-        cost = estimate_tool_cost(tool_name)
+        est = estimate_tool_tokens(tool_name)
     elif purpose:
-        cost = estimate_purpose_cost(purpose)
+        est = estimate_purpose_tokens(purpose)
     else:
-        cost = 0.01  # 默认保守估计
-    
-    # 2. 获取用户预算和当前消耗
-    budget = get_user_token_budget(user_name)
-    if budget == float("inf"):
-        return True, "管理员无限预算"
-    
-    used_cost = get_daily_usage_cost(user_name)
-    remaining = budget - used_cost
-    
-    # 新增 拦截统计
-    if remaining <= 0:
-        record_intercept(user_name, tool_name or "unknown", "预算已用完")
-        return False, f"今日预算已用完（已使用 ¥{used_cost:.4f}，预算 ¥{budget:.4f}）"
-    
-    if cost > remaining:
-        record_intercept(user_name, tool_name or "unknown", f"预估花费 ¥{cost:.4f} 超过剩余预算 ¥{remaining:.4f}")
-        return False, f"预估花费 ¥{cost:.4f} 超过剩余预算 ¥{remaining:.4f}"
-    
-    return True, f"预算充足（剩余 ¥{remaining:.4f}，预估花费 ¥{cost:.4f}）"
+        est = DEFAULT_ESTIMATED_TOKENS
+
+    # 2. 每日预算检查 —— 委托给**统一实现**（原先这里自己写了一份错的）
+    allowed, reason = check_token_budget_detail(user_name, est)
+    if not allowed:
+        record_intercept(user_name, tool_name or purpose or "unknown", reason)
+    return allowed, reason
 
 
 def get_daily_usage_cost(user_name: str) -> float:
@@ -592,11 +637,17 @@ def check_multilevel_budget(
 ) -> tuple[bool, str]:
     """
     多级预算检查：
-    1. 单次调用上限
-    2. 单线程上限
-    3. 每日预算上限
+    1. 单次调用上限（单位：**元**）
+    2. 单线程上限（单位：**元**）
+    3. 每日预算上限（单位：**Token**）
+
+    ⚠️ 本函数**刻意有两个单位**，别"统一"掉：
+      · 第一、二级是**单次/单线程的花费上限**，配 `MAX_SINGLE_CALL_COST` / `MAX_THREAD_COST`（元）——
+        它们量纲本来就是对的（元 vs 元），2026-09-16 的修复**没动它们**。
+      · 第三级是**每日预算**，权威单位是 **Token**（`ROLE_TOKEN_BUDGET` / `get_daily_token_usage`），
+        原先误用「元」去相减 ⇒ 恒放行（DEC-002）。现已委托给 `check_token_budget_detail`。
     """
-    # 计算预估花费
+    # 第一、二级用「元」
     if estimated_cost is not None:
         cost = estimated_cost
     elif tool_name:
@@ -605,6 +656,11 @@ def check_multilevel_budget(
         cost = estimate_purpose_cost(purpose)
     else:
         cost = 0.01
+
+    # 第三级用「Token」—— 两个单位分开算，不混
+    est_tokens = (estimate_tool_tokens(tool_name) if tool_name
+                  else estimate_purpose_tokens(purpose) if purpose
+                  else DEFAULT_ESTIMATED_TOKENS)
     
     # 第一级：单次调用上限
     if cost > MAX_SINGLE_CALL_COST:
@@ -617,23 +673,11 @@ def check_multilevel_budget(
         record_intercept(user_name, tool_name or "unknown", f"线程累计花费 ¥{thread_cost:.4f} + 预估 ¥{cost:.4f} 超过线程上限 ¥{MAX_THREAD_COST:.4f}")
         return False, f"当前线程已花费 ¥{thread_cost:.4f}，预估 ¥{cost:.4f}，超过线程上限 ¥{MAX_THREAD_COST:.4f}"
     
-    # 第三级：每日预算上限
-    budget = get_user_token_budget(user_name)
-    if budget == float("inf"):
-        return True, "管理员无限预算"
-    
-    used_cost = get_daily_usage_cost(user_name)
-    remaining = budget - used_cost
-    
-    if remaining <= 0:
-        record_intercept(user_name, tool_name or "unknown", "每日预算已用完")
-        return False, f"今日预算已用完（已使用 ¥{used_cost:.4f}，预算 ¥{budget:.4f}）"
-    
-    if cost > remaining:
-        record_intercept(user_name, tool_name or "unknown", f"预估花费 ¥{cost:.4f} 超过剩余预算 ¥{remaining:.4f}")
-        return False, f"预估花费 ¥{cost:.4f} 超过剩余预算 ¥{remaining:.4f}"
-    
-    return True, f"预算充足（剩余 ¥{remaining:.4f}，预估花费 ¥{cost:.4f}）"
+    # 第三级：每日 Token 预算 —— 委托给**统一实现**（原先这里自己写了一份、且单位是错的）
+    allowed, reason = check_token_budget_detail(user_name, est_tokens)
+    if not allowed:
+        record_intercept(user_name, tool_name or purpose or "unknown", reason)
+    return allowed, reason
 
 def get_thread_cost(thread_id: str) -> float:
     """查询指定线程的累计花费"""
@@ -664,16 +708,16 @@ def check_budget_warning(user_name: str) -> dict:
     if budget == float("inf"):
         return {"warning": False, "message": None}
     
-    used_cost = get_daily_usage_cost(user_name)
-    ratio = used_cost / budget if budget > 0 else 0
-    
+    used = get_daily_token_usage(user_name)      # Token（原先误用 get_daily_usage_cost 的「元」）
+    ratio = used / budget if budget > 0 else 0
+
     if ratio >= BUDGET_WARNING_THRESHOLD:
         return {
             "warning": True,
-            "message": f"⚠️ 您今日已使用预算的 {ratio*100:.0f}%（¥{used_cost:.4f} / ¥{budget:.4f}），请合理控制调用频率。",
+            "message": f"⚠️ 您今日已使用预算的 {ratio*100:.0f}%（{used:.0f} / {budget:.0f} tokens），请合理控制调用频率。",
             "ratio": round(ratio, 2),
-            "used_cost": round(used_cost, 4),
+            "used_tokens": round(used, 0),
             "budget": budget,
         }
-    
+
     return {"warning": False, "message": None, "ratio": round(ratio, 2)}
