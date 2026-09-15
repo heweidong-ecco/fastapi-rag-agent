@@ -33,7 +33,17 @@ All notable changes to this project will be documented in this file.
 
 ### Security
 
-- ⚠️ **尚未处理,已登记**(详见 `DEC-001`「影响与后续行动」):
-  - `api/auth.py` 硬编码登录口令（明文，原文见 git 历史），共散落 **10 处**（含 3 个 locustfile、`conftest.py`、`test_auth.py`、`test_integration.py`、Postman ×4、`schemas.py` 的 Swagger 示例）。
-  - `api/ rag-agent-api.postman_collection.json`(已被 git 跟踪)内含一个 **35 字符真实形态的 API Key**,出现 **2 处**(L1159、L3293)。
-  - **改代码不等于止血** —— 凭据在 `git log -p` 与任何已 fork 的克隆里永久留存。**部署实例必须轮换口令;该 API Key 须在 `api_keys` 表删行并重新签发。**
+凭据处置进度（**完整操作手册见 `docs/凭据轮换手册.md`**，决策见 `docs/decisions/DEC-001`）：
+
+- ✅ **Postman collection 里的硬编码 API Key 已移除**（`2fc3fc1`）：原 2 处（L3293 collection 级 `auth`、L1159 请求级 header `x-api-key`）改为 `{{admin_api_key}}` 变量引用。
+  - **实测结论：它是早期测试的死值** —— 在 `api_keys` 表中**查无此记录**，从未对应当前库里的任何凭据 ⇒ **无需轮换**，本次改动只为停止继续扩散。
+  - ⚠️ 新 Key 的值**不要再写回该文件**（它被 git 跟踪，且仓库为 PUBLIC）。
+- ✅ **库内孤儿 Key 已删除**（`id=1`，2026-06-26 创建）：无任何文件对应、无人使用。
+- ⏸ **库内活 Key（`id=2`）保留**：被 `agent-eval-gate` 的评测链路使用，且**未公开泄露**（本仓 git 历史中从未出现）⇒ 轮换它零安全收益、却会打断那个项目。
+- ✅ **`api/alembic.ini` 的硬编码 Postgres 口令已移除**（`f105cbf`）：该行运行时并不被读取（`alembic/env.py:22` 无条件覆盖为 `config.py` 构造的 URL），改为 `CHANGE_ME` 占位符，零运行风险。
+- ✅ **云端 API Key（DashScope / DeepSeek）与 `JWT_SECRET_KEY` 已核实未泄露** —— 当前 108 个被跟踪文件 + **整个 git 历史**均无命中。
+- ⚠️ **仍未处理**：
+  - **`api/auth.py` 硬编码登录口令**（明文，原文见 git 历史），共散落 **10 处**（3 个 locustfile、`conftest.py`、`test_auth.py`、`test_integration.py`、Postman ×4、`schemas.py` 的 Swagger 示例）。它**在代码字面量里，无法独立轮换** —— 必须与 Part B 的 **S1**（口令移到 `LOGIN_PASSWORD` 环境变量）一起做。
+  - **Postgres 口令仍是公开的示例占位符**，且 5432 **绑定所有网卡**（`TCP *:5432`）⇒ **同网段设备可直接连库**。改口令 + 收窄端口待评测空闲时做（两者耦合，见手册 §4）。
+  - **`JWT_SECRET_KEY` 形状不对**（169 字符的 JWT，而非随机密钥）。换掉会使**所有已签发 token 失效**。
+- **改代码不等于止血**：上述凭据在 `git log -p` 与任何已 fork 的克隆里**永久留存**。轮换的作用是让**已泄露的那一份失效**，不是让它消失。
