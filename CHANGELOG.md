@@ -56,6 +56,29 @@ All notable changes to this project will be documented in this file.
 
 ### Removed
 
+- **重构 ⑤ 归档：删掉 `CODE_INVENTORY.md` §3-1 判定的真·死代码**（M5 · 2026-09-17）。三处**静态可证的空操作**，合计 **-20 / +2 行**：
+
+  | 位置 | 净删 | 内容 · 为什么是空操作 |
+  |---|---|---|
+  | `api/rate_limiter.py` | 5 | `'''...'''` 包着的"原来基础格式"旧实例。位于**模块中部**（L123，前面已有 `return`）⇒ 不是 docstring，删掉**不改 `__doc__`** |
+  | `api/agent_graph_advanced_learning.py` | 4 | `'''...'''` 包着的旧工具执行逻辑（已搬到 `mcp_server.py`）。位于 `agent_decide` **函数体内**、`return` 之后 ⇒ 纯表达式语句 |
+  | `api/api_v1_rag.py` · `stream_search` | 7 | `messages` **构造了两遍**：第一遍（`messages = []` + `extend(history)` + `extend([system, user])`）的结果，在 L617 被 `messages = []` **无条件清零重建** |
+
+  - 另删 **1 行悬空注释**（`# 3. 构建消息` —— 它的正文块就是上面那 7 行）+ **1 行残留空白**（4 空格），并把 `# 4./# 5.` **重编号为 `# 3./# 4.`**（第三段没了，编号不该跳）
+  - **验证 —— 三道门，改动前后对比**：
+
+    | 门 | 改动前 | 改动后 |
+    |---|---|---|
+    | ① `compileall api/ -q` | SYNTAX OK | **SYNTAX OK** |
+    | ② `import main` | `len(app.routes)=14` · `OPENAPI_PATHS=59` | **`14` · `59`（逐位相同）** |
+    | ③ `pytest` | 26 passed + **11 failed** + 1 skipped | **37 passed + 0 failed + 1 skipped** |
+
+    ⚠️ 门③的"改动前"是 **Docker 未启动**时测的，那 11 条红**全是** redis `ConnectionError` 与 `/health` 503（`assert 503 == 200`），与本次改动无关。**26 + 11 = 37** ⇒ 测试**一条没丢、一条没新红**，11 条红在 Docker 起来后全部转绿。耗时 50.6s → 4.7s（那 50s 是连接超时在等）。
+  - **测试跑在隔离库 `rag_test`**（本计划 §二 的决定）。原因：`test_documents.py` / `test_integration.py` 会**真往 `documents` 表插文档且没有任何 cleanup**，而那张表是 `agent-eval-gate` 评测所用的知识库 —— 插进去会**真实改变检索结果**。
+    - 实测 `rag_db.documents` 测试前后**均 70 行**，`test`=20 / `test_docs`=9 **未变** ⇒ 隔离生效
+    - ⚠️ 顺带发现：该表**历史上已被测试污染过 29 行**（`test` 20 + `test_docs` 9），是此前在 `rag_db` 上直接跑测试留下的。**本次未清理**（不是本次改动引入的，清理与否待裁决）
+  - ⚠️ **本次只做「删死代码」，不含「代际裁决」** —— `CODE_INVENTORY.md` §2 那 8 组代际并存（最核心是 Agent **4 套实现同挂线上**）**一行未动**。那是 M5 的 C/D/E 档（5–8 天），须先定"哪个是产品版本"。
+
 - 本地残留分支 `docs/api-doc-final-review`(已并入 `main`,远端无此分支)。
 
 ### Fixed
