@@ -120,11 +120,6 @@ class TokenBucketLimiter:
             "limit": self.capacity
         }
 
-'''
-原来基础格式
-# 创建默认限流器实例（每秒10次，最多攒20个）
-limiter = TokenBucketLimiter(rate=3.0, capacity=20)
-'''
 # 新增 实现“全局 + 用户”两层令牌桶防护
 
 # 全局限流器：每秒100次，桶容量150（允许一定突发）

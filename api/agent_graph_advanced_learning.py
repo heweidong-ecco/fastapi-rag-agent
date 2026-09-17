@@ -213,10 +213,6 @@ def create_react_subgraph():
         messages = [SystemMessage(content=system_prompt)] + state["messages"]
         response = llm_react_with_tools.invoke(messages)
         return {"messages": [response]}
-    ''' 创建了MCP 服务 把健康检查和降级逻辑移动到mcp_server.py中
-    # 执行工具前加入健康检查和降级逻辑：
-    from tool_health import get_tool_health, get_fallback_tool, UNHEALTHY
-    '''
     # 工具执行节点现在只需一行核心逻辑
     from mcp_server import TOOL_HANDLERS
 

@@ -573,10 +573,6 @@ async def stream_search(
             "source": r[2],
             "similarity": r[3]
         })
-    # 3. 构建消息
-    messages = []
-    if req.conversation_history:
-        messages.extend(req.conversation_history)
 
     if req.citations:
         # 引用模式：构建带编号的上下文和引用规则 Prompt
@@ -608,12 +604,7 @@ async def stream_search(
 {context_text}"""
         sources_list = []
 
-    messages.extend([
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": req.question}
-    ])
-    
-    # 4. 构建当前消息列表（如果有停止当前消息先放历史，如果没有即为空，再放当前提示词）真停止按钮的调用（使它支持历史补偿）
+    # 3. 构建当前消息列表（如果有停止当前消息先放历史，如果没有即为空，再放当前提示词）真停止按钮的调用（使它支持历史补偿）
     messages = []
     if req.conversation_history:
         messages.extend(req.conversation_history)
@@ -623,7 +614,7 @@ async def stream_search(
         {"role": "user", "content": req.question}
     ])
     
-    # 5. 流式生成器
+    # 4. 流式生成器
     async def generate():
         collected_parts = []          # 用于拼凑完整回答
         try:
