@@ -44,7 +44,51 @@
   - 改动 → `CHANGELOG.md`
   - ⚠️ **机制不挂在这里就等于没有** —— `api/LEARNING_INDEX.md` 已定义过一整套治理格式,**全仓库 0 个文件使用、0 个文件引用它**
 - **PR 纪律(2026-09-15 起 · 依 `agent-eval-gate/docs/decisions/定调复核-签核记录.md` 的 D-23)**:
-  - ⛔ **开 PR 前必须先跑 `/留痕-checks`** —— 用户级 skill,查 8 项(commit 规范 / 密钥 / 误提交 / CI / issue 关联 / **Agent 变更回归** / eval-gate / 敏感文件)。**2026-09-16 补加**:此前 8 个 PR **一次都没跑过**它(见 `docs/复盘/2026-09-16-八个PR跳过了留痕门.md`) —— **有门不用,等于没有门**
+  - ⛔ **开 PR 前必须先跑 `/留痕-checks`** —— 用户级 skill。**2026-09-16 补加**:此前 8 个 PR **一次都没跑过**它(见 `docs/复盘/2026-09-16-八个PR跳过了留痕门.md`) —— **有门不用,等于没有门**
+  - ⚠️ **2026-09-17 适配裁决**:该 skill 查 **8 项**,但在本仓**只有 5 项适用**。**仍要调 skill,但只报这 5 项**;另 3 项**一行带过写「不适用」**,不逐条展开:
+
+    | 报 | 项 | 本仓判据 |
+    |---|---|---|
+    | ✅ | ① commit 规范 | Conventional(`type(scope): …`),一条一件事 |
+    | ✅ | ③ 密钥扫描 | 🔴 **本仓是 PUBLIC** —— 每次对 staged diff 扫 **5 个真实凭据 + 3 个历史泄露字面量** |
+    | ✅ | ④ CI 状态 | `gh pr checks`。⚠️ **不凭命令输出判成败**(#13 那次 pending 假象) |
+    | ✅ | ⑥ 误提交文件 | 新增文件是否都在合理位置 |
+    | ✅ | ① 未提交/未跟踪 | 有无残留临时文件(如曾经的 `api/_tmp_olddb.py`) |
+    | ⬜ | ⑤ issue 关联 | **不适用** —— 本仓无 issue 体系,恒为「无」 |
+    | ⬜ | ⑧ eval-gate | **不适用** —— 本仓 CI 无评估门,且这是**已登记**的延期状态(`ci.yml:4` 待 M6) |
+    | ⚠️ | ⑦ Agent 变更回归 | **判据须改写**(见下) |
+
+    > **为什么砍 #5/#8**:它们**4 次运行输出逐字相同**——问的是"本仓有没有 X",答案恒为没有。
+    > **那不是"发现问题",是每次重新发现同一个事实**。而一个**每次都是红的门会被读成已知噪音然后被忽略**,
+    > 连带**稀释掉真正有用的那 5 项**。
+  - ⚠️ **#7「Agent 变更回归」的本仓判据(双判据,2026-09-17 裁决)**:
+    - ⛔ **原判据在本仓失效**:它按**路径**触发(`prompts/` · `contracts/tools-mcp` · `eval/`),
+      且那些路径**相对 `agent-eval-gate` 而非本仓**。**本仓 prompt 是内联在 `.py` 里的**
+      ⇒ 路径式触发**永不命中**,哪怕 prompt 真被改了
+    - ✅ **判据 A(快·文件清单)** —— 本仓 prompt / 工具 / 记忆 的**真实分布**,
+      **实测得来**(2026-09-17 扫全 `api/*.py`,非手写):
+
+      | 面 | 文件 |
+      |---|---|
+      | **prompt** | `agent_graph_advanced_learning.py`(7) · `plan_execute.py`(6) · `rag_pipeline.py`(3) · `api_v1_rag.py`(3) · `agent_graph_advanced.py`(3) · `query_rewriter.py`(2) · `search_tools.py`(1) · `answer_with_citations.py`(1) |
+      | **工具** | `mcp_server.py`(5) · `mcp_tool_factory.py`(5) · `agent_graph_advanced_learning.py`(4) · `browser_tools.py`(3) · `api_v1_rag.py`(3) · `simple_tools.py`(2) · `agent_graph.py`(2) · `agent_checkpointer.py`(2) · `code_executor.py`(1) · `search_tools.py`(1) |
+      | **记忆** | `memory_store.py`(12) · `agent_graph_advanced_learning.py`(6) · `agent_graph_advanced.py`(3) · `api_v1_agent.py`(2) |
+
+      ⚠️ **清单可重生成**(不靠记)——
+      ```bash
+      cd api && for f in *.py; do
+        p=$(grep -cE "system_prompt|system_message|你是一个|请严格根据" "$f")
+        t=$(grep -cE "@tool\b|@server\.(list_tools|call_tool)|TOOL_HANDLERS" "$f")
+        m=$(grep -cE "Mem0|mem0|from memory_store" "$f")
+        [ $((p+t+m)) -gt 0 ] && echo "$f prompt=$p 工具=$t 记忆=$m"; done
+      ```
+      📌 **本清单的来历**:第一版是**我手写的 7 个**,当场验证发现**只覆盖约 40%**
+      —— 实际 18 个文件,漏了 11 个(最大一处 `agent_graph_advanced_learning.py`)。
+      **手写清单被当场证伪** ⇒ 故改为「方法 + 派生结果」,并保留这条教训。
+    - ✅ **判据 B(慢·内容兜底)**:不看路径,直接看 **diff 有没有改 prompt 文本 / 工具 schema / 记忆策略**
+    - **两者都要** —— A 快但**清单会腐**(已证伪一次),B 慢但**不会漏**
+    - ⚠️ **用了哪个判据要在 PR 里说出来**;用了替代判据**必须写明**,
+      **不许静默翻译判据**(规则见 `docs/规则草稿-规则必须绑定路径.md`)
   - **一分支一 PR**;PR 模板见 `.github/PULL_REQUEST_TEMPLATE.md`(必附三项:评估回归 / 是否改 Prompt·工具·记忆 / 观测证据)
   - 开好 PR **先问业务方「可以合吗」**,拿到那句话才 `gh pr merge`(拿到后不再问第二遍)
   - ⛔ **Agent 自己开的 PR 不许自合** —— 那等于自产自合、整条链上零次人工确认;**单人仓里「点合并」是唯一的人工审核位**
