@@ -14,6 +14,23 @@
 #   - 存量黑名单 → 从 `.secret-denylist` 现读(**也被 gitignore**)
 #   - 另加一组**通用模式**(不需要知道具体值就能命中)
 #
+# 📌 修订史(每一次都是**门真上岗时抓到的**,不是想出来的):
+#   v1 → v2: 原先扫**整份 diff**(含 `-` 删除行) ⇒ **删掉一个存量密钥时门报红**。
+#            已改为只扫**新增行**(泄漏只可能发生在"写进去"的时候)。
+#   v2 → v3(2026-09-17): 第 ① 段的键过滤原先是"**除了太短的,全扫**" ⇒
+#            `POSTGRES_HOST=postgres` / `LLM_MODEL_CHAT=qwen-plus` 被当成凭据,
+#            **门把本仓最高频的词全列成了命中**。已加【非机密键】排除名单(见第 ① 段)。
+#            ⇒ 两次都是**门的假阳性**,两次都不是"门太松"。
+#   v3 → v4(2026-09-17) 🔴 **最严重的一次,而且它不是新增的问题 —— 它自 v1 起就在**:
+#            全部三处判定都写成 `printf '%s' "$X" | grep -q…`。`grep -q` **命中即退出**,
+#            上游 `printf` 收到 **SIGPIPE(141)**;而本脚本开头有 `set -o pipefail` ⇒
+#            **整条管道**的状态变成 141 ⇒ `if` 判成"**没命中**" ⇒ **真实命中被静默丢弃**。
+#            ⚠️ 它是**概率性**的 —— 取决于 printf 写完没有(竞态)。
+#            **实测:同一份暂存内容连跑 20 次,拦住 11 次、漏报 9 次。**
+#            ⇒ 已全部改成 `grep … >/dev/null`(读完再判断,不早退)。
+#            📌 这就是一道**看起来在工作、实际是硬币**的门 —— 比"没有门"更坏,
+#              因为它会让人以为自己被保护着。复盘见 docs/复盘/2026-09-17-一道硬币做的门.md。
+#
 # 用法:
 #   bash scripts/check_secrets.sh          # 扫 staged 改动(默认,提交前用)
 #   bash scripts/check_secrets.sh --all    # 扫整个工作区
@@ -50,16 +67,41 @@ HITS=0
 FAILED_NAMES=()
 
 # ---- ① 真实凭据:从 .env 现读(报告只写【名字】,绝不写值)----------------------
+#
+# 🔴 【非机密键】排除名单 —— 2026-09-17 加,起因是**门第二次真上岗时拦错了**。
+#
+#   病因:本段原先遍历 .env 的**每一个**键做值匹配。于是这些**基础设施配置**被当成了凭据:
+#       POSTGRES_HOST=postgres · POSTGRES_DB=rag_db · LLM_MODEL_CHAT=qwen-plus · LLM_BASE_URL=<dashscope 地址> · LOGIN_USER_NAME=admin
+#   —— 而这些**恰恰是本仓文档里最高频的词**。后果:**门会拦下绝大多数正常 commit**
+#   (本仓 M6 那次提交就是被它拦下的,两个命中全是它自己 `.env` 里的 postgres / rag_db)。
+#
+#   ⇒ 做法:**排除"按名字就知道不是机密"的类别,其余键照旧全扫**。
+#     取舍写在明处:这是**偏向误报**的 fail-safe 方向 —— 新出现的怪键仍会被拦,
+#     而不是静默放过。若要反过来(只扫机密型键名),那是另一种取舍,见 DEC-014。
+#   📌 **不静默**:跳过了哪些键,下方会逐条打印出来。
+NON_SECRET_KEY_RE='(_HOST|_PORT|_DB|_URL|_MODEL_|_CONN|_USER_NAME|_EXPIRE_)'
+SKIPPED_KEYS=()
+
 if [ -f "$ENV_FILE" ]; then
     while IFS='=' read -r key val; do
         case "$key" in ''|\#*) continue ;; esac
+        # 非机密键:跳过,但**记下来待会儿打印**(不静默排除)
+        if printf '%s' "$key" | grep -E -- "$NON_SECRET_KEY_RE" >/dev/null; then
+            SKIPPED_KEYS+=("$key"); continue
+        fi
         val="${val%\"}"; val="${val#\"}"; val="${val%\'}"; val="${val#\'}"
         [ "${#val}" -lt 6 ] && continue           # 太短的不算(避免误报)
-        if printf '%s' "$SCAN_TEXT" | grep -qF -- "$val"; then
+        # 🔴 **不许用 `grep -q`** —— 见文件头部「修订史 v3→v4」：
+        #    `-q` 命中即退出 ⇒ 上游 `printf` 收到 SIGPIPE(141) ⇒ `set -o pipefail` 让
+        #    **整条管道**返回 141 ⇒ `if` 判成"没命中" ⇒ **真实命中被静默丢弃**。
+        #    ⚠️ 它是**概率性**的:同一份暂存内容连跑 20 次,拦 11 次、漏 9 次(实测)。
+        if printf '%s' "$SCAN_TEXT" | grep -F -- "$val" >/dev/null; then
             echo "  ❌ 命中: .env 中的 $key"
             HITS=$((HITS+1)); FAILED_NAMES+=("$key")
         fi
     done < <(grep -E '^[A-Z_][A-Z0-9_]*=' "$ENV_FILE" 2>/dev/null)
+    echo "  · 已跳过 ${#SKIPPED_KEYS[@]} 个【非机密键】($NON_SECRET_KEY_RE):"
+    echo "      ${SKIPPED_KEYS[*]:-无}"
 else
     echo "  ⚠️ 未找到 .env —— 跳过真实凭据检查(不能确认它们没泄漏)"
 fi
@@ -69,7 +111,8 @@ fi
 if [ -f "$DENYLIST" ]; then
     while IFS= read -r lit; do
         case "$lit" in ''|\#*) continue ;; esac
-        if printf '%s' "$SCAN_TEXT" | grep -qF -- "$lit"; then
+        # ⚠️ 同样**不许用 `grep -q`**（理由见第 ① 段那处注释）
+        if printf '%s' "$SCAN_TEXT" | grep -F -- "$lit" >/dev/null; then
             echo "  ❌ 命中: .secret-denylist 中的某个存量字面量(第 $(grep -nF -- "$lit" "$DENYLIST" | head -1 | cut -d: -f1) 行)"
             HITS=$((HITS+1)); FAILED_NAMES+=("denylist")
         fi
@@ -88,7 +131,8 @@ declare -a PATTERNS=(
     'eyJhbGciOi[A-Za-z0-9_-]{10,}'         # JWT(裸的,不带 Bearer 前缀时也算)
 )
 for p in "${PATTERNS[@]}"; do
-    if printf '%s' "$SCAN_TEXT" | grep -qE -- "$p"; then
+    # ⚠️ 同样**不许用 `grep -q`**（理由见第 ① 段那处注释）
+    if printf '%s' "$SCAN_TEXT" | grep -E -- "$p" >/dev/null; then
         echo "  ❌ 命中通用模式: $p"
         HITS=$((HITS+1)); FAILED_NAMES+=("pattern:$p")
     fi
