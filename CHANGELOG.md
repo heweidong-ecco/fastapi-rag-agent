@@ -42,6 +42,34 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **重构 ⑥ 切开点 3：`code_executor.py` / `simple_tools.py` 抽 `_impl` 薄包装**（M5 · 2026-09-17）。目的：让**沙箱白名单与工具逻辑**可在**只有标准库**的环境里被导入和测试。
+
+  **起因**：两个文件都在**模块层** `from langchain_core.tools import tool` —— 于是想单测沙箱白名单（`ALLOWED_BUILTINS` / `create_safe_globals`）就必须先把 **langchain 装齐**。而这两处的**真正逻辑全是纯 stdlib**（`io` / `contextlib` / `datetime`）。
+
+  | 新文件（**纯 stdlib**） | 内容 |
+  |---|---|
+  | `api/code_executor_impl.py` | 沙箱白名单（44 builtin / 9 模块）· `create_safe_globals()` · `execute_python_impl()` |
+  | `api/simple_tools_impl.py` | `calculator_impl()` · `date_today_impl()` |
+
+  - `code_executor.py` / `simple_tools.py` 只剩一层 **`@tool` 外壳**，直接委托给 impl
+  - **依赖方向单向**：impl 模块**只 import 标准库**，绝不反向引用外壳（R1 不成环）
+  - **向后兼容**：`code_executor.py` 重新导出 `create_safe_globals` / `ALLOWED_*` / `MAX_*`，老调用方照旧（已 grep：`api_v1_agent.py:19` · `agent_graph_advanced_learning.py:45` · `mcp_server.py:11,14`，一个没漏）
+  - 📌 函数名带 `_impl` 后缀是**故意的** —— 提醒读者**这不是给 LLM 看的工具**；面向 LLM 的工具描述（docstring）留在 `@tool` 那层
+
+  **验证 —— 全部对比基线**：
+
+  | 项 | 结果 |
+  |---|---|
+  | `compileall` | SYNTAX OK |
+  | **🎯 目标**：`import code_executor_impl` / `simple_tools_impl` | **拉起的第三方：无 —— 纯 stdlib** |
+  | 向后兼容 | `from code_executor import execute_python, create_safe_globals, ALLOWED_BUILTINS` ✓ · `from simple_tools import calculator, date_today, SIMPLE_TOOLS` ✓（`SIMPLE_TOOLS=['calculator','date_today']`） |
+  | **🔴 工具描述逐字未变** | 用 `ast` 取出前后两版的函数 docstring 对比：`execute_python` · `calculator` · `date_today` **三者全部逐字相同** —— **这是 LLM 的接口，不能动** |
+  | **R2 真调用**（透过 `@tool` 外壳走） | `execute_python("print(6*7)")` → **`'42\n'`** · 需求描述被拒 ✓ · **沙箱仍拦 `import os`**（`ImportError: __import__ not found`）⇒ **安全边界没被削弱** · `calculator("3*4-5/6")` → `11.166…` · `date_today()` → `今天是2026年9月17日，星期四` |
+  | `import main` | `routes=14` · `OPENAPI_PATHS=59`（逐位未变） |
+  | `pytest`（隔离库 `rag_test`） | **37 passed / 1 skipped / 0 failed** |
+
+  - ⚠️ **收益的口径要说清**：**不是**"`import code_executor` 不再拉 langchain"（**它仍然拉** —— 外壳必须有 langchain 才能建 `@tool`）。收益是**逻辑与外壳分离**：想用/想测沙箱逻辑，import **`code_executor_impl`** 即可，**不需要 langchain**。
+
 - **重构 ⑥ 切开点 2：`token_tracker.py` 脱离 psycopg2**（M5 · 2026-09-17）。净 `-3/+15`。
 
   **起因**：该文件在**模块层**导入 `db.get_db`，**而且重复了两行**（L10 与 L13 —— 同一句 `from db import get_db` 写了两遍）。后果：`import token_tracker` 会连带拉起 **psycopg2**，哪怕调用方只想用它的纯计算函数（`PRICING` / 预估 / 汇总）。

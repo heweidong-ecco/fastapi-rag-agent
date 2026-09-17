@@ -28,7 +28,12 @@
     - **收益:`import token_tracker` 拉起的重包 psycopg2 → 0**
     - ⚠️ **我自己造过一次污染并已清理**:R2 冒烟**忘了带 `POSTGRES_DB=rag_test`**,往**真库 `rag_db`** 写了 4 行成本表数据(`user_name='u1'`)。已按 `u1`+`t1`+`purpose='test'` 精确删除并复核为 0;**未碰 `documents`**(评测知识库全程 70 行未变)。
       **教训:「只读冒烟」其实会写库** —— 凡调用 `record_*` 的验证必须带库名隔离
-  - ⬜ **切开点 3–5 待做**:③ `code_executor.py`/`simple_tools.py` 抽 `_impl` 薄包装 · ④ `main.py` gradio 挂载加环境门控 · ⑤ `api_v1_rag.py` 模块级 LLM 对象搬进函数
+  - ✅ **切开点 3(2026-09-17)**:`code_executor.py`/`simple_tools.py` 抽 `_impl` 薄包装。新建**纯 stdlib** 的 `code_executor_impl.py`(沙箱白名单 44 builtin/9 模块 + `create_safe_globals` + `execute_python_impl`)与 `simple_tools_impl.py`(`calculator_impl`/`date_today_impl`);原文件只剩 `@tool` 外壳 + 重新导出
+    - ⚠️ **收益口径要说清**:**不是**"`import code_executor` 不再拉 langchain"(**它仍然拉**——外壳建 `@tool` 必须有 langchain)。收益是**逻辑与外壳分离**:想用/想测沙箱逻辑,import **`code_executor_impl`** 即可,**不需要 langchain**
+    - 门:`compileall` OK · `14`/`59` 未变 · pytest **37 passed** · 向后兼容已 grep 三个调用方(`api_v1_agent.py:19` · `agent_graph_advanced_learning.py:45` · `mcp_server.py:11,14`)
+    - **🔴 工具描述逐字未变**:用 `ast` 取前后两版的 docstring 对比,`execute_python`/`calculator`/`date_today` **三者全部逐字相同**——**那是 LLM 的接口,不能动**
+    - **R2 真调用**:`execute_python("print(6*7)")`→`'42\n'` · **沙箱仍拦 `import os`** ⇒ **安全边界没被削弱**
+  - ⬜ **切开点 4–5 待做**:④ `main.py` gradio 挂载加环境门控 · ⑤ `api_v1_rag.py` 模块级 LLM 对象搬进函数
   - ⚠️ **严格串行,一个切开点一个 commit** —— 否则回滚粒度退化成"全部重来"
 - **下一步**(在该计划之内):⬜ **⑥ 切开点 2 → 3 → 4 → 5 → ⑦ M6 单模块测试闭环**
 - **⏸ 挂起项(新会话须知,别重复踩)**:
