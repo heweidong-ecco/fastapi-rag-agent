@@ -28,7 +28,10 @@ def authenticate_user(user_name: str, password: str) -> bool:
 
 **风险**:本仓库是 **PUBLIC**。任何人看到该口令即可尝试登录;若部署实例与仓库同名同口令,是直接的账号接管。注意它**不是**"教学死代码" —— 它在请求路径上。
 
-另:`api/config.py:36` `API_KEY = os.getenv("API_KEY", "test-key-123")` 保留了开发默认值,同属一类问题。
+另:`api/config.py:36` 曾有一处 `API_KEY` 配置**保留了开发默认值**(值见 git 历史,本文件不复写),同属一类问题。
+> ⚠️ **2026-09-17 脱敏**:此行初版**把那个默认值的字面量原样写在这里**——已改为只写【名字】。
+> 该配置**已随 PR #6 移除**(见 `DEC-001`),但**字面量不该留在 PUBLIC 文档里**,与它是否还活着无关。
+> 规则见 `scripts/check_secrets.sh` 与 `ROADMAP.md` 的 PR 纪律。
 
 ### 🔴 0-2 `token_tracker.py` 预算单位错配 → 预算拦截与告警**实际打不到** ✅
 

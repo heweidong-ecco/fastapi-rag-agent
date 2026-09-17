@@ -28,3 +28,6 @@ archive/
 screenshots/
 *.db
 
+
+# ===== 凭据黑名单（装的是"绝不能再进仓库"的值本身，故必须忽略）=====
+.secret-denylist
