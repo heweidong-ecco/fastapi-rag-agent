@@ -46,7 +46,13 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-rag_db}
     ports:
-      - "5432:5432"
+      # 🔴 只绑回环地址（2026-09-17 凭据③「端口收窄」）—— 原先写 `"5432:5432"`，
+      # 等于**绑在 0.0.0.0**：局域网内任何机器都能连到这个库。
+      # ⚠️ **改这里不改变正在运行的容器** —— 需重建才生效。
+      #    **本次有意不重建**：理由与连带影响见**本文件末尾「改名后遗症」§2/§3** ——
+      #    重建会让容器落到 `fastapi-rag-agent_app-net`，而 `agent-eval-gate` 的
+      #    `sut-harness/run_sut.sh` 默认网络名还写着旧名 ⇒ 会打断评测。
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -64,7 +70,10 @@ services:
     image: redis:7-alpine
     container_name: redis-rag
     ports:
-      - "6379:6379"
+      # 🔴 同上（凭据③「端口收窄」）：原先 `"6379:6379"` = 绑在 0.0.0.0。
+      # ⚠️ Redis **没有口令**，暴露面比 Postgres 更大 —— 这条比对端更该收。
+      # ⚠️ 同样**需重建容器才生效**；本次有意不重建（见 `postgres` 那条 + 文件末尾「改名后遗症」）。
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
