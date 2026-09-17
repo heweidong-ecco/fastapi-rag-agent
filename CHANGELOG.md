@@ -42,6 +42,34 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **重构 ⑥ 切开点 1：`db.py` 拆出 `db_metadata.py` + `bm25_index.py`**（M5 · 2026-09-17）。目的：让 `import db` 不再被迫拉起重包。
+
+  **起因**：`db.py` 在**模块层** `import sqlalchemy / numpy / jieba / rank_bm25`，于是**任何** `from db import get_db` 的调用方（`auth.py` / `cost_dashboard.py` / `api_v1.py` …）都被连带拖起这 4 个重包 —— 哪怕只是想要一个数据库连接。
+
+  | 新文件 | 内容 | 依赖方向 |
+  |---|---|---|
+  | `api/db_metadata.py` | sqlalchemy 的 `metadata` + 4 张表声明（原 `db.py:212-278`） | **零依赖**（只用 sqlalchemy）⇒ `db.py` 可安全单向引用，**不成环** |
+  | `api/bm25_index.py` | BM25 全套（原 `db.py:279-332`） | `from db import get_db` ⇒ **`db.py` 只能惰性引用它** |
+
+  - **`db.py` 保留同名转发层**：`bm25_search` / `get_bm25_index` / `get_all_documents` / `invalidate_bm25_cache` 改成**函数内惰性导入**的转发函数，老调用方 `from db import bm25_search` **照旧可用**（已 grep 全部调用方：`hybrid_search.py:6` · `api_v1.py:35` · `api_v1_rag.py:26`，一个没漏）
+  - ⚠️ **必须惰性** —— `bm25_index` 反向依赖 `db.get_db`，模块层互相 import 会成环；且**只在"先 import bm25_index"时才炸**（"先 import db"碰巧能跑），属最难查的一类。已**两个方向各测一次**
+  - `alembic/env.py:39` 的 `from db import metadata` → `from db_metadata import metadata`（`metadata` 是**值**不是函数，没法惰性转发；且 Alembic 不在应用运行时导入图里，指过去更干净）
+
+  **验证 —— 全部对比基线，逐位相同**：
+
+  | 项 | 结果 |
+  |---|---|
+  | `compileall api/ -q` | SYNTAX OK |
+  | `import main` | `routes=14` · `OPENAPI_PATHS=59` |
+  | `pytest`（隔离库 `rag_test`） | **37 passed / 1 skipped / 0 failed** |
+  | **R1** 循环导入 · 两个方向 | 均 OK |
+  | **R2** 惰性转发**真调用**（不是只看 import） | `get_all_documents`=70 行 · `get_bm25_index`=BM25Okapi/70 docs · `db.bm25_search("文档",3)` 与直接调 `bm25_index.bm25_search` **结果完全相同**（证同一份缓存）· `invalidate` OK · `bm25_search_async`=3 hits |
+  | 搬移是否逐字 | 与 `git show HEAD:api/db.py` 原区块 diff：**A 仅多 2 个空行 · B 仅多 `from db import get_db` 一行** ⇒ **零内容丢失** |
+  | **收益** | `import db` 拉起的重包 **4 → 0**（sqlalchemy / numpy / jieba / rank_bm25 全部脱钩，只剩本来就要的 psycopg2） |
+
+  - ⚠️ **一处未能实跑**：本仓 venv **没装 alembic**（只有 SQLAlchemy 2.0.53），故 `alembic current` 跑不了。`env.py` 那行改动靠**对象等价**确认（`db_metadata.metadata` 与原 `db.metadata` 是同一组表、同样的列），**不是靠真跑 alembic** —— 换到有 alembic 的环境应补跑一次 `alembic upgrade head`
+  - ⚠️ 顺带记一个**环境坑**（非本次引入）：在 `api/` 目录下 `import alembic` 会命中本地的 `api/alembic/` **迁移目录**（同名遮蔽），报 `No module named 'alembic.config'` —— 这**不是** alembic 装坏了，是 cwd 遮蔽
+
 - **`api/requirements.txt` 修掉三个真实缺陷** —— 它们会让**任何一次全新安装/`docker build` 装出一个 import 阶段就崩的应用**（这解释了那张 2026-07-01 的镜像为何"不能随便重建"）：
   | # | 缺陷 | 症状（2026-09-15 实测） | 修法 |
   |---|---|---|---|

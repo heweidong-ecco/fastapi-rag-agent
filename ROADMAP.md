@@ -14,16 +14,23 @@
   - **执行顺序与旧计划相反**:基线 → 修 bug → 归档 → 切模块 → M6
   - 登记的另两处:`CLAUDE.md` 顶部(每会话自动加载,但不入库) · 该文件正文
 - **四个 bug 已完成（2026-09-16）**:✅ #1 认证口令(PR #6) · ✅ N1 中间件路径(PR #7) · ✅ #3 压测口径(PR #8) · ✅ #2 预算单位(PR #10) —— 各一个 PR、独立可 revert
-- **⑤ 归档(第一刀)✅ 完成(2026-09-17)**:删掉 `CODE_INVENTORY.md` §3-1 判定的 **16 行真·死代码**(另 1 行悬空注释 + 1 行残留空白;净 −20/+2 行)。三道门前后对比:`compileall` OK · **`OPENAPI_PATHS=59` 与 `len(app.routes)=14` 逐位未变** · pytest **37 passed / 0 failed**(改动前同环境 26 passed + 11 failed,11 条红全是 Docker 未启动的 redis 连接错,**26+11=37,一条没丢**)
+- **⑤ 归档(第一刀)✅ 完成(2026-09-17 · PR #13)**:删掉 `CODE_INVENTORY.md` §3-1 判定的 **16 行真·死代码**(另 1 行悬空注释 + 1 行残留空白;净 −20/+2 行)。三道门前后对比:`compileall` OK · **`OPENAPI_PATHS=59` 与 `len(app.routes)=14` 逐位未变** · pytest **37 passed / 0 failed**(改动前同环境 26 passed + 11 failed,11 条红全是 Docker 未启动的 redis 连接错,**26+11=37,一条没丢**)
   - ⚠️ **⑤ 只做了「删死代码」这一半** —— **「给被取代的代际原地加 `# STATUS: superseded → §2 组N` 标记」还没做**。原因:标记要**先判定"哪一代是产品版本"**,那正是 M5 的 C/D/E 裁决(⚠️ `CODE_INVENTORY.md` §7.2 明说第 2 代两文件的先后**无法从代码判定**),**须业务方定,Agent 不代判**
   - **测试一律跑隔离库 `rag_test`** —— `test_documents.py`/`test_integration.py` 会真往 `documents` 表插文档**且无 cleanup**,而那张表是 `agent-eval-gate` 评测的知识库。⚠️ 该表**历史上已被污染 29 行**(`test` 20 + `test_docs` 9),非本次引入,未清理
-- **下一步**(在该计划之内):⬜ **⑥ 切模块(5 个切开点,严格串行) → ⑦ M6 单模块测试闭环**
+- **⑥ 切模块(5 个切开点,严格串行)· 进度**:
+  - ✅ **切开点 1(2026-09-17)**:`db.py` 拆出 `db_metadata.py`(表声明,**零依赖**)+ `bm25_index.py`(BM25,**反向**依赖 `db.get_db`)。`db.py` 保留**函数内惰性导入**的同名转发层 ⇒ 老调用方 `from db import bm25_search` 照旧可用。**收益:`import db` 拉起的重包 4 → 0**(sqlalchemy/numpy/jieba/rank_bm25 全脱钩)
+    - 门:`compileall` OK · `14`/`59` 逐位未变 · pytest **37 passed** · **R1 循环导入两个方向都测**(尤其"先 import bm25_index"那个危险序) · **R2 转发层是"真调用"验的**,非只看 import
+    - 搬移保真:与原区块 diff —— **仅多 2 个空行 + 1 行 `from db import get_db`**,零内容丢失
+    - ⚠️ **alembic 未实跑**(本仓 venv 没装它):`env.py` 那行改动靠**对象等价**确认,换有 alembic 的环境应补跑 `alembic upgrade head`
+  - ⬜ **切开点 2–5 待做**:② `token_tracker.py:10/13` 两行重复的 `from db import get_db` → 删一行、另一行移进函数 · ③ `code_executor.py`/`simple_tools.py` 抽 `_impl` 薄包装 · ④ `main.py` gradio 挂载加环境门控 · ⑤ `api_v1_rag.py` 模块级 LLM 对象搬进函数
+  - ⚠️ **严格串行,一个切开点一个 commit** —— 否则回滚粒度退化成"全部重来"
+- **下一步**(在该计划之内):⬜ **⑥ 切开点 2 → 3 → 4 → 5 → ⑦ M6 单模块测试闭环**
 - **⏸ 挂起项(新会话须知,别重复踩)**:
   - **凭据③ 端口收窄** ⏸ 缓期 —— **重建 `postgres-rag` 会让它与 `redis-rag` 分到不同网络**(项目已在 `#3` 改名 ⇒ 网络名从 `my-fixed-name_app-net` 变 `fastapi-rag-agent_app-net`)。**待 ⑥ 与网络改名一并处理**。口令那一半 ✅ 已完成(32 位随机,旧口令从外部连实测 FATAL)
   - **凭据④ `JWT_SECRET_KEY`** ⬜ 待办 —— `.env` 里是 169 字符、以 `eyJhbG` 开头(**像是把某个 JWT 本身填进了密钥字段**)。换掉会让**所有已签发 token 失效**
   - **`rag-api-eval` 容器是停着的** —— 2026-09-16 为了让评测打到当前代码而停(它跑的是 **2026-07-01 旧镜像**)。`agent-eval-gate` 的 harness 每次会自己 `docker run` 重建,**不用手动管**
   - **评测门判据待裁决**:同一份代码连跑三次,红队突破 **0/1/0** ⇒ **零容忍硬门 + 非确定性被测 = 会随机阻断**。属 `agent-eval-gate` 的判据,**本仓未动**(详见 `CHANGELOG.md`)
-  - **本机环境**:`venv/`＝本仓自建隔离环境(Python 3.10.10,159 包/888M,**不含 torch 系**);`.env` 有两个备份(`.env.bak-20260916*`,含全部密钥、已被 gitignore);**推送 github 间歇性挂死,先重试 2–3 次**别怀疑配置
+  - **本机环境**:`venv/`＝本仓自建隔离环境(Python 3.10.10,159 包/888M,**不含 torch 系**、**未装 alembic** —— 故 `alembic` CLI 跑不了;且在 `api/` 下 `import alembic` 会命中本地 `api/alembic/` **迁移目录**造成同名遮蔽,报 `No module named 'alembic.config'`,**这不算装坏了**);`.env` 有两个备份(`.env.bak-20260916*`,含全部密钥、已被 gitignore);**推送 github 间歇性挂死,先重试 2–3 次**别怀疑配置
 - **已完成**:`docs/CODE_INVENTORY.md` —— 8 组代际并存、代码量(≈9,280 行)、工作量评估(删完约 −2,000 行 / 5–8 天)、逐处裁决建议。**M5 的裁决(留/并/删)本身尚未开始**
 - **过程记录(常驻机制,非一次性文档)**:
   - 决策 → `docs/decisions/`(`DEC-nnn`,含备选方案与反悔成本)
