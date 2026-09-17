@@ -42,6 +42,30 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **重构 ⑥ 切开点 4：`main.py` 的 Gradio 挂载加环境门控**（M5 · 2026-09-17）。业务方裁决取 **A 方案 —— 默认值保持现状**。
+
+  **起因**：`main.py:512` 的 `from cost_dashboard import create_dashboard` 在**模块层**执行，而 `cost_dashboard.py:5,6,8` 是模块层 `import gradio` / `import matplotlib` ⇒ **`import main` 必拉这两个包**。
+
+  - 改法：把 L511–516 整段包进 `if os.getenv("ENABLE_DASHBOARD", "true") == "true":`
+  - 🔴 **收益口径（写进代码注释，不许读成"不再拉"）**：这给的是「**可以**不拉」，**不是**「不再拉」。
+    默认值 `"true"` = 保持改动前行为 ⇒ **默认路径上 `import main` 仍然拉 gradio + matplotlib**。
+    只有**显式设 `ENABLE_DASHBOARD=false`** 时才真省掉（门关时 `cost_dashboard` 整个不被 import）。
+
+  **验证 —— 两条分支都测**（只测默认分支等于没测收益分支）：
+
+  | | 🅰 默认（不设环境变量） | 🅱 `ENABLE_DASHBOARD=false` |
+  |---|---|---|
+  | `len(app.routes)` | **14**（= 基线，逐位一致） | **13**（少一个） |
+  | `OPENAPI_PATHS` | **59** | **59**（不变） |
+  | `/dashboard` 路由 | ✅ 在 | ❌ 不在 |
+  | `gradio` 在 `sys.modules` | **True**（保持现状） | **False** ✅ |
+  | `matplotlib` 在 `sys.modules` | **True** | **False** ✅ |
+
+  - 📌 **`OPENAPI_PATHS` 两边都是 59** —— 因为 `/dashboard` 是 **mount 不是 OpenAPI 路由**。
+    而 `len(app.routes)` 掉 1，正印证了计划 R5 点名的坑：**`main.py:516` 会【重绑定 `app`】**，
+    门关时那次重绑定不发生 ⇒ `app.routes` 少一条。**这是"关掉面板"的应有语义。**
+  - `compileall` SYNTAX OK · `pytest`（隔离库 `rag_test`）**37 passed / 1 skipped / 0 failed**
+
 - **重构 ⑥ 切开点 3：`code_executor.py` / `simple_tools.py` 抽 `_impl` 薄包装**（M5 · 2026-09-17）。目的：让**沙箱白名单与工具逻辑**可在**只有标准库**的环境里被导入和测试。
 
   **起因**：两个文件都在**模块层** `from langchain_core.tools import tool` —— 于是想单测沙箱白名单（`ALLOWED_BUILTINS` / `create_safe_globals`）就必须先把 **langchain 装齐**。而这两处的**真正逻辑全是纯 stdlib**（`io` / `contextlib` / `datetime`）。
