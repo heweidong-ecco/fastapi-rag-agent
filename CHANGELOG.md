@@ -10,6 +10,55 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **⑦ M6 · `/rag/search` 单模块测试闭环 —— 本仓第一条「改代码 → 跑测试 → 看结果」的闭环先例**（2026-09-17）。
+  新建 `api/test_rag_search.py`（**22 条**：21 离线 + 1 集成）· `api/pytest.ini` · `ci.yml` 增加第二个 job。决策见 `DEC-013`。
+
+  **靶子** = `/rag/search`。`CODE_INVENTORY.md:159` 建议二选一，另一条「最终留下的那套 Agent」**被两条同时挡死**：
+  ① M5 组 1 的 C 档裁决未做（`ROADMAP.md:18`：Agent 不代判）② 它要 chat LLM，而 qwen-turbo/plus **免费额度已耗尽** ⇒ **跑不通 = 没有闭环**。
+  而 `/rag/search` 实测跑通（`mode=fast` → 200 / 825ms / `docs[0].from == "both"`，**RRF 真的融合了**），
+  **不碰 torch、不调 chat LLM**。🔴 **而它此前测试覆盖是 0**（`test_search.py` 测的是 `/rag/pg_search`），
+  **RRF 恰恰是 2026-08-17 复审出 bug 的地方**（§0-4）。
+
+  | 层 | 测什么 | 需要 | 进 CI |
+  |---|---|---|---|
+  | **L0** 纯逻辑 | `_rrf_fusion` 融合/排序/截断/空输入 · 四个 factory 开关矩阵 | 只要 langchain | ✅ |
+  | **L1** 契约 | 401 · `top_k` 422 边界 · `mode` 是 query 参数 · 缺字段 422 | **redis** | ✅ |
+  | **L2** 行为 | **mode→pipeline 分派** · RRF 穿到 HTTP 层 · `top_k` 传递 · 响应形状 | redis + patch 6 个缝 | ✅ |
+  | **L3** 集成 | 真 pgvector + 真 BM25 + 真 DashScope embedding | postgres + 外网 | ❌ `@pytest.mark.integration` |
+
+  - **变异测试：证明新套件真有牙**（用例能过 ≠ 能红）——三个变异各自精确命中：
+
+    | 变异 | 结果 |
+    |---|---|
+    | A · 路由 `if mode == "fast"` 改坏 | **1 failed**，正好是 `[fast-False-False-False]` 那一格 |
+    | B · RRF 两路命中误标成 `vector` | **2 failed**，正好是融合那条 + HTTP 形状那条 |
+    | C · **按 3 元组解包**（=2026-08-17 真 bug 的形状） | **11 failed**，`ValueError: too many values to unpack`，L0 与 L2 双层都红 |
+
+  - 全套回归：**59 passed / 1 skipped**（基线 37+1，**+22 条新测试，零回归**）；`routes=14` / `OPENAPI_PATHS=59` 逐位未变
+
+- 🔴 **修掉一个会挂死 CI 的已存在缺陷：`import main` 会起非 daemon 遥测线程，导致"测试全过但进程退不出去"**（2026-09-17 · M6 期间实测发现）。
+
+  **病因**：`cost_dashboard.py:218` 在**导入期**就建 Gradio Blocks ⇒ 只要 `import main`，Gradio 就起线程去连
+  `huggingface.co` 发匿名遥测（`gradio/analytics.py` → `huggingface_hub._telemetry`），外加两条 `posthog/consumer.py` 上报线程。
+  **网络不通时它们卡在 TCP connect 上永不返回**，主线程永远停在 `threading._shutdown`。
+
+  | 实测 | 结果 |
+  |---|---|
+  | 不设开关 | **20s+ 进程不退出**（此前一直如此，只是没人量过） |
+  | 设 `GRADIO_ANALYTICS_ENABLED=False` | **11s 内正常退出**（其中 `import main` 本身 6.6s） |
+  | 修复后残余**非 daemon** 线程 | **0** |
+
+  **修法**：`api/conftest.py` 在 `import main` **之前**设 `GRADIO_ANALYTICS_ENABLED=False`。
+  ⚠️ **位置不能挪到各测试模块里** —— `conftest.py` 先于所有测试模块被导入，那里才是唯一有效的时点。
+  ⚠️ 它**随机复现**（取决于当次 DNS/TCP 是快速失败还是挂住）—— 按"跑一次看看"的方式验，大概率显示正常。详见 `docs/复盘/2026-09-17-看到汇总行就以为跑完了.md`。
+
+- **`ci.yml` 增加 `offline-tests` job —— `ci.yml:4` 那句「等本项目重构定案后再接入 —— 见 M6」兑现**（2026-09-17）。
+  跑 `pytest api/test_rag_search.py -m "not integration" -v`；带 **redis service**（`redis:7`，零迁移零数据零种子）。
+  - 🔴 **redis 不是可选项**：`RateLimitMiddleware` 对每个非公开路径都打 Redis，且 `rate_limiter.py` **没有 `except RedisError`** ⇒ **Redis 不通时全站 500**（实测）。
+  - **postgres 不需要**（实测：把 `POSTGRES_PORT` 指向死端口，L1/L2 全绿）—— 断言要么在中间件层、要么在 handler 之前被挡下，要么把库调用 patch 掉了。
+  - `import main` 在导入期构造 OpenAI 客户端，**空 key 会抛 `OpenAIError`**（实测）⇒ CI 给**非空 dummy 环境变量**（离线用例永不真调用）。
+  - **未接进 CI 的已登记**：L3 集成层 · 既有测试里**另有 27 条也是离线的**（死 postgres 下 48 passed，其中 21 条来自新文件）。
+
 - **`scripts/check_secrets.sh` —— 凭据门（命中即 `exit 1` 中止）**（2026-09-17）。
 
   **起因是一次真实事故**:当天我把 **3 个历史泄露凭据的字面量写进了 PUBLIC 文档**,
