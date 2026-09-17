@@ -22,7 +22,13 @@
     - 门:`compileall` OK · `14`/`59` 逐位未变 · pytest **37 passed** · **R1 循环导入两个方向都测**(尤其"先 import bm25_index"那个危险序) · **R2 转发层是"真调用"验的**,非只看 import
     - 搬移保真:与原区块 diff —— **仅多 2 个空行 + 1 行 `from db import get_db`**,零内容丢失
     - ⚠️ **alembic 未实跑**(本仓 venv 没装它):`env.py` 那行改动靠**对象等价**确认,换有 alembic 的环境应补跑 `alembic upgrade head`
-  - ⬜ **切开点 2–5 待做**:② `token_tracker.py:10/13` 两行重复的 `from db import get_db` → 删一行、另一行移进函数 · ③ `code_executor.py`/`simple_tools.py` 抽 `_impl` 薄包装 · ④ `main.py` gradio 挂载加环境门控 · ⑤ `api_v1_rag.py` 模块级 LLM 对象搬进函数
+  - ✅ **切开点 2(2026-09-17)**:`token_tracker.py` **脱离 psycopg2**。删掉**两行重复的**模块层 `from db import get_db`(L10/L13),改为**函数内惰性导入**
+    - ⚠️ **计划写的"移进函数"是单数,实测 8 个函数**用 `get_db` ⇒ **8 处各加一行**;位置放**函数体最前、`try` 之前**(放 `try` 里会被函数自己的 `except` 吞掉,掩盖 ImportError)
+    - 门:`compileall` OK · `14`/`59` 未变 · pytest **37 passed** · **R2 八个函数全部"真调用"验过**(计划点名的"import 成功但首次调用才炸"风险)
+    - **收益:`import token_tracker` 拉起的重包 psycopg2 → 0**
+    - ⚠️ **我自己造过一次污染并已清理**:R2 冒烟**忘了带 `POSTGRES_DB=rag_test`**,往**真库 `rag_db`** 写了 4 行成本表数据(`user_name='u1'`)。已按 `u1`+`t1`+`purpose='test'` 精确删除并复核为 0;**未碰 `documents`**(评测知识库全程 70 行未变)。
+      **教训:「只读冒烟」其实会写库** —— 凡调用 `record_*` 的验证必须带库名隔离
+  - ⬜ **切开点 3–5 待做**:③ `code_executor.py`/`simple_tools.py` 抽 `_impl` 薄包装 · ④ `main.py` gradio 挂载加环境门控 · ⑤ `api_v1_rag.py` 模块级 LLM 对象搬进函数
   - ⚠️ **严格串行,一个切开点一个 commit** —— 否则回滚粒度退化成"全部重来"
 - **下一步**(在该计划之内):⬜ **⑥ 切开点 2 → 3 → 4 → 5 → ⑦ M6 单模块测试闭环**
 - **⏸ 挂起项(新会话须知,别重复踩)**:

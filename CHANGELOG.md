@@ -42,6 +42,31 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **重构 ⑥ 切开点 2：`token_tracker.py` 脱离 psycopg2**（M5 · 2026-09-17）。净 `-3/+15`。
+
+  **起因**：该文件在**模块层**导入 `db.get_db`，**而且重复了两行**（L10 与 L13 —— 同一句 `from db import get_db` 写了两遍）。后果：`import token_tracker` 会连带拉起 **psycopg2**，哪怕调用方只想用它的纯计算函数（`PRICING` / 预估 / 汇总）。
+
+  - **改法**：删掉两行模块层导入 → 改为**函数内惰性导入**。⚠️ 计划里写的是"另一行**移进函数**"（单数），**实测是 8 个函数**用到 `get_db`：`record_usage` · `record_cost` · `get_daily_token_usage` · `get_user_history` · `generate_monthly_report` · `get_daily_usage_cost` · `record_intercept` · `get_thread_cost` ⇒ **8 处各加一行**
+  - **位置放在函数体最前、`try` 之前** —— 放 `try` 里会被该函数**自己的 `except` 吞掉**，掩盖 `ImportError`
+  - 沿用该文件**既有的惰性导入写法**（`from permission import ...` @L291 · `import calendar` @L377）
+
+  **验证 —— 全部对比基线**：
+
+  | 项 | 结果 |
+  |---|---|
+  | 模块层残留 `from db import get_db` | **0** |
+  | 函数内惰性导入 | **8** |
+  | `with get_db() as conn:` 用法数 | **8**（一个没漏） |
+  | `compileall` | SYNTAX OK |
+  | **R2 · 惰性导入「真调用」**（计划点名的风险：*import 成功但首次调用才炸*） | 8 个函数**全部真调一次**：`record_usage` OK · `record_cost` OK · `get_daily_token_usage`=30 · `get_user_history`=1 行 · `generate_monthly_report`=dict · `get_daily_usage_cost`=0.00015 · `record_intercept` OK · `get_thread_cost`=0.00015 |
+  | `import main` | `routes=14` · `OPENAPI_PATHS=59`（逐位未变） |
+  | `pytest`（隔离库 `rag_test`） | **37 passed / 1 skipped / 0 failed** |
+  | **收益** | `import token_tracker` 拉起的重包 **psycopg2 → 0**（`sqlalchemy` 亦为 0）；`PRICING` 等纯计算可在无 DB 环境下使用 |
+
+  - ⚠️ **本次我自己造了一次污染，已清理**：R2 冒烟**忘了带 `POSTGRES_DB=rag_test`**，于是 `record_usage`/`record_cost`/`record_intercept` 往**真库 `rag_db`** 写了 4 行（`token_usage_logs` 1 · `cost_records` 2 · `budget_intercepts` 1，`user_name='u1'`）。**已按 `user_name='u1' AND thread_id='t1' AND purpose='test'` 精确删除并复核为 0**。
+    - 影响面：只碰了**成本表**，**未碰 `documents`**（评测知识库全程 70 行未变）
+    - 教训：**"只读冒烟"其实会写库** —— 凡是调用 `record_*` 的验证都必须带库名隔离
+
 - **重构 ⑥ 切开点 1：`db.py` 拆出 `db_metadata.py` + `bm25_index.py`**（M5 · 2026-09-17）。目的：让 `import db` 不再被迫拉起重包。
 
   **起因**：`db.py` 在**模块层** `import sqlalchemy / numpy / jieba / rank_bm25`，于是**任何** `from db import get_db` 的调用方（`auth.py` / `cost_dashboard.py` / `api_v1.py` …）都被连带拖起这 4 个重包 —— 哪怕只是想要一个数据库连接。
