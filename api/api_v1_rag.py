@@ -524,19 +524,30 @@ async def jwt_ask_question(
 
 # ==================== 流式输出（SSE） ====================
 from fastapi.responses import StreamingResponse
-from langchain_openai import ChatOpenAI
 from config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL_CHAT
 import asyncio
 import json
 
-# 初始化流式LLM
-llm_stream = ChatOpenAI(
-    model=LLM_MODEL_CHAT,
-    api_key=LLM_API_KEY,
-    base_url=LLM_BASE_URL,
-    temperature=0.3,
-    streaming=True  # 关键：开启流式模式
-)
+# ⚠️ 2026-09-17 重构 ⑥ 切开点 5：惰性单例。
+#    原先此处是【模块层】直接 `llm_stream = ChatOpenAI(...)` ⇒
+#    `import api_v1_rag`（进而 `import main`）**在导入期就构造 LLM 对象**，
+#    哪怕这个进程根本不走流式接口。
+#    现改为**首次使用时才建**；此后复用同一实例（与原先的"单例"语义一致）。
+_llm_stream = None
+
+def get_llm_stream():
+    """惰性构造流式 LLM（首次调用时才建，之后复用）。"""
+    global _llm_stream
+    if _llm_stream is None:
+        from langchain_openai import ChatOpenAI  # 惰性导入：放在函数内，导入期不拉 langchain
+        _llm_stream = ChatOpenAI(
+            model=LLM_MODEL_CHAT,
+            api_key=LLM_API_KEY,
+            base_url=LLM_BASE_URL,
+            temperature=0.3,
+            streaming=True  # 关键：开启流式模式
+        )
+    return _llm_stream
 
 @router.post("/rag/stream_search")
 async def stream_search(
@@ -619,7 +630,7 @@ async def stream_search(
         collected_parts = []          # 用于拼凑完整回答
         try:
             # 调用流式LLM
-            stream = llm_stream.stream(messages)
+            stream = get_llm_stream().stream(messages)
             for chunk in stream:
                 if chunk.content:
                     collected_parts.append(chunk.content)
@@ -668,59 +679,74 @@ import json
 import asyncio
 from websocket_callback import WebSocketAgentCallback
 
-from langchain_openai import ChatOpenAI
-from langchain.agents import create_tool_calling_agent, AgentExecutor
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_community.tools import  DuckDuckGoSearchRun
-from langchain_core.tools import tool
 from datetime import datetime
 
-#一 初始化模型
-llm=ChatOpenAI(
-    model=LLM_MODEL_CHAT,
-    api_key=LLM_API_KEY,
-    base_url=LLM_BASE_URL,
-    temperature=0,
-)
-#二 定义工具
-@tool
-async def search(query: str) -> str:
-    """搜索互联网获取实时信息。输入搜索关键词。"""
-    search_tool = DuckDuckGoSearchRun()
-    result = await asyncio.to_thread(search_tool.invoke, query)
-    return result
+# ⚠️ 2026-09-17 重构 ⑥ 切开点 5：惰性单例。
+#    原先下面这一整段（初始化 LLM / 定义三个工具 / 建 prompt / create_tool_calling_agent /
+#    AgentExecutor）**全在模块层** ⇒ `import api_v1_rag`（进而 `import main`）
+#    **在导入期就构造 LLM 与 Agent 对象**，哪怕这个进程从不打开 `/ws/agent`。
+#    现整段搬进 get_agent_executor()，**首次使用时才建**，之后复用（与原先单例语义一致）。
+#    ⚠️ 工具 docstring 与 prompt 文本**逐字未改** —— 那是给 LLM 看的接口。
+_agent_executor = None
 
-@tool
-async def calculator(expression:str) -> str:
-    """计算一个数学表达式。例如3*4-5/6。输入的必须是纯数学表达式"""
-    result = await asyncio.to_thread(eval, expression)
-    return str(result)
+def get_agent_executor():
+    """惰性构造 WebSocket Agent（首次调用时才建，之后复用）。"""
+    global _agent_executor
+    if _agent_executor is None:
+        # ⚠️ 全部放在函数内：导入期不拉 langchain
+        from langchain_openai import ChatOpenAI
+        from langchain.agents import create_tool_calling_agent, AgentExecutor
+        from langchain_core.prompts import ChatPromptTemplate
+        from langchain_community.tools import  DuckDuckGoSearchRun
+        from langchain_core.tools import tool
 
-@tool
-async def date_today(query: str = "") -> str:
-    """查询今天的日期、星期几。忽略查询参数。"""
-    now = datetime.now()
-    weekdays = ["一", "二", "三", "四", "五", "六", "日"]
-    weekday_str = weekdays[now.weekday()]
-    # 直接在协程中返回字符串即可，这个操作不阻塞
-    return f"今天是{now.year}年{now.month}月{now.day}日，星期{weekday_str}"
+        #一 初始化模型
+        llm=ChatOpenAI(
+            model=LLM_MODEL_CHAT,
+            api_key=LLM_API_KEY,
+            base_url=LLM_BASE_URL,
+            temperature=0,
+        )
+        #二 定义工具
+        @tool
+        async def search(query: str) -> str:
+            """搜索互联网获取实时信息。输入搜索关键词。"""
+            search_tool = DuckDuckGoSearchRun()
+            result = await asyncio.to_thread(search_tool.invoke, query)
+            return result
 
-tools = [calculator, date_today, search]
+        @tool
+        async def calculator(expression:str) -> str:
+            """计算一个数学表达式。例如3*4-5/6。输入的必须是纯数学表达式"""
+            result = await asyncio.to_thread(eval, expression)
+            return str(result)
 
-# ========== 6. 创建Agent ==========
-# 这是一个专为工具调用设计的标准模板
-prompt = ChatPromptTemplate.from_messages([
-    (
-        "system",
-        "You are a helpful assistant. Use the provided tools to answer the user's question. "
-        "If a tool is needed, call it with the appropriate arguments. "
-        "After receiving the tool's result, continue reasoning or give the final answer."
-    ),
-    ("human", "{input}"),
-    ("placeholder", "{agent_scratchpad}"),
-])
-agent = create_tool_calling_agent(llm, tools, prompt)
-agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
+        @tool
+        async def date_today(query: str = "") -> str:
+            """查询今天的日期、星期几。忽略查询参数。"""
+            now = datetime.now()
+            weekdays = ["一", "二", "三", "四", "五", "六", "日"]
+            weekday_str = weekdays[now.weekday()]
+            # 直接在协程中返回字符串即可，这个操作不阻塞
+            return f"今天是{now.year}年{now.month}月{now.day}日，星期{weekday_str}"
+
+        tools = [calculator, date_today, search]
+
+        # ========== 6. 创建Agent ==========
+        # 这是一个专为工具调用设计的标准模板
+        prompt = ChatPromptTemplate.from_messages([
+            (
+                "system",
+                "You are a helpful assistant. Use the provided tools to answer the user's question. "
+                "If a tool is needed, call it with the appropriate arguments. "
+                "After receiving the tool's result, continue reasoning or give the final answer."
+            ),
+            ("human", "{input}"),
+            ("placeholder", "{agent_scratchpad}"),
+        ])
+        agent = create_tool_calling_agent(llm, tools, prompt)
+        _agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
+    return _agent_executor
 
 @router.websocket("/ws/agent")
 async def agent_websocket(websocket: WebSocket):
@@ -742,7 +768,9 @@ async def agent_websocket(websocket: WebSocket):
             
             try:
                 # 使用回调的 ainvoke（create_tool_calling_agent 的输入键是 "input"，输出键是 "output"）
-                result = await agent_executor.ainvoke(
+                # 惰性取单例：首次打开 WS 时才构造 Agent
+                executor = get_agent_executor()
+                result = await executor.ainvoke(
                     {"input": user_message},
                     config={"callbacks": [callback]}
                 )

@@ -38,9 +38,15 @@
     - **两条分支都测**(只测默认分支等于没测收益分支):🅰默认 `14`/`59` 逐位一致、gradio 仍拉 · 🅱`false` 时 `13`/`59`、`/dashboard` 消失、gradio 与 matplotlib **都没拉**
     - 📌 `OPENAPI_PATHS` 两边都是 59 —— `/dashboard` 是 **mount 不是 OpenAPI 路由**;`app.routes` 掉 1 正印证计划 R5 那个坑:**L516 会重绑定 `app`**
     - 门:`compileall` OK · pytest **37 passed**
-  - ⬜ **切开点 5 待做**:⑤ `api_v1_rag.py` 模块级 LLM 对象搬进函数
+  - ✅ **切开点 5(2026-09-17)**:**⑥ 的最后一步**。`api_v1_rag.py` 的 `llm_stream` 与整段 agent 装配(6 个模块级对象)搬进**惰性单例 getter** `get_llm_stream()` / `get_agent_executor()`
+    - **🎯 核心主张已证**:新版 `import main` 后 `_llm_stream=None`、`_agent_executor=None`;**对照旧版**模块层直接赋值 **6 个对象**
+    - **🔴 11 个工具 docstring + prompt 模板逐字未变**(`ast` 与 git 旧版比对)——那是**给 LLM 看的接口**
+    - R2:`get_llm_stream()`→`ChatOpenAI` · `get_agent_executor()`→`AgentExecutor`(**3 工具**,与改前一致) · **两者都验了单例**
+    - 门:`compileall` OK · `14`/`59` 未变 · pytest **37 passed**
+    - 📌 收益口径(沿用 DEC-010):**不是**"不再 import langchain",而是「**不碰这两个接口的进程,永远不构造这两个对象**」
+  - ✅✅ **⑥ 切模块 全部完成(5/5)** —— 下一步进入 **⑦ M6 单模块测试闭环**
   - ⚠️ **严格串行,一个切开点一个 commit** —— 否则回滚粒度退化成"全部重来"
-- **下一步**(在该计划之内):⬜ **⑥ 切开点 4 → 5 → ⑦ M6 单模块测试闭环**(① ② ③ 已完成)
+- **下一步**(在该计划之内):⬜ **⑦ M6 单模块测试闭环**(⑤ 归档 ✅ · ⑥ 切模块 5/5 ✅ 全部完成)
 - **⏸ 挂起项(新会话须知,别重复踩)**:
   - **凭据③ 端口收窄** ⏸ 缓期 —— **重建 `postgres-rag` 会让它与 `redis-rag` 分到不同网络**(项目已在 `#3` 改名 ⇒ 网络名从 `my-fixed-name_app-net` 变 `fastapi-rag-agent_app-net`)。**待 ⑥ 与网络改名一并处理**。口令那一半 ✅ 已完成(32 位随机,旧口令从外部连实测 FATAL)
   - **凭据④ `JWT_SECRET_KEY`** ⬜ 待办 —— `.env` 里是 169 字符、以 `eyJhbG` 开头(**像是把某个 JWT 本身填进了密钥字段**)。换掉会让**所有已签发 token 失效**
