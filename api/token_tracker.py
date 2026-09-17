@@ -7,10 +7,14 @@ from typing import Optional, Dict
 from dataclasses import dataclass, field
 from collections import defaultdict
 # 从 db.py 导入数据库连接（注意路径）
-from db import get_db
+# ⚠️ 2026-09-17 重构 ⑥ 切开点 2：此处**原先在模块层**导入 `db.get_db`，且**重复了两行**
+#    （L10 与 L13）。后果：`import token_tracker` 会连带拉起 **psycopg2**，
+#    哪怕调用方只想用本模块的纯计算函数（PRICING / 预估 / 汇总）。
+#    现改为**函数内惰性导入** —— 见下方各函数体首行的 `from db import get_db`，
+#    与本文件既有的 `from permission import ...`（L291）、`import calendar`（L377）同一写法。
+#    ⚠️ 位置放在函数体最前、`try` 之前 —— 放 `try` 里会被本函数自己的 `except` 吞掉，掩盖 ImportError。
 import threading
 import os
-from db import get_db
 import json
 
 # ==================== 数据模型 ====================
@@ -75,6 +79,7 @@ def record_usage(
     tool_args: dict = None,
 ):
     """记录一次 LLM 调用的 Token 消耗，同时写入内存缓存和数据库。"""
+    from db import get_db
     total = prompt_tokens + completion_tokens
     # 计算成本（必须先于 TokenUsage 构造，否则引用未定义变量）
     pricing = PRICING.get(model, _DEFAULT_PRICING)
@@ -158,6 +163,7 @@ def record_cost(
     将单次调用的花费明细写入数据库。
     这是花费数据持久化的核心函数。
     """
+    from db import get_db
     # 计算费用
     pricing = PRICING.get(model, _DEFAULT_PRICING)
     input_cost = (prompt_tokens / 1000) * pricing["prompt"]
@@ -189,6 +195,7 @@ def get_daily_token_usage(user_name: str) -> float:
     从数据库查询用户今日已消耗的 Token 总数。
     这是预算控制的权威数据源，不依赖内存缓存。
     """
+    from db import get_db
     try:
         with get_db() as conn:
             with conn.cursor() as cur:
@@ -209,6 +216,7 @@ def get_daily_token_usage(user_name: str) -> float:
 # ==================== 从数据库查询历史统计（用于趋势分析） ====================
 def get_user_history(user_name: str, days: int = 30) -> list:
     """获取用户最近N天的每日Token消耗历史"""
+    from db import get_db
     try:
         with get_db() as conn:
             with conn.cursor() as cur:
@@ -358,7 +366,8 @@ def generate_monthly_report(user_name: str, year: int = None, month: int = None)
         包含总花费、日均花费、用途分布等信息的报告字典
     """
     from datetime import datetime
-    
+    from db import get_db
+
     # 默认当前月份
     now = datetime.now()
     if year is None:
@@ -564,6 +573,7 @@ def check_budget_before_call(
 
 def get_daily_usage_cost(user_name: str) -> float:
     """从数据库查询用户今日已消耗的总花费"""
+    from db import get_db
     try:
         with get_db() as conn:
             with conn.cursor() as cur:
@@ -587,6 +597,7 @@ _intercept_lock = threading.Lock()
 
 def record_intercept(user_name: str, tool_name: str, reason: str):
     """记录一次预算拦截"""
+    from db import get_db
     with _intercept_lock:
         _intercept_count[user_name] += 1
     # 可选：写入数据库
@@ -681,6 +692,7 @@ def check_multilevel_budget(
 
 def get_thread_cost(thread_id: str) -> float:
     """查询指定线程的累计花费"""
+    from db import get_db
     try:
         with get_db() as conn:
             with conn.cursor() as cur:
