@@ -58,7 +58,11 @@
   - **`ci.yml:4` 那句「待 M6 再接入」已兑现** —— 新增 `offline-tests` job(带 `redis:7` service)
   - 🔴 **同批修掉一个会挂死 CI 的已存在缺陷**:`cost_dashboard.py:218` 在**导入期**建 Gradio Blocks ⇒ 起**非 daemon** 线程连 `huggingface.co` 发遥测;**网络不通时卡在 TCP connect** ⇒ **全 PASSED 但进程退不出去**(实测 20s+ 不退出;关掉后 11s 内退出)。修在 `api/conftest.py` 的 `import main` **之前**
     - ⚠️ 它**随机复现** —— 按"跑一次看看"验大概率显示正常。详见 `docs/复盘/2026-09-17-看到汇总行就以为跑完了.md`
-  - **未接进 CI 的(已登记,不是忘了)**:L3 集成层 · **既有测试里另有 27 条也是离线的**(死 postgres 下 48 passed,其中 21 条来自新文件)→ 扩 `--ignore` 名单即可,留作后续
+  - **未接进 CI 的(已登记,不是忘了)**:L3 集成层(`integration`)· 需要真库的(`needs_db`)—— **这两类仍需 postgres,不进 CI**
+  - ✅ **M6 的三项后续已做完(2026-09-17)**:
+    - **CI 覆盖面扩到 `api/` 全套** —— `pytest api/ -m "not integration and not needs_db"`,实测 **50 passed / 1 skipped / 11 deselected**(本机带 `rag_test` 时 60 passed)。新增 **`needs_db`** marker(与 `integration` 是两种"跑不了",别混);判据**实测**出来的,顺带发现 `test_auth.py` 无库也能过
+    - **两个 CI job 加 `timeout-minutes`**(`syntax` 5 / `offline-tests` 15)—— 兜底那个"测试全过但进程不退出"的缺陷
+    - **`/rag/search` 的 `mode` 静默兜底已修** —— 裸 `str` → `Literal`(非法值 **422** 且 OpenAPI 带枚举)+ `if/elif/else` → **查表**(结构上无兜底分支)。M6 时裁决的"只记录不修"那笔登记**已兑现**
   - 决策见 `docs/decisions/DEC-013-M6测试分层与CI接法.md`
 - ✅ **计划内(基线 → 修 bug → ⑤ 归档 → ⑥ 切模块 → ⑦ M6)全部完成**(2026-09-17)
   - ⬜ **计划之外仍未做的**:`⑤` 只做了「删死代码」那一半,**「给被取代的代际加 `# STATUS: superseded` 标记」还没做** —— 它阻塞于 **M5 的 C/D/E 裁决**(哪一代是产品版本,须业务方定)

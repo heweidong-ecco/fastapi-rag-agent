@@ -232,10 +232,9 @@ def test_route_dispatches_mode_to_correct_pipeline(client, offline_retrieval, mo
     断言的是响应里的 `pipeline` 元信息（由 `RAGPipeline.search_async` 自己回填），
     所以它**同时**证明了两件事：路由挑对了 factory，且那条管线真的被跑到了。
 
-    ⚠️ 这里**故意不测"未知 mode"** —— `api_v1_rag.py:480` 是个裸 `else`，
-    `mode=garbage` 会**静默**落进 `accurate_norerank`（实测确认）。
-    业务方 2026-09-17 裁决：**M6 只记录，不把它写进测试** ——
-    测试不该把缺陷固化成"预期行为"，修复另开 PR。见 `DEC-013` 与 `ROADMAP.md`。
+    ⚠️ **"未知 mode"的用例不在这里** —— 它曾是个裸 `else`（`mode=garbage` 静默落进
+    `accurate_norerank`）；M6 当时按裁决**只记录、不写进测试**（测试不该把缺陷固化成"预期行为"），
+    **已于 2026-09-17 修为 422**，用例见下方的 `test_unknown_mode_is_rejected`。
     """
     r = client.post(
         SEARCH_PATH, params={"mode": mode}, headers=_auth_headers(),
@@ -282,6 +281,36 @@ def test_top_k_is_passed_through(client, offline_retrieval):
         json={"question": "Python", "top_k": 1},
     )
     assert len(r.json()["docs"]) == 1
+
+
+def test_unknown_mode_is_rejected(client):
+    """未知 `mode` 必须 **422**，不许静默兜底（2026-09-17 修）。
+
+    修前：mode 分派是**裸 `else`** —— `mode=garbage` → **200**，静默落进
+    `accurate_norerank`（多跑一次查询改写 = 多花钱、多延迟，**且不报错**）。
+    修后：`mode` 声明为 `Literal`，非法值在**进入函数体之前**被 FastAPI 挡下。
+
+    ⚠️ **零网络**：422 在 handler 之前产生，不需要 embedding / DB / 外网。
+    """
+    r = client.post(
+        SEARCH_PATH, params={"mode": "garbage"}, headers=_auth_headers(),
+        json={"question": "x", "top_k": 3},
+    )
+    assert r.status_code == 422
+    assert r.json()["detail"][0]["loc"] == ["query", "mode"]
+
+
+def test_mode_defaults_to_accurate_norerank(client, offline_retrieval):
+    """不传 `mode` 时走默认值 —— 与**显式**传 `accurate_norerank` 必须逐字段一致。"""
+    headers = _auth_headers()
+    body = {"question": "Python", "top_k": 3}
+    omitted = client.post(SEARCH_PATH, headers=headers, json=body)
+    explicit = client.post(SEARCH_PATH, params={"mode": "accurate_norerank"}, headers=headers, json=body)
+
+    assert omitted.status_code == explicit.status_code == 200
+    assert omitted.json()["mode"] == "accurate_norerank"
+    assert omitted.json()["pipeline"] == explicit.json()["pipeline"]
+    assert omitted.json()["docs"] == explicit.json()["docs"]
 
 
 # ============================================================================

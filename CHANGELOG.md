@@ -126,6 +126,27 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **CI `offline-tests` 的覆盖面：从「1 个文件」扩到「`api/` 全套」+ 两个 job 加 `timeout-minutes`**（2026-09-17 · M6 的后续）。
+
+  M6 时它只跑 `api/test_rag_search.py`；现在跑 **`pytest api/ -m "not integration and not needs_db"`** ——
+  实测 **50 passed / 1 skipped / 11 deselected**（本机带 `rag_test` 时是 **60 passed**）。
+
+  **为了"能挡得住"而引入的第二个 marker `needs_db`** —— 它和 `integration` 是**两种不同的"跑不了"**，别混：
+
+  | marker | 缺什么 | 谁标了 |
+  |---|---|---|
+  | `integration` | 真 Postgres **+ DashScope 外网** | `test_rag_search.py::test_search_fast_against_real_stack` |
+  | `needs_db` | **只要真 Postgres** | `test_documents.py` · `test_integration.py` · `test_search.py`（整篇）+ `test_main.py::test_health`（单条） |
+
+  ⚠️ `test_main.py` 里**只有 `test_health` 一条**需要库（`/health` 会真探 Postgres/Redis 连通性，没有库返回 503），
+  其余两条**没有**跟着标 —— marker 是**按需**打的，不是"整个文件一刀切"。
+  📌 **判据是实测的，不是推的**：把 `POSTGRES_PORT` 指向死端口逐文件跑，才定下这份名单
+  （顺带发现 `test_auth.py` **无库也能过** —— 它的登录用例不依赖 `auth_headers` 那条路）。
+
+  **`timeout-minutes`（`syntax` 5 分 / `offline-tests` 15 分）** 是**兜底**：
+  2026-09-17 实测过一个「**测试全过但进程不退出**」的缺陷（Gradio 遥测非 daemon 线程），
+  没有超时上限时那种卡住会一直耗到平台全局上限；有上限，"卡住"才是一个**显式状态**。
+
 - **重构 ⑥ 切开点 5：`api_v1_rag.py` 的 LLM / Agent 对象改为惰性单例**（M5 · 2026-09-17）。**⑥ 的最后一步。**
 
   **起因**：两处在**模块层**直接构造对象 —— `llm_stream = ChatOpenAI(...)` 与**一整段** agent 装配（`llm` / 三个 `@tool` / `tools` / `prompt` / `agent` / `agent_executor`）。
@@ -290,6 +311,26 @@ All notable changes to this project will be documented in this file.
 - 本地残留分支 `docs/api-doc-final-review`(已并入 `main`,远端无此分支)。
 
 ### Fixed
+
+- 🔴 **`/rag/search` 的 `mode` 静默兜底 —— 拼错一个字母会被悄悄换成另一个模式**（2026-09-17）。
+
+  **修前**：`api_v1_rag.py` 的 mode 分派是个**裸 `else`** ⇒ `mode=garbage` 返回 **200**，
+  **静默**落进 `accurate_norerank`（多跑一次查询改写 = **多花钱、多延迟，且不报错**）。
+
+  **修法（两层，缺一不可）**：
+  1. `mode` 由裸 `str` 改为 **`SearchMode = Literal["fast","accurate","accurate_norerank","full"]`**
+     ⇒ 非法值由 FastAPI 在**进入函数体之前**挡成 **422**，且 OpenAPI 里**带上枚举**
+  2. `if/elif/else` 改为**查表** `PIPELINE_FACTORIES[mode]()` ⇒ 结构上**不存在兜底分支**
+
+  | 验证 | 结果 |
+  |---|---|
+  | 新增 `test_unknown_mode_is_rejected` | `mode=garbage` → **422**，`loc == ["query","mode"]`；**零网络**（handler 之前就挡下） |
+  | 新增 `test_mode_defaults_to_accurate_norerank` | 不传 `mode` 与显式传默认值**逐字段一致** |
+  | **变异验证**（把 `SearchMode` 改回裸 `str`） | **1 failed**（`KeyError: 'garbage'`）⇒ 用例有牙 |
+  | OpenAPI | `mode` 的 `enum` = 四个值，`default = accurate_norerank`；`14`/`59` 逐位未变 |
+
+  📌 **副产物**：光有"查表"也会把静默兜底变成 **500**；`Literal` 才给到 422 —— **两层各管一段**。
+  📌 M6 时业务方裁决「**只记录、不写进测试**」（测试不该把缺陷固化成"预期行为"），本次是那笔登记的兑现。
 
 - 🔴🔴 **凭据门 v4：这道门自建立起就是一枚硬币 —— 同一份暂存内容，20 次里拦 11 次、漏 9 次**（2026-09-17）。复盘见 `docs/复盘/2026-09-17-一道硬币做的门.md`。
 

@@ -1,3 +1,10 @@
+import pytest
+
+# 整篇标记 `needs_db` —— 走真实 pgvector 检索，**不进 CI**（CI 无 postgres service）。
+# 本机跑：`cd api && POSTGRES_DB=rag_test pytest api/ -m "not integration"`。
+pytestmark = pytest.mark.needs_db
+
+
 def test_pg_search_empty(client, auth_headers):
     response = client.post("/api/v1/rag/pg_search",
         headers=auth_headers,

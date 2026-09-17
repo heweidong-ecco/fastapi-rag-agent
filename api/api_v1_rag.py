@@ -4,6 +4,7 @@ API v1 路由集中定义
 """
 import json
 import time
+from typing import Literal
 from fastapi import APIRouter, Depends, Path, Query
 from fastapi.responses import StreamingResponse, JSONResponse
 
@@ -456,10 +457,23 @@ async def rewrite_search_api(
 # 添加综合检索接口 RAGPipeline
 from rag_pipeline import create_fast_pipeline, create_accurate_pipeline, create_accurate_norerank_pipeline,create_full_pipeline
 
+# 🔴 `mode` 必须是**受限枚举**，不能是裸 `str` —— 2026-09-17 修，起因见 `unified_search` 的注释。
+SearchMode = Literal["fast", "accurate", "accurate_norerank", "full"]
+
+# mode → 管线工厂。**用查表代替 if/elif/else**：漏一个 mode 会 KeyError（当场炸），
+# 而不是静默落进某个兜底分支。
+PIPELINE_FACTORIES = {
+    "fast": create_fast_pipeline,
+    "accurate": create_accurate_pipeline,
+    "accurate_norerank": create_accurate_norerank_pipeline,
+    "full": create_full_pipeline,
+}
+
+
 @router.post("/rag/search")
 async def unified_search(
     req: QuestionRequest,
-    mode: str = "accurate_norerank",  # 可选: "fast", "accurate","accurate_norerank" "full"
+    mode: SearchMode = "accurate_norerank",
     user_name: str = Depends(get_current_user_hybrid),
 ):
     """
@@ -468,17 +482,16 @@ async def unified_search(
     **模式说明：**
     - **fast**：仅 BM25 + 向量检索 + RRF 融合，速度最快。
     - **accurate**：增加查询改写和 Cross-Encoder 重排序，精度最高。
+    - **accurate_norerank**：增加查询改写，但**不做** Cross-Encoder 重排序（**默认值**，不依赖 torch）。
     - **full**：在 accurate 基础上增加查询扩展，覆盖最全。
+
+    ⚠️ `mode` 是**受限枚举**，取值只有上面四个；传别的值会得到 **422**，而不是被静默兜底。
     """
-    # 根据 mode 选择管线
-    if mode == "fast":
-        pipeline = create_fast_pipeline()
-    elif mode == "full":
-        pipeline = create_full_pipeline()
-    elif mode == "accurate":
-        pipeline = create_accurate_pipeline()
-    else:
-        pipeline = create_accurate_norerank_pipeline()
+    # 🔴 2026-09-17 修：此处原先是一个**裸 `else`** —— 任何拼错的 mode（如 `fst`）
+    # 都不报错，而是**静默换成 `accurate_norerank`**（多跑一次查询改写 = 多花钱、多延迟）。
+    # 现在：`mode` 声明为 `SearchMode`（`Literal`），非法值由 FastAPI 在进入函数体之前挡成 422；
+    # 且下方改用**查表**，结构上不存在"兜底分支"。决策见 `docs/decisions/DEC-013`。
+    pipeline = PIPELINE_FACTORIES[mode]()
 
     # 执行检索
     result = await pipeline.search_async(
