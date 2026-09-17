@@ -44,9 +44,25 @@
     - R2:`get_llm_stream()`→`ChatOpenAI` · `get_agent_executor()`→`AgentExecutor`(**3 工具**,与改前一致) · **两者都验了单例**
     - 门:`compileall` OK · `14`/`59` 未变 · pytest **37 passed**
     - 📌 收益口径(沿用 DEC-010):**不是**"不再 import langchain",而是「**不碰这两个接口的进程,永远不构造这两个对象**」
-  - ✅✅ **⑥ 切模块 全部完成(5/5)** —— 下一步进入 **⑦ M6 单模块测试闭环**
+  - ✅✅ **⑥ 切模块 全部完成(5/5)**
   - ⚠️ **严格串行,一个切开点一个 commit** —— 否则回滚粒度退化成"全部重来"
-- **下一步**(在该计划之内):⬜ **⑦ M6 单模块测试闭环**(⑤ 归档 ✅ · ⑥ 切模块 5/5 ✅ 全部完成)
+- ✅ **⑦ M6 单模块测试闭环(2026-09-17)** —— **计划内的最后一步,已完成**
+  - **靶子 = `/rag/search`**。`CODE_INVENTORY.md:159` 建议二选一,**另一条「最终留下的那套 Agent」被两条同时挡死**:
+    ① M5 组 1 的 C 档裁决未做(本文档已写明 Agent 不代判)② 它要 chat LLM,而 qwen-turbo/plus **免费额度已耗尽** ⇒ **跑不通 = 没有闭环**
+  - 🔴 **它此前测试覆盖是 0**(`test_search.py` 测的是 `/rag/pg_search`),**而 RRF 恰恰是 2026-08-17 复审出 bug 的地方**(§0-4)
+  - **分四层,按"需要什么"切**:L0 纯逻辑 / L1 契约 / L2 行为 → **进 CI**;L3 集成 → `@pytest.mark.integration`,本机跑
+    - **L1/L2 只需 redis** —— 实测:把 `POSTGRES_PORT` 指向死端口,两层全绿(postgres **不需要**)
+    - ⚠️ **redis 不是可选项**:`RateLimiter` 对每个非公开路径都打 Redis 且**无 `except RedisError`** ⇒ **Redis 不通 = 全站 500**(fail-closed,只登记不判)
+  - **变异测试(用例能过 ≠ 能红)**:A 改坏 mode 分派 → **1 failed**(正好那一格) · B 破坏 RRF 标注 → **2 failed** · C **按 3 元组解包**(=那个真 bug 的形状) → **11 failed**,L0/L2 双层都红
+  - **全套 59 passed / 1 skipped**(基线 37+1,+22 零回归) · `14`/`59` 逐位未变
+  - **`ci.yml:4` 那句「待 M6 再接入」已兑现** —— 新增 `offline-tests` job(带 `redis:7` service)
+  - 🔴 **同批修掉一个会挂死 CI 的已存在缺陷**:`cost_dashboard.py:218` 在**导入期**建 Gradio Blocks ⇒ 起**非 daemon** 线程连 `huggingface.co` 发遥测;**网络不通时卡在 TCP connect** ⇒ **全 PASSED 但进程退不出去**(实测 20s+ 不退出;关掉后 11s 内退出)。修在 `api/conftest.py` 的 `import main` **之前**
+    - ⚠️ 它**随机复现** —— 按"跑一次看看"验大概率显示正常。详见 `docs/复盘/2026-09-17-看到汇总行就以为跑完了.md`
+  - **未接进 CI 的(已登记,不是忘了)**:L3 集成层 · **既有测试里另有 27 条也是离线的**(死 postgres 下 48 passed,其中 21 条来自新文件)→ 扩 `--ignore` 名单即可,留作后续
+  - 决策见 `docs/decisions/DEC-013-M6测试分层与CI接法.md`
+- ✅ **计划内(基线 → 修 bug → ⑤ 归档 → ⑥ 切模块 → ⑦ M6)全部完成**(2026-09-17)
+  - ⬜ **计划之外仍未做的**:`⑤` 只做了「删死代码」那一半,**「给被取代的代际加 `# STATUS: superseded` 标记」还没做** —— 它阻塞于 **M5 的 C/D/E 裁决**(哪一代是产品版本,须业务方定)
+  - ⬜ **M5 的裁决(留/并/删)本身尚未开始** —— `CODE_INVENTORY.md` 的 A/B/C/D/E 档,估 5–8 天
 - **⏸ 挂起项(新会话须知,别重复踩)**:
   - **凭据③ 端口收窄** ⏸ 缓期 —— **重建 `postgres-rag` 会让它与 `redis-rag` 分到不同网络**(项目已在 `#3` 改名 ⇒ 网络名从 `my-fixed-name_app-net` 变 `fastapi-rag-agent_app-net`)。**待 ⑥ 与网络改名一并处理**。口令那一半 ✅ 已完成(32 位随机,旧口令从外部连实测 FATAL)
   - **凭据④ `JWT_SECRET_KEY`** ⬜ 待办 —— `.env` 里是 169 字符、以 `eyJhbG` 开头(**像是把某个 JWT 本身填进了密钥字段**)。换掉会让**所有已签发 token 失效**

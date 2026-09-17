@@ -1,8 +1,23 @@
 name: CI
 
-# ⚠️ 当前范围：只做**语法级**检查（compileall），不跑 pytest。
-#    pytest 需要 postgres/redis 与完整依赖，等本项目重构定案后再接入 —— 见 ROADMAP.md 的 M6。
-#    这个 workflow 故意保持"重构无关"：它只查语法，不管你怎么改目录和模块。
+# 两个 job，职责分开：
+#   syntax        —— **语法级**（compileall），秒级，故意保持"重构无关"：只查语法，不管你怎么改目录和模块。
+#   offline-tests —— **M6 接进来的离线测试闭环**（2026-09-17）。见 ROADMAP.md「⑦ M6」与 docs/decisions/DEC-013。
+#
+# ⚠️ offline-tests 为什么是现在这个样子：
+#   · 只跑 `api/test_rag_search.py -m "not integration"` —— 该文件的 L0/L1/L2 三层，
+#     实测**只需要 redis**，不需要 postgres、不需要外网、不需要 torch。
+#   · 🔴 **必须给 redis service** —— 不是可选项。`RateLimitMiddleware` 对每个非公开路径都打 Redis，
+#     且 `rate_limiter.py` 没有 `except RedisError` 兜底 ⇒ **Redis 不通时全站 500**（实测）。
+#   · 环境变量给的是 **dummy 值**：`import main` 在导入期就会构造 OpenAI 客户端，
+#     空 key 会直接抛 OpenAIError（实测）。这些路径在离线用例里**永远不会被真正调用**。
+#   · `GRADIO_ANALYTICS_ENABLED=False` 是**双保险**：`api/conftest.py` 里已设，
+#     但那边一旦被绕过，Gradio 的遥测非 daemon 线程会**卡住进程退出**（详见 conftest 注释）。
+#
+# ⚠️ 尚未接进 CI 的（**已登记，不是忘了**）：
+#   · L3 集成测试（`-m integration`）—— 需要真 postgres + DashScope 外网，进去就是 flaky
+#   · 既有测试里**另有 27 条也是离线的**（死 postgres 下实测 48 passed，其中 21 条来自本文件）
+#     加进来只需扩 --ignore 名单，但那是另一次改动（一 PR 一逻辑变更）
 
 on:
   push:
@@ -31,3 +46,49 @@ jobs:
 
       - name: 编译检查 api/ 下全部 Python 文件
         run: python -m compileall api/ -q
+
+  offline-tests:
+    name: 离线测试（/rag/search 闭环 · redis）
+    runs-on: ubuntu-latest
+
+    services:
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+          cache-dependency-path: api/requirements-test.txt
+
+      - name: 安装测试依赖
+        # requirements-test.txt 是 requirements.txt 的**只做减法**版 ——
+        # 剔掉了 sentence-transformers/torch 等本仓懒加载用不到的重包。
+        run: pip install -r api/requirements-test.txt
+
+      - name: 跑离线测试
+        env:
+          GRADIO_ANALYTICS_ENABLED: "False"
+          REDIS_HOST: localhost
+          REDIS_PORT: "6379"
+          # ⚠️ 以下全部是 **dummy 值**，不是凭据。任务书：
+          #   `import main` 在导入期构造 OpenAI 客户端，空 key 会抛 OpenAIError；
+          #   离线用例不会真正调用这些服务，故给个非空占位即可。
+          DASHSCOPE_API_KEY: ci-dummy-not-a-real-key
+          LLM_API_KEY: ci-dummy-not-a-real-key
+          POSTGRES_PASSWORD: ci-dummy-not-a-real-key
+          JWT_SECRET_KEY: ci-dummy-not-a-real-key
+          LOGIN_PASSWORD: ci-dummy-not-a-real-key
+        run: pytest api/test_rag_search.py -m "not integration" -v
