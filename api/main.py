@@ -509,9 +509,23 @@ app.mount("/static", StaticFiles(directory=static_dir), name="static")
 # 访问路径：http://localhost:8000/static/stream_test.html
 
 # ==================== 挂载Gradio成本统计可视化面板 ====================
-from cost_dashboard import create_dashboard
-import gradio as gr
-# 访问面板 启动服务后，浏览器打开 http://localhost:8000/dashboard。
-dashboard = create_dashboard()
-app = gr.mount_gradio_app(app, dashboard, path="/dashboard")
+# ⚠️ 2026-09-17 重构 ⑥ 切开点 4：加环境门控。业务方裁决取 **A 方案（默认值保持现状）**。
+#
+# 🔴 **收益口径必须说清（不要读成"不再拉"）**：
+#    这给的是「**可以**不拉 gradio + matplotlib」，**不是**「不再拉」。
+#    因为默认值取 `"true"`（= 保持改动前的行为），**默认路径上 `import main` 仍然会拉它们**。
+#    只有**显式设 `ENABLE_DASHBOARD=false`** 时才真正省掉 ——
+#    门关时 `cost_dashboard` 整个不会被 import，gradio / matplotlib 随之都不进 `sys.modules`。
+#
+# ⚠️ 下面最后一行 `app = gr.mount_gradio_app(app, ...)` **会重绑定 `app`**（不是原地修改）。
+#    门关时该重绑定**不发生** ⇒ **`/dashboard` 路由不存在**、且 `len(app.routes)` 会**变小**。
+#    这是"关掉面板"的应有语义；默认分支（门开）与改动前**逐位一致**。
+if os.getenv("ENABLE_DASHBOARD", "true") == "true":
+    from cost_dashboard import create_dashboard
+    import gradio as gr
+    # 访问面板 启动服务后，浏览器打开 http://localhost:8000/dashboard。
+    dashboard = create_dashboard()
+    app = gr.mount_gradio_app(app, dashboard, path="/dashboard")
+else:
+    logger.info("ENABLE_DASHBOARD=false —— 已跳过成本看板挂载（不导入 gradio / matplotlib）")
 

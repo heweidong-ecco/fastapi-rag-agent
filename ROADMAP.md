@@ -33,7 +33,12 @@
     - 门:`compileall` OK · `14`/`59` 未变 · pytest **37 passed** · 向后兼容已 grep 三个调用方(`api_v1_agent.py:19` · `agent_graph_advanced_learning.py:45` · `mcp_server.py:11,14`)
     - **🔴 工具描述逐字未变**:用 `ast` 取前后两版的 docstring 对比,`execute_python`/`calculator`/`date_today` **三者全部逐字相同**——**那是 LLM 的接口,不能动**
     - **R2 真调用**:`execute_python("print(6*7)")`→`'42\n'` · **沙箱仍拦 `import os`** ⇒ **安全边界没被削弱**
-  - ⬜ **切开点 4–5 待做**:④ `main.py` gradio 挂载加环境门控 · ⑤ `api_v1_rag.py` 模块级 LLM 对象搬进函数
+  - ✅ **切开点 4(2026-09-17)**:`main.py` 的 Gradio 挂载加环境门控(`ENABLE_DASHBOARD`,**默认 `"true"` 保持现状**,业务方裁决 A 方案)
+    - 🔴 **收益口径**:给的是「**可以**不拉 gradio+matplotlib」,**不是**「不再拉」——**默认路径上仍然拉**;只有显式设 `false` 才真省掉。**这条写进了代码注释**,免得后人按错的预期用
+    - **两条分支都测**(只测默认分支等于没测收益分支):🅰默认 `14`/`59` 逐位一致、gradio 仍拉 · 🅱`false` 时 `13`/`59`、`/dashboard` 消失、gradio 与 matplotlib **都没拉**
+    - 📌 `OPENAPI_PATHS` 两边都是 59 —— `/dashboard` 是 **mount 不是 OpenAPI 路由**;`app.routes` 掉 1 正印证计划 R5 那个坑:**L516 会重绑定 `app`**
+    - 门:`compileall` OK · pytest **37 passed**
+  - ⬜ **切开点 5 待做**:⑤ `api_v1_rag.py` 模块级 LLM 对象搬进函数
   - ⚠️ **严格串行,一个切开点一个 commit** —— 否则回滚粒度退化成"全部重来"
 - **下一步**(在该计划之内):⬜ **⑥ 切开点 4 → 5 → ⑦ M6 单模块测试闭环**(① ② ③ 已完成)
 - **⏸ 挂起项(新会话须知,别重复踩)**:
@@ -41,6 +46,13 @@
   - **凭据④ `JWT_SECRET_KEY`** ⬜ 待办 —— `.env` 里是 169 字符、以 `eyJhbG` 开头(**像是把某个 JWT 本身填进了密钥字段**)。换掉会让**所有已签发 token 失效**
   - **`rag-api-eval` 容器是停着的** —— 2026-09-16 为了让评测打到当前代码而停(它跑的是 **2026-07-01 旧镜像**)。`agent-eval-gate` 的 harness 每次会自己 `docker run` 重建,**不用手动管**
   - **评测门判据待裁决**:同一份代码连跑三次,红队突破 **0/1/0** ⇒ **零容忍硬门 + 非确定性被测 = 会随机阻断**。属 `agent-eval-gate` 的判据,**本仓未动**(详见 `CHANGELOG.md`)
+  - **🔴 本机硬件实况(2026-09-17 实测,回答过"是硬件不够还是代码问题")**:
+    **8.0 GB 物理内存** · 4 核 Intel i5-7600 · 磁盘可用 **452 GB(磁盘完全不是瓶颈)** · Docker 配额 **3.84 GiB** · 当前空闲内存 **≈105 MB**
+    - **结论:硬件不够是真的,但只卡住【两条路】**:① `docker build` 完整镜像(宿主 8GB + Docker 只分 3.84GB)② `mode=accurate/full` 与 `rerank_search`(要 torch ~1GB + 模型 `bge-reranker-v2-m3` **2.3GB**)
+    - **⚠️ 不是代码/业务问题 —— 恰恰相反,代码是对的**:`reranker.py:14` 是**真懒加载**、默认 mode 是 `accurate_norerank` ⇒ **默认路径根本不碰 torch**,所以"没装 torch"**不会让应用起不来**
+    - ⇒ **硬件挡住的是【验证覆盖面】,不是【业务能力】**。换大内存机器 `mode=accurate/full` 就能验,**产品本身没有缺陷,是验证有个洞**
+    - ⚠️ 准确说法是**"没有余量、高风险"**,**不是"物理上不可能"**(8GB 塞 torch+模型≈3.3GB 峰值,理论塞得下但会疯狂 swap)。业务方 2026-09-17 裁决:**不值,不去撞**
+    - (已实测确认:torch / transformers / sentence_transformers / cv2 / ragas / datasets / locust **一个都没装**;gradio 与 matplotlib **有**)
   - **本机环境**:`venv/`＝本仓自建隔离环境(Python 3.10.10,159 包/888M,**不含 torch 系**、**未装 alembic** —— 故 `alembic` CLI 跑不了;且在 `api/` 下 `import alembic` 会命中本地 `api/alembic/` **迁移目录**造成同名遮蔽,报 `No module named 'alembic.config'`,**这不算装坏了**);`.env` 有两个备份(`.env.bak-20260916*`,含全部密钥、已被 gitignore);**推送 github 间歇性挂死,先重试 2–3 次**别怀疑配置
 - **已完成**:`docs/CODE_INVENTORY.md` —— 8 组代际并存、代码量(≈9,280 行)、工作量评估(删完约 −2,000 行 / 5–8 天)、逐处裁决建议。**M5 的裁决(留/并/删)本身尚未开始**
 - **过程记录(常驻机制,非一次性文档)**:
