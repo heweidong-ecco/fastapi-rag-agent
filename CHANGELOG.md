@@ -77,6 +77,25 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **重构 ⑥ 切开点 5：`api_v1_rag.py` 的 LLM / Agent 对象改为惰性单例**（M5 · 2026-09-17）。**⑥ 的最后一步。**
+
+  **起因**：两处在**模块层**直接构造对象 —— `llm_stream = ChatOpenAI(...)` 与**一整段** agent 装配（`llm` / 三个 `@tool` / `tools` / `prompt` / `agent` / `agent_executor`）。
+  后果：`import api_v1_rag`（进而 `import main`）**在导入期就构造 LLM 与 Agent**，哪怕进程**从不打开** `/rag/stream_search` 或 `/ws/agent`。
+
+  - **改法**：各搬进**惰性单例 getter**（`get_llm_stream()` / `get_agent_executor()`），首次使用时才建、之后复用（**与原先单例语义一致**）；`langchain*` 导入一并移进函数内。
+  - ⚠️ **工具 docstring 与 prompt 模板逐字未改** —— 那是**给 LLM 看的接口**
+
+  | 项 | 结果 |
+  |---|---|
+  | `compileall` | SYNTAX OK |
+  | **🔴 docstring 逐字未变** | **全部 11 个**（含搬运的 3 个）**逐字相同** ✓ · **prompt 模板亦逐字相同** ✓ |
+  | `import main` | `routes=14` · `OPENAPI_PATHS=59`（逐位未变） |
+  | **🎯 核心主张** | 新版 `import main` 后 `_llm_stream=None` 且 `_agent_executor=None`；**对照旧版**：模块层直接赋值 **6 个对象** |
+  | **R2 真调用** | `get_llm_stream()`→`ChatOpenAI`(streaming=True) · `get_agent_executor()`→`AgentExecutor`(**3 工具**，与改前一致) · **两者都验了单例** |
+  | `pytest` | **37 passed / 1 skipped / 0 failed** |
+
+  - 📌 收益口径（沿用 `DEC-010`）：**不是**"不再 import langchain"，而是「**不碰这两个接口的进程，永远不构造这两个对象**」。
+
 - **重构 ⑥ 切开点 4：`main.py` 的 Gradio 挂载加环境门控**（M5 · 2026-09-17）。业务方裁决取 **A 方案 —— 默认值保持现状**。
 
   **起因**：`main.py:512` 的 `from cost_dashboard import create_dashboard` 在**模块层**执行，而 `cost_dashboard.py:5,6,8` 是模块层 `import gradio` / `import matplotlib` ⇒ **`import main` 必拉这两个包**。
