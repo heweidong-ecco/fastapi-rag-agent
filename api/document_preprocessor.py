@@ -167,8 +167,15 @@ class DocumentPreprocessor:
         """
         对文档块进行语义去重。
         如果两个块的语义相似度超过阈值，只保留第一个。
-        
-        注意：这个方法需要 sentence-transformers，只在批量入库时使用。
+
+        注意：这个方法需要 sentence-transformers。
+
+        ⚠️ 2026-09-20 核实（§三·B4）：**当前无任何调用方** ——
+           唯一的调用点（`api/api_v1_rag.py` 的批量入库路径）**已被注释掉**：
+               # chunks = preprocessor.deduplicate_chunks(chunks)
+           ⇒ 原 docstring 写「**只在批量入库时使用**」是**半真半假**：批量入库的代码还在，
+             但那句调用**是注释状态** ⇒ **它现在根本没被使用**。已把该句改掉，避免误读。
+           ⇒ **保留**（去重能力本身有价值），但**别以为它在生效**。
         """
         try:
             from sentence_transformers import SentenceTransformer, util

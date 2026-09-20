@@ -209,6 +209,40 @@ All notable changes to this project will be documented in this file.
 - **`docs/复盘/`** —— 过程错误记录机制,含 `模板-复盘.md` 与当日 3 份复盘。
 - **`CHANGELOG.md`** —— 本文件。
 
+### Removed
+
+- **§三 清理 · B 类（死代码 / 多余调用）—— 删 5 处、保留并标注 4 处**（2026-09-20 · 分支 `chore/section3-cleanup`）。
+
+  **⚠️ 动手前每条判据都【重跑过】** —— 因为 §五 已证明审计的"孤儿"结论会错（`get_thread_cost` 其实是活的）。
+
+  **删除的（零外部调用，已当场核实）**：
+
+  | # | 位置 | 是什么 | 判据 |
+  |---|---|---|---|
+  | **B5** | `api/db.py` `get_bm25_index()` | **转发壳**（`return _impl()`） | `grep -rn 'db\.get_bm25_index\|from db import.*get_bm25_index' api/` → **0** |
+  | **B6** | `api/db.py` `get_all_documents()` | 同上 | 同上 → **0** |
+  | **B7** | `api/db.py` `DB_CONFIG = {...}` | 常量 | `grep -rn '\bDB_CONFIG\b' api/` → 只有定义那一行 |
+  | **B8** | `api/rag_pipeline.py` 类属性 `preprocessor` | **类属性**（不是实例属性） | `grep -rn '\.preprocessor' api/` → **0**；且实测 `'preprocessor' in vars(RAGPipeline)` = True、实例上没有 ⇒ 只在类定义时构造一次，从没人读 |
+  | **B10** | `api/plan_execute.py:128` | **纯重复的 LLM 调用** | 见下 |
+
+  **B10 是这批里唯一"省钱"的一条**：`dynamic_input = generate_dynamic_input(...)` 算完之后**根本没用**
+  （下一行的 `execute_step_with_quality_check` 签名里没这个参数），**而该函数内部自己又调了一遍 `generate_dynamic_input`**
+  （`:264`）**而且真的用了**（`:267`）。⇒ 原来那句 = **每走到这个分支白花一次 LLM 调用**。删掉 = **纯收益、零行为影响**。
+
+  **保留并加注释的（B1–B4）**：`sort_blocks_by_reading_order` · `table_to_text` · `parse_markdown_to_plain` ·
+  `deduplicate_chunks` —— 它们**确实零调用**，但都是**成体系的能力**（双栏排版排序 / 表格转文本 / markdown 解析 / 语义去重），
+  **很可能是给未来调用者预留的**，删了要用得重写。⇒ **保留，但在 docstring 里写明「当前无调用方」**。
+  - ⚠️ 其中 `deduplicate_chunks` 的原 docstring 写「**只在批量入库时使用**」是**半真半假** ——
+    批量入库的代码还在，但那句调用**是注释状态**（`api_v1_rag.py:291`）⇒ **它现在根本没被使用**。已改正。
+
+  **⬜ B9 未动，待业务方裁**：`api/tool_health.py` 的 `FALLBACK_MAP` + `get_fallback_tool`（「自动降级」）——
+  零调用，**且它引用的名字也不存在**（`fallback_search`、`chat` 全仓无定义）⇒ 接了也不工作。
+  而**真正在做降级的是 `api/mcp_server.py:47-61`**（把 `UNHEALTHY` 的工具**移出清单**）。
+  ⇒ 建议**删代码 + 把模块 docstring 里「与自动降级」那句改成实话**。
+
+  **验证（改完立刻重跑）**：逐文件 `ast.parse` ✅ · 离线层 **73 passed / 1 skipped / 11 deselected** ·
+  `ROUTES=13` / `OPENAPI_PATHS=59` 与改动前一致 · 删除项逐条复核确认已不在。
+
 ### Changed
 
 - **§三 清理 · A 类（11 条"注释说 A、代码做 B"）全部修正**（2026-09-20 · 分支 `chore/section3-cleanup`）。

@@ -124,9 +124,12 @@ def execute_plan_with_replan(plan: List[Dict], user_goal: str = "") -> str:
             current_plan.pop(0)
             continue
 
-        # 1. 动态生成输入
-        dynamic_input = generate_dynamic_input(step, context, user_goal)
-        
+        # 1. 动态生成输入 —— ⚠️ 2026-09-20 删（§三·B10）：
+        #    此处原有一行 `dynamic_input = generate_dynamic_input(step, context, user_goal)`,
+        #    但**下面那行根本不用它**（`execute_step_with_quality_check` 的签名里没有这个参数）。
+        #    ⇒ 它是**纯重复**：这个函数**内部自己就调 `generate_dynamic_input`**（见 :264），
+        #      而且真的用了（:267）。⇒ 原来那句 = **每走到这个分支白花一次 LLM 调用**。
+        #
         # 2. 执行步骤（带重试）
         step_result = execute_step_with_quality_check(step, context, user_goal)
         

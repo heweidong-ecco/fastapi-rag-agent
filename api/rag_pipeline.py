@@ -52,8 +52,9 @@ class RAGPipeline:
             temperature=0
         )
 
-    from document_preprocessor import DocumentPreprocessor
-    preprocessor = DocumentPreprocessor()
+    # ⚠️ 2026-09-20 删（§三·B8）：此处原有类属性 `preprocessor = DocumentPreprocessor()` ——
+    #    **全仓零引用**（`grep -rn '\.preprocessor' api/` = 0）。它只是**在类定义时构造一次**，
+    #    从没有任何方法读它。（真正做预处理的实例是在各方法内部**就地构造**的。）
 
     async def search_async(
         self,
