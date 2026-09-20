@@ -282,7 +282,30 @@ All notable changes to this project will be documented in this file.
   **读出了 `last_time` 却从不用它回填**（`reset_time` 用的是 `now`）⇒ 标准令牌桶应当是
   `tokens += (now - last_time) * rate` ⇒ **桶可能永不恢复**。改它 = 改限流行为 ⇒ 待业务方裁。
 
+### Added
+
+- **§三·D2 —— 给两个 `*_impl.py` 补上最小单测（10 条），兑现那句"可脱离 langchain 单测"**（2026-09-20）。
+
+  `code_executor_impl.py` / `simple_tools_impl.py` 的 docstring 一直声称「**可脱离 langchain 单测**」，
+  但**全仓唯一引用者是各自的 `@tool` 外壳，没有任何测试在跑它们** ⇒ 那句声明**从未被验证过**。
+
+  ✅ **先核声明本身**：实测两个模块**只 import 标准库**（一个是 `datetime`，另一个是 `io` + `contextlib`）
+  ⇒ **能力是真的**，只是没人用。⇒ 按业务方意见：**补测试，而不是改声明**。
+
+  **为什么"补测试"比"改声明"值**：这次重构（⑥ 切开点 3）把沙箱逻辑抽成纯 stdlib，
+  目的就是让它可测；**没有测试，下次改动静悄悄把 langchain 依赖塞回去，没人会发现**。
+  新增用例 `test_impl_modules_do_not_import_langchain` 就是那条**结构性锁**（用 `ast` 查导入）。
+
+  新增 `api/test_impl_modules.py`（**10 条**）：沙箱白名单（含运行期 `open` 探针）· stdlib 执行与 stdout 捕获 ·
+  无输出/出错/超长截断 · 自然语言拒绝 · `calculator_impl` 与 `date_today_impl` · 以及上面那条导入锁。
+
+  🔴 **写用例时核出一条新发现 N17（未修、已登记 §三·3.10）**：沙箱的 `ALLOWED_BUILTINS`
+  **没有任何异常类** ⇒ 被执行的代码**不能写 `try/except ValueError`、也不能 `raise ValueError(…)`**
+  （实测先撞 `NameError`）。⚠️ 这条限制**从代码上看不出来**（"白名单里没有异常类"是**沉默的**），
+  而它直接影响「LLM 写出来的代码能不能跑」。⇒ 已固化成一条会红的用例，放开时会提醒更新记录。
+
 ### Fixed
+
 
 
 - **§三 清理 · C 类（4 条有行为影响的）—— C1/C2/C3 已修，C5 改成有上限（附红→绿用例）**（2026-09-20）。
