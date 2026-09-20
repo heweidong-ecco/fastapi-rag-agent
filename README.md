@@ -317,7 +317,7 @@ curl -s -X POST localhost:8000/api/v1/rag/hybrid_search -H "Authorization: Beare
 
 | # | 限制 | 实测证据 | 影响 |
 |---|---|---|---|
-| 1 | **浏览器工具在本机不可用** | `venv/bin/playwright install chromium` ⇒ `ERROR: Playwright does not support chromium on mac13`（本机 macOS **13.6**；Playwright 1.62 要 chromium **1234**，缓存里是 1228） | `fetch_webpage` / `screenshot_webpage` 健康检查恒为 unhealthy（**环境天花板，非代码缺陷**）—— 目前工具健康 **4/6** |
+| 1 | 🔴 **浏览器工具在本仓的【任何部署方式】下都不可用** | **2026-09-20 更正**：原文写「**在本机**不可用 …… **环境天花板**」—— ⚠️ **那是把"本仓部署方式都不装浏览器"说成了"我这台机器的毛病"**。实测：`api/Dockerfile` 与 `docker-compose.yml` **都没有 `playwright install`**（全仓 4 处提及它，**全是文档在解释它跑不了**，无一处是去装）⇒ **`python:3.10-slim` 里同样没有浏览器，换机器 / 用 Docker 一样跑不了。**<br>另：本机 macOS **13.6** 上 `playwright install chromium` 直接报 `does not support chromium on mac13`（Playwright 1.62 要 chromium **1234**，缓存是 1228） | **能力层面**：`fetch_webpage` / `fetch_webpage_html` / `screenshot_webpage` **三个都跑不了**（实测 `BrowserType.launch: Executable doesn't exist`）。<br>**体现层面**：工具健康 **4/6** 只反映 MCP 注册表里的那 **2** 个（`fetch_webpage` / `screenshot_webpage`）；第三个 `fetch_webpage_html` **压根没注册进 MCP** —— 那是另一个缺陷（见 `docs/待办登记…` §一·C）。<br>⚠️ **要不要让它真能用，是产品决策**（在 Dockerfile 里装 chromium，镜像 +约 300MB） |
 | 2 | **`mode=accurate/full` 与重排序未验** | 本机 **8GB 内存 / 4 核**，装不下 torch + `bge-reranker-v2-m3`（2.3GB） | 默认模式是 `accurate_norerank`（**不碰 torch**），故产品可用；但这两条路径**本机验不了** |
 | 3 | **性能数字全部未实测** | 见上方「性能目标」段 | 不得作为选型/承诺依据 |
 | 4 | **知识库语料良莠不齐** | `documents` 表 **35/77 行是测试数据**（`source` = `test` 24 行 + `test_docs` 11 行），含「测试文档一」这类；其余是正经语料 | 结果**时好时坏** —— 同一个问题可能命中切题的（如 `eval_dataset.json#23`）也可能命中测试垃圾。**演示前建议先灌一份干净语料** |

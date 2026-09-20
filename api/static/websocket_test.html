@@ -30,7 +30,13 @@
         function connect() {
             if (ws && ws.readyState === WebSocket.OPEN) return;
             
-            ws = new WebSocket('ws://localhost:8000/ws/agent');
+            // 🩹 2026-09-20 修：原文写死 `ws://localhost:8000/ws/agent` —— **两处都错**：
+            //   ① 路径错：端点真实路径是 `/api/v1/ws/agent`（`api_v1_rag.py:45` 的 router 前缀是 `/api/v1`）
+            //      ⇒ 实测 `new WebSocket('/ws/agent')` 直接被拒（WebSocketDisconnect）
+            //   ② 写死 host/port：从别的机器或别的端口打开就连不上
+            // ⇒ 改为**从当前页面推导**（页面本身由 `/static/...` 提供，同源）。
+            const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(`${proto}//${location.host}/api/v1/ws/agent`);
             
             ws.onopen = () => {
                 document.getElementById('status').textContent = '已连接';
