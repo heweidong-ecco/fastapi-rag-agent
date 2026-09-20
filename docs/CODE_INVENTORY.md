@@ -180,7 +180,7 @@ remaining = budget - used_cost                # ← Token 数 减 元
 
 | 对象 | 原因 |
 |---|---|
-| `archive/scripts/evaluate_with_ragas.py`(218) + `eval_dataset.json`(37 条) + `ragas_report.json` + `ragas_detailed_report.json` | **全仓唯一的评估链路与唯一的历史评估证据**。ROADMAP M7 写着"RAGAS 复跑";`api/requirements.txt` 里还装着 `ragas`、`datasets`。要删必须先决定是恢复进 `api/` 还是放弃评估能力 |
+| `api/evaluate_with_ragas.py`(218) + `api/eval_dataset.json`(37 条) + `api/ragas_report.json` + `api/ragas_detailed_report.json` | **全仓唯一的评估链路与唯一的历史评估证据**。ROADMAP M7 写着"RAGAS 复跑";`api/requirements.txt` 里还装着 `ragas`、`datasets`。<br>✅ **2026-09-20：已按本条的建议【恢复进 `api/`】并入库**（原路径是 `archive/scripts/` + `archive/artifacts/`）。⚠️ 但**未实跑验证** —— 本机 venv 未装 `ragas`/`datasets` |
 | `archive/scripts/data_retention.py`(72) | 它是 `api/db.py` 里已建好的 `cost_records_archive` 表(L155)的**唯一操作者**。删了这张表永远是死表 |
 | §3-3 的 13 处错位 docstring | 是真文档,位置错了而已 —— 上移,别删 |
 | `api/reranker.py` + `api/LEARNING_INDEX.md` | 已合并完成的正面样例,留着当范式 |
