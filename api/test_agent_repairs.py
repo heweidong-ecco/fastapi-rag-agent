@@ -589,6 +589,15 @@ def test_react_subgraph_sets_final_output(monkeypatch):
             return _Bound()
 
     monkeypatch.setattr(L, "ChatOpenAI", _FakeLLM)
+    # ⚠️ **必须同时挡掉记忆注入那条路** —— `agent_decide` 会调
+    #    `inject_memories_to_prompt` → `search_user_memory` → **mem0 自己去连
+    #    DashScope 做 embedding**。不挡的话这条用例就**依赖真凭据**：
+    #    本地有真 key 所以"绿"，CI 是 dummy key ⇒
+    #    `openai.AuthenticationError: 401 Incorrect API key` ⇒ **CI 红**。
+    #    🔴 这正是"本地绿 ≠ CI 绿"的实例 —— 事后我用 **CI 同款 dummy 环境**
+    #      本地复现了它（`DASHSCOPE_API_KEY=ci-dummy-… pytest …` ⇒ 1 failed）。
+    #    ⇒ **教训：新用例写完，要用 CI 的环境跑一遍，别只在有真 key 的本机跑。**
+    monkeypatch.setattr(L, "inject_memories_to_prompt", lambda prompt, state: prompt)
 
     graph = L.create_react_subgraph()
     out = graph.invoke({"messages": [HumanMessage(content="帮我规划学习路线")]})
