@@ -95,7 +95,8 @@ class AgentState(TypedDict):
     memory_space: str       # 新增：当前使用的记忆空间
 
 # ==================== 创建 通用的“记忆注入”工具函数 ====================
-from memory_store import search_user_memory
+# ⚠️ 2026-09-20 删（D1/pyflakes 报 redefinition）：此处的 `from memory_store import search_user_memory`
+#    与文件下方**逐字重复**，且下面那份在它之前从未被使用 ⇒ 删此处、保留下方。
 
 def inject_memories_to_prompt(original_prompt: str, state: AgentState) -> str:
     """

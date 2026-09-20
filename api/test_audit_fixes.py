@@ -146,3 +146,92 @@ def test_no_duplicate_method_definitions_in_preprocessor():
         "同一个类里有【同名方法定义多次】—— 先定义的那份**永远不会生效**，"
         "改它不会报错、也不会有任何效果：\n  " + "\n  ".join(problems)
     )
+
+
+# ===========================================================================
+# §三·A9/A10 · 函数体里不能有【孤立的 docstring】（不是首句的裸字符串表达式）
+# ===========================================================================
+def test_no_stray_docstrings_in_function_bodies():
+    """`api/` 下**不允许**出现"孤立的 docstring" —— 函数体里【不是首句】的裸字符串表达式。
+
+    🔴 实测（2026-09-20）：全仓有 **8 处**这种写法（审计只列了 6 处，`ast` 检查又抓出 2 处 ——
+       `api_v1_rag.py:261` 的 `upload_document()`、`main.py:503` 的 `graceful_shutdown()`）。
+       它们**全是空操作**（Python 求值后丢弃），典型来历是**docstring 被后插入的代码挤开**：
+
+           def f():
+               log_something()          # ← 后插进来的
+               <那句本该是 docstring 的字符串>   # ← 于是成了空操作，f 实际上没有 docstring
+
+       ⇒ **函数看起来"有文档"，但 `f.__doc__` 是 None**，`help()` / IDE 提示 / 自动文档**全拿不到**。
+
+    ⚠️ 本段注释里**故意不写出三引号** —— 写的话会把本 docstring 提前闭合（我第一版就这么错的）。
+
+    ⚠️ **为什么不能用"跑一下看行为"来测**：它是**纯空操作**，跑任何调用都通过
+       ⇒ 只能用**结构判据**（`ast`）守。
+
+    📌 **与 `CLAUDE.md` 修复记录 #7、以及本文件里那条"重复方法定义"用例同型**：
+       都是"**代码与它看起来的样子不一致**"，且都只能靠结构判据发现。
+    """
+    roots = pathlib.Path(__file__).parent
+    hits = []
+    for f in sorted(roots.glob("*.py")):
+        try:
+            tree = ast.parse(f.read_text(encoding="utf-8"))
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for i, stmt in enumerate(node.body):
+                if i == 0:
+                    continue          # 首句是正常 docstring
+                if (isinstance(stmt, ast.Expr)
+                        and isinstance(stmt.value, ast.Constant)
+                        and isinstance(stmt.value.value, str)):
+                    hits.append(f"{f.name}:{stmt.lineno}  在 {node.name}() 里（函数体第 {i+1} 句）")
+
+    assert not hits, (
+        "函数体里有【孤立的 docstring】（空操作 ⇒ 该函数实际没有 docstring）：\n  "
+        + "\n  ".join(hits)
+        + "\n修法：上移到 `def` 正下方（若函数已有 docstring，则把那句合并进去并删掉）。"
+    )
+
+
+# ===========================================================================
+# §三·C5 · 缓存装饰器"抢不到锁"时【不能无限递归】
+# ===========================================================================
+def test_cached_tool_does_not_recurse_forever_when_lock_never_acquired(monkeypatch):
+    """`cached_tool` 在**始终抢不到锁**时，必须**有上限**，不能无限递归。
+
+    🔴 实测（2026-09-20）：原实现在 `else` 分支里
+           time.sleep(0.1); return wrapper(*args, **kwargs)
+       ⇒ 如果锁**一直**拿不到（持有者崩了没删锁、或一直被别的请求续上），
+         **递归没有上限** ⇒ 栈溢出 / 无限等待。
+
+    ⚠️ 这是**并发正确性**问题，不是风格问题 —— 它只在高并发下暴露，
+       而一旦暴露就是**进程级**故障（RecursionError 把整个请求打死）。
+
+    ✅ 期望行为：等一小段（有上限）之后**降级为直接执行**（这次不写缓存），
+       而不是继续递归 —— 缓存是优化，**不该因为它拿不到就拒服务**。
+    """
+    import tool_cache as T
+
+    # 永远抢不到锁
+    monkeypatch.setattr(T.redis_client, "set", lambda *a, **k: False)
+    monkeypatch.setattr(T.redis_client, "get", lambda *a, **k: None)
+    monkeypatch.setattr(T.redis_client, "delete", lambda *a, **k: None)
+    # 把等待缩短，否则用例会慢（原实现 0.1s × 上千次递归）
+    monkeypatch.setattr(T.time, "sleep", lambda *a, **k: None)
+    monkeypatch.setattr(T, "_LOCK_WAIT_SECONDS", 0.2, raising=False)
+
+    calls = []
+
+    @T.cached_tool(expire_seconds=1)
+    def _probe(x):
+        calls.append(x)
+        return x * 2
+
+    result = _probe(3)          # ⚠️ 老实现会在这里 RecursionError
+
+    assert result == 6, "抢不到锁时应当【降级为直接执行】，把结果正常返回"
+    assert calls == [3], "且只应真正执行一次（不能重复调用工具函数）"

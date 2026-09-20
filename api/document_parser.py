@@ -93,6 +93,10 @@ def sort_blocks_by_reading_order(blocks: List[Dict]) -> List[Dict]:
     """
     将文本块按阅读顺序排序（从上到下，从左到右）。
     这是处理双栏排版的核心逻辑。
+
+    ⚠️ 2026-09-20 核实（§三·B1）：**当前无任何调用方**（`grep -rn` 全仓 0 次）。
+       ⇒ **保留**（它是双栏排版的核心能力，删了要用得重写），但**不要以为它在生效**。
+         如果哪天要用，先确认调用它的那条解析路径也真的跑过。
     """
     # 按 y 坐标分组（同一水平线的文本块归为一组）
     y_tolerance = 5  # 5 像素以内的视为同一行
@@ -119,7 +123,11 @@ def sort_blocks_by_reading_order(blocks: List[Dict]) -> List[Dict]:
     return rows
 # ==================== 扩展：将表格转为结构化文本存入知识库:辅助函数 ====================
 def table_to_text(table_data: list) -> str:
-    """将表格转换为可读的文本描述，用于存入知识库"""
+    """将表格转换为可读的文本描述，用于存入知识库。
+
+    ⚠️ 2026-09-20 核实（§三·B2）：**当前无任何调用方**（`grep -rn` 全仓 0 次）。
+       ⇒ **保留**（表格→文本是入库链路上有价值的一环），但**不要以为它在生效**。
+    """
     if not table_data:
         return ""
     
@@ -170,6 +178,11 @@ def parse_markdown_to_plain(file_path: str) -> str:
     解析 Markdown 文件。
     策略二：转换为纯文本（去除所有 Markdown 标记）。
     适合需要去除格式符号、只保留文字内容的场景。
+
+    ⚠️ 2026-09-20 核实（§三·B3）：**当前无任何调用方** ——
+       全仓唯一出现处是 `parse_markdown()` 里一句**注释**：
+           return parse_markdown(file_path)  # 或 parse_markdown_to_plain
+       ⇒ **保留**（是 `parse_markdown` 的备用策略），但**别以为它在生效**。
     """
     import markdown
     from bs4 import BeautifulSoup

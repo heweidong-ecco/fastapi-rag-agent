@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 
 from config import validate_config
-from logger_config import logger,setup_logger
+from logger_config import setup_logger  # ⚠️ 2026-09-20 删 `logger`（D1/pyflakes 报 redefinition）：:59 会 `logger = setup_logger()` 覆盖它，覆盖前从未使用
 from exceptions import AppException, ErrorCode
 from api_v1 import router as public_router
 from api_v1_rag import router as rag_router
@@ -225,8 +225,13 @@ class QuotaMiddleware(BaseHTTPMiddleware):
             info = quota_limiter.get_quota_info(user_name, quota)
             if not quota_limiter.increment_and_check(user_name, quota):
                 # 配额已用完，返回429，使用标准化错误格式
-                remaining = quota_limiter.get_remaining(user_name, quota)
-                role = get_user_role(user_name)
+                # ⚠️ 2026-09-20 删（D1/pyflakes：局部变量赋值后从未使用）：此处原有
+                #     remaining = quota_limiter.get_remaining(user_name, quota)
+                #     role      = get_user_role(user_name)
+                #   两行 —— 但下面的响应体里**没有用它们**：`role` 是**又调了一遍**
+                #   `get_user_role(user_name).value`，而 `remaining` 直接硬编码成 `0`
+                #   （在"配额已用完"这条分支里，它本来就恒为 0 ⇒ 硬编码是对的）。
+                #   ⇒ 这两行是死代码，删掉。行为不变。
                 response = JSONResponse(
                     status_code=429,
                     content={
@@ -499,8 +504,12 @@ async def startup_event():
 
 @app.on_event("shutdown")
 async def graceful_shutdown():
+    """应用关闭时执行清理操作。
+
+    ⚠️ 2026-09-20 修：这段 docstring 原先**躺在 `close_pool()` 之后**，是**空操作** ——
+       函数本身**没有 docstring**。已上移到签名正下方（代码一行未动）。
+    """
     close_pool()  # 关闭连接池
-    """应用关闭时执行清理操作"""
     logger.info("收到关闭信号，开始优雅关闭...")
 
     # 1. 停止接收新请求（FastAPI 自动处理）

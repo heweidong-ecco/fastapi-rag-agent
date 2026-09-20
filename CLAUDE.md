@@ -140,7 +140,7 @@ locust -f locustfile_hybrid.py
 | 文件 | 职责 |
 |------|------|
 | `api/api_v1.py` | 公开接口（`/`）、认证（`/auth/login`、`/auth/refresh`）、管理员创建用户、调试接口（查看缓存状态、限流配额、Embedding 性能对比） |
-| `api/api_v1_rag.py` | 文档管理（`/rag/insert`、`/rag/batch-insert`、`/rag/upload`）、检索（`/rag/pg_search`、`/rag/hybrid_search`）、流式生成（`/rag/stream`，SSE 实现带真中断）、带引用的答案生成、WebSocket Agent（`/ws/agent`、`/ws/test`）、文档清理规则 |
+| `api/api_v1_rag.py` | 文档管理（`/rag/insert`、`/rag/insert_batch`、`/rag/upload_document`）、检索（`/rag/pg_search`、`/rag/hybrid_search`、`/rag/rerank_search`、`/rag/rewrite_search`、`/rag/search`）、流式生成（`/rag/stream_search`，SSE 实现带真中断）、带引用的答案生成、WebSocket Agent（`/api/v1/ws/agent`、`/api/v1/ws/test`）、文档清理规则 |
 | `api/api_v1_agent.py` | LangGraph Agent 对话（`/agent/langgraph_chat`）、人工审批节点（`/agent/approve`）、多分支路由高级 Agent（`/agent/advanced_chat`）、Plan-Execute 模式、长期记忆（Mem0）、浏览器工具（Playwright）、Python 代码执行器、MCP Client 对话（`/agent/mcp_chat`）、MCP 工具列表、工具健康检查、Token 预算追踪与成本看板数据、执行轨迹可视化 |
 
 ### RAG 检索管线（`api/rag_pipeline.py`）
@@ -253,5 +253,5 @@ Agent 配套基础设施：
 - **DashScope LLM 免费额度**：本机测试时 embedding API（`text-embedding-v2`）正常，但 **chat 模型（qwen-turbo/qwen-plus）免费额度已耗尽**，调用 LLM 的功能（答案生成、查询改写、Agent 对话）会返回 `403 Free quota exhausted`。这是账户配额问题，不是代码 bug——充值或开启付费后即可恢复
 - **venv 环境**：测试专用 venv（在本仓库之外）中已将 `transformers` 降级为 4.44.2、`numpy` 降级为 1.26.4，以兼容 torch 2.2.2（重排序/CrossEncoder 依赖）。该 venv 还有 gradio/starlette、langchain-chroma/langchain-core 的版本冲突警告，属既有问题，不影响本应用运行
 - **重排序模型**：`BAAI/bge-reranker-v2-m3` 约 2.3GB，首次调用 `rerank_search` 或 `accurate` 管线时自动下载（懒加载），需要网络
-- `api/logger_config.py` 第 44 行之后有一段约 70 行的 SLS 远程日志参考文档以 `'''...'''` 字符串形式内嵌，不影响运行但较为混乱，如不需要可删除
+- ~~`api/logger_config.py` 第 44 行之后有一段约 70 行的 SLS 远程日志参考文档以 `'''...'''` 字符串形式内嵌~~ ⚠️ **2026-09-20 实测更正：这条不存在** —— `logger_config.py` **只有 45 行**，且 `SLS` 在该文件里出现 **0 次**。**不要去找那段 SLS**。
 - `agent_graph_advanced.py`、`mcp_server.py` 等文件内有多处 `'''...'''` 注释掉的旧实现，属学习保留内容，不影响运行

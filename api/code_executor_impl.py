@@ -25,6 +25,26 @@ ALLOWED_BUILTINS = [
     "slice", "sorted", "str", "sum", "tuple", "type", "zip",
     # 常用数学模块
     "math",
+
+    # ⚠️ 2026-09-20 加（§三·N17 · 业务方裁「放开」）：**异常类**。
+    #
+    #    此前白名单里**一个异常类都没有** ⇒ 被执行的代码**不能**写
+    #      `try: … except ValueError: …`，也不能 `raise ValueError(…)`
+    #    —— 两者都会先撞 `NameError: name 'ValueError' is not defined`。
+    #    🔴 而**异常处理是 Python 最常见的写法之一**，且这条限制**从代码上看不出来**
+    #       （"一长串白名单里没有异常类"是**沉默的**）。
+    #
+    #    放开的安全性：**异常类本身不提供逃逸能力** —— 它们只是**类型对象**，
+    #    没有文件/进程/导入的能力。放开它们不会让沙箱多出一条逃逸路径。
+    #
+    #    ⛔ **刻意【不】放开的**：`BaseException` / `SystemExit` / `KeyboardInterrupt`
+    #       / `GeneratorExit` —— 这几个是**退出机制**，让被执行的代码能捕获它们，
+    #       等于允许它**吃掉执行器的中断信号**。要捕获，用 `Exception` 就够了。
+    "Exception",
+    "ArithmeticError", "AssertionError", "AttributeError",
+    "IndexError", "KeyError", "NameError", "NotImplementedError",
+    "OSError", "RuntimeError", "StopIteration", "TypeError",
+    "ValueError", "ZeroDivisionError",
 ]
 
 ALLOWED_MODULES = [

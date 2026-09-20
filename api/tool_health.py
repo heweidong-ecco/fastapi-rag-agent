@@ -1,6 +1,18 @@
 """
-工具健康检查与自动降级（通用版本）
+工具健康检查（通用版本）
 通过 MCP Client 动态检测所有工具的可用性，无需为每个工具单独编写检查函数。
+
+⚠️ **降级不在这里** —— 见 `api/mcp_server.py` 的 `list_tools()`：
+   它把 `UNHEALTHY` 的工具**移出工具清单**（那是当前实际生效的降级机制）。
+
+🔴 2026-09-20 删（§三·B9 · 业务方裁「删代码 + 把 docstring 改成实话」）：
+   本文件原先自称「工具健康检查**与自动降级**」，并带一份 `FALLBACK_MAP` + `get_fallback_tool()`。
+   实测那套是**双重死代码**：
+     ① **全仓零调用**（`grep -rn 'get_fallback_tool|FALLBACK_MAP' api/` 除定义处 0 次）
+     ② **连它引用的名字也不存在** —— `fallback_search`、`chat` 全仓都无定义
+        ⇒ **就算接上线，它返回的也是一个不存在的工具名。**
+   ⇒ 它不是"预留的能力"，是**一段从来没能工作过的代码**。
+   真正的降级是"**把不健康的工具移出清单**"，不是"换一个备用工具"—— 已在上方写明。
 """
 import time
 import os
@@ -11,11 +23,6 @@ UNHEALTHY = "unhealthy"
 UNKNOWN = "unknown"
 
 _tool_health: Dict[str, Dict] = {}
-
-FALLBACK_MAP = {
-    "web_search": "fallback_search",
-    "fetch_webpage": "web_search",
-}
 
 # 为每种工具类型定义安全的测试参数
 # 如果某个工具不在这个映射中，会跳过健康检查（标记为 UNKNOWN）
@@ -79,8 +86,11 @@ def get_tool_health(tool_name: str) -> str:
         return UNKNOWN
     return _tool_health[tool_name]["status"]
 
-def get_fallback_tool(tool_name: str) -> str:
-    return FALLBACK_MAP.get(tool_name, "chat")
+# 🔴 2026-09-20 删（§三·B9）：此处原有
+#       def get_fallback_tool(tool_name: str) -> str:
+#           return FALLBACK_MAP.get(tool_name, "chat")
+#    —— 它**零调用**，且引用的 `fallback_search` / `chat` **全仓都不存在**。
+#    降级（把不健康工具移出清单）在 `mcp_server.py` 的 `list_tools()` 里，不在本文件。
 
 async def run_health_check():
     """

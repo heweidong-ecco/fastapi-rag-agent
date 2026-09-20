@@ -52,8 +52,9 @@ class RAGPipeline:
             temperature=0
         )
 
-    from document_preprocessor import DocumentPreprocessor
-    preprocessor = DocumentPreprocessor()
+    # ⚠️ 2026-09-20 删（§三·B8）：此处原有类属性 `preprocessor = DocumentPreprocessor()` ——
+    #    **全仓零引用**（`grep -rn '\.preprocessor' api/` = 0）。它只是**在类定义时构造一次**，
+    #    从没有任何方法读它。（真正做预处理的实例是在各方法内部**就地构造**的。）
 
     async def search_async(
         self,
@@ -64,6 +65,11 @@ class RAGPipeline:
         strict_mode: bool = False,        # 新增
         citations: bool = False,          # 新增
     ) -> dict:
+        """执行完整检索流程，返回结果和管线元信息。
+
+        ⚠️ 2026-09-20 修：这段 docstring 原先**躺在查询规范化那几行之后**，是**空操作** ——
+           本方法**没有 docstring**。已上移到签名正下方（代码一行未动）。
+        """
         timing = {}  # 存储各阶段耗时（毫秒）
         t_total_start = time.time()
         # 查询规范化（与文档入库使用同一套规则）
@@ -71,9 +77,6 @@ class RAGPipeline:
         preprocessor = DocumentPreprocessor()
         query = preprocessor.clean_whitespace(query)
         query = preprocessor.normalize_text(query)
-        """
-        执行完整检索流程，返回结果和管线元信息。
-        """
         pipeline_info = {
             "original_query": query,
             "rewrite_enabled": self.enable_rewrite,
@@ -231,7 +234,12 @@ def create_accurate_pipeline() -> RAGPipeline:
     return RAGPipeline(enable_rewrite=True, enable_expand=False, enable_bm25=True, enable_rerank=True)
 
 def create_accurate_norerank_pipeline() -> RAGPipeline:
-    """精确检索：启用查询改写和重排序，效果最好"""
+    """精确检索：启用查询改写，但【不做】Cross-Encoder 重排序（因此不依赖 torch）。
+
+    ⚠️ 2026-09-20 修：原 docstring 与上面 `create_accurate_pipeline` **逐字相同**
+       （"启用查询改写和重排序"）—— 而本函数的 `enable_rerank=False`。
+       函数名 + 实参都写着"no rerank"，只有 docstring 说反了。
+    """
     return RAGPipeline(enable_rewrite=True, enable_expand=False, enable_bm25=True, enable_rerank=False)
 
 def create_full_pipeline() -> RAGPipeline:

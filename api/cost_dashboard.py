@@ -157,7 +157,7 @@ def refresh(user_name, days):
 # 增加导出函数 CSV
 import csv
 import tempfile
-import os
+# ⚠️ 2026-09-20 删（D1/pyflakes 报 redefinition）：此处的 `import os` 与文件头 `:4` **重复**。
 
 def export_cost_csv(user_name: str, days: int = 30) -> str:
     """

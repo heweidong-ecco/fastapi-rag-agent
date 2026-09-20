@@ -43,8 +43,25 @@ def set_cached_tool_result(tool_name: str, result, expire_seconds: int = 300, *a
         redis_client.set(key, json.dumps(result), ex=actual_expire)
 
 # ==================== 缓存装饰器 ====================
+
+# 🔴 2026-09-20 加（§三·C5 · 业务方裁「需要调整，不能无限递归」）：
+#    **抢不到锁时最多等多久**；超了就**降级为直接执行**（这次不写缓存）。
+#
+#    原实现在 `else` 分支里是 `time.sleep(0.1); return wrapper(*args, **kwargs)`
+#    ⇒ **递归没有上限**：锁一直拿不到（持有者崩了没删锁、或一直被别的请求续上）时，
+#      **把栈打爆** —— 实测 `RecursionError: maximum recursion depth exceeded`。
+#    ⚠️ 这是**并发正确性**问题、且是**进程级**故障：一旦触发就把整个请求打死。
+#
+#    ✅ 正确取舍：**缓存是优化，不该因为它拿不到就拒服务。** 等一小段（有上限）后
+#       直接执行工具函数 —— 结果照常返回，只是这次不写缓存。
+_LOCK_WAIT_SECONDS = 2.0
+
+
 def cached_tool(expire_seconds: int = 300):
-    """装饰器：自动为工具函数添加缓存（含穿透、击穿、雪崩防护）"""
+    """装饰器：自动为工具函数添加缓存（含穿透、击穿、雪崩防护）
+
+    ⚠️ 抢锁**有上限**（`_LOCK_WAIT_SECONDS`）：超时后**降级为直接执行** —— 不再等、**不递归**。
+    """
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -53,21 +70,27 @@ def cached_tool(expire_seconds: int = 300):
             cached = get_cached_tool_result(tool_name, *args, **kwargs)
             if cached is not None:
                 return cached
-            
-            # 2. 防击穿：互斥锁
+
+            # 2. 防击穿：互斥锁（**有上限地等** —— 用循环，不用递归；理由见文件头那段）
             lock_key = f"lock:{tool_name}"
-            if redis_client.set(lock_key, "1", nx=True, ex=10):
-                try:
-                    # 3. 执行工具函数
-                    result = func(*args, **kwargs)
-                    # 4. 回写缓存（带防穿透和防雪崩）
-                    set_cached_tool_result(tool_name, result, expire_seconds, *args, **kwargs)
-                    return result
-                finally:
-                    redis_client.delete(lock_key)
-            else:
-                # 没拿到锁，等一小会儿再递归查缓存
-                time.sleep(0.1)
-                return wrapper(*args, **kwargs)
+            deadline = time.monotonic() + _LOCK_WAIT_SECONDS
+            while True:
+                if redis_client.set(lock_key, "1", nx=True, ex=10):
+                    try:
+                        # 3. 执行工具函数
+                        result = func(*args, **kwargs)
+                        # 4. 回写缓存（带防穿透和防雪崩）
+                        set_cached_tool_result(tool_name, result, expire_seconds, *args, **kwargs)
+                        return result
+                    finally:
+                        redis_client.delete(lock_key)
+
+                # 5. 没拿到锁：到点就**降级**；否则等一小会儿，再看别人有没有把缓存填好
+                if time.monotonic() >= deadline:
+                    return func(*args, **kwargs)      # 降级：直接执行，这次不写缓存
+                time.sleep(0.05)
+                cached = get_cached_tool_result(tool_name, *args, **kwargs)
+                if cached is not None:
+                    return cached
         return wrapper
     return decorator

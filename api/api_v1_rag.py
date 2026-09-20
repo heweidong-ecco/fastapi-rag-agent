@@ -23,12 +23,14 @@ from db import get_db, insert_document,insert_batch_documents
 from embedding_client import get_embedding
 
 from permission import get_user_role, get_user_quota, UserRole
-from tools_with_cache import get_weather, calculator
+from tools_with_cache import get_weather  # ⚠️ 2026-09-20 删 `calculator`（D1）：它在被下方那个**函数内的局部 calculator** 覆盖前从未使用
 from db import invalidate_bm25_cache
 from hybrid_search import hybrid_search
 from hybrid_search import rerank_search
 from hybrid_search import hybrid_search_with_rewrite
-from rag_pipeline import create_fast_pipeline, create_accurate_pipeline, create_full_pipeline
+# ⚠️ 2026-09-20 删（D1/pyflakes 报 redefinition）：这一行与下方（`SearchMode` 那段附近）
+#    的导入**重复**，且下方那份还多带 `create_accurate_norerank_pipeline`。
+#    实测：本行那份在下方覆盖之前**从未被使用** ⇒ 删本行、保留下方更全的那份。
 from fastapi import File, UploadFile
 import tempfile
 
@@ -257,8 +259,12 @@ async def upload_document(
     domain: str = "default",  # 新增：用户可指定领域，默认为 "default"，法律"legal",医疗"medical"
     user_name: str = Depends(get_current_user_hybrid),
 ):
-    """上传并解析多格式文档（PDF/Word/Markdown/HTML）"""
-    """上传并解析多格式文档，经过预处理后入库"""
+    """上传并解析多格式文档（PDF/Word/Markdown/HTML），经过预处理后入库。
+
+    ⚠️ 2026-09-20 修：此处原有**两行紧挨着的 docstring** ——
+       第二行（那句「上传并解析多格式文档，经过预处理后入库」，用三引号包着）是**空操作**
+       （函数已有一行 docstring）。已把它的信息并入第一行、删掉第二行。
+    """
     # 检查文件格式
     allowed_extensions = ["pdf", "docx", "md", "html"]
     ext = file.filename.lower().split(".")[-1]
@@ -269,8 +275,8 @@ async def upload_document(
         )
     
     # 保存临时文件
-    import tempfile
-    import os
+    # ⚠️ 2026-09-20 删（D1/pyflakes 报 redefinition）：这里原先又 `import tempfile` / `import os`，
+    #    而两者**模块级早就导入过**（见文件头部）⇒ 这两行只是把同名对象再绑一次，纯冗余。
     with tempfile.NamedTemporaryFile(delete=False, suffix=f".{ext}") as tmp:
         tmp.write(await file.read())
         tmp_path = tmp.name
@@ -536,10 +542,11 @@ async def jwt_ask_question(
     }
 
 # ==================== 流式输出（SSE） ====================
-from fastapi.responses import StreamingResponse
+# ⚠️ 2026-09-20 删（D1/pyflakes 报 redefinition）：此处的 `StreamingResponse` 与 `json`
+#    在文件头早已导入过 ⇒ 删这两行。⚠️ 同段的 `from config import ...` 与 `import asyncio`
+#    **不是重复**（文件头没有），**必须留**。
 from config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL_CHAT
 import asyncio
-import json
 
 # ⚠️ 2026-09-17 重构 ⑥ 切开点 5：惰性单例。
 #    原先此处是【模块层】直接 `llm_stream = ChatOpenAI(...)` ⇒
@@ -567,13 +574,15 @@ async def stream_search(
     req: QuestionRequest,
     user_name: str = Depends(get_current_user_hybrid),
 ):
-    # 1. 若前端未主动传历史，则从 Redis 加载该用户最近5轮对话
+    """流式RAG问答接口（融合优化版）（支持引用溯源和历史补偿）。
+    使用SSE逐字返回生成的答案，提供类似ChatGPT的体验。
+
+    ⚠️ 2026-09-20 修：这段 docstring 原先**躺在两句代码之后**（函数体第三句），
+       是**空操作** —— 函数本身**没有 docstring**。已上移到签名正下方。
+    """
+    # 0. 若前端未主动传历史，则从 Redis 加载该用户最近5轮对话
     if not req.conversation_history:
         req.conversation_history = get_chat_history(user_name)
-    """
-    流式RAG问答接口（融合优化版）（支持引用溯源和历史补偿）。
-    使用SSE逐字返回生成的答案，提供类似ChatGPT的体验。
-    """
     # 1. 检索（与普通接口相同）
     # 1. 向量检索（这部分不是流式的，一次性查完）
     # 构建当前输入的这条的历史对话，真停止按钮的调用（使它支持历史补偿）
@@ -688,8 +697,8 @@ async def stream_search(
 # ==================== WebSocket 端点 ====================
 # 模拟: 客户端发送用户问题，服务端模拟 Agent 的思考-行动-观察循环
 from fastapi import WebSocket, WebSocketDisconnect
-import json
-import asyncio
+# ⚠️ 2026-09-20 删（D1/pyflakes 报 redefinition）：此处的 `import json` / `import asyncio`
+#    在本文件**已被导入过两次**（文件头 + SSE 段）⇒ 删这两行。
 from websocket_callback import WebSocketAgentCallback
 
 from datetime import datetime

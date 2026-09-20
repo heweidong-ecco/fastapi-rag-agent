@@ -47,13 +47,9 @@ def get_db():
     finally:
         _connection_pool.putconn(conn)
 
-DB_CONFIG = {
-    "dbname": POSTGRES_DB,
-    "user": POSTGRES_USER,
-    "password": POSTGRES_PASSWORD,
-    "host": POSTGRES_HOST,
-    "port": POSTGRES_PORT
-}
+# ⚠️ 2026-09-20 删（§三·B7）：此处原有 `DB_CONFIG = {...}` —— **全仓零引用**
+#    （`grep -rn '\bDB_CONFIG\b' api/` 只有定义那一行）。真正的连接配置走连接池，不用它。
+
 # 注意：仅保留上方基于连接池的 get_db()（自动提交/回滚/归还连接）。
 # 历史版本曾在下方重复定义 get_db() 覆盖连接池版本，导致写入不提交、连接池失效，已删除。
 
@@ -229,15 +225,11 @@ def bm25_search(query: str, top_k: int = 10):
     from bm25_index import bm25_search as _impl
     return _impl(query, top_k)
 
-def get_bm25_index():
-    """转发到 `bm25_index.get_bm25_index`（惰性导入）。"""
-    from bm25_index import get_bm25_index as _impl
-    return _impl()
-
-def get_all_documents():
-    """转发到 `bm25_index.get_all_documents`（惰性导入）。"""
-    from bm25_index import get_all_documents as _impl
-    return _impl()
+# ⚠️ 2026-09-20 删（§三·B5/B6）：此处原有 `get_bm25_index()` 与 `get_all_documents()`
+#    两个**转发壳**（各自 `return _impl()`），但**全仓零外部调用**：
+#      grep -rn 'db\.get_bm25_index\|from db import.*get_bm25_index' api/    → 0
+#      grep -rn 'db\.get_all_documents\|from db import.*get_all_documents' api/ → 0
+#    真正在用的是 `bm25_index` 里那两份（模块内部自己调）。⇒ 这两个壳是重构留下的残壳。
 
 def invalidate_bm25_cache():
     """转发到 `bm25_index.invalidate_bm25_cache`（惰性导入）。"""

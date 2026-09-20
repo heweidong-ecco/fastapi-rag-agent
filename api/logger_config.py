@@ -22,7 +22,8 @@ def setup_logger():
         colorize=True
     )
     
-    # 2. 文件输出：JSON 格式，方便生产环境分析
+    # 2. 文件输出：**管道分隔的纯文本**（不是 JSON），便于 grep 与人工排查
+    #    ⚠️ 2026-09-20 修：原注释写「JSON 格式」，与下面的 `format=` 不符。
     logger.add(
         "logs/api_{time:YYYY-MM-DD}.log",
         format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {extra[request_id]} | {message}",

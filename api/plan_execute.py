@@ -1,6 +1,27 @@
 """
 Plan-and-Execute 模块
 实现任务规划与逐步执行。
+
+> ## 🔴 **必读：这条路径的「执行层」目前是【LLM 模拟】，不是真调用工具**
+>
+> **现状（2026-09-20 核实）**：`execute_single_step()` 只对 **`calculator`** 做真调用
+> （`str(eval(input_data))`），**其余所有工具走的是"请 LLM 模拟执行"那条分支** ——
+> 也就是说，`web_search` / `fetch_webpage` / `screenshot_webpage` / `execute_python`
+> **都不会真的被调用**，结果是让 LLM "编"一个出来。
+>
+> ⚠️ **这条以前没人写出来** —— 端点 `/agent/plan_execute` 看起来在跑真工具，
+>    实际上**只有规划是真的**。
+>
+> ### 后续（**已登记为独立待办，不是"修补"**）
+>
+> 业务方 2026-09-20 的裁决与说明：
+> * **选 b**（保留模拟，但**把话说清楚** —— 就是本段）
+> * **并且要接真工具**：**"大改是必要的"**
+> * ⚠️ **关键信息**：**原系统里本来就有一套【可用的】全局 Plan-and-Execute 执行层，
+>   但没有被带进本仓** ⇒ **需要【单独新做】**，不是在现有代码上打补丁。
+>
+> 📌 登记位置：`docs/待办登记-2026-09-20-全仓审计与方向更正.md` §三·**N15**
+>   与 §十四（新做的执行层）。
 """
 import os
 import json
@@ -18,14 +39,39 @@ planner_llm = ChatOpenAI(
 )
 
 # ==================== 任务规划器 ====================
+
+# 🔴 2026-09-20 修（§三·C1，业务方裁「同源」）：**可用工具清单改为从 MCP 注册表派生。**
+#
+#    此前这里**手写了两份互相矛盾**的工具清单（同一个 prompt 里！）：
+#      · 第一份写 `search` —— 而 MCP 注册表里**没有** `search`，真名是 **`web_search`**
+#      · 第二份写 `search / calculator / filter / summarize / generate`
+#        —— 后三个**全仓不存在**
+#    ⇒ **两份都不能照用**，LLM 会被引着规划出根本不存在的工具名。
+#
+#    ⚠️ 与 🔴C 是**同一个根因**：**手工维护的工具清单必然漂**。
+#       ⇒ 改为从 `mcp_server.TOOLS` 派生（单一事实源）—— 以后加工具只需改那一处。
+from mcp_server import TOOLS as _MCP_TOOLS
+
+
+def _available_tool_lines() -> str:
+    """把 MCP 注册表渲染成给 LLM 读的「可用工具」清单（**唯一来源**）。"""
+    lines = []
+    for t in _MCP_TOOLS:
+        fn = t["func"]
+        # 用工具描述的第一行（docstring 首行）—— 与 `bind_tools` 发给 LLM 的是同一份
+        desc = (fn.description or "").strip().splitlines()[0] if fn.description else ""
+        lines.append(f"- {fn.name}：{desc}")
+    return "\n".join(lines)
+
+
 def plan_task(user_goal: str) -> List[Dict]:
     """
     将用户的复杂目标分解为有序的步骤清单。
 
-    返回格式:
+    返回格式（⚠️ `tool` 的取值**只能是** `_available_tool_lines()` 里列出的那些）:
     [
-        {"step": 1, "action": "搜索上周AI新闻", "tool": "search", "input": "2026年7月第一周 AI 重要新闻"},
-        {"step": 2, "action": "筛选与科技公司相关的新闻", "tool": "filter", "input": "科技公司"},
+        {"step": 1, "action": "搜索上周AI新闻", "tool": "web_search", "input": "2026年7月第一周 AI 重要新闻"},
+        {"step": 2, "action": "计算同比增幅", "tool": "calculator", "input": "(120-100)/100"},
         ...
     ]
     """
@@ -36,19 +82,15 @@ def plan_task(user_goal: str) -> List[Dict]:
 - 如果用户需求是“写一段代码”，你应该先自己生成代码文本，然后调用 execute_python 去执行它。
 - 如果某个工具没有列在可用工具清单中，说明它不存在，不要规划使用该工具的步骤。
 
-**可用工具：**
-- search：搜索互联网信息
-- calculator：计算数学表达式
-- execute_python：执行一段已编写好的 Python 代码
-- fetch_webpage：获取网页文本内容
-- screenshot_webpage：截取网页并保存为图片
+**可用工具（**这就是全部**，不要用清单外的名字）：**
+__TOOL_LIST__
 
 **规划规则：**
 1. 每个步骤必须是一个具体的、可执行的操作。
 2. 步骤之间必须有清晰的逻辑顺序，不能跳跃。
 3. 如果某个步骤依赖前面的结果，必须在描述中明确说明。
 4. 每个步骤需要指定使用的工具（tool）和输入（input）。
-5. 可用的工具包括：search（搜索）、calculator（计算）、filter（筛选）、summarize（总结）、generate（生成文本）。
+5. **`tool` 的取值只能来自上面的「可用工具」清单** —— 清单里没有的，就是不存在，不要规划它。
 6. 步骤数量控制在 3-7 个。
 
 **输出格式（严格JSON数组）：**
@@ -57,7 +99,7 @@ def plan_task(user_goal: str) -> List[Dict]:
     {"step": 2, "action": "操作描述", "tool": "工具名", "input": "工具输入"}
 ]
 
-请严格按照JSON格式输出，不要包含任何其他文本。"""
+请严格按照JSON格式输出，不要包含任何其他文本。""".replace("__TOOL_LIST__", _available_tool_lines())
 
     response = planner_llm.invoke([
         SystemMessage(content=system_prompt),
@@ -124,9 +166,12 @@ def execute_plan_with_replan(plan: List[Dict], user_goal: str = "") -> str:
             current_plan.pop(0)
             continue
 
-        # 1. 动态生成输入
-        dynamic_input = generate_dynamic_input(step, context, user_goal)
-        
+        # 1. 动态生成输入 —— ⚠️ 2026-09-20 删（§三·B10）：
+        #    此处原有一行 `dynamic_input = generate_dynamic_input(step, context, user_goal)`,
+        #    但**下面那行根本不用它**（`execute_step_with_quality_check` 的签名里没有这个参数）。
+        #    ⇒ 它是**纯重复**：这个函数**内部自己就调 `generate_dynamic_input`**（见 :264），
+        #      而且真的用了（:267）。⇒ 原来那句 = **每走到这个分支白花一次 LLM 调用**。
+        #
         # 2. 执行步骤（带重试）
         step_result = execute_step_with_quality_check(step, context, user_goal)
         
@@ -216,7 +261,9 @@ def generate_dynamic_input(step: Dict, context: str, user_goal: str) -> str:
 quality_checker_llm = ChatOpenAI(
     # 用最轻量的模型，节省成本和延迟，
     # 推荐使用一个小型、快速的本地模型（比如Qwen3-1.7B），专门做这种简单的通过/不通过判断。
-    # 因为没有本地部署，因为没额定暂时用qwen3.7-plus
+    # 没有本地部署 ⇒ 用配置里的 chat 模型（`model=` 那一行就是它）
+    # ⚠️ 2026-09-20 修：原注释写死「暂时用 qwen3.7-plus」—— 那是**无效模型名**
+    #    （`CLAUDE.md` 已明列），且与下面真正生效的 `model=LLM_MODEL_CHAT` 不符。
     model=LLM_MODEL_CHAT,
     api_key=LLM_API_KEY,
     base_url=LLM_BASE_URL,
@@ -276,7 +323,7 @@ def execute_step_with_quality_check(step: Dict, context: str, user_goal: str, ma
         else:
             print(f"步骤{step['step']} 质量不达标，第{attempt+1}次重试...")
             # 在上下文中加入质量反馈，帮助生成更好的输入
-            context += f"\n[上一轮结果质量不达标，请调整策略]"
+            context += "\n[上一轮结果质量不达标，请调整策略]"  # ⚠️ 2026-09-20 去掉多余的 f（D1/pyflakes：f-string 无占位符）
     
     # 所有重试都不达标，返回最后一次的结果（比什么都不给强）
     return step_result + "\n[注意：此步骤经过多次重试，质量可能不达标]"

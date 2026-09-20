@@ -5,7 +5,8 @@ import operator
 
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
-from langgraph.checkpoint.sqlite import SqliteSaver  # 新增
+# ⚠️ 2026-09-20 删（D1/pyflakes 报 redefinition）：本行 `SqliteSaver` 从未被使用 ——
+#    真正用的是下面函数内那处（同名再导入一次）。
 # 新增,RedisSaver 版本不兼容问题还没解决，现在暂时不用
 # from langgraph.checkpoint.redis import RedisSaver  
 from langchain_openai import ChatOpenAI
@@ -103,8 +104,9 @@ def build_checkpointer_agent(backend: str = "memory"): # 默认memory即MemorySa
         db_path = os.path.join(os.path.dirname(__file__), "agent_history.db")
         checkpointer = SqliteSaver.from_conn_string(db_path)
     elif backend == "redis":
-        # 从环境变量获取 Redis 连接信息
-        redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
+        # ⚠️ 2026-09-20 删（D1/pyflakes：局部变量赋值后从未使用）：此处原有
+        #       redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
+        #    它**只被下面那行注释掉的代码用过** ⇒ 是死变量。
         # 新增,RedisSaver 版本不兼容问题还没解决，现在暂时不用
         # checkpointer = RedisSaver.from_conn_string(redis_url)
         checkpointer = MemorySaver()  # 暂以内存兜底，避免编译空图

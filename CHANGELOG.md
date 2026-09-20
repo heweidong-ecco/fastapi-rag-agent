@@ -209,7 +209,234 @@ All notable changes to this project will be documented in this file.
 - **`docs/复盘/`** —— 过程错误记录机制,含 `模板-复盘.md` 与当日 3 份复盘。
 - **`CHANGELOG.md`** —— 本文件。
 
+### Removed
+
+- **§三 清理 · B 类（死代码 / 多余调用）—— 删 5 处、保留并标注 4 处**（2026-09-20 · 分支 `chore/section3-cleanup`）。
+
+  **⚠️ 动手前每条判据都【重跑过】** —— 因为 §五 已证明审计的"孤儿"结论会错（`get_thread_cost` 其实是活的）。
+
+  **删除的（零外部调用，已当场核实）**：
+
+  | # | 位置 | 是什么 | 判据 |
+  |---|---|---|---|
+  | **B5** | `api/db.py` `get_bm25_index()` | **转发壳**（`return _impl()`） | `grep -rn 'db\.get_bm25_index\|from db import.*get_bm25_index' api/` → **0** |
+  | **B6** | `api/db.py` `get_all_documents()` | 同上 | 同上 → **0** |
+  | **B7** | `api/db.py` `DB_CONFIG = {...}` | 常量 | `grep -rn '\bDB_CONFIG\b' api/` → 只有定义那一行 |
+  | **B8** | `api/rag_pipeline.py` 类属性 `preprocessor` | **类属性**（不是实例属性） | `grep -rn '\.preprocessor' api/` → **0**；且实测 `'preprocessor' in vars(RAGPipeline)` = True、实例上没有 ⇒ 只在类定义时构造一次，从没人读 |
+  | **B10** | `api/plan_execute.py:128` | **纯重复的 LLM 调用** | 见下 |
+
+  **B10 是这批里唯一"省钱"的一条**：`dynamic_input = generate_dynamic_input(...)` 算完之后**根本没用**
+  （下一行的 `execute_step_with_quality_check` 签名里没这个参数），**而该函数内部自己又调了一遍 `generate_dynamic_input`**
+  （`:264`）**而且真的用了**（`:267`）。⇒ 原来那句 = **每走到这个分支白花一次 LLM 调用**。删掉 = **纯收益、零行为影响**。
+
+  **保留并加注释的（B1–B4）**：`sort_blocks_by_reading_order` · `table_to_text` · `parse_markdown_to_plain` ·
+  `deduplicate_chunks` —— 它们**确实零调用**，但都是**成体系的能力**（双栏排版排序 / 表格转文本 / markdown 解析 / 语义去重），
+  **很可能是给未来调用者预留的**，删了要用得重写。⇒ **保留，但在 docstring 里写明「当前无调用方」**。
+  - ⚠️ 其中 `deduplicate_chunks` 的原 docstring 写「**只在批量入库时使用**」是**半真半假** ——
+    批量入库的代码还在，但那句调用**是注释状态**（`api_v1_rag.py:291`）⇒ **它现在根本没被使用**。已改正。
+
+  **⬜ B9 未动，待业务方裁**：`api/tool_health.py` 的 `FALLBACK_MAP` + `get_fallback_tool`（「自动降级」）——
+  零调用，**且它引用的名字也不存在**（`fallback_search`、`chat` 全仓无定义）⇒ 接了也不工作。
+  而**真正在做降级的是 `api/mcp_server.py:47-61`**（把 `UNHEALTHY` 的工具**移出清单**）。
+  ⇒ 建议**删代码 + 把模块 docstring 里「与自动降级」那句改成实话**。
+
+  **验证（改完立刻重跑）**：逐文件 `ast.parse` ✅ · 离线层 **73 passed / 1 skipped / 11 deselected** ·
+  `ROUTES=13` / `OPENAPI_PATHS=59` 与改动前一致 · 删除项逐条复核确认已不在。
+
+### Removed
+
+- **§三·B9 —— 删掉「自动降级」那套（业务方裁：删代码 + 把 docstring 改成实话）**（2026-09-20）。
+
+  `api/tool_health.py` 原先自称「工具健康检查**与自动降级**」，并带 `FALLBACK_MAP` + `get_fallback_tool()`。
+  实测那套是**双重死代码**：
+  ① **全仓零调用**；② **连它引用的名字也不存在** —— `fallback_search`、`chat` **全仓都无定义**
+  ⇒ **就算接上线，它返回的也是一个不存在的工具名。** 它不是"预留的能力"，是**一段从来没能工作过的代码**。
+  **真正的降级在 `api/mcp_server.py:47-61`**：把 `UNHEALTHY` 的工具**移出清单**（不是"换备用工具"）。
+  ⇒ 已删代码，并把模块 docstring 改成实话（写明"**降级不在这里**"）。
+
+- **§三·D1 —— 用 `pyflakes` 量化后清掉「结构类」问题**（2026-09-20）。
+
+  📊 **先量化（此前只有审计的"约 80 处"这个没验证过的数）**：
+  ```bash
+  ./venv/bin/pip install pyflakes     # ⚠️ dev-only，【没有】写进 api/requirements.txt
+  ./venv/bin/python -m pyflakes api/
+  ```
+  **实测**：未使用导入 **107**（不是 80）· `redefinition` **18** · 赋值未用局部变量 **4** · f-string 无占位符 **2**。
+  ✅ **`code_executor.py` 一条都没报** ⇒ pyflakes **正确理解 `__all__` 重导出**，审计那个"例外"不是问题。
+
+  **本轮清掉的（结构类，全部零行为影响）**：
+
+  | 类 | 前 → 后 | 说明 |
+  |---|---|---|
+  | **`redefinition`**（重复导入/重复定义） | **18 → 0** | ⚠️ **与 §二/C2/C3 同一类**。含：`main.py` 的 `logger`（被 `logger = setup_logger()` 覆盖）、`api_v1_rag.py` 的 `StreamingResponse`/`json`/`asyncio`（**三段导入块互相重复**）、`query_rewriter.py` 的 `REDIS_HOST/REDIS_PORT`（被下一行的超集覆盖）、`agent_graph_advanced.py` 的 `json`/`os`、`cost_dashboard.py` 的 `os`、`agent_checkpointer.py` 的 `SqliteSaver`、`agent_graph_advanced_learning.py` 的 `search_user_memory` |
+  | **f-string 无占位符** | **2 → 0** | `auth.py`（`f"管理员用户名: admin"`）· `plan_execute.py` |
+  | **赋值未用局部变量** | 4 → **1**（**故意留的**） | 删了 `redis_url`（只被注释掉的代码用过）与 `main.py` 的 `remaining`/`role`（响应体里没用到：`role` 是**又调了一遍**、`remaining` 直接硬编码 0）。⚠️ **剩下那 1 个（`rate_limiter.py` 的 `last_time`）不是垃圾 ⇒ 见下 N16** |
+
+  ⚠️ **删重复导入时我犯了一次错并当场被抓到**：`query_rewriter.py` 那处，我的改动把**两行都删了**（本意只删第一行、保留第二行那份超集）
+  ⇒ `NameError: name 'REDIS_HOST' is not defined` ⇒ **`api/` 整个 import 不了**。**是 `pytest` 抓到的**（`conftest` 会 import `main`）。已修。
+
+  **⬜ 未清（有意留的）**：**未使用导入 103 个**（`os` 18 · `json` 7 · `asyncio` 6 …，全是 stdlib/framework，**没有带副作用的导入**）。
+  ⇒ 这是一次**跨约 25 个文件的纯机械改动**，diff 大 ⇒ **单独一轮做**（等业务方定）。
+
+  🔴 **顺带核出新发现 N16（未修、已登记 §三·3.9）**：`api/rate_limiter.py` 的 `get_quota_info()`
+  **读出了 `last_time` 却从不用它回填**（`reset_time` 用的是 `now`）⇒ 标准令牌桶应当是
+  `tokens += (now - last_time) * rate` ⇒ **桶可能永不恢复**。改它 = 改限流行为 ⇒ 待业务方裁。
+
+### Added
+
+- **§三·D2 —— 给两个 `*_impl.py` 补上最小单测（10 条），兑现那句"可脱离 langchain 单测"**（2026-09-20）。
+
+  `code_executor_impl.py` / `simple_tools_impl.py` 的 docstring 一直声称「**可脱离 langchain 单测**」，
+  但**全仓唯一引用者是各自的 `@tool` 外壳，没有任何测试在跑它们** ⇒ 那句声明**从未被验证过**。
+
+  ✅ **先核声明本身**：实测两个模块**只 import 标准库**（一个是 `datetime`，另一个是 `io` + `contextlib`）
+  ⇒ **能力是真的**，只是没人用。⇒ 按业务方意见：**补测试，而不是改声明**。
+
+  **为什么"补测试"比"改声明"值**：这次重构（⑥ 切开点 3）把沙箱逻辑抽成纯 stdlib，
+  目的就是让它可测；**没有测试，下次改动静悄悄把 langchain 依赖塞回去，没人会发现**。
+  新增用例 `test_impl_modules_do_not_import_langchain` 就是那条**结构性锁**（用 `ast` 查导入）。
+
+  新增 `api/test_impl_modules.py`（**10 条**）：沙箱白名单（含运行期 `open` 探针）· stdlib 执行与 stdout 捕获 ·
+  无输出/出错/超长截断 · 自然语言拒绝 · `calculator_impl` 与 `date_today_impl` · 以及上面那条导入锁。
+
+  🔴 **写用例时核出一条新发现 N17（未修、已登记 §三·3.10）**：沙箱的 `ALLOWED_BUILTINS`
+  **没有任何异常类** ⇒ 被执行的代码**不能写 `try/except ValueError`、也不能 `raise ValueError(…)`**
+  （实测先撞 `NameError`）。⚠️ 这条限制**从代码上看不出来**（"白名单里没有异常类"是**沉默的**），
+  而它直接影响「LLM 写出来的代码能不能跑」。⇒ 已固化成一条会红的用例，放开时会提醒更新记录。
+
 ### Changed
+
+- **N17 放开沙箱异常类 · N15 把"执行层是模拟"写明**（2026-09-20 · 业务方裁决）。
+
+  **① N17 · 代码执行沙箱放开「异常类」**（`api/code_executor_impl.py`）
+
+  此前 `ALLOWED_BUILTINS` 里**一个异常类都没有** ⇒ 被执行的代码**不能**写
+  `try: … except ValueError: …`，也不能 `raise ValueError(…)`（两者都先撞 `NameError`）。
+  🔴 而**异常处理是 Python 最常见的写法之一**，且这条限制**从代码上看不出来**（"一长串白名单里缺了什么"是**沉默的**）。
+
+  **业务方裁：放开。已执行** —— 加了 13 个（`Exception` + 常见子类）。
+  ⛔ **刻意【不】加的**：`BaseException` / `SystemExit` / `KeyboardInterrupt` / `GeneratorExit` ——
+  它们是**退出机制**，放开等于**允许被执行代码吃掉执行器的中断信号**。要捕获，用 `Exception` 就够了。
+
+  **验证**：`try/except ZeroDivisionError` → `"caught"` ✅ · `raise ValueError('boom')` → `"代码执行出错: ValueError: boom"` ✅
+
+  📌 **那条"锁住旧行为"的用例按预期完成了使命**：它当时断言"白名单里**没有**异常类"，
+  并写明「哪天放开了这条会红、提醒你去更新记录」⇒ **它确实红了** ⇒ 已改成断言**放开后**的行为
+  （并且仍然锁死"那几个退出机制不能进来"）。
+
+  **② N15 · 把 Plan-and-Execute"执行层是模拟"写明**（业务方裁：**选 b**）
+
+  `api/plan_execute.py` 的**模块 docstring 最上方**现在明写：
+  **只有 `calculator` 是真调用，其余工具全部是"请 LLM 模拟执行"**。
+  此前这条**从代码上看不出来** —— 端点 `/agent/plan_execute` 看起来在跑真工具，**实际上只有规划是真的**。
+
+  🔴 **后续（已登记为独立待办，不是"修补"）**：业务方裁决 **"并且要接真工具，大改是必要的"**，
+  并说明：**"之前的代码是有全局 Plan-and-Execute 的执行层，是可用，我没放进来，需要单独新做"**
+  ⇒ **本仓没有可抄的现成代码，要【新做一层】**。登记在 `docs/待办登记…` **§十四**，
+  那里同时列了"新做时必须一并解决"的 5 项（含浏览器工具在本仓仍是死的、prompt 要复用 C1 的同源来源等）。
+
+  🔴 **顺带撞出新条目 N18（未修、待裁）**：沙箱**也不能定义类** ——
+  `class Mine(Exception): pass` ⇒ `NameError: __build_class__ not found`（白名单里没有 `__build_class__`）。
+  ⚠️ 这**不在**本次"放开异常类"的授权范围内 ⇒ 未动，已登记。
+
+### Fixed
+
+
+- 🔴 **撤回一条我自己报错的"疑似 bug"（N16）**，并删掉那个真正的死变量（2026-09-20）。
+
+  **我原报**：`api/rate_limiter.py` 的 `get_quota_info()` 读出了 `last_time` 却不用它回填
+  ⇒ **"令牌桶可能永不恢复"**。
+
+  **核完发现：不是 bug。** 回填**有的**，在**限流的消费入口 `is_allowed()` 的 Lua 脚本**里：
+
+  ```lua
+  local elapsed = now - last_time
+  local new_tokens = math.floor(elapsed * rate)
+  tokens = math.min(capacity, tokens + new_tokens)     -- ← 回填在这里，而且是对的
+  ```
+
+  ⇒ `get_quota_info()` 是**只读的展示函数**，它算的 `reset_time = now + need/rate` **也是对的**；
+  那个 `last_time` 只是**没用上的局部变量**。
+
+  ⚠️ **我的错在哪**：在 D1 里只看到"有个变量没用"，就**顺推成"桶不回填"** ——
+  那是**从一个局部现象跳到系统级结论，中间没核消费入口**。
+  ⇒ 已撤回登记（§三·3.9 就地标注），并删掉那个死变量（**D1 的"赋值未用局部变量"因此归零**）。
+
+  📌 **留下的教训**：**"未使用变量"≠"功能缺失"** ——
+  `last_time` 没用上，是因为**真正用它的地方在另一个函数、而且是在 Lua 里**。
+
+
+
+
+- **§三 清理 · C 类（4 条有行为影响的）—— C1/C2/C3 已修，C5 改成有上限（附红→绿用例）**（2026-09-20）。
+
+  **C1 · 同一个 prompt 里两份互相矛盾的工具清单**（`api/plan_execute.py`）
+  此前 prompt 里手写了**两份**「可用工具」：
+  · 第一份写 `search` —— 而 MCP 注册表里**没有** `search`，真名是 **`web_search`**
+  · 第二份写 `search / calculator / filter / summarize / generate` —— **后三个全仓不存在**
+  ⇒ **两份都不能照用。** 与 🔴C **同一根因**：**手工维护的清单必然漂**。
+  **修法（业务方裁「同源」）**：改为从 `mcp_server.TOOLS` **派生**（新增 `_available_tool_lines()`），
+  并把规划规则第 5 条改成「**`tool` 的取值只能来自上面的清单**」。
+  实测派生结果 = **6 个真工具 + 它们真实的描述**（和 `bind_tools` 发给 LLM 的是同一份）。
+
+  **C2 · 两个常量各定义两次**（`api/token_tracker.py`）
+  `DEFAULT_DAILY_TOKEN_BUDGET` / `ROLE_TOKEN_BUDGET` 在**同一文件**里定义了两次、**值完全相同**，
+  唯一的读取点在后一份之后 ⇒ **前一份被完全遮蔽**（改它不生效、也不报错）。
+  后一份**还带注释**（"免费用户：每天1万token"）⇒ 保留后一份、删前一份。
+  📌 与 §二（`remove_noise_markers` 重复定义）**同型** —— 本仓第 3 次踩。
+
+  **C3 · 导入的常量被 `os.getenv` 覆盖**（`api/jwt_handler.py`）
+  `:5` 从 `config` 导入 `ACCESS_TOKEN_EXPIRE_MINUTES` / `REFRESH_TOKEN_EXPIRE_DAYS`，
+  `:12-13` 又用 `os.getenv` **重新赋值覆盖** ⇒ 那个 import 是**死导入**。
+  ✅ 已核实**两边默认值相同**（15 / 7）、读的是**同一个 env 变量** ⇒ **行为完全等价**。
+  删掉 `:12-13`，**让 `config.py` 成为唯一来源**（与 C2 同一原则：**一处定义**）。
+  ⚠️ **连带**：`import os` 因此没了使用者 —— 已顺手删除（属 D1 范畴，但是本次改动**直接造成**的）。
+
+  **C5 · 抢不到锁时【无上限递归】**（`api/tool_cache.py`）　**[业务方裁：需要调整，不能无限递归]**
+  原实现在 `else` 分支 `time.sleep(0.1); return wrapper(*args, **kwargs)`
+  ⇒ 锁一直拿不到就把**栈打爆**（实测 `RecursionError: maximum recursion depth exceeded`）。
+  ⚠️ 这是**并发正确性**问题、且是**进程级**故障 —— 一触发就把整个请求打死。
+  **修法**：改成**有上限的循环**（`_LOCK_WAIT_SECONDS = 2.0`），超时后**降级为直接执行**（这次不写缓存）。
+  ⇒ 取舍：**缓存是优化，不该因为它拿不到就拒服务。**
+  **红→绿已验证**：用例 `test_cached_tool_does_not_recurse_forever_when_lock_never_acquired`
+  （红时实测 `RecursionError`）。
+
+  **验证（改完立刻重跑）**：逐文件 `ast.parse` ✅ · 离线层 **74 passed / 1 skipped / 11 deselected**
+  （73 基线 + 1 新增）· `ROUTES=13` / `OPENAPI_PATHS=59` 与改动前一致。
+
+  **🔴 顺带核出一条新发现（N15，未修、已登记）**：`api/plan_execute.py` 的 `execute_single_step()`
+  对**除 `calculator` 外**的工具**全是"LLM 模拟执行"**（`"请模拟执行以下操作…"`），**不是真调用**。
+  ⇒ C1 修的是"prompt 列了不存在的工具"，而 N15 是"**列对了也不真执行**"。修它 = 改产品行为，待业务方裁。
+
+### Changed
+
+
+- **§三 清理 · A 类（11 条"注释说 A、代码做 B"）全部修正**（2026-09-20 · 分支 `chore/section3-cleanup`）。
+
+  **纯注释 / docstring 修正，零行为影响** —— 明细分见 `docs/清理清单-2026-09-20.md` §二。逐条：
+
+  | 位置 | 注释说 | 代码做 |
+  |---|---|---|
+  | `api/hybrid_search.py:13` | `[(content, source, similarity), ...]`（**3 元组**） | `:35` 按 **4 元组**解包 |
+  | `api/rag_pipeline.py` `create_accurate_norerank_pipeline` | docstring 与上面 `create_accurate_pipeline` **逐字相同**（"启用查询改写**和重排序**"） | 实参 `enable_rerank=False`（函数名就写着 no-rerank） |
+  | `api/logger_config.py:25` | 「文件输出：**JSON 格式**」 | `:28` 是**管道分隔纯文本** |
+  | `api/plan_execute.py:219` | 写死「暂时用 `qwen3.7-plus`」 | 那是**无效模型名**；真正生效的是 `model=LLM_MODEL_CHAT` |
+  | `api/agent_graph_advanced.py:1` | 自称 `api/agent_graph_advanced_1.0.0.py` | **该文件不存在** |
+  | `api/agent_graph_advanced.py:76-80` | 「**新增会话池**，避免并发阻塞」 | **会话池走过又被推翻**，现已移除（见其下 docstring：单 task 自开自关） |
+  | `CLAUDE.md` 路由表 | `/rag/batch-insert` · `/rag/upload` · `/rag/stream` | **三个都不存在** ⇒ 改为 `insert_batch` / `upload_document` / `stream_search`，并补上漏登的 4 个检索端点与 WS 的真实前缀 `/api/v1/ws/…` |
+  | `CLAUDE.md` 末尾 | 「`logger_config.py` 第 44 行后有约 **70 行 SLS**」 | 实测**文件 45 行、`SLS` 出现 0 次** |
+
+  **🔎 孤立 docstring（审计列 6 处，`ast` 检查又抓出 2 处，共 8 处）**：
+  `api_v1_agent.py:188` · `:418` · `api_v1_rag.py:261` · `:573` · `rag_pipeline.py:74` · `query_rewriter.py:46` · `:111` · `main.py:503`。
+  它们**全是空操作**（函数体里不是首句的裸字符串 ⇒ 求值后丢弃），典型来历是 **docstring 被后插入的代码挤开**
+  ⇒ **函数看起来"有文档"，但 `__doc__` 是 `None`**，`help()` / IDE 提示 / 自动文档全拿不到。
+  修法**分三种**（不是一律"上移"）：**函数真缺 docstring 的上移**（`api_v1_agent.py:418` · `api_v1_rag.py:573` ·
+  `rag_pipeline.py:74` · `main.py:503`）；**函数已有 docstring 的合并后删掉**（`query_rewriter.py:46` · `:111` ·
+  `api_v1_rag.py:261`）；**描述的是子步骤的改成普通注释**（`api_v1_agent.py:188`）。
+
+  **守住**：新增回归用例 `test_no_stray_docstrings_in_function_bodies`（`ast` 结构判据 ——
+  它是**纯空操作**，"跑一下看行为"永远测不出来）。
+
 
 - 🔴 **两处「审计结论」被实测推翻 —— 一处翻案、一处加重**（2026-09-20 · `docs/待办登记…` §十三）。
 

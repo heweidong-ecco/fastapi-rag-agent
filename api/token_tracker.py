@@ -59,13 +59,11 @@ PRICING = {
 _DEFAULT_PRICING = {"prompt": 0.003, "completion": 0.006}
 
 # ==================== 预算控制相关常量 ====================
-DEFAULT_DAILY_TOKEN_BUDGET = int(os.getenv("DEFAULT_DAILY_TOKEN_BUDGET", "100000"))
-
-ROLE_TOKEN_BUDGET = {
-    "free": 10000,
-    "premium": 100000,
-    "admin": float("inf"),
-}
+# ⚠️ 2026-09-20 删（§三·C2）：此处原有 `DEFAULT_DAILY_TOKEN_BUDGET` 与 `ROLE_TOKEN_BUDGET`
+#    的**一份重复定义**，与文件下方（`get_user_token_budget` 之前）那份**逐字同值**，
+#    而 Python **后者胜出** ⇒ **这一份是被完全遮蔽的死定义**（改它不生效、也不报错）。
+#    下方那份**还带注释**（"免费用户：每天1万token"），是更好的那份 ⇒ 保留下方、删此处。
+#    📌 与 §二（`remove_noise_markers` 重复定义）**同型**。
 
 
 def record_usage(
