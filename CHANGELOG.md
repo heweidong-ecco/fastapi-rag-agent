@@ -443,6 +443,16 @@ All notable changes to this project will be documented in this file.
   | **`CLAUDE.md` / `ROADMAP.md`** | ⚠️ 这两处**都在教"用 `-test` 建 venv"** —— 不改，后来的会话照做即失败（这正是"改这边漏那边"）。已同步 |
   | **`README.md`「📈 评估体系」** | 原写「**集成 RAGAS**」——**不成立**：`ragas` 在依赖里，但 **`api/*.py` 0 处 import 它**，评估脚本还在 `archive/`（不入库）。已改为「⬜ 未接入」 |
 
+  **⏳ → ✅ CI 耗时的实测值补上了**（此前文档里只敢写"会变重"，**没写分钟数**）：
+
+  | | 离线测试 job |
+  |---|---|
+  | 此前用 `requirements-test.txt`（近 5 次） | **1m12s / 1m18s / 1m23s / 1m25s / 1m27s** |
+  | 改用 `requirements.txt`（PR #35，首次） | **3m35s** |
+
+  ⚠️ **3m35s 是 pip 缓存冷的值** —— cache key 从 `requirements-test.txt` 换成了 `requirements.txt`，**必然 miss**。
+  ⇒ **稳态值未测**（换回本文件后第二次运行即命中缓存）。**但 3m35s 可接受，不动摇 §四·1 的结论。**
+
   **同时把断言总表里 4 条 ⬜ 转成 ✅**（重跑实测，不是推断）：
   离线层 `68 passed, 1 skipped, 11 deselected`（与文档**逐字一致**）· `test_agent_repairs.py` `18 passed`（且文件里恰 18 个 test 函数）·
   凭据门"没 `git add` 就扫 = 没扫"的口径 · `--all` 在干净仓库上**本来就会红 2 处**（既存占位符）。
