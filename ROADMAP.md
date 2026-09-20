@@ -166,6 +166,21 @@
 
     ⚠️ **每条都要写出结论**:**「调了」/「未命中(为什么不命中)」/「命中未调(说明原因)」**。
     **不许只写"已核对"** —— 那等于没写(本次复盘就是证据:**产出物上看不出判据被跳过**)。
+
+    🔴 **2026-09-20 补加:「合并之前」那一行也必须绑成【动作】,不能只停在表里。**
+    起因:PR #29 合并时这两条**命中未调**,而我**自己在 PR 正文里写了**「⏳ 时点=合并之前,合前补」
+    —— **写下那一刻感觉已经处理了(有个交代),实际等于没有执行者**。
+    ⇒ **现绑到动作:执行合并命令(`gh pr merge`)之前,必须做完下面两件,并把结论写进 PR:**
+    1. **调 `requesting-code-review`** —— 派独立 reviewer 复核;**它报的每条先自己独立复现,再决定改不改**
+       (⚠️ 不是照做;本仓已有一次是"reviewer 说得对,而**我自己提的修法**被证伪") 
+    2. **调 `finishing-a-development-branch`** —— 并**在 PR 正文写明合并方式(squash / merge / rebase)
+       及其后果**
+    ⚠️ **为什么第 2 条要写"合并方式及其后果"**:PR #29 那次写了「三个 commit **逐一可 revert**」,
+    而本仓用 **squash** ⇒ **断言与事实相反**。这不只是措辞问题 —— **它是"可以安全合"的论据之一**。
+    📌 复盘:`docs/复盘/2026-09-19-合并前检查点没建起来.md`
+    📌 证据:**PR #29 两条都漏**(事发那次);**PR #30 是第一条真正走完这两步的** ——
+    且它证明这两步不是走过场:reviewer 报的 8 条里,**有 3 条是真错**(含我自己编的"两个月",
+    以及一份**照字面实施会给凭据门引入假红**的修法)。
   - ⛔⛔ **同一时点还要过一遍「三套过程记录」** —— **2026-09-17 补加,起因是 `DEC` 那一路断了**:
 
     | 渠道 | 记什么 | 触发器 | 本仓实况 |
@@ -211,14 +226,31 @@
     - ⛔ **原判据在本仓失效**:它按**路径**触发(`prompts/` · `contracts/tools-mcp` · `eval/`),
       且那些路径**相对 `agent-eval-gate` 而非本仓**。**本仓 prompt 是内联在 `.py` 里的**
       ⇒ 路径式触发**永不命中**,哪怕 prompt 真被改了
-    - ✅ **判据 A(快·文件清单)** —— 本仓 prompt / 工具 / 记忆 的**真实分布**,
-      **实测得来**(2026-09-17 扫全 `api/*.py`,非手写):
+    - ✅ **判据 A(快·文件清单)** —— 本仓 prompt / 工具 / 记忆 的**真实分布**,**实测得来**,非手写。
+      🔴 **最近一次重生成: 2026-09-20**(全扫 `api/*.py`);上一版是 2026-09-17。
 
       | 面 | 文件 |
       |---|---|
-      | **prompt** | `agent_graph_advanced_learning.py`(7) · `plan_execute.py`(6) · `rag_pipeline.py`(3) · `api_v1_rag.py`(3) · `agent_graph_advanced.py`(3) · `query_rewriter.py`(2) · `search_tools.py`(1) · `answer_with_citations.py`(1) |
-      | **工具** | `mcp_server.py`(5) · `mcp_tool_factory.py`(5) · `agent_graph_advanced_learning.py`(4) · `browser_tools.py`(3) · `api_v1_rag.py`(3) · `simple_tools.py`(2) · `agent_graph.py`(2) · `agent_checkpointer.py`(2) · `code_executor.py`(1) · `search_tools.py`(1) |
+      | **prompt** | `agent_graph_advanced_learning.py`(6) · `plan_execute.py`(6) · `rag_pipeline.py`(3) · `api_v1_rag.py`(3) · `agent_graph_advanced.py`(3) · `test_plan_constraints.py`(3) · `query_rewriter.py`(2) · `search_tools.py`(1) · `answer_with_citations.py`(1) |
+      | **工具** | `mcp_server.py`(5) · `mcp_tool_factory.py`(5) · `agent_graph_advanced_learning.py`(4) · `browser_tools.py`(3) · `api_v1_rag.py`(3) · `simple_tools.py`(3) · `agent_checkpointer.py`(2) · `agent_graph.py`(2) · `code_executor.py`(2) · `code_executor_impl.py`(2) · `search_tools.py`(1) · `simple_tools_impl.py`(1) |
       | **记忆** | `memory_store.py`(12) · `agent_graph_advanced_learning.py`(6) · `agent_graph_advanced.py`(3) · `api_v1_agent.py`(2) |
+
+      **合计 20 个文件**(上一版记 18)。
+
+      🔴 **它腐过一次,而且旧表本身还有两处错(2026-09-20 重生成时抓到)** —— 逐条已查明:
+
+      | 差异 | 原因(**实测,不是推测**) |
+      |---|---|
+      | **18 → 20 个文件** | +`code_executor_impl.py` · +`simple_tools_impl.py` —— **切开点 3**(`ded4195`,09-17)**新建**的,而上一版清单**生成于它之前** |
+      | `code_executor.py` 工具 **1→2** · `simple_tools.py` **2→3** | ⚠️ **不是真多了工具,是统计口径的假阳性** —— 正则数的是"**提到** `@tool` 的行",而切开点 3 在这两个文件里加了**提到 `@tool` 的说明文字**。**真装饰器数量没变**(分别 1 个 / 2 个:`code_executor.py:36` · `simple_tools.py:15,25`) |
+      | `agent_graph_advanced_learning.py` prompt **7 → 6** | ⚠️ **不是漂移,是旧表把数写错了** —— 实测该文件在 **⑤ 归档前后都是 6**(`git show 4ad5298^:api/agent_graph_advanced_learning.py \| grep -c` = **6**),其间**没有任何命中行被增删** |
+      | 旧表**记 18,但三行去重只有 17** | 旧表**漏了 `test_plan_constraints.py`(prompt=3)** —— 它算在"18"这个数里,却**没出现在任何一行** ⇒ **旧表自相矛盾** |
+
+      📌 **这一版是怎么被抓出来的(值得记)**:2026-09-19 开 PR #29 前跑 `/留痕-checks` 的 #7 判据 A,
+      **重生成了一遍**才发现"记的 18"与"实测的 20"对不上。
+      ⇒ 这**正是**"清单要可重生成"那条设计的意义;但 ⚠️ **没人会主动去重生成一份已经写好的清单**
+      (与 `ROADMAP` 第一屏"只增不删"是**同一个病**)。
+      **⇒ 故本条清单从此带【最近一次重生成日期】,让陈旧可见**(而不是等下一次有人想起来)。
 
       ⚠️ **清单可重生成**(不靠记)——
       ```bash
@@ -228,9 +260,14 @@
         m=$(grep -cE "Mem0|mem0|from memory_store" "$f")
         [ $((p+t+m)) -gt 0 ] && echo "$f prompt=$p 工具=$t 记忆=$m"; done
       ```
-      📌 **本清单的来历**:第一版是**我手写的 7 个**,当场验证发现**只覆盖约 40%**
-      —— 实际 18 个文件,漏了 11 个(最大一处 `agent_graph_advanced_learning.py`)。
-      **手写清单被当场证伪** ⇒ 故改为「方法 + 派生结果」,并保留这条教训。
+      📌 **本清单两次被证伪,两次都不是"想出来的",是跑出来的**:
+      · **第一次(2026-09-17)**:第一版是**我手写的 7 个**,当场验证发现**只覆盖约 40%**
+        —— 当时实测 18 个文件,漏了 11 个(最大一处 `agent_graph_advanced_learning.py`)。
+        ⇒ 故改为「方法 + 派生结果」,并保留这条教训。
+      · **第二次(2026-09-20)**:⚠️ **即便是"实测得来"的这一版,里面本身也有错**
+        (见上表:一个算错的数 7、一个漏掉的文件)—— 而它**挂着"实测得来"四个字,更容易被信**。
+        ⇒ 教训升级:**「实测得来」不等于「一直有效」。清单是【快照】,不是【事实】** ——
+        快照必须能被重拍,而且**得有人去拍**。（本仓的现实是:**没人会主动拍**。）
     - ✅ **判据 B(慢·内容兜底)**:不看路径,直接看 **diff 有没有改 prompt 文本 / 工具 schema / 记忆策略**
     - **两者都要** —— A 快但**清单会腐**(已证伪一次),B 慢但**不会漏**
     - ⚠️ **用了哪个判据要在 PR 里说出来**;用了替代判据**必须写明**,
