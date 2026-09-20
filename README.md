@@ -2,21 +2,41 @@
 
 一个生产级的 RAG（检索增强生成）+ Agent API 服务，集成了混合检索、重排序、查询改写、引用溯源、LangGraph Agent、MCP 工具、Mem0 长期记忆和成本控制等核心能力，构建于 FastAPI、PostgreSQL(pgvector)、Redis 之上。
 
-**模型端点**：生成/对话 LLM 走 **DeepSeek**（`LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL_*` 三键可换任意 OpenAI 兼容端点，见 `api/config.py`）；
-Embedding 走 **阿里云百炼 DashScope `text-embedding-v2`**（1536 维）。
+**模型端点**（⚠️ **两件事别混**）：
+- **Embedding 固定走** 阿里云百炼 DashScope `text-embedding-v2`（1536 维）。
+- **生成/对话 LLM 是可配置的**，而 **`api/config.py` 的默认值是 DashScope + `qwen-turbo`/`qwen-plus`**。
+  🔴 **本项目开发机上用的是 DeepSeek**（`.env` 里 `LLM_BASE_URL=https://api.deepseek.com` ·
+  `LLM_MODEL_FAST`/`LLM_MODEL_CHAT=deepseek-v4-flash`），但那是 **`.env`（不入库）里的取值**，
+  **不是代码默认值** —— **新克隆下来跑的是 qwen，不是 DeepSeek。**
+  要切，填 `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL_FAST` / `LLM_MODEL_CHAT` **四个**环境变量
+  （`LLM_API_KEY` 不填则回退用 `DASHSCOPE_API_KEY`）——
+  **`.env.example` 第 4–9 行已备好这四个键的注释模板**（默认注释掉 ⇒ 不填就是 DashScope）。
 
-## 📊 性能目标（⚠️ **目标值，尚未实测**）
+## 📊 性能目标（⚠️ **目标值 —— 不是指标**）
 
-> 🔴 **这三行此前写作"性能指标"，是本仓校对时改的。** 它们**没有任何实测数据支撑** ——
-> 仓库里那份 `性能基线报告模板.txt` **只是模板**，从未跑出过报告；
-> `ROADMAP.md` 也明写「P99 / 失败率 / 并发 / Grafana **尚无实测数据**」。
-> **把它们当指标引用是不诚实的**，故就地改名为「目标值」。
-> 📌 反证（单样本，非 P99）：`mode=accurate_norerank` 实测 **1.93s**（含查询改写），**已超过下表的 800ms**。
+> 🔴 **这三行此前写作「性能指标」，且下面这张表是核对时改的。**
+>
+> **仓库里【有】一次旧压测记录**（见 `性能基线报告模板.txt`，2026-06-25，三档并发 10/20/35）——
+> ⚠️ **但那份记录不能用来支撑这三个数，方向甚至相反**：
+
+| 旧记录（2026-06-25） | 值 | 与下表目标对比 |
+| :--- | :--- | :--- |
+| P99 延迟 | **68 / 32 / 28 ms**（10/20/35 并发） | **低于**目标的 800ms ✅ |
+| **错误率** | **77.24% / 96% / 97%** | 🔴 **远糟于**目标的 `< 0.1%` |
+| QPS | 5.1 / 10.5 / 17.8 req/s | — |
+
+> ⚠️ **那次压测跑在坏掉的环境上**：同日 `api/logs/api_2026-06-25.log` 含 **113 条未捕获异常**
+> （`redis:6379` 解析失败、`could not translate host name "postgres"`），**与 77–97% 的错误率自洽**。
+> ⇒ **P99 那几个数不能采信**（失败请求不产生正常延迟样本），**口径也从未复核过**。
+>
+> 📌 **所以本表的每一格「现状」都是 ⬜**：不是"没有记录"，而是 **"那份记录不可用"**。
+> `ROADMAP.md` 里那句「P99 / 失败率 / 并发 / Grafana **尚无实测数据**」指的正是这个意思
+> （核查清单 24 项**全部未勾**）。
 
 | 目标 | 目标值 | 现状 |
 | :--- | :--- | :--- |
-| **P99 检索延迟** | `< 800ms` | ⬜ **未实测**（`mode=fast` 实测 ~25ms；`accurate_norerank` 单样本 1.93s） |
-| **基础检索失败率** | `< 0.1%` | ⬜ **未实测** |
+| **P99 检索延迟** | `< 800ms` | ⬜ **无可采信数据**（旧记录 28–68ms **跑在坏环境上**，不可用） |
+| **基础检索失败率** | `< 0.1%` | 🔴 **旧记录 77–97%（环境坏，不可用；但说明这条从未达标过）** |
 | **Embedding 缓存命中率** | `> 90%` | ⬜ **未实测** |
 | **多格式文档支持** | PDF, Word, Markdown, HTML | ✅ 已实现（`api/document_parser.py`） |
 
@@ -72,7 +92,14 @@ cd rag-agent-api
 
 ```bash
 cp .env.example .env
-# 编辑 .env，填入你的阿里百炼 API Key 等信息
+# 编辑 .env，至少填这三项：
+#   DASHSCOPE_API_KEY   —— Embedding 用（阿里百炼）
+#   JWT_SECRET_KEY      —— 随便一串随机值
+#   LOGIN_PASSWORD      —— 缺失会【拒绝启动】
+# 生成随机值：python3 -c "import secrets; print(secrets.token_urlsafe(24))"
+#
+# 生成/对话 LLM 默认走 DashScope 的 qwen-turbo / qwen-plus；
+# 想换成 DeepSeek 等 OpenAI 兼容端点，取消 .env.example 第 4–9 行的注释并填 LLM_* 四键。
 ```
 
 ### 3. 一键启动
@@ -150,5 +177,5 @@ curl http://localhost:8000/api/v1/
 | 1 | **浏览器工具在本机不可用** | `venv/bin/playwright install chromium` ⇒ `ERROR: Playwright does not support chromium on mac13`（本机 macOS **13.6**；Playwright 1.62 要 chromium **1234**，缓存里是 1228） | `fetch_webpage` / `screenshot_webpage` 健康检查恒为 unhealthy（**环境天花板，非代码缺陷**）—— 目前工具健康 **4/6** |
 | 2 | **`mode=accurate/full` 与重排序未验** | 本机 **8GB 内存 / 4 核**，装不下 torch + `bge-reranker-v2-m3`（2.3GB） | 默认模式是 `accurate_norerank`（**不碰 torch**），故产品可用；但这两条路径**本机验不了** |
 | 3 | **性能数字全部未实测** | 见上方「性能目标」段 | 不得作为选型/承诺依据 |
-| 4 | **知识库语料为测试数据** | 检索命中的是「测试文档一」「Python是一门强大的编程语言」（`source` = `test`/`test_docs`） | 直接演示会显得**答非所问**；需先灌真实语料 |
+| 4 | **知识库语料良莠不齐** | `documents` 表 **35/77 行是测试数据**（`source` = `test` 24 行 + `test_docs` 11 行），含「测试文档一」这类；其余是正经语料 | 结果**时好时坏** —— 同一个问题可能命中切题的（如 `eval_dataset.json#23`）也可能命中测试垃圾。**演示前建议先灌一份干净语料** |
 | 5 | **本地 Qdrant 是单实例锁** | `mem0_client` 在 `memory_store.py` **模块导入期**就开 `./.mem0/qdrant` ⇒ 应用跑着时 `pytest` 跑不了（`Storage folder … already accessed by another instance`） | 跑测试前须停应用；逃生口：从**仓库根**跑 + 设 `MEM0_DIR=<临时目录>`（**两个都要**） |
