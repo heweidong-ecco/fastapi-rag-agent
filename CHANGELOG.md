@@ -10,6 +10,62 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- 🔴 **"别人 clone 下来能不能跑" —— 实测后发现【不能】，已修**（2026-09-20）。
+
+  **业务方问「README 等等别人 git clone 工作都做好了吗」—— 我去真 clone 了一遍，答案是"没做好"：**
+
+  | 步 | 原文 | 实测 |
+  |---|---|---|
+  | 1 | `git clone https://github.com/你的用户名/rag-agent-api.git` | ❌ **`Repository not found`** —— **占位符 URL**，照抄必失败 |
+  | 3 | 「一键启动」= `docker compose up -d` | ⚠️ 它会 **build 多 GB 镜像**（`docker-compose.yml:13` 的 `build: context: ./api`，而 `api/requirements.txt` 含 torch 系）⇒ **8GB 内存上跑不动（实测）**，与"一键"的描述严重不符 |
+  | — | **无任何依赖安装步骤** | ❌ README 全文 grep `pip install`/`requirements` = **0 命中** |
+  | — | **`dev.sh` 一次都没提** | ❌ 文件在仓库里，且它正是本仓的本地开发路径 |
+  | — | **`requirements-test.txt`（轻量路径）没提** | ❌ **本仓其实有两条路径**，README 只暗示了重的那条 |
+
+  **修法**：
+  1. **README 快速开始重写** —— 真实 clone URL；**两条启动路径**（**路径 A 轻量**为默认：
+     `docker compose up -d postgres redis` + `pip install -r api/requirements-test.txt` + 本地 uvicorn；
+     路径 B Docker 全量，并明写它的构建代价）；提 `dev.sh`；
+     **验证步骤给出 4 条命令 + 2026-09-20 实测输出原文**（含"库是空的 ⇒ `docs: []` 是正常的"这类坑）；
+     末尾指向新的 Agent 指南。
+  2. **`docs/FAQ.md` 补 Q1.1–Q1.5** —— 原 FAQ **整份假设 Docker 路径**（Q1–Q3 全是 `docker compose`），
+     新增：轻量路径怎么跑 / `Repository not found` / Postgres 连不上（且**要用 `docker start` 而非 `up`**）/
+     `validate_config` 的**四个**必填项 / `pytest` 撞 Qdrant 单实例锁的逃生口。
+  3. **新增 `docs/给Agent的测试与调试指南.md`** —— 面向**另一个 Agent**：
+     可粘贴的 Prompt ×3 · 分层命令行与 marker 对照 · **「看起来像坏了其实不是」对照表（10 条）** ·
+     日志定位法 · **红线 6 条**（别 build 镜像 / 别不带 `rag_test` 跑真库 / 别直推 main / …）· 提交前必跑凭据门。
+
+  **同一批的诚实修正**：README 里 `curl /api/v1/` 应返回 `{"status":"ok","version":"v1"}` —— **这条原本就是对的**
+  （实测确认），未改。
+
+- **第 0 步「盘点」三件产出 —— 为的是"改 A 漏 B"这类问题**（2026-09-20）。
+
+  业务方指出一个更根本的隐患：**「你对整个项目还没有完全看透，等下修了这边，又漏那边」**。
+  ⇒ **先盘点再动手**，产出三件：
+
+  | 产出 | 路径 | 作用 |
+  |---|---|---|
+  | **断言总表** | `docs/断言总表-2026-09-20.md` | 把"看透代码"换成"**核断言**"：交付文档 3 份共 **33 条**断言，每条带**当场可跑的核对命令**（已核 12 条，其余标 ⬜ 并写明缺什么；§B–§E 登记为欠账，**不自称完整**） |
+  | **影响面扫描器** | `scripts/impact.sh` + 回归 **11 项** | **改动前的机械防线**：列出全仓谁会因这次改动而变成错的 |
+  | **重写保留清单** | `docs/PR34-重写保留清单-2026-09-20.md` | 把 `694d424` 里**方向无关、已实测**的内容摘出来 ⇒ 重写时不会丢实测 |
+
+  **盘点当场核出 6 条原审计没有的问题**（N1–N6，详见 `docs/待办登记-2026-09-20-全仓审计与方向更正.md` §十一）：
+  🔴 README 论证「P99 不可采信」所依赖的日志**克隆者拿不到**（`.gitignore:9 logs/`，`git ls-files api/logs/` = 0）·
+  ~~🔴 FAQ 说 `-test` 是「只做减法」**不成立**~~ ⚠️ **此条已于同日撤回 —— 是错的**，见下方 `Fixed` 段 ·
+  ⚠️ `Agent/` 是审计的整片盲区 · ⚠️ 技术栈表列 RAGAS/Locust 而轻量路径装的没有 ·
+  ⚠️ 根级 2 个 md 被 gitignore 但在盘上 · ⚠️ `/rag/search` 对无效 mode **静默兜底**（多花钱、多延迟）。
+
+- **`docs/FAQ.md` 新增「五、Agent 相关」A1–A9**（2026-09-20）。原系统 `Agent/docs/faq_agent.md` 的 Q7–Q15 迁入
+  —— **根 FAQ 此前 0 条 Agent 排障**。⚠️ 迁入时**逐条核了代码**，其中**原 Q13（让人查 `.env` 的 `MEM0_API_KEY`）
+  与 Q14（说可调 Mem0 的 `delete()`）两条在本仓不成立**，已按事实改写（本仓 Mem0 是**本地模式**，
+  没有那个键；`api/memory_store.py` 也**没有** `delete` 方法）。Q1–Q6 与根 FAQ 逐条重复、Q16 与根 Q10 重复，**未迁**。
+
+### 说明
+
+- 本条的**发现方式**值得记：我是**真去 `git clone` 了一遍、照着 README 盲跑**才发现的。
+  在这之前我已经在同一个 PR 里把 README 改成"诚实版"、并写了「已知限制」——
+  **却从没验过"照 README 做能不能跑起来"**。⇒ **"诚实化"不等于"可用"。**
+
 - **`LICENSE`（MIT）+ README「已知限制」诚实清单**（2026-09-20 · B 档：技术预览 Release 的前置）。
 
   **为什么补 LICENSE**：README 一直写「MIT License」，但**仓库里没有这个文件**
@@ -154,6 +210,21 @@ All notable changes to this project will be documented in this file.
 - **`CHANGELOG.md`** —— 本文件。
 
 ### Changed
+
+- **根 `README.md`：补"整套系统架构图" + 写明原系统出处**（2026-09-20）。
+  「技术架构」段新增 `docs/architecture-full.png`（**并显式标注图上工具层的 `rag_search` 已过时** ——
+  当前实际是 `fetch_webpage_html`，`api/agent_graph_advanced_learning.py:47-51`；**图记录的是更早一代工具集**）；
+  项目结构树下新增出处说明：**原系统是极狐 GitLab 上的 `agent-assistant`**
+  （证据原在 `Agent/deploy.md`，现见 git 历史 `351f699`）；结构树里的 `Agent/` 一行已删。
+
+- **两处"引用了已删文件"的历史记录 —— 只加日期补注，不篡改原文**（2026-09-20）：
+  - `docs/decisions/DEC-003`：它把 `Agent/docs/api_agent.md` 列为"仓内约定证据"**之一** ⇒ **由 2 处降为 1 处**。
+    ✅ **决策本身不受影响**（主依据是"端点无 Pydantic body"这一**代码事实**，`api/api_v1_agent.py:348-357` 仍在）；
+    `docs/demos.md` 那处**证据未断**。
+  - `docs/凭据轮换手册`：「原始泄露面 3 个被跟踪文件」**现剩 2 个**。⚠️ **口径变了 ≠ 风险变了**
+    —— 被删的那个文件里是**公开占位符**；真正的风险仍是"有没有别处把真口令写进被跟踪文件"。
+
+  **为什么只加补注**：这两份是**事发/决策当时的快照**，改成现状会让记录失真。
 
 - **CI `offline-tests` 的覆盖面：从「1 个文件」扩到「`api/` 全套」+ 两个 job 加 `timeout-minutes`**（2026-09-17 · M6 的后续）。
 
@@ -339,7 +410,87 @@ All notable changes to this project will be documented in this file.
 
 - 本地残留分支 `docs/api-doc-final-review`(已并入 `main`,远端无此分支)。
 
+- **原系统 `Agent/` 目录整体删除（方案甲「拆走再删」，`DEC-018`）**（2026-09-20）。
+
+  业务方问「原 clone 来的 `Agent/` 还有用吗，没有用不用保留，**污染环境**」。
+  实测后判断：**不是"全没用"，是三块有用、四块是污染**：
+
+  | 处置 | 内容 | 依据 |
+  |---|---|---|
+  | **搬** | `architecture_full.png` → `docs/architecture-full.png` + 根 README 引用 | **整套系统**级架构图（仓根那张只到子系统级），**唯一**画了 MCP 层 / 部门制 Agent / 成本控制体系的图 |
+  | **迁** | `faq_agent.md` 的 Q7–Q15 → `docs/FAQ.md` 第五节 | 根 FAQ 原有 **0 条** Agent 排障 |
+  | **删** | `README.md`（自称"生产级"，与根 README **在同一仓里说反话**）· `deploy.md`（与根 `deploy.md` 重叠 + **第三处占位符 clone URL**，审计漏抓）· `.env.example`（**配置面与仓根不同**：多 `MEM0_API_KEY`/`API_KEY`，**少 `LOGIN_PASSWORD`** ⇒ 照抄配不起来）· `docs/api_agent.md` · `docs/architecture_agent.png` | —— |
+
+  ⚠️ **未删任何代码** —— Agent 模块的 12 个 `.py` **全是原系统的**（引入于 `2c1a922` 2026-07-17 / `351f699` 2026-08-17），
+  本项目对其改动 **+405 / −210 行**，而这些文件共 **2974 行** ⇒ **≈ 13.6%（上限）**，其中
+  `tool_health.py`/`browser_tools.py`/`code_executor.py`/`simple_tools.py` **一行未动**。
+  **全部原文仍在 git 历史**（`git show 351f699 --stat`），可恢复。
+
+### Changed
+
+- 🔴 **交付收敛成【一条路径】—— `docker compose up -d`**（2026-09-20 · 分支 `docs/redeliver-single-path`）。
+
+  **业务方方向更正**：「**不用双 requirements.txt，这样会混，最后肯定是用 docker-compose 一键编排的，
+  别人 git clone 也是 docker-compose**」、「**整个项目阶段性完成，本来就是要完整明了、简洁的交付**」。
+
+  | 改了什么 | 内容 |
+  |---|---|
+  | **`README.md`** | 「3. 启动」从**两条路径**（轻量 A / Docker 全量 B，还推荐了 A）**收敛成一条** `docker compose up -d`；删掉「别用 `docker compose up`」红线的**理由**；前置要求表重排（Docker 变唯一必需，Python 3.10 降为"跑测试才需要"）；新增「🔧 本地开发/跑测试」小节（**明说这是开发路径，不是交付路径**）；「5. 访问文档」改为全栈都有（Grafana/Prometheus/看板） |
+  | **`docs/FAQ.md`** | Q1.1 从「我不想构建镜像怎么办」**重写为**「怎么把项目跑起来」；Q1.3 的 `docker start` 理由改写（**保留现象、去掉已作废的理由**）；A6 的"轻量路径"表述改为"本地开发路径" |
+  | **`docs/给Agent的测试与调试指南.md`** | §1 标题从「**不构建镜像**」改掉，并**明说本节是开发路径**；§6 红线第一条**降级**（理由作废，但保留"先确认再动手"）；§8 总结改写 |
+  | **`api/requirements-test.txt`** | 🔴 **删除**（§四·1 裁「删 + CI 改回」）。**安全性已核**：用**集合运算**（含版本约束比对整行）实测它是 `requirements.txt` 的**真子集** ⇒ 切过去**不丢任何包** |
+  | **`.github/workflows/ci.yml`** | 依赖清单与 pip cache 路径改回 `api/requirements.txt`，并注明**代价（CI 会变重）** |
+  | **`CLAUDE.md` / `ROADMAP.md`** | ⚠️ 这两处**都在教"用 `-test` 建 venv"** —— 不改，后来的会话照做即失败（这正是"改这边漏那边"）。已同步 |
+  | **`README.md`「📈 评估体系」** | 原写「**集成 RAGAS**」——**不成立**：`ragas` 在依赖里，但 **`api/*.py` 0 处 import 它**，评估脚本还在 `archive/`（不入库）。已改为「⬜ 未接入」 |
+
+  **⏳ → ✅ CI 耗时的实测值补上了**（此前文档里只敢写"会变重"，**没写分钟数**）：
+
+  | | 离线测试 job |
+  |---|---|
+  | 此前用 `requirements-test.txt`（近 5 次） | **1m12s / 1m18s / 1m23s / 1m25s / 1m27s** |
+  | 改用 `requirements.txt`（PR #35，首次） | **3m35s** |
+
+  ⚠️ **3m35s 是 pip 缓存冷的值** —— cache key 从 `requirements-test.txt` 换成了 `requirements.txt`，**必然 miss**。
+  ⇒ **稳态值未测**（换回本文件后第二次运行即命中缓存）。**但 3m35s 可接受，不动摇 §四·1 的结论。**
+
+  **同时把断言总表里 4 条 ⬜ 转成 ✅**（重跑实测，不是推断）：
+  离线层 `68 passed, 1 skipped, 11 deselected`（与文档**逐字一致**）· `test_agent_repairs.py` `18 passed`（且文件里恰 18 个 test 函数）·
+  凭据门"没 `git add` 就扫 = 没扫"的口径 · `--all` 在干净仓库上**本来就会红 2 处**（既存占位符）。
+
 ### Fixed
+
+- 🔴 **撤回一条我自己发出去的错断言**：「`requirements-test.txt` **不只做减法**（还加了 `gradio`）」—— **是错的**（2026-09-20）。
+
+  我用 `diff` 看到 `-test` 里多出一行 `gradio>=4.0.0`，据此断言 FAQ 的「只做减法」不成立，
+  **并把这句写进了本文件、`docs/待办登记…` 与 `docs/断言总表…`，还推送了出去**。
+  **复核后确认：它是错的。**
+
+  **复核用的判据换了**（关键）：改用**集合运算** ——
+  `comm -13 <(requirements.txt 去注释/去版本号/sort -u) <(-test 同样处理)`：
+  **只在 `-test` 里的包 = 空**；只在 `requirements.txt` 里的，恰为**文档声明的 7 项**
+  （`sentence-transformers` / `transformers` / `camelot-py[cv]` / `opencv-python` / `ragas` / `datasets` / `locust`）。
+  ⇒ **「只做减法」是对的，FAQ 没错。**
+
+  **根因：`diff` 的「行序伪影」。** `gradio` 在原文件 `:94`、在 `-test:116` —— **两边都有**，
+  只因此处上下文行不同，`diff` 把它报成了"新增"。
+  ⛔ **教训：判「两个清单的集合差异」不能用 `diff`（它按行序对齐），要用 set 运算（`comm`/`sort -u`）。**
+  行数 `123 vs 100` 属实，但差值来自 `-test` **头部那段长注释**，**不是多装了包**。
+
+  ⚠️ **更难看的一点**：本文件 `:199`（更早的条目）**本来就写对了**（"只做减法，**未加任何新包**"）——
+  **我在同一个文件里写了句和它相隔 145 行、内容相反的话，却没想到去读它。**
+
+- 🔧 **`scripts/impact.sh` 自身两个缺陷 —— 自建的防线，自己先踩了两次**（2026-09-20）。
+
+  ① **假绿灯（严重）**：`printf '%s'` 吃掉末尾换行，而 `wc -l` 数的是**换行数** ⇒ **系统性少算 1**；
+  **恰好 1 处命中时报「0」** —— 输出"零命中"。**一个会给出"没有影响面"假绿灯的防线，比没有防线更危险。**
+  实测：`architecture_agent` 只有 `Agent/README.md` 一处引用，被报成 **0**。
+  ⇒ 改 `'%s\n'`，并补 T9（恰 1 命中 ⇒ 必须报 1）/ T10（计数 == **独立 oracle**）。
+  ② **测试脆**：删 `Agent/` 后回归从 **11/11 掉到 9/11** —— 排查**不是脚本坏，是测试依赖了仓库内容**
+  （T4 的哨兵串、T9 的关键词**都被我自己随后写进了测试文件或别处** ⇒ "零命中"再也构不出来、"恰 1 命中"变成 3）。
+  ⇒ T4 改用**运行时生成**的哨兵；T9 夹具独立成 `scripts/impact_test_fixture.txt` + **运行时读取**
+  （测试里不留 token 字面量）+ **夹具失效守卫** —— 该守卫**当场抓住过一次**我自己把 token 写进测试文件。
+
+  ⚠️ **更正一条此前报出去的数字**：我给业务方报的「`POSTGRES_PASSWORD` 命中 **19** 个」是错的，**实为 20**。
 
 - 🔴 **三条 Agent 路径全断 —— 七处【依赖漂移】，全部修通**（2026-09-20）。
 

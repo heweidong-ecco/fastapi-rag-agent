@@ -1,6 +1,26 @@
 # RAG Agent API
 
-一个生产级的 RAG（检索增强生成）+ Agent API 服务，集成了混合检索、重排序、查询改写、引用溯源、LangGraph Agent、MCP 工具、Mem0 长期记忆和成本控制等核心能力，构建于 FastAPI、PostgreSQL(pgvector)、Redis 之上。
+> ## 📌 先读这一段：**本仓是「轻量版」**
+>
+> 本仓是**受硬件条件约束**（本机 8GB 内存 / 4 核）**经过三轮删减**后留下的**可运行最小集**。
+> 它**不是**这个项目的全貌 —— **完整版还包含相当一部分本仓里没有的模块与能力**，
+> 那些部分**不在本仓的范围内**，也不由本仓的测试覆盖。
+>
+> **本仓里保留的这部分**，代码有单元测试与模块级测试覆盖，**是可以跑、可以验的** ——
+> 下面「快速开始」照做即可，`pytest` 也有可对照的基线数字。
+>
+> ⚠️ **两点如实说明（别让这段话被误读）**：
+> 1. **被删掉的那部分，本仓无法为它背书** —— 它们的可运行性、测试情况都在本仓之外，
+>    本仓既看不到、也验不了。**本段只承诺"本仓里的东西能跑"。**
+> 2. **删减的直接代价已经登记在文档里**，不是"删掉了但功能照旧"：
+>    `mode=accurate/full` 与重排序在本机跑不了（装不下 torch + 2.3GB 模型）；
+>    具体清单见下方「📊 性能目标」与「⚠️ 已知限制」。
+
+一个 RAG（检索增强生成）+ Agent API 服务，集成了混合检索、重排序、查询改写、引用溯源、LangGraph Agent、MCP 工具、Mem0 长期记忆和成本控制等核心能力，构建于 FastAPI、PostgreSQL(pgvector)、Redis 之上。
+
+> 🔴 2026-09-20 改：原文首句写「一个**生产级的** RAG + Agent API 服务」——
+> **已删去"生产级"**。理由：本仓的性能数字**全部未实测**（见下），
+> 且有三条已知限制；把一个没有验收数据的东西称作"生产级"是**没有依据的断言**。
 
 **模型端点**（⚠️ **两件事别混**）：
 - **Embedding 固定走** 阿里云百炼 DashScope `text-embedding-v2`（1536 维）。
@@ -44,6 +64,22 @@
 
 ![系统架构图](docs/architecture.png)
 
+**整套系统架构图**（上面那张没画到的部分：MCP 工具层 · 部门制 Agent · 成本控制体系）：
+
+![完整系统架构图](docs/architecture-full.png)
+
+> 📌 **2026-09-20**：这张图原在 `Agent/docs/architecture_full.png`，随 `Agent/` 目录处置搬到 `docs/`。
+> 它是**整套系统**级别的图（另一张 `docs/architecture.png` 只到子系统级）。
+>
+> ✅ **已逐项核对，图上组件本仓都有**：
+> FastAPI 网关（路由/认证/限流/日志/文本规范化）· LangGraph **部门制 Agent**
+> （Supervisor + 检索/计算/日期/翻译/ReAct + Checkpointer —— `api/agent_graph_advanced_learning.py:105/134/154/169/197/246`）
+> · **MCP Server 工具注册中心**（`api/mcp_server.py:24`）· RAG 检索管线 · Mem0 / Redis / pgvector
+> · **成本控制体系**（`api/cost_dashboard.py`）· Grafana + Prometheus（`docker-compose.yml:90`）。
+>
+> ⚠️ **一处已过时，别照图核代码**：图上工具层画的是 **`rag_search`**，而当前的实际工具是
+> **`fetch_webpage_html`**（`api/agent_graph_advanced_learning.py:47-51`）。⇒ 这张图记录的是**更早一代**的工具集。
+
 ## ❓ 常见问题
 
 遇到问题请先查阅 [FAQ 与故障排查](docs/FAQ.md)。
@@ -59,7 +95,7 @@
 | **监控** | Prometheus + Grafana | 指标采集与可视化大屏 |
 | **容器化** | Docker + Docker Compose | 一键部署 |
 | **测试** | pytest + Locust | 单元测试、集成测试、性能压测 |
-| **评估** | RAGAS | 自动化检索质量评估 |
+| **评估** | RAGAS ⬜ **未接入** | ⚠️ 依赖在 `requirements.txt` 里，但**本仓代码 0 处调用**、脚本也不在库 —— 见上方「📈 评估体系」 |
 | **CI/CD** | GitHub Actions | 自动测试工作流 |
 
 ## ✨ 核心功能
@@ -75,54 +111,153 @@
 
 ## 📈 评估体系
 
--   **自动评估**：集成 RAGAS，自动评估忠实度、答案相关性、上下文召回率和精确率。
+> 🔴 **2026-09-20 更正**：本段原写「**集成 RAGAS**，自动评估忠实度、答案相关性、上下文召回率和精确率」——
+> **不成立，已改**。实测：`ragas` **确实在 `api/requirements.txt` 里**，但 **`api/` 下 0 处 `import` 它**；
+> 而唯一用它的评估脚本 `archive/scripts/evaluate_with_ragas.py` **被 `.gitignore` 排除、不在库里**。
+> ⇒ **本仓没有可运行的自动评估链路。** 说"集成"是没有依据的断言。
+
+-   ⬜ **自动评估（RAGAS）**：**未随本交付入库** —— 依赖装了，但**代码与脚本都不在**。
 -   **人工评估**：从完整性、简洁性、逻辑性、可用性四个维度进行定性分析。
 -   **Bad Case分析**：持续跟踪并分析失败案例，驱动系统优化。
 
 ## 🚀 快速开始
 
+**前置要求**（⚠️ 2026-09-20 补 —— 原先没写，而 Python 版本是**硬要求**）：
+
+| 需要 | 说明 |
+|---|---|
+| **Docker + Docker Compose v2** | **唯一必需** —— 一条 `docker compose up -d` 起全栈（PostgreSQL+pgvector / Redis / API / Prometheus / Grafana） |
+| **磁盘 / 内存** | ⚠️ 要**下载并构建 GB 级镜像**（`api/requirements.txt` 含 torch 系）⇒ **首次启动较慢**。**8GB 内存的机器上实测构建会失败** —— 那是环境天花板，不是配置写错（见「已知限制」） |
+| **Python 3.10** | ⚠️ **只有要跑测试 / 本地改代码时才需要**（`api/Dockerfile` 的基础镜像也是 3.10）。**不要用 `python3`** —— 本机实测 `python3` = **3.14.7**，只有 `python3.10`（3.10.10）可用 |
+
 ### 1. 克隆项目
 
 ```bash
-git clone https://github.com/你的用户名/rag-agent-api.git
-cd rag-agent-api
+git clone https://github.com/heweidong-ecco/fastapi-rag-agent.git
+cd fastapi-rag-agent
 ```
+
+> 🔴 2026-09-20 修：此处原为 `git clone https://github.com/你的用户名/rag-agent-api.git`
+> —— **是占位符，照抄必然 `Repository not found`**（已实测）。现改为真实地址。
 
 ### 2. 配置环境变量
 
 ```bash
 cp .env.example .env
-# 编辑 .env，至少填这三项：
+# `api/config.py` 的 validate_config 检查【四项】—— 缺任何一项都【拒绝启动】：
 #   DASHSCOPE_API_KEY   —— Embedding 用（阿里百炼）
+#   POSTGRES_PASSWORD   —— ⚠️ 这一项容易漏！.env.example 里给了个占位值 mysecretpassword，
+#                          不改成真的也能起来（本地 Docker 就是那套），但**不能删/留空**
 #   JWT_SECRET_KEY      —— 随便一串随机值
-#   LOGIN_PASSWORD      —— 缺失会【拒绝启动】
+#   LOGIN_PASSWORD      —— 管理员登录口令
 # 生成随机值：python3 -c "import secrets; print(secrets.token_urlsafe(24))"
 #
 # 生成/对话 LLM 默认走 DashScope 的 qwen-turbo / qwen-plus；
 # 想换成 DeepSeek 等 OpenAI 兼容端点，取消 .env.example 第 4–9 行的注释并填 LLM_* 四键。
 ```
 
-### 3. 一键启动
+> 🔴 2026-09-20 修：此处原写「**三项**」——**漏了 `POSTGRES_PASSWORD`**。
+> 实测 `api/config.py:58-74` 检查的是 **4 项**；漏写会让"删了这一项 ⇒ 起不来 ⇒ 按本表查不到原因"。
+
+### 3. 启动（**一条命令**）
 
 ```bash
+cp .env.example .env      # 上一步填好【四项】必填
 docker compose up -d
 ```
 
-### 4. 验证
+⚠️ **首次会 `build` API 镜像**（`docker-compose.yml:13` 的 `build: context: ./api`），
+而 `api/requirements.txt` 含 torch 系 ⇒ **要下几个 GB、构建较久**。
+**8GB 内存 / Docker 配额较小的机器上实测会失败** —— 那是**环境天花板，不是配置写错了**（见下方「已知限制」）。
+
+> 🔴 **2026-09-20 方向更正**：本段此前写的是「**两条路径**」（轻量：DB 用 Docker + API 跑本机；Docker 全量），
+> **推荐轻量那条，还立了「别用 `docker compose up`」的红线**。**现已收敛成上面这一条** ——
+> 业务方口径：「**不用双 requirements.txt，这样会混，最后肯定是用 docker-compose 一键编排的，
+> 别人 git clone 也是 docker-compose**」、「**整个项目阶段性完成，本来就是要完整明了、简洁的交付**」。
+> ⇒ **删掉分叉**，也**删掉那条红线的理由**（它原本是为"别打断 `agent-eval-gate` 评测"立的，而该顾虑已作废）。
+
+#### ⚠️ 如果你的机器上**已经有** `postgres-rag` / `redis-rag` 容器
+
+```bash
+docker ps --format '{{.Names}}' | grep -E 'postgres-rag|redis-rag'
+```
+
+**有的话先看清它们是不是本仓的** —— `docker compose up` 是**按 compose 项目**工作的，而容器可能不属于本项目。
+
+> ⚠️ **这个坑是实测的（2026-09-20）**：本机 `postgres-rag` / `redis-rag` 的
+> `com.docker.compose.project` 是 **`my-fixed-name`**、`config_files` 指向**另一个仓库**的 compose 文件；
+> 本仓 `docker compose ps` **是空的**（不认领它们）。此时 `up` 会计划 **`Container postgres-rag Creating`**
+> + 建新网络 ⇒ **要么撞名硬失败，要么把已有容器重建到 `fastapi-rag-agent_app-net`**。
+>
+> ⛔ **原文此处写的是"重建会打断 `agent-eval-gate` 的评测，所以这是红线"—— 该理由已作废**
+> （业务方：「**不用考虑 agent-eval-gate 占用 docker-compose，那个项目已经做完了，我们正常使用**」）。
+> ✅ **但"重建已有容器会断掉指向它的东西"这个现象本身仍然成立** ⇒ 所以是**先确认再动手**，不是无条件禁止。
+
+#### 🔧 本地开发 / 跑测试（**这是开发路径，不是交付路径**）
+
+交付只需要上面那一条命令。**只有当你要在本机跑 `pytest` 或改代码时**，才需要这一套：
+
+```bash
+python3.10 -m venv venv
+venv/bin/pip install -r api/requirements.txt
+cd api && ENABLE_DASHBOARD=false ../venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
+```
+
+> ⚠️ **必须在 `api/` 目录下起 uvicorn**（有一处路径按相对位置解析）。`bash dev.sh` 干的就是这一步。
+>
+> 📌 **依赖清单只有一份：`api/requirements.txt`。** 🔴 2026-09-20 删掉了此前那份"轻量版"
+> `api/requirements-test.txt` —— 业务方口径「**不用双 requirements.txt，这样会混**」。
+> 已核安全性：实测那份是 `requirements.txt` 的**真子集**（含版本约束在内比对整行 ⇒ 只在它里面出现的行 = **空**），
+> 切过去**不丢任何包**。代价是本机会拉 torch 系；但 `api/reranker.py:14` 是真懒加载，
+> **不碰 torch 也能跑**（默认模式 `accurate_norerank`）。
+
+### 4. 验证（**以下输出是 2026-09-20 实测的原文**）
 
 ```bash
 curl http://localhost:8000/health
-# 应返回 {"status":"healthy",...}
+# {"status":"healthy","checks":{"database":"ok","redis":"ok","embedding_api":"deferred to external monitoring"}}
 
 curl http://localhost:8000/api/v1/
-# 应返回 {"status":"ok","version":"v1"}
+# {"status":"ok","version":"v1"}
+
+curl http://localhost:8000/ready
+# {"status":"ready"}      ← ⚠️ 启动后 10 秒内会返回 503，那是设计行为，不是坏了
 ```
+
+再取个 token、跑一次真实检索（**这才是"真的跑起来了"**）：
+
+```bash
+# ⚠️ 先把 .env 里的值载进当前 shell —— 下面两行【原本没写，照抄会拿到空口令 ⇒ 401】
+set -a; . ./.env; set +a          # 或者手写：export LOGIN_USER_NAME=admin LOGIN_PASSWORD='你的口令'
+
+TOK=$(curl -s -X POST localhost:8000/api/v1/auth/login -H 'Content-Type: application/json' \
+  -d "{\"user_name\":\"$LOGIN_USER_NAME\",\"password\":\"$LOGIN_PASSWORD\"}" \
+  | python3 -c 'import sys,json;print(json.load(sys.stdin)["access_token"])')
+
+curl -s -X POST localhost:8000/api/v1/rag/hybrid_search -H "Authorization: Bearer $TOK" \
+  -H 'Content-Type: application/json' -d '{"question":"测试","top_k":3}'
+# 应返回 {"method":"hybrid (vector + bm25)","docs":[...]} —— docs 里的 "from" 字段是 "vector"/"bm25"/"both"
+```
+
+> 🔴 2026-09-20 修：`$LOGIN_USER_NAME` / `$LOGIN_PASSWORD` **只存在于 `.env`，它们不是 shell 变量**
+> —— 原版没写怎么把它们导出来，照抄会发出**空用户名/空口令**（`TOK` 取不到，下一句 401）。
+> **这正是本 PR 要消灭的那类"照抄跑不通"。** 已补 `set -a; . ./.env; set +a`。
+
+> ⚠️ **此时知识库是空的**（新装的库没有文档）⇒ `docs` 会是 `[]`，**这是正常的**。
+> 要看非空结果，先按 `docs/demos.md` 灌几篇文档，或参考 `/api/v1/rag/insert`。
 
 ### 5. 访问文档
 
+`docker compose up -d` 起的是**全栈**，所以下面这些都会有：
+
 -   Swagger UI：http://localhost:8000/docs
+-   成本看板（Gradio）：http://localhost:8000/dashboard
 -   Grafana 监控：http://localhost:3000 (admin/admin)
 -   Prometheus：http://localhost:9090
+
+## 🤖 用另一个 Agent 来测这个项目？
+
+见 **`docs/给Agent的测试与调试指南.md`** —— 里面有可直接粘贴的 Prompt、分层命令行、每个失败的已知原因。
 
 ## 📁 项目结构
 
@@ -149,14 +284,22 @@ curl http://localhost:8000/api/v1/
 │   ├── metrics.py          # Prometheus 指标
 │   ├── auth.py             # 认证逻辑
 │   └── ...                 # 更多模块
-├── Agent/                  # Agent 子系统文档
-├── docs/                   # 项目文档（FAQ、架构图、Demo）
-├── archive/                # 归档的未使用文件（不入库）
+├── docs/                   # 项目文档（FAQ、架构图、Demo、决策记录）
+├── archive/                # 归档的未使用文件（⚠️ **被 .gitignore 排除，不在库里**）
 ├── docker-compose.yml      # 服务编排
 ├── prometheus.yml          # Prometheus 配置
 ├── locustfile_v2.py        # 性能压测脚本
 └── README.md               # 本文件
 ```
+
+> 📌 **关于原 `Agent/` 目录（2026-09-20 已处置）**
+>
+> 本仓是在**原系统**的基础上做的。原系统是**极狐 GitLab 上的 `agent-assistant` 项目**
+> （证据：原系统文档里的 `git clone https://jihulab.com/…/agent-assistant.git`，见 git 历史 `351f699` / `2c1a922`）。
+> 它的文档曾以 `Agent/` 目录形式随仓携带，2026-09-20 因**与仓根文档大面积重复、且其 `.env.example`
+> 与 `deploy.md` 会误导**（前者配置面与仓根不同、后者是占位符 URL）而拆解处置：
+> **架构图搬进 `docs/`，Agent 排障 9 条并入 `docs/FAQ.md` 第五节，其余删除。**
+> 全部原文仍在 git 历史里（`git show 351f699 --stat`）。
 
 ## 📄 许可证
 
