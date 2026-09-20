@@ -211,6 +211,33 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **§三 清理 · A 类（11 条"注释说 A、代码做 B"）全部修正**（2026-09-20 · 分支 `chore/section3-cleanup`）。
+
+  **纯注释 / docstring 修正，零行为影响** —— 明细分见 `docs/清理清单-2026-09-20.md` §二。逐条：
+
+  | 位置 | 注释说 | 代码做 |
+  |---|---|---|
+  | `api/hybrid_search.py:13` | `[(content, source, similarity), ...]`（**3 元组**） | `:35` 按 **4 元组**解包 |
+  | `api/rag_pipeline.py` `create_accurate_norerank_pipeline` | docstring 与上面 `create_accurate_pipeline` **逐字相同**（"启用查询改写**和重排序**"） | 实参 `enable_rerank=False`（函数名就写着 no-rerank） |
+  | `api/logger_config.py:25` | 「文件输出：**JSON 格式**」 | `:28` 是**管道分隔纯文本** |
+  | `api/plan_execute.py:219` | 写死「暂时用 `qwen3.7-plus`」 | 那是**无效模型名**；真正生效的是 `model=LLM_MODEL_CHAT` |
+  | `api/agent_graph_advanced.py:1` | 自称 `api/agent_graph_advanced_1.0.0.py` | **该文件不存在** |
+  | `api/agent_graph_advanced.py:76-80` | 「**新增会话池**，避免并发阻塞」 | **会话池走过又被推翻**，现已移除（见其下 docstring：单 task 自开自关） |
+  | `CLAUDE.md` 路由表 | `/rag/batch-insert` · `/rag/upload` · `/rag/stream` | **三个都不存在** ⇒ 改为 `insert_batch` / `upload_document` / `stream_search`，并补上漏登的 4 个检索端点与 WS 的真实前缀 `/api/v1/ws/…` |
+  | `CLAUDE.md` 末尾 | 「`logger_config.py` 第 44 行后有约 **70 行 SLS**」 | 实测**文件 45 行、`SLS` 出现 0 次** |
+
+  **🔎 孤立 docstring（审计列 6 处，`ast` 检查又抓出 2 处，共 8 处）**：
+  `api_v1_agent.py:188` · `:418` · `api_v1_rag.py:261` · `:573` · `rag_pipeline.py:74` · `query_rewriter.py:46` · `:111` · `main.py:503`。
+  它们**全是空操作**（函数体里不是首句的裸字符串 ⇒ 求值后丢弃），典型来历是 **docstring 被后插入的代码挤开**
+  ⇒ **函数看起来"有文档"，但 `__doc__` 是 `None`**，`help()` / IDE 提示 / 自动文档全拿不到。
+  修法**分三种**（不是一律"上移"）：**函数真缺 docstring 的上移**（`api_v1_agent.py:418` · `api_v1_rag.py:573` ·
+  `rag_pipeline.py:74` · `main.py:503`）；**函数已有 docstring 的合并后删掉**（`query_rewriter.py:46` · `:111` ·
+  `api_v1_rag.py:261`）；**描述的是子步骤的改成普通注释**（`api_v1_agent.py:188`）。
+
+  **守住**：新增回归用例 `test_no_stray_docstrings_in_function_bodies`（`ast` 结构判据 ——
+  它是**纯空操作**，"跑一下看行为"永远测不出来）。
+
+
 - 🔴 **两处「审计结论」被实测推翻 —— 一处翻案、一处加重**（2026-09-20 · `docs/待办登记…` §十三）。
 
   **① `api/websocket_test.html`：审计判它"孤儿"，判错了。**

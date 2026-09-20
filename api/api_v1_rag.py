@@ -257,8 +257,12 @@ async def upload_document(
     domain: str = "default",  # 新增：用户可指定领域，默认为 "default"，法律"legal",医疗"medical"
     user_name: str = Depends(get_current_user_hybrid),
 ):
-    """上传并解析多格式文档（PDF/Word/Markdown/HTML）"""
-    """上传并解析多格式文档，经过预处理后入库"""
+    """上传并解析多格式文档（PDF/Word/Markdown/HTML），经过预处理后入库。
+
+    ⚠️ 2026-09-20 修：此处原有**两行紧挨着的 docstring** ——
+       第二行（那句「上传并解析多格式文档，经过预处理后入库」，用三引号包着）是**空操作**
+       （函数已有一行 docstring）。已把它的信息并入第一行、删掉第二行。
+    """
     # 检查文件格式
     allowed_extensions = ["pdf", "docx", "md", "html"]
     ext = file.filename.lower().split(".")[-1]
@@ -567,13 +571,15 @@ async def stream_search(
     req: QuestionRequest,
     user_name: str = Depends(get_current_user_hybrid),
 ):
-    # 1. 若前端未主动传历史，则从 Redis 加载该用户最近5轮对话
+    """流式RAG问答接口（融合优化版）（支持引用溯源和历史补偿）。
+    使用SSE逐字返回生成的答案，提供类似ChatGPT的体验。
+
+    ⚠️ 2026-09-20 修：这段 docstring 原先**躺在两句代码之后**（函数体第三句），
+       是**空操作** —— 函数本身**没有 docstring**。已上移到签名正下方。
+    """
+    # 0. 若前端未主动传历史，则从 Redis 加载该用户最近5轮对话
     if not req.conversation_history:
         req.conversation_history = get_chat_history(user_name)
-    """
-    流式RAG问答接口（融合优化版）（支持引用溯源和历史补偿）。
-    使用SSE逐字返回生成的答案，提供类似ChatGPT的体验。
-    """
     # 1. 检索（与普通接口相同）
     # 1. 向量检索（这部分不是流式的，一次性查完）
     # 构建当前输入的这条的历史对话，真停止按钮的调用（使它支持历史补偿）

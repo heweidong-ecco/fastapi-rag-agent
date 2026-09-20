@@ -499,8 +499,12 @@ async def startup_event():
 
 @app.on_event("shutdown")
 async def graceful_shutdown():
+    """应用关闭时执行清理操作。
+
+    ⚠️ 2026-09-20 修：这段 docstring 原先**躺在 `close_pool()` 之后**，是**空操作** ——
+       函数本身**没有 docstring**。已上移到签名正下方（代码一行未动）。
+    """
     close_pool()  # 关闭连接池
-    """应用关闭时执行清理操作"""
     logger.info("收到关闭信号，开始优雅关闭...")
 
     # 1. 停止接收新请求（FastAPI 自动处理）

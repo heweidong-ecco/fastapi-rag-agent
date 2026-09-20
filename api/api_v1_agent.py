@@ -184,8 +184,11 @@ async def agent_plan_execute(
     user_name: str = Depends(get_current_user_hybrid),
 ):
     """完整的 Plan-and-Execute 流程"""
-    # 1. 规划
-    """任务规划接口：将用户目标分解为步骤清单"""
+    # 1. 规划：将用户目标分解为步骤清单
+    # ⚠️ 2026-09-20 修：此处原是一个**字符串字面量**（`"""任务规划接口：…"""`）——
+    #    函数在上一行**已经有 docstring** ⇒ 它是**空操作**；
+    #    且它描述的是「规划」这一**子步骤**，不是整个函数的职责。
+    #    ⇒ 改成**普通注释**（保留信息、去掉误导）。
     plan = plan_task(goal)
 
     # 2. 执行
@@ -412,10 +415,14 @@ async def mcp_agent_chat(
     # user_name: str = Depends(get_current_user_hybrid),
     user_name: str = Depends(check_budget),  # 改为使用预算检查
 ):
+    """使用 MCP Client 的 Agent 对话接口（请求级隔离）
+
+    ⚠️ 2026-09-20 修：这段 docstring 原先**躺在 `start_trace()` 之后**（函数体第二句），
+       是**空操作** —— 函数本身**没有 docstring**。已上移到签名正下方。
+    """
     # 记录工具 开始追踪
     start_trace(thread_id, question)
 
-    """使用 MCP Client 的 Agent 对话接口（请求级隔离）"""
     result = await mcp_agent.ainvoke(
         {
             "messages": [HumanMessage(content=question)],

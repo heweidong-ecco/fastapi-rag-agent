@@ -38,14 +38,16 @@ def _get_cache_key(prefix: str, text: str, extra: str = "") -> str:
     return "rewrite:" + hashlib.md5(raw.encode()).hexdigest()
 
 def expand_query(original_query: str, num_variants: int = 3) -> list[str]:
-    """生成查询变体（带缓存）"""
+    """生成多个不同表述的查询变体，用于扩大检索范围（带缓存）。
+
+    ⚠️ 2026-09-20 修：原 docstring 只有「生成查询变体（带缓存）」，
+       而函数体里**另有一段孤立的 docstring**（"用于扩大检索范围"）——
+       它躺在缓存早退分支之后，是**空操作**。已合并到这里。
+    """
     cache_key = _get_cache_key("expand", original_query, str(num_variants))
     cached = redis_client.get(cache_key)
     if cached:
         return json.loads(cached)
-    """
-    生成多个不同表述的查询变体，用于扩大检索范围。
-    """
     prompt = f"""你是一个查询扩展助手。请将用户的问题改写成 {num_variants} 个不同表述但语义相同的查询。
 每个查询一行，不要编号，不要任何额外说明。
 
@@ -98,8 +100,12 @@ def _history_lines(conversation_history) -> list:
 def rewrite_query(original_query: str, conversation_history=None) -> str:
     """优化查询（带缓存）
 
+    做什么：补全上下文、转书面语、纠正口语化表达；提供了对话历史时会尝试消解指代。
+
     `conversation_history` 接受 `list[dict]`（`{"role","content"}`，= schema 声明的形态）
     或 `list[str]`（旧形态）—— 两种都由 `_history_lines()` 规整。
+
+    ⚠️ 2026-09-20 修：上面"做什么"那句，原先是**函数体中段一个孤立的字符串**（空操作）。
     """
     # 将历史序列化成字符串作为缓存键的一部分
     history_lines = _history_lines(conversation_history)
@@ -108,10 +114,6 @@ def rewrite_query(original_query: str, conversation_history=None) -> str:
     cached = redis_client.get(cache_key)
     if cached:
         return cached
-    """
-    优化查询：补全上下文、转书面语、纠正口语化表达。
-    如果提供了对话历史，会尝试消解指代。
-    """
     history_text = ""
     if history_lines:
         history_text = "\n对话历史：\n" + "\n".join(history_lines)

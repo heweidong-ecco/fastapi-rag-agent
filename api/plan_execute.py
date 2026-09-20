@@ -216,7 +216,9 @@ def generate_dynamic_input(step: Dict, context: str, user_goal: str) -> str:
 quality_checker_llm = ChatOpenAI(
     # 用最轻量的模型，节省成本和延迟，
     # 推荐使用一个小型、快速的本地模型（比如Qwen3-1.7B），专门做这种简单的通过/不通过判断。
-    # 因为没有本地部署，因为没额定暂时用qwen3.7-plus
+    # 没有本地部署 ⇒ 用配置里的 chat 模型（`model=` 那一行就是它）
+    # ⚠️ 2026-09-20 修：原注释写死「暂时用 qwen3.7-plus」—— 那是**无效模型名**
+    #    （`CLAUDE.md` 已明列），且与下面真正生效的 `model=LLM_MODEL_CHAT` 不符。
     model=LLM_MODEL_CHAT,
     api_key=LLM_API_KEY,
     base_url=LLM_BASE_URL,

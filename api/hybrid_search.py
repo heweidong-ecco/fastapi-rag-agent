@@ -10,7 +10,7 @@ from reranker import rerank
 from query_rewriter import expand_query, rewrite_query
 
 def reciprocal_rank_fusion(
-    vector_docs,  # [(content, source, similarity), ...]
+    vector_docs,  # [(id, content, source, similarity), ...]  ← 2026-09-20 修：原写 3 元组，与 L35 的解包不符
     bm25_docs,    # [(id, content, source, bm25_score), ...]
     k=60,
     top_k=5
