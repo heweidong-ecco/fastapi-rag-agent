@@ -30,6 +30,18 @@
 #            ⇒ 已全部改成 `grep … >/dev/null`(读完再判断,不早退)。
 #            📌 这就是一道**看起来在工作、实际是硬币**的门 —— 比"没有门"更坏,
 #              因为它会让人以为自己被保护着。复盘见 docs/复盘/2026-09-17-一道硬币做的门.md。
+#   v4 → v5(2026-09-20) 🔴 也是**自 v1 起就在**的另一条同类路径 —— v3→v4 只修了
+#            "症状所在的那一处",没修**形状**:
+#            `SCAN_TEXT` 取自管道,而 `2>/dev/null` + `|| true` 把「生产者失败」压成了
+#            「产出为空」⇒ **扫描没跑,门照样绿**。最狠的一个变体是:若 `git diff`
+#            **输出一部分之后才失败**,`SCAN_TEXT` 非空 ⇒ 走正常路径 ⇒ 打出**货真价实的**
+#            `✅ 凭据门: 通过 —— 0 命中`,而扫的是**被截断的内容** —— **绿得毫无破绽**。
+#            ⇒ 已改为**单独取 `git diff`/`git grep` 自身的退出码**,失败即 `exit 2`(不得当作通过);
+#              并新增 **③-0 自证(positive control)**:喂一个运行时拼接的合成样本,
+#              断言模式匹配机制抓得住它 —— 抓不住即 `exit 2`。
+#            📌 判据形式的修正:`通过 ⇐ 执行 ∧ ¬命中`,**不许退化成** `通过 ⇐ ¬命中`。
+#              复盘见 docs/复盘/2026-09-20-查不到不等于不存在.md。
+#            ⚠️ 回归测试:scripts/test_check_secrets.sh(断言**退出码**,不断言文案)。
 #
 # 用法:
 #   bash scripts/check_secrets.sh          # 扫 staged 改动(默认,提交前用)
@@ -49,17 +61,78 @@ DENYLIST="$REPO_ROOT/.secret-denylist"
 #    v1 曾扫整份 diff,结果:**我删掉一个存量凭据字面量时,门报了红** ——
 #    因为它连 `-` 删除行一起扫了。**删掉密钥是好事,不该拦。**
 #    (这个缺陷是门第一次真上岗时抓到的,已修。)
+#
+# 🔴 2026-09-20(v4→v5) **取 SCAN_TEXT 必须单独拿【生产者自己的退出码】**。
+#    此前写成 `$(git diff … 2>/dev/null | grep … || true)` —— `2>/dev/null` 吞掉错误、
+#    `|| true` 抹平退出码 ⇒ **「git diff 失败」与「产出为空」压成同一个结果**
+#    ⇒ **扫描压根没跑，门照样绿**。形式化:门从 `通过 ⇐ 执行 ∧ ¬命中`
+#    **退化成** `通过 ⇐ ¬命中`。（复盘见 docs/复盘/2026-09-20-查不到不等于不存在.md）
+#    ⛔ **不许拿【管道状态】判成败** —— 脚本是 `set -uo pipefail`，而暂存区只有
+#       删除行/重命名(无 `+` 行)时 `git diff` 成功、两个 `grep` 均返回 1 ⇒ 管道状态 = 1
+#       ⇒ **合法空集会被误判成"没执行"**。（这正是 v1→v2 记过的同一个坑。）
 if [ "$MODE" = "--all" ]; then
-    SCAN_TEXT="$(git grep -h -I -e '' -- . 2>/dev/null || true)"
+    ALL_OUT="$(git grep -h -I -e '' -- .)"
+    ALL_RC=$?
+    # git grep 的语义: 0=有匹配 · 1=无匹配(**合法的空**) · ≥2=出错
+    if [ "$ALL_RC" -ge 2 ]; then
+        echo "⛔ 凭据门: **扫描没有执行** —— git grep 失败(exit $ALL_RC)"
+        echo "   ⇒ 【不得当作通过】。⚠️ 这不是'扫过了没命中',是'压根没扫成'。"
+        exit 2
+    fi
+    SCAN_TEXT="$ALL_OUT"
     echo "[凭据门] 扫描范围: 整个工作区(全部内容)"
 else
-    # 去掉 diff 头(`+++ b/...`)与删除行(`-`),只留新增行(`+`)
-    SCAN_TEXT="$(git diff --cached -U0 2>/dev/null | grep -E '^\+' | grep -vE '^\+\+\+' || true)"
+    DIFF_OUT="$(git diff --cached -U0)"
+    DIFF_RC=$?
+    if [ "$DIFF_RC" -ne 0 ]; then
+        echo "⛔ 凭据门: **扫描没有执行** —— git diff 读取暂存区失败(exit $DIFF_RC)"
+        echo "   ⇒ 【不得当作通过】。⚠️ 这不是'暂存区为空'。"
+        exit 2
+    fi
+    # 走到这里才允许出现"空集":git diff 已被确认成功,空就是**真的**空。
+    # （下面的 `|| true` 是安全的 —— 它只吸收"grep 无匹配(exit 1)";
+    #   生产者失败已在上面拦掉了,不会漏到这里。）
+    SCAN_TEXT="$(printf '%s' "$DIFF_OUT" | grep -E '^\+' | grep -vE '^\+\+\+' || true)"
     echo "[凭据门] 扫描范围: staged 的【新增行】(git diff --cached | grep '^+')"
 fi
 
+# ---- ③ 通用模式:不需要知道具体值 -------------------------------------------
+# ⚠️ 本数组**必须定义在下面"自证"之前** —— 自证要拿它来验匹配机制真的在工作。
+declare -a PATTERNS=(
+    'sk-[A-Za-z0-9]{16,}'                  # OpenAI/DashScope 风格
+    'ghp_[A-Za-z0-9]{20,}'                 # GitHub PAT
+    'gho_[A-Za-z0-9]{20,}'                 # GitHub OAuth
+    'AKIA[0-9A-Z]{16}'                     # AWS Access Key ID
+    'BEGIN [A-Z ]*PRIVATE KEY'             # PEM 私钥
+    'eyJhbGciOi[A-Za-z0-9_-]{10,}'         # JWT(裸的,不带 Bearer 前缀时也算)
+)
+
+# ---- ③-0 自证(positive control) ---------------------------------------------
+# 🔴 2026-09-20 加。**判据能说"没查到"的前提,是它抓得住已知该命中的东西。**
+#    喂一个【运行时拼出来的合成样本】(不是任何真实凭据),断言通用模式抓得住它。
+#    ⛔ **样本必须在运行时拼接** —— 写成字面量的话,**本文件自己就会命中自己的模式**,
+#       导致凭据门在提交这个脚本时报红(门自噬)。
+#    形式化:本段提供 `通过 ⇐ 执行 ∧ ¬命中` 里「**匹配机制确实在工作**」那一半的证据。
+#    ⚠️ 它必须跑在下面"空集即 exit 0"**之前** —— 否则暂存区为空时根本走不到这里。
+CANARY="sk-$(printf 'A%.0s' 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20)CANARY"
+CANARY_HIT=0
+for p in "${PATTERNS[@]}"; do
+    if printf '%s' "$CANARY" | grep -E -- "$p" >/dev/null; then CANARY_HIT=1; break; fi
+done
+if [ "$CANARY_HIT" -ne 1 ]; then
+    echo "⛔ 凭据门: **自证失败** —— 已知该命中的合成样本没被抓住。"
+    echo "   ⇒ **模式匹配机制本身失灵,本次'没命中'不能采信。**"
+    exit 2
+fi
+echo "  · 自证通过(合成样本被通用模式抓住;该样本非真实凭据)"
+
+# ⚠️ 此处的"空"与上面的"失败"是两回事 —— 前者是【已确认执行且确实为空】。
 if [ -z "$SCAN_TEXT" ]; then
-    echo "[凭据门] staged 区为空 —— 没有要提交的内容。"
+    if [ "$MODE" = "--all" ]; then
+        echo "[凭据门] 工作区没有可扫内容 —— **扫过了,确实为空**。"
+    else
+        echo "[凭据门] staged 区为空 —— **git diff 已确认执行成功**,确实没有要提交的内容。"
+    fi
     exit 0
 fi
 
@@ -122,14 +195,8 @@ else
 fi
 
 # ---- ③ 通用模式:不需要知道具体值 -------------------------------------------
-declare -a PATTERNS=(
-    'sk-[A-Za-z0-9]{16,}'                  # OpenAI/DashScope 风格
-    'ghp_[A-Za-z0-9]{20,}'                 # GitHub PAT
-    'gho_[A-Za-z0-9]{20,}'                 # GitHub OAuth
-    'AKIA[0-9A-Z]{16}'                     # AWS Access Key ID
-    'BEGIN [A-Z ]*PRIVATE KEY'             # PEM 私钥
-    'eyJhbGciOi[A-Za-z0-9_-]{10,}'         # JWT(裸的,不带 Bearer 前缀时也算)
-)
+# ⚠️ PATTERNS 数组已上移到文件前部(在「自证」之前)——
+#    自证必须先于"空集即 exit 0"执行,否则暂存区为空时根本走不到自证。
 for p in "${PATTERNS[@]}"; do
     # ⚠️ 同样**不许用 `grep -q`**（理由见第 ① 段那处注释）
     if printf '%s' "$SCAN_TEXT" | grep -E -- "$p" >/dev/null; then
