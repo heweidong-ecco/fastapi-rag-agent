@@ -1,5 +1,80 @@
 # Agent 多任务演示
 
+> 🔴 **2026-09-20 加：下面三个场景是【最初写的规划】** —— 命令是 `curl -X POST "..."` 占位，
+> 而 Agent 那三条路径当时**根本跑不通**（1 代空答案 / 2 代 500 / 3 代 500）。
+> 当天修通了（7 处依赖漂移 + 2 处既存缺陷，见 `docs/decisions/DEC-017-demo就绪路线与LLM换DeepSeek.md`），
+> 但**命令仍是占位**，且 Demo 1 依赖的 `fetch_webpage` **在本机不可用**
+> （macOS 13 不支持 Playwright 1.62）。
+> ⇒ **要真拍 demo，用下面【实测可跑】那一段，不要照这三个场景的占位命令。**
+
+---
+
+## ✅ 实测可跑（**2026-09-20 现场验过，命令与输出都是真的**）
+
+### 前置
+
+```bash
+cd ~/Desktop/Product/agent-projects/projects/fastapi-rag-agent
+docker compose up -d postgres redis          # 只起 DB/Redis
+cd api && ENABLE_DASHBOARD=false ../venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
+curl -s localhost:8000/health
+# ⇒ {"status":"healthy","checks":{"database":"ok","redis":"ok","embedding_api":"deferred to external monitoring"}}
+```
+
+### 取 token
+
+```bash
+TOK=$(curl -s -X POST localhost:8000/api/v1/auth/login -H 'Content-Type: application/json' \
+  -d "{\"user_name\":\"$LOGIN_USER_NAME\",\"password\":\"$LOGIN_PASSWORD\"}" \
+  | python3 -c 'import sys,json;print(json.load(sys.stdin)["access_token"])')
+```
+
+### Demo A · 混合检索（RRF 真融合）
+
+```bash
+curl -s -X POST localhost:8000/api/v1/rag/hybrid_search -H "Authorization: Bearer $TOK" \
+  -H 'Content-Type: application/json' -d '{"question":"混合检索是怎么做的","top_k":3}'
+```
+**实测输出**：`{"method":"hybrid (vector + bm25)","docs":[{…,"rrf_score":0.0782,"from":"vector"}, {…,"from":"both"}]}`
+⇒ **`from: "both"` 就是 RRF 确实融合了两路的证据**（不是只有向量路）。
+
+### Demo B · 带引用的答案生成（**旗舰**）
+
+```bash
+curl -s -X POST "localhost:8000/api/v1/rag/search?mode=accurate_norerank" \
+  -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' \
+  -d '{"question":"混合检索是怎么做的？","top_k":3,"generate_answer":true,"citations":true}'
+```
+**实测输出**（关键片段）：`answer` 里带 **`[来源:1]`** 行内标注；`sources` 是结构化的
+`[{"id":64,"source":"eval_dataset.json#23","content_preview":"…"}]`。
+**顺带能演「拒答」**：资料不足时它会说「根据现有资料，无法回答。现有资料仅提到：…」
+—— **这是正确行为，不是失败**。
+
+> ⚠️ **`generate_answer` 与 `citations` 默认都是 `false`** —— 不显式打开就**只返回 `docs`**，
+> 不生成答案、更不会有引用。**这是最容易在演示时翻车的点。**
+
+### Demo C · 三条 Agent 路径（**2026-09-20 修通**）
+
+| 命令 | 实测 |
+|---|---|
+| `POST /api/v1/agent/langgraph_chat?question=请计算 6*7` | ✅ 200，**但返回的是待审批状态**：`{"status":"pending_approval","pending_tool_calls":[{"name":"calculator","args":{"expression":"6*7"}}]}` —— 该图带**人工审批节点**，**工具还没执行**；要走 `/agent/approve` 才继续 |
+| `POST /api/v1/agent/advanced_chat?question=计算 123*456` | ✅ `{"answer":"56088","intent":"CALCULATOR"}` |
+| `POST /api/v1/agent/advanced_chat?question=帮我规划学习 Python 的三步计划` | ✅ **真答案**（Markdown 版三步计划）—— 走 REACT 分支；**此前这里返回的是占位串「处理完成」** |
+| `POST /api/v1/agent/mcp_chat?question=1+1等于几` | ✅ `{"answer":"1+1 = **2**。"}` |
+| `GET /api/v1/agent/mcp_tools_dynamic` | ✅ 200 · 6 个工具 |
+
+> 🔴 **演示前必看**：`GET /api/v1/agent/tool_health` 会显示 **4/6 healthy** ——
+> `fetch_webpage` / `screenshot_webpage` 恒为 unhealthy（**本机 macOS 13.6 不支持
+> Playwright 1.62 的 chromium 1234**，是环境天花板，不是代码缺陷）。
+> **别在演示时贸然打开这个端点**，或打开前先说明这条。
+
+---
+
+## ⬜ 最初写的三个场景（**命令仍是占位，未据实更新**）
+
+> ⚠️ 保留原样是为了留痕 —— 它们描述的是「**想演什么**」，不是「**现在能演什么**」。
+> Demo 1 依赖 `fetch_webpage`（本机不可用）；Demo 2/3 的命令与预期结果**从未实测过**。
+
 ## Demo 1：研究型任务
 **场景**：帮我研究量子计算的最新进展，生成报告
 **命令**：curl -X POST "..." 

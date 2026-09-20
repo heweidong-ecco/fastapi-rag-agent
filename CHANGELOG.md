@@ -10,6 +10,27 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **`LICENSE`（MIT）+ README「已知限制」诚实清单**（2026-09-20 · B 档：技术预览 Release 的前置）。
+
+  **为什么补 LICENSE**：README 一直写「MIT License」，但**仓库里没有这个文件**
+  （GitHub API 的 `license` 字段是 `null`）—— **声明与事实不符**。一个 public 仓要给别人用，这是硬缺口。
+
+  **README 改了三处**：
+  1. 🔴 **「性能指标」→「性能目标（⚠️ 目标值，尚未实测）」**：`P99<800ms` / `失败率<0.1%` /
+     `缓存命中率>90%` 三行**没有任何实测支撑**（`性能基线报告模板.txt` **只是模板**；
+     `ROADMAP.md` 也明写「尚无实测数据」）。**当作指标引用是不诚实的。**
+     📌 反证（单样本，非 P99）：`mode=accurate_norerank` 实测 **1.93s**，**已超 800ms**。
+  2. **模型端点描述过时**：原文写「LLM/Embedding 由阿里云百炼 DashScope 提供」，
+     而 LLM 已换成 **DeepSeek**（见 DEC-017 裁决 ②）。已改为分别说明。
+  3. **新增「⚠️ 已知限制（诚实清单）」段**（5 条）：浏览器工具在本机不可用 ·
+     `accurate/full` 与重排序未验 · 性能数字全部未实测 · **知识库语料是测试数据** · 本地 Qdrant 单实例锁。
+
+  **顺带修**：仓库描述里的错字 `Memd` → `Mem0`（并去掉一个多余空格）。
+
+  **`docs/demos.md` 也补了一段【实测可跑】**：原文三个场景的命令是 `curl -X POST "..."` **占位**、
+  且从未实测；新增段落给出**当场验过的真命令与真输出**（含最容易翻车的点：
+  `generate_answer` / `citations` **默认 false**，不打开就只有 docs 没有答案）。
+
 - **⑦ M6 · `/rag/search` 单模块测试闭环 —— 本仓第一条「改代码 → 跑测试 → 看结果」的闭环先例**（2026-09-17）。
   新建 `api/test_rag_search.py`（**22 条**：21 离线 + 1 集成）· `api/pytest.ini` · `ci.yml` 增加第二个 job。决策见 `DEC-013`。
 
