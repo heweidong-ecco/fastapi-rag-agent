@@ -426,6 +426,27 @@ All notable changes to this project will be documented in this file.
   `tool_health.py`/`browser_tools.py`/`code_executor.py`/`simple_tools.py` **一行未动**。
   **全部原文仍在 git 历史**（`git show 351f699 --stat`），可恢复。
 
+### Changed
+
+- 🔴 **交付收敛成【一条路径】—— `docker compose up -d`**（2026-09-20 · 分支 `docs/redeliver-single-path`）。
+
+  **业务方方向更正**：「**不用双 requirements.txt，这样会混，最后肯定是用 docker-compose 一键编排的，
+  别人 git clone 也是 docker-compose**」、「**整个项目阶段性完成，本来就是要完整明了、简洁的交付**」。
+
+  | 改了什么 | 内容 |
+  |---|---|
+  | **`README.md`** | 「3. 启动」从**两条路径**（轻量 A / Docker 全量 B，还推荐了 A）**收敛成一条** `docker compose up -d`；删掉「别用 `docker compose up`」红线的**理由**；前置要求表重排（Docker 变唯一必需，Python 3.10 降为"跑测试才需要"）；新增「🔧 本地开发/跑测试」小节（**明说这是开发路径，不是交付路径**）；「5. 访问文档」改为全栈都有（Grafana/Prometheus/看板） |
+  | **`docs/FAQ.md`** | Q1.1 从「我不想构建镜像怎么办」**重写为**「怎么把项目跑起来」；Q1.3 的 `docker start` 理由改写（**保留现象、去掉已作废的理由**）；A6 的"轻量路径"表述改为"本地开发路径" |
+  | **`docs/给Agent的测试与调试指南.md`** | §1 标题从「**不构建镜像**」改掉，并**明说本节是开发路径**；§6 红线第一条**降级**（理由作废，但保留"先确认再动手"）；§8 总结改写 |
+  | **`api/requirements-test.txt`** | 🔴 **删除**（§四·1 裁「删 + CI 改回」）。**安全性已核**：用**集合运算**（含版本约束比对整行）实测它是 `requirements.txt` 的**真子集** ⇒ 切过去**不丢任何包** |
+  | **`.github/workflows/ci.yml`** | 依赖清单与 pip cache 路径改回 `api/requirements.txt`，并注明**代价（CI 会变重）** |
+  | **`CLAUDE.md` / `ROADMAP.md`** | ⚠️ 这两处**都在教"用 `-test` 建 venv"** —— 不改，后来的会话照做即失败（这正是"改这边漏那边"）。已同步 |
+  | **`README.md`「📈 评估体系」** | 原写「**集成 RAGAS**」——**不成立**：`ragas` 在依赖里，但 **`api/*.py` 0 处 import 它**，评估脚本还在 `archive/`（不入库）。已改为「⬜ 未接入」 |
+
+  **同时把断言总表里 4 条 ⬜ 转成 ✅**（重跑实测，不是推断）：
+  离线层 `68 passed, 1 skipped, 11 deselected`（与文档**逐字一致**）· `test_agent_repairs.py` `18 passed`（且文件里恰 18 个 test 函数）·
+  凭据门"没 `git add` 就扫 = 没扫"的口径 · `--all` 在干净仓库上**本来就会红 2 处**（既存占位符）。
+
 ### Fixed
 
 - 🔴 **撤回一条我自己发出去的错断言**：「`requirements-test.txt` **不只做减法**（还加了 `gradio`）」—— **是错的**（2026-09-20）。

@@ -13,8 +13,11 @@
 > 它含一条**前提级更正**（与本文档下文若干处描述冲突，以它为准）：
 >
 > - 本机**能跑测试**（曾误判为"做不了运行期验证"）。但**不要借用** `ai-learning/venv` —— 它的 `fastapi 0.115.11` 与 `starlette 1.6.0` **不配对**，任何 `APIRouter(...)` 都建不起来
-> - 正确做法：**在本仓自建隔离 venv** → `python3.10 -m venv venv && venv/bin/pip install -r api/requirements-test.txt`
-> - `api/requirements-test.txt` 是 `requirements.txt` 的**剔重版**（只做减法）：去掉 `sentence-transformers`（拖 torch）等测试不需要的重依赖 —— 本仓 `api/reranker.py:14` 是真懒加载，**不需要 torch**
+> - 正确做法：**在本仓自建隔离 venv** → `python3.10 -m venv venv && venv/bin/pip install -r api/requirements.txt`
+> - 🔴 **2026-09-20 更新**：原文走的是 `api/requirements-test.txt`（剔重版，不含 torch 系）——
+>   业务方裁决「**不用双 requirements.txt，这样会混**」⇒ **该文件已删，统一用 `api/requirements.txt`**。
+>   代价：本机会拉 torch 系（GB 级）。⚠️ 若只想跑**离线测试**，本仓 `api/reranker.py:14` 是真懒加载、
+>   **不碰 torch也能跑**（只有 `mode=accurate/full` 与 `rerank_search` 才需要）—— 但**依赖清单只有一份**，不要另建
 > - ⇒ **"切模块"不是测试的前置条件**
 > - 执行顺序：**基线 → 修 bug → 归档 → 切模块 → M6**
 >

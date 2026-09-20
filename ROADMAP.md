@@ -35,7 +35,10 @@
 
 - 🔴 **最高优先级(2026-09-15 业务方批准)**:**`docs/重构计划-2026-09-15.md`** —— **开工前先读它**。
   - **其余 M5 裁决工作让位于它**
-  - 含一条**前提级更正**:本机**能跑测试**(曾误判为"做不了运行期验证")。环境走 **本仓自建隔离 venv**(`venv/`,Python 3.10.10)+ **`api/requirements-test.txt`**(剔重版,**不含 torch 系**)
+  - 含一条**前提级更正**:本机**能跑测试**(曾误判为"做不了运行期验证")。环境走 **本仓自建隔离 venv**(`venv/`,Python 3.10.10)+ **`api/requirements.txt`**
+    - ⚠️ **2026-09-20 更新**：原文写的是 `api/requirements-test.txt`（剔重版、不含 torch 系）——
+      **该文件已按业务方裁决删除**（「不用双 requirements.txt，这样会混」）⇒ **统一用 `api/requirements.txt`**。
+      代价：本机会拉 torch 系（GB 级）。本仓 `api/reranker.py:14` 是真懒加载，**不碰 torch 也能跑**（默认 `accurate_norerank`）
   - 借来的 `ai-learning/venv` **不可用** —— 它的 fastapi 0.115.11 与 starlette 1.6.0 不配对,任何 `APIRouter(...)` 都建不起来
   - ⇒ **"切模块"不再是测试的前置条件**
   - **执行顺序与旧计划相反**:基线 → 修 bug → 归档 → 切模块 → M6

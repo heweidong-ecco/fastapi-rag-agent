@@ -20,24 +20,29 @@ ls venv/bin/python && venv/bin/python -V               # ③ 有没有可用的 
 | 现象 | 含义 | 处置 |
 |---|---|---|
 | ①② 都有响应 | **已经在跑** ⇒ 直接测 | 跳到 §3 |
-| ① 空 | DB/Redis 没跑 | `docker start postgres-rag redis-rag`（**别用 `up`**，见 §6 红线） |
+| ① 空 | DB/Redis 没跑 | `docker start postgres-rag redis-rag`（⚠️ 先用 `docker ps` 确认这两个容器**是不是本仓的**，见 §1①） |
 | ③ 不存在 | 没建环境 | 见 §1 |
 
 ---
 
-## 1 · 把环境跑起来（**只有两步，不构建镜像**）
+## 1 · 把环境跑起来
 
-> ⚠️ 标题说"两步"指的是**两个阶段**：**起依赖** + **起服务**。展开是下面 5 条命令。
+> 🔴 **2026-09-20 方向更正**：本节此前与 `README.md` 一起被拆成"两条路径"（轻量 / Docker 全量），
+> 标题还写着「**不构建镜像**」。**已收敛** —— **交付路径只有一条：`docker compose up -d`**。
+> 本节下面那条是 **Agent 要跑测试时的"开发路径"**（本机 venv + 本机 uvicorn），与交付路径不是一回事。
+
+> ⚠️ **本节的定位**：你来测这个仓 —— 要么用**交付路径**（`docker compose up -d`，见 `README.md`），
+> 要么用下面的**开发路径**（要改代码 / 跑 `pytest` 时）。**别把开发路径当成交付路径验证。**
 
 ```bash
-# ① DB + Redis —— ⚠️ 先判断，别直接 up（见下）
+# ① DB + Redis —— ⚠️ 先判断它们是不是本仓的（见下）
 docker ps --format '{{.Names}}' | grep -E 'postgres-rag|redis-rag' \
   && docker start postgres-rag redis-rag \
   || docker compose up -d postgres redis
 
-# ② 依赖
+# ② 依赖（清单只有一份：api/requirements.txt）
 python3.10 -m venv venv
-venv/bin/pip install -r api/requirements-test.txt      # ← 必须 -test 那份；见下
+venv/bin/pip install -r api/requirements.txt
 
 # ③ 环境变量
 cp .env.example .env                                    # 然后填【四项】必填（见下）
@@ -50,8 +55,7 @@ cd api && ENABLE_DASHBOARD=false ../venv/bin/uvicorn main:app --host 127.0.0.1 -
 > 而容器可能**不属于本项目**。实测本机 `postgres-rag`/`redis-rag` 的
 > `com.docker.compose.project` 是 **`my-fixed-name`**、config 指向**另一个仓库**，
 > 本仓 `docker compose ps` **是空的** ⇒ 直接 `up` 会计划 **`Container postgres-rag Creating`**
-> ⇒ **撞名硬失败**，或**把容器重建到 `fastapi-rag-agent_app-net`** ——
-> 而后者正是 §6 红线（会打断用旧网络名的 `agent-eval-gate`）。
+> ⇒ **撞名硬失败**，或**把容器重建到 `fastapi-rag-agent_app-net`**。
 > **已有容器 ⇒ `docker start`；全新机器才 `compose up`。**
 
 **必须填的【四项】（`api/config.py:58-74` 的 `validate_config` 是 fail-closed，缺一项即拒绝启动）**：
@@ -60,13 +64,13 @@ cd api && ENABLE_DASHBOARD=false ../venv/bin/uvicorn main:app --host 127.0.0.1 -
 > ⚠️ 2026-09-20 修：此处原写「三个」——**漏了 `POSTGRES_PASSWORD`**（实测代码检查 4 项）。
 > 它由 `.env.example` 提供了占位值，所以容易漏；但**删掉/留空就会起不来**。
 
-> 🔴 **为什么是 `requirements-test.txt` 不是 `requirements.txt`**
-> 后者含 `sentence-transformers`/`transformers`/`camelot-py[cv]`/`opencv-python` ⇒ **拖 GB 级 torch**，
-> 而 **8GB 内存的机器上 `docker build` 跑不动（实测）**。
-> **本仓默认路径不需要 torch**：默认模式 `accurate_norerank`，`api/reranker.py:14` 是真懒加载。
-> **代价**：`mode=accurate` / `mode=full` / `/rag/rerank_search` **本机跑不了**（要 torch + 2.3GB 模型）。
->
-> ⛔ **绝不要跑 `docker compose up -d`（不带服务名）** —— 它会 build 含 torch 的镜像。理由见 §6。
+> 📌 **② 的依赖清单只有一份：`api/requirements.txt`。**
+> 🔴 2026-09-20：此前那份"轻量版" `api/requirements-test.txt` **已删**（业务方裁决
+> 「**不用双 requirements.txt，这样会混**」）。已核安全性：实测它是 `requirements.txt` 的**真子集**
+> （含版本约束在内比对整行 ⇒ 只在它里面出现的行 = **空**），切过去**不丢任何包**。
+> **代价**：本机会拉 torch 系（GB 级）。但 `api/reranker.py:14` 是真懒加载 ⇒
+> **不碰 torch 也能跑**（默认模式 `accurate_norerank`）；只有 `mode=accurate`/`full` 与
+> `/rag/rerank_search` 才需要 torch + 2.3GB 模型。
 
 ---
 
@@ -182,7 +186,7 @@ sed 's/\x1b\[[0-9;]*m//g' /tmp/api.log | grep -E "^(TypeError|ValueError|Runtime
 
 | 别做 | 为什么 |
 |---|---|
-| ⛔ `docker compose up -d`（**不带服务名**）**或任何重建** | 它会 **build 含 torch 的镜像**（本机跑不动），**且**重建会让容器落到新网络名 `fastapi-rag-agent_app-net`，而 **`agent-eval-gate` 的 harness 默认用旧网络名 `my-fixed-name_app-net`** ⇒ **打断外部评测**。**已有容器要用 `docker start postgres-rag redis-rag`**；⚠️ 即使只带 `postgres redis` 两个服务名，在**已有同名容器**的机器上也会撞名/重建（实测），所以 §1① 先判断再决定用 `start` 还是 `up` |
+| ⚠️ 在**已有同名容器**的机器上跑 `docker compose up`（**含只带 `postgres redis` 两个服务名的**） | 实测会**撞名硬失败**或**重建**已有容器（它们可能属于别的 compose 项目，见 §1①）。⛔ **原文此处写的是"会打断 `agent-eval-gate` 的评测，所以是红线"—— 该理由已作废**（业务方：「不用考虑 agent-eval-gate 占用 docker-compose，那个项目已经做完了，我们正常使用」）。✅ 但**"重建会断掉指向它的东西"这个现象仍成立** ⇒ **先 `docker ps` 确认再动手**，不是无条件禁止 |
 | ⛔ 不带 `POSTGRES_DB=rag_test` 跑需要真库的测试 | 会往**真库 `rag_db`** 写文档，而那是评测知识库。**本仓已发生过一次**（35/77 行测试数据就是这么来的） |
 | ⛔ 改 `main` 分支 / 直接 push | `main` 开了**分支保护**，直推会被服务端拒绝。走 **分支 → PR → 两个必需检查** |
 | ⛔ `git commit` 里带明文凭据 | 本仓是 **PUBLIC**。提交前跑 **`bash scripts/check_secrets.sh`**（命中即 `exit 1`） |
@@ -207,7 +211,7 @@ bash scripts/check_secrets.sh        # 凭据门：命中即 exit 1（扫 staged
 ## 8 · 一句话总结给 Agent
 
 > **先看 §4 那张表**（一半的"bug"都在那里）；
-> **能跑起来的两条路径在 §1**（用 `requirements-test.txt`，别 build 镜像）；
+> **交付路径只有一条**：`docker compose up -d`（见 `README.md`）；**要改代码/跑测试才用 §1 的开发路径**；
 > **测什么、怎么测在 §3**；
 > **别碰的红线在 §6**；
 > **凡没实测的断言，写成「未验证」** —— 本仓最看重的就是这一条。

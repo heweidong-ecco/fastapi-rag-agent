@@ -1,38 +1,42 @@
 # 📋 常见问题与故障排查 (FAQ)
 
-> 🔴 **2026-09-20 说明**：本 FAQ 原先**整份都假设 Docker 路径**（Q1–Q3 全是 `docker compose`），
-> 而 `docker compose up -d` 会 **build 含 torch 的镜像**，在 8GB 内存的机器上**跑不动**（实测）。
-> **已补 Q1.1–Q1.5**，覆盖**轻量路径**（DB/Redis 用 Docker、API 跑本机）与 clone 者真会撞的坑。
-> 路径选择见 `README.md` 的「3. 启动」。
+> 🔴 **2026-09-20 方向更正**：本 FAQ 此前被拆成"**两条路径**"（轻量 + Docker 全量），并立了
+> 「别用 `docker compose up`」的红线。**已收敛成一条** —— 交付路径就是 **`docker compose up -d`**。
+> 业务方口径：「**不用双 requirements.txt，这样会混，最后肯定是用 docker-compose 一键编排的，
+> 别人 git clone 也是 docker-compose**」。
+> ⇒ **Q1.1 已按此重写**；那条红线的理由（"会打断 `agent-eval-gate` 评测"）**已作废**（理由见 Q1.3）。
 
 ## 一、部署相关
 
-### Q1.1：我不想（或不能）构建 Docker 镜像，怎么在本机跑起来？
+### Q1.1：怎么把项目跑起来？
 
-用**轻量路径** —— 它不构建任何镜像，只跑两个现成的 DB/Redis 容器：
+**一条命令**（前置：Docker + Docker Compose v2；`.env` 已按 Q1.4 填好四项）：
 
 ```bash
-# ⚠️ 先判断容器在不在 —— 已有就用 start，别用 up（理由见下方告示）
-docker ps --format '{{.Names}}' | grep -E 'postgres-rag|redis-rag' \
-  && docker start postgres-rag redis-rag \
-  || docker compose up -d postgres redis      # 只有这两个是现成镜像
-
-python3.10 -m venv venv
-venv/bin/pip install -r api/requirements-test.txt    # ← 注意是 -test 那份（不含 torch）
-cp .env.example .env                          # 然后填【四项】：见 Q1.4
-cd api && ENABLE_DASHBOARD=false ../venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
+cp .env.example .env       # 填【四项】必填，见 Q1.4
+docker compose up -d
 ```
 
-> 🔴 **2026-09-20 修：此处原写「直接 `docker compose up -d postgres redis`」—— 在已有同名容器的机器上是错的。**
-> 实测本机 `postgres-rag`/`redis-rag` 的 `com.docker.compose.project` 是 **`my-fixed-name`**、
-> 配置文件指向**另一个仓库**，而本仓 `docker compose ps` 是空的（不认领）⇒ 直接 `up` 会计划
-> **`Container postgres-rag Creating`** ⇒ **撞名硬失败**，或**重建到 `fastapi-rag-agent_app-net`**
-> —— 后者会打断依赖旧网络名的 `agent-eval-gate`（见 Q1.3）。
+⚠️ **首次会 `build` API 镜像**（`docker-compose.yml:13` 的 `build: context: ./api`），
+而 `api/requirements.txt` 含 torch 系 ⇒ **要下几个 GB、构建较久**。
+**8GB 内存 / Docker 配额较小的机器上实测会失败** —— 那是**环境天花板，不是配置写错**
+（见 `README.md` 的「⚠️ 已知限制」）。
 
-⚠️ **两个 `requirements` 别弄混**：`requirements.txt` **含** `sentence-transformers`/`transformers`/
-`camelot-py[cv]`/`opencv-python`（**拖 GB 级 torch**）；`requirements-test.txt` 是它的**剔重版（只做减法）**。
-**本仓默认路径不需要 torch**（默认模式 `accurate_norerank`；`api/reranker.py:14` 是真懒加载）。
-**代价**：`mode=accurate` / `mode=full` / `/rag/rerank_search` 在本机跑不了 —— 要装 torch + 2.3GB 模型。
+> 📌 **原 Q1.1 写的是"轻量路径"**（DB/Redis 用 Docker、API 跑本机、装 `api/requirements-test.txt`）——
+> **已删**。业务方裁决**不要双 requirements**，**那份文件也已删除** ⇒
+> **依赖清单只有 `api/requirements.txt` 一份**。
+>
+> 🔧 **只有要跑测试 / 在本机改代码时**才需要下面这套（**开发路径，不是交付路径**）：
+>
+> ```bash
+> python3.10 -m venv venv
+> venv/bin/pip install -r api/requirements.txt
+> cd api && ENABLE_DASHBOARD=false ../venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
+> ```
+>
+> ⚠️ 本机会因此拉 torch 系（GB 级）。但 `api/reranker.py:14` 是**真懒加载** ⇒
+> **不碰 torch 也能跑**（默认模式 `accurate_norerank`）。`mode=accurate`/`full` 与 `/rag/rerank_search`
+> 才需要 torch + 2.3GB 模型。
 
 ### Q1.2：`git clone` 报 `Repository not found`？
 
@@ -49,11 +53,18 @@ git clone https://github.com/heweidong-ecco/fastapi-rag-agent.git
 
 ```bash
 docker ps                                  # 有没有 postgres-rag / redis-rag
-docker start postgres-rag redis-rag        # 若已存在但停了：重启【现有】容器，不要 up（见下）
+docker start postgres-rag redis-rag        # 若已存在但停了：重启【现有】容器（见下）
 ```
 
-> ⚠️ **用 `docker start`，不要用 `docker compose up -d`** —— 后者可能**重建**容器并让它落到新网络名，
-> 从而打断依赖旧网络名的外部工具（本仓的 `agent-eval-gate` 评测 harness 就是这种）。
+> ⚠️ **本机已有 `postgres-rag`/`redis-rag` 容器时，先看清它们是不是本仓的** —— `docker compose up` 按
+> **compose 项目**工作，而容器可能**不属于本项目**：实测本机这两个容器的
+> `com.docker.compose.project` 是 **`my-fixed-name`**、`config_files` 指向**另一个仓库**的 compose 文件，
+> 本仓 `docker compose ps` **是空的**（不认领它们）⇒ `up` 会**撞名硬失败**或**重建**已有容器。
+>
+> ⛔ **原文此处写的是"重建会打断 `agent-eval-gate` 的评测，所以别用 `up`"—— 该理由已作废**
+> （业务方：「**不用考虑 agent-eval-gate 占用 docker-compose，那个项目已经做完了，我们正常使用**」）。
+> ✅ **但"重建已有容器会断掉指向它的东西"这个现象本身仍然成立** ⇒ **先确认再动手**，不是无条件禁止。
+>
 > 另外本仓对 `.env` 里的 `POSTGRES_HOST=postgres` 有**本地覆盖**：`config.py` 见 `DOCKER_ENV` 非 true 时
 > 自动改指 `localhost`（见 `docker-compose.yml` 的 `DOCKER_ENV=true`）。
 
@@ -284,8 +295,9 @@ curl http://localhost:8000/api/v1/agent/token/budget -H "Authorization: Bearer <
 1. 确认服务已起：`docker compose ps`
 2. 地址是 **`http://localhost:8000/dashboard`**（**不是**独立端口）。
 3. 它由 `api/cost_dashboard.py` 挂载，**默认开启**（`api/main.py:523`：`ENABLE_DASHBOARD` 默认 `"true"`）。
-4. ⚠️ **如果你是按 README 的轻量路径起的服务**，命令行里带了 `ENABLE_DASHBOARD=false` ⇒ **面板被刻意跳过**
-   （为了不导入 gradio/matplotlib）。**这不是坏了** —— 去掉那个环境变量即可。
+4. ⚠️ **如果你是按 README 的「🔧 本地开发路径」起的服务**，命令行里带了 `ENABLE_DASHBOARD=false` ⇒
+   **面板被刻意跳过**（为了不导入 gradio/matplotlib）。**这不是坏了** —— 去掉那个环境变量即可。
+   📌 用 `docker compose up -d`（交付路径）起的话**没有这个变量**，看板默认就是挂载的。
 
 ### A7：长期记忆（Mem0）不生效？
 

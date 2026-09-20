@@ -95,7 +95,7 @@
 | **监控** | Prometheus + Grafana | 指标采集与可视化大屏 |
 | **容器化** | Docker + Docker Compose | 一键部署 |
 | **测试** | pytest + Locust | 单元测试、集成测试、性能压测 |
-| **评估** | RAGAS | 自动化检索质量评估 |
+| **评估** | RAGAS ⬜ **未接入** | ⚠️ 依赖在 `requirements.txt` 里，但**本仓代码 0 处调用**、脚本也不在库 —— 见上方「📈 评估体系」 |
 | **CI/CD** | GitHub Actions | 自动测试工作流 |
 
 ## ✨ 核心功能
@@ -111,7 +111,12 @@
 
 ## 📈 评估体系
 
--   **自动评估**：集成 RAGAS，自动评估忠实度、答案相关性、上下文召回率和精确率。
+> 🔴 **2026-09-20 更正**：本段原写「**集成 RAGAS**，自动评估忠实度、答案相关性、上下文召回率和精确率」——
+> **不成立，已改**。实测：`ragas` **确实在 `api/requirements.txt` 里**，但 **`api/` 下 0 处 `import` 它**；
+> 而唯一用它的评估脚本 `archive/scripts/evaluate_with_ragas.py` **被 `.gitignore` 排除、不在库里**。
+> ⇒ **本仓没有可运行的自动评估链路。** 说"集成"是没有依据的断言。
+
+-   ⬜ **自动评估（RAGAS）**：**未随本交付入库** —— 依赖装了，但**代码与脚本都不在**。
 -   **人工评估**：从完整性、简洁性、逻辑性、可用性四个维度进行定性分析。
 -   **Bad Case分析**：持续跟踪并分析失败案例，驱动系统优化。
 
@@ -121,9 +126,9 @@
 
 | 需要 | 说明 |
 |---|---|
-| **Python 3.10** | ⚠️ **必须是 3.10**（`api/Dockerfile` 的基础镜像也是 3.10）。**不要用 `python3`** —— 本机实测 `python3` = **3.14.7**，只有 `python3.10`（3.10.10）可用。命令一律写 `python3.10 -m venv venv` |
-| **Docker + Docker Compose v2** | 只用来跑 PostgreSQL 与 Redis（路径 A 不构建镜像） |
-| 磁盘 / 内存 | 轻量路径几百 MB 即可；**路径 B（Docker 全量）要下 GB 级镜像，8GB 内存的机器上会失败** |
+| **Docker + Docker Compose v2** | **唯一必需** —— 一条 `docker compose up -d` 起全栈（PostgreSQL+pgvector / Redis / API / Prometheus / Grafana） |
+| **磁盘 / 内存** | ⚠️ 要**下载并构建 GB 级镜像**（`api/requirements.txt` 含 torch 系）⇒ **首次启动较慢**。**8GB 内存的机器上实测构建会失败** —— 那是环境天花板，不是配置写错（见「已知限制」） |
+| **Python 3.10** | ⚠️ **只有要跑测试 / 本地改代码时才需要**（`api/Dockerfile` 的基础镜像也是 3.10）。**不要用 `python3`** —— 本机实测 `python3` = **3.14.7**，只有 `python3.10`（3.10.10）可用 |
 
 ### 1. 克隆项目
 
@@ -154,67 +159,57 @@ cp .env.example .env
 > 🔴 2026-09-20 修：此处原写「**三项**」——**漏了 `POSTGRES_PASSWORD`**。
 > 实测 `api/config.py:58-74` 检查的是 **4 项**；漏写会让"删了这一项 ⇒ 起不来 ⇒ 按本表查不到原因"。
 
-### 3. 启动
-
-本仓有**两条**路径。**推荐第一条**：它不需要构建镜像，在 8GB 内存的机器上也能跑。
-
-#### ✅ 路径 A · 轻量（推荐）—— DB/Redis 用 Docker，API 跑在本机
+### 3. 启动（**一条命令**）
 
 ```bash
-# 3a. 起 DB 与 Redis（这两个是现成镜像，不触发构建）
-docker compose up -d postgres redis
-#     ⚠️ 但如果 docker ps 里已经有 postgres-rag / redis-rag，【别跑这句】——
-#        见下方「⚠️ 3a 的前提」：它们可能属于别的 compose 项目，up 会撞名或重建。
-
-# 3b. 建虚拟环境并装依赖
-python3.10 -m venv venv
-venv/bin/pip install -r api/requirements-test.txt      # ← 注意是 -test 那份
-
-# 3c. 起 API（在 api/ 目录下！）
-cd api
-ENABLE_DASHBOARD=false ../venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
+cp .env.example .env      # 上一步填好【四项】必填
+docker compose up -d
 ```
 
-#### ⚠️ 3a 的前提：**先看容器是不是已经有了**
+⚠️ **首次会 `build` API 镜像**（`docker-compose.yml:13` 的 `build: context: ./api`），
+而 `api/requirements.txt` 含 torch 系 ⇒ **要下几个 GB、构建较久**。
+**8GB 内存 / Docker 配额较小的机器上实测会失败** —— 那是**环境天花板，不是配置写错了**（见下方「已知限制」）。
+
+> 🔴 **2026-09-20 方向更正**：本段此前写的是「**两条路径**」（轻量：DB 用 Docker + API 跑本机；Docker 全量），
+> **推荐轻量那条，还立了「别用 `docker compose up`」的红线**。**现已收敛成上面这一条** ——
+> 业务方口径：「**不用双 requirements.txt，这样会混，最后肯定是用 docker-compose 一键编排的，
+> 别人 git clone 也是 docker-compose**」、「**整个项目阶段性完成，本来就是要完整明了、简洁的交付**」。
+> ⇒ **删掉分叉**，也**删掉那条红线的理由**（它原本是为"别打断 `agent-eval-gate` 评测"立的，而该顾虑已作废）。
+
+#### ⚠️ 如果你的机器上**已经有** `postgres-rag` / `redis-rag` 容器
 
 ```bash
 docker ps --format '{{.Names}}' | grep -E 'postgres-rag|redis-rag'
 ```
 
-| 结果 | 该怎么做 |
-|---|---|
-| **有**（已存在） | **用 `docker start postgres-rag redis-rag`** —— ⛔ **不要** `docker compose up` |
-| **没有** | `docker compose up -d postgres redis` 才是对的（全新机器） |
+**有的话先看清它们是不是本仓的** —— `docker compose up` 是**按 compose 项目**工作的，而容器可能不属于本项目。
 
-> 🔴 **为什么要分这两种（2026-09-20 实测）**：
-> `docker compose up` 是**按 compose 项目**工作的，而容器可能**不属于本项目**。
-> 实测本机：`postgres-rag` / `redis-rag` 的 `com.docker.compose.project` 是 **`my-fixed-name`**、
-> `config_files` 指向**另一个仓库**的 compose 文件；本仓 `docker compose ps` **是空的**（不认领它们）。
-> 此时 `docker compose up -d postgres redis` 的 `--dry-run` 会计划 **`Container postgres-rag Creating`**
-> + 建两个新网络 ⇒ **要么撞名硬失败，要么把容器重建到 `fastapi-rag-agent_app-net`**。
-> ⛔ **而后者正是本仓的红线** —— `agent-eval-gate` 的评测 harness 默认用旧网络名
-> `my-fixed-name_app-net`（见 `docker-compose.yml` 末尾「改名后遗症」），**重建会打断它**。
-> ⇒ **已有容器就 `docker start`**（重启现有容器，网络与端口都不变）。
+> ⚠️ **这个坑是实测的（2026-09-20）**：本机 `postgres-rag` / `redis-rag` 的
+> `com.docker.compose.project` 是 **`my-fixed-name`**、`config_files` 指向**另一个仓库**的 compose 文件；
+> 本仓 `docker compose ps` **是空的**（不认领它们）。此时 `up` 会计划 **`Container postgres-rag Creating`**
+> + 建新网络 ⇒ **要么撞名硬失败，要么把已有容器重建到 `fastapi-rag-agent_app-net`**。
+>
+> ⛔ **原文此处写的是"重建会打断 `agent-eval-gate` 的评测，所以这是红线"—— 该理由已作废**
+> （业务方：「**不用考虑 agent-eval-gate 占用 docker-compose，那个项目已经做完了，我们正常使用**」）。
+> ✅ **但"重建已有容器会断掉指向它的东西"这个现象本身仍然成立** ⇒ 所以是**先确认再动手**，不是无条件禁止。
 
-> 🔴 **为什么用 `requirements-test.txt` 而不是 `requirements.txt`**：
-> 后者含 `sentence-transformers` / `transformers` / `camelot-py[cv]` / `opencv-python`
-> —— **拖 GB 级的 torch**。而**本仓默认路径不需要 torch**：默认检索模式是
-> `accurate_norerank`，`api/reranker.py:14` 对 `sentence_transformers` 是**真懒加载**。
-> **代价（已登记）**：`mode=accurate` / `mode=full` 与 `/rag/rerank_search` **在本机跑不了**（要装 torch + 2.3GB 模型）。
-> 完整说明见 `api/requirements-test.txt` 头部注释。
+#### 🔧 本地开发 / 跑测试（**这是开发路径，不是交付路径**）
 
-> ⚠️ **必须在 `api/` 目录下起 uvicorn** —— 有一处路径是按相对位置解析的（本仓已把 MCP 那条修成绝对路径，
-> 但习惯上仍建议 `cd api`）。`bash dev.sh` 就是干 3a+3c 这两步的（但它假设依赖已装好）。
-
-#### 🐳 路径 B · Docker 全量
+交付只需要上面那一条命令。**只有当你要在本机跑 `pytest` 或改代码时**，才需要这一套：
 
 ```bash
-docker compose up -d
+python3.10 -m venv venv
+venv/bin/pip install -r api/requirements.txt
+cd api && ENABLE_DASHBOARD=false ../venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
 ```
 
-> ⚠️ **它会 `build` API 镜像**（`docker-compose.yml:13` 的 `build: context: ./api`），
-> 而 `api/requirements.txt` 含 torch 系 ⇒ **拉几个 GB、构建很久**。
-> **8GB 内存 / Docker 配额较小的机器上大概率失败**（实测本机不行）。**只有要跑重排序或追求一条命令时才选它。**
+> ⚠️ **必须在 `api/` 目录下起 uvicorn**（有一处路径按相对位置解析）。`bash dev.sh` 干的就是这一步。
+>
+> 📌 **依赖清单只有一份：`api/requirements.txt`。** 🔴 2026-09-20 删掉了此前那份"轻量版"
+> `api/requirements-test.txt` —— 业务方口径「**不用双 requirements.txt，这样会混**」。
+> 已核安全性：实测那份是 `requirements.txt` 的**真子集**（含版本约束在内比对整行 ⇒ 只在它里面出现的行 = **空**），
+> 切过去**不丢任何包**。代价是本机会拉 torch 系；但 `api/reranker.py:14` 是真懒加载，
+> **不碰 torch 也能跑**（默认模式 `accurate_norerank`）。
 
 ### 4. 验证（**以下输出是 2026-09-20 实测的原文**）
 
@@ -253,9 +248,12 @@ curl -s -X POST localhost:8000/api/v1/rag/hybrid_search -H "Authorization: Beare
 
 ### 5. 访问文档
 
+`docker compose up -d` 起的是**全栈**，所以下面这些都会有：
+
 -   Swagger UI：http://localhost:8000/docs
--   Grafana 监控：http://localhost:3000 (admin/admin) —— ⚠️ **仅路径 B 会起它**（路径 A 只起 postgres/redis）
--   Prometheus：http://localhost:9090 —— 同上
+-   成本看板（Gradio）：http://localhost:8000/dashboard
+-   Grafana 监控：http://localhost:3000 (admin/admin)
+-   Prometheus：http://localhost:9090
 
 ## 🤖 用另一个 Agent 来测这个项目？
 
@@ -287,7 +285,7 @@ curl -s -X POST localhost:8000/api/v1/rag/hybrid_search -H "Authorization: Beare
 │   ├── auth.py             # 认证逻辑
 │   └── ...                 # 更多模块
 ├── docs/                   # 项目文档（FAQ、架构图、Demo、决策记录）
-├── archive/                # 归档的未使用文件（不入库）
+├── archive/                # 归档的未使用文件（⚠️ **被 .gitignore 排除，不在库里**）
 ├── docker-compose.yml      # 服务编排
 ├── prometheus.yml          # Prometheus 配置
 ├── locustfile_v2.py        # 性能压测脚本
