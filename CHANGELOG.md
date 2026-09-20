@@ -51,7 +51,7 @@ All notable changes to this project will be documented in this file.
 
   **盘点当场核出 6 条原审计没有的问题**（N1–N6，详见 `docs/待办登记-2026-09-20-全仓审计与方向更正.md` §十一）：
   🔴 README 论证「P99 不可采信」所依赖的日志**克隆者拿不到**（`.gitignore:9 logs/`，`git ls-files api/logs/` = 0）·
-  🔴 FAQ 说 `-test` 是「只做减法」**不成立**（它还**加了** `gradio`，且比 `requirements.txt` 更长）·
+  ~~🔴 FAQ 说 `-test` 是「只做减法」**不成立**~~ ⚠️ **此条已于同日撤回 —— 是错的**，见下方 `Fixed` 段 ·
   ⚠️ `Agent/` 是审计的整片盲区 · ⚠️ 技术栈表列 RAGAS/Locust 而轻量路径装的没有 ·
   ⚠️ 根级 2 个 md 被 gitignore 但在盘上 · ⚠️ `/rag/search` 对无效 mode **静默兜底**（多花钱、多延迟）。
 
@@ -427,6 +427,26 @@ All notable changes to this project will be documented in this file.
   **全部原文仍在 git 历史**（`git show 351f699 --stat`），可恢复。
 
 ### Fixed
+
+- 🔴 **撤回一条我自己发出去的错断言**：「`requirements-test.txt` **不只做减法**（还加了 `gradio`）」—— **是错的**（2026-09-20）。
+
+  我用 `diff` 看到 `-test` 里多出一行 `gradio>=4.0.0`，据此断言 FAQ 的「只做减法」不成立，
+  **并把这句写进了本文件、`docs/待办登记…` 与 `docs/断言总表…`，还推送了出去**。
+  **复核后确认：它是错的。**
+
+  **复核用的判据换了**（关键）：改用**集合运算** ——
+  `comm -13 <(requirements.txt 去注释/去版本号/sort -u) <(-test 同样处理)`：
+  **只在 `-test` 里的包 = 空**；只在 `requirements.txt` 里的，恰为**文档声明的 7 项**
+  （`sentence-transformers` / `transformers` / `camelot-py[cv]` / `opencv-python` / `ragas` / `datasets` / `locust`）。
+  ⇒ **「只做减法」是对的，FAQ 没错。**
+
+  **根因：`diff` 的「行序伪影」。** `gradio` 在原文件 `:94`、在 `-test:116` —— **两边都有**，
+  只因此处上下文行不同，`diff` 把它报成了"新增"。
+  ⛔ **教训：判「两个清单的集合差异」不能用 `diff`（它按行序对齐），要用 set 运算（`comm`/`sort -u`）。**
+  行数 `123 vs 100` 属实，但差值来自 `-test` **头部那段长注释**，**不是多装了包**。
+
+  ⚠️ **更难看的一点**：本文件 `:199`（更早的条目）**本来就写对了**（"只做减法，**未加任何新包**"）——
+  **我在同一个文件里写了句和它相隔 145 行、内容相反的话，却没想到去读它。**
 
 - 🔧 **`scripts/impact.sh` 自身两个缺陷 —— 自建的防线，自己先踩了两次**（2026-09-20）。
 
