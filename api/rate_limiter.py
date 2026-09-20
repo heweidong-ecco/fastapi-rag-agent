@@ -100,12 +100,15 @@ class TokenBucketLimiter:
         now = time.time()
         data = redis_client.hgetall(key)
         
+        # ⚠️ 2026-09-20 删（§三·D1）：两个分支里原先都还有 `last_time = ...`，**从未被使用**。
+        #    🔴 **但它一开始被我误报成"桶不回填"（N16）** —— 核了消费入口才发现**回填是有的**，
+        #    在 `is_allowed()` 的 **Lua 脚本**里（`elapsed = now - last_time` ⇒ `tokens += elapsed*rate`），
+        #    而且是对的。⇒ 本函数是**只读展示**，它算的 `reset_time = now + need/rate` **也是对的**。
+        #    ⇒ 这两行只是死变量，删掉；**N16 已撤回**。
         if not data:
             tokens = self.capacity
-            last_time = now
         else:
             tokens = float(data.get("tokens", self.capacity))
-            last_time = float(data.get("last_time", now))
         
         # 计算恢复到满桶所需时间
         need = self.capacity - tokens

@@ -306,6 +306,30 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- 🔴 **撤回一条我自己报错的"疑似 bug"（N16）**，并删掉那个真正的死变量（2026-09-20）。
+
+  **我原报**：`api/rate_limiter.py` 的 `get_quota_info()` 读出了 `last_time` 却不用它回填
+  ⇒ **"令牌桶可能永不恢复"**。
+
+  **核完发现：不是 bug。** 回填**有的**，在**限流的消费入口 `is_allowed()` 的 Lua 脚本**里：
+
+  ```lua
+  local elapsed = now - last_time
+  local new_tokens = math.floor(elapsed * rate)
+  tokens = math.min(capacity, tokens + new_tokens)     -- ← 回填在这里，而且是对的
+  ```
+
+  ⇒ `get_quota_info()` 是**只读的展示函数**，它算的 `reset_time = now + need/rate` **也是对的**；
+  那个 `last_time` 只是**没用上的局部变量**。
+
+  ⚠️ **我的错在哪**：在 D1 里只看到"有个变量没用"，就**顺推成"桶不回填"** ——
+  那是**从一个局部现象跳到系统级结论，中间没核消费入口**。
+  ⇒ 已撤回登记（§三·3.9 就地标注），并删掉那个死变量（**D1 的"赋值未用局部变量"因此归零**）。
+
+  📌 **留下的教训**：**"未使用变量"≠"功能缺失"** ——
+  `last_time` 没用上，是因为**真正用它的地方在另一个函数、而且是在 Lua 里**。
+
+
 
 
 - **§三 清理 · C 类（4 条有行为影响的）—— C1/C2/C3 已修，C5 改成有上限（附红→绿用例）**（2026-09-20）。
