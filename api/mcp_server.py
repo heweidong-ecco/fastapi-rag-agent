@@ -75,7 +75,15 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         raise ValueError(f"未知工具: {name}")
 
     handler = TOOL_HANDLERS[name]
-    result = handler(arguments)
+    # 🔴 2026-09-20 **在 async 边界处 offload**：
+    #    本服务是 asyncio 的，而工具可能是**同步**的（如 browser_tools 的同步 Playwright）
+    #    —— 直接在事件循环里执行会报
+    #    `It looks like you are using Playwright Sync API inside the asyncio loop.`
+    #    ⇒ `fetch_webpage` / `screenshot_webpage` 永远 unhealthy（健康检查 4/6 而非 6/6）。
+    #    ⚠️ 为什么 offload 放在**这里**、而不是把 handler 改成 async：
+    #       处理器还有**同步**调用方（`agent_graph_advanced_learning.py:230`），
+    #       改成 async 会让那边拿到 coroutine ⇒ 工具静默失效（实测）。见 mcp_tool_factory 的注释。
+    result = await asyncio.to_thread(handler, arguments)
     return [TextContent(type="text", text=str(result))]
 
 # MCP Server 启动入口

@@ -50,8 +50,14 @@ tools = [
     execute_python  # 新增
 ]
 
-# 新增浏览器工具
-tools.extend([fetch_webpage, fetch_webpage_html])
+# 🔴 2026-09-20 删掉了一行 `tools.extend([fetch_webpage, fetch_webpage_html])` ——
+#    上面那个列表**已经包含**这两个工具 ⇒ 加了之后**各出现两次** ⇒
+#    `llm_react.bind_tools(tools)` 发给 LLM 时被拒：
+#      `openai.BadRequestError: 400 - 'Tool names must be unique.'`
+#    ⇒ **3 代 Agent 的 REACT 分支 100% 500**。
+#    ⚠️ 它此前**测不出来** —— `/agent/advanced_chat` 会先在 mem0 那一步 500（bug 1），
+#       根本走不到 REACT 分支;**修好 bug 1 才把它暴露出来**。
+#    回归测试:api/test_agent_repairs.py::test_react_tool_list_has_no_duplicate_names
 
 # 重新绑定工具到模型
 llm_with_tools = llm.bind_tools(tools)
@@ -244,15 +250,34 @@ def create_react_subgraph():
             return "tools"
         return END
 
+    def summarize(state: AgentState):
+        """收尾节点：把最后一条消息的文本落成 `final_output`。
+
+        🔴 2026-09-20 补（第 9 个依赖漂移之外的缺陷）:
+          本子图原先**只有 agent / tools 两个节点、没有任何节点写 `final_output`**,
+          而端点读的是 `api_v1_agent.py` 的 `result.get("final_output", "处理完成")`
+          ⇒ **走 REACT 意图时永远返回占位串「处理完成」**（其余四个子图都写了）。
+          实测复现:`POST /agent/advanced_chat?question=帮我规划…三步计划`
+          → `{"answer":"处理完成","intent":"REACT"}`。
+          ⚠️ 它此前**测不出来** —— 先是 mem0 那道 500、后是工具重名那道 400,
+             REACT 分支根本走不到底。**修好前面两个才把它暴露出来。**
+          回归测试:`api/test_agent_repairs.py::test_react_subgraph_sets_final_output`
+        """
+        last = state["messages"][-1]
+        return {"final_output": getattr(last, "content", "") or ""}
+
     subgraph.add_node("agent", agent_decide)
     subgraph.add_node("tools", tool_execute)
+    subgraph.add_node("summarize", summarize)
     subgraph.set_entry_point("agent")
     subgraph.add_conditional_edges(
         "agent",
         should_continue,
-        {"tools": "tools", END: END}
+        # ⚠️ 原本这里是 `{..., END: END}` —— 直接结束就没有节点能写 final_output。
+        {"tools": "tools", END: "summarize"}
     )
     subgraph.add_edge("tools", "agent")
+    subgraph.add_edge("summarize", END)
 
     return subgraph.compile()
 

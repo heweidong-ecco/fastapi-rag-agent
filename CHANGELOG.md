@@ -312,6 +312,54 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- 🔴 **三条 Agent 路径全断 —— 七处【依赖漂移】，全部修通**（2026-09-20）。
+
+  **发现方式**：业务方问「距离 demo 还差多少」。把 API 真起来逐个打 —— 结果
+  **1 代 `/agent/langgraph_chat` 返回 200 但答案是空串** · **2 代 `/agent/advanced_chat` 500** ·
+  **3 代 `/agent/mcp_chat` 500** · **工具健康 0/6**。而 **RAG 那条线完好**。
+  ⚠️ **七个 bug 没有一个是业务逻辑错** —— 全是装上的版本比代码写作时新：
+  `mcp 1.30.0` · `mem0ai 2.0.20` · `qdrant-client 1.19.0` · `playwright 1.62.0`。
+
+  | # | 位置 | 根因 |
+  |---|---|---|
+  | 1 | `memory_store.py` | mem0 2.x **两层**漂移：**签名**（`user_id`→`filters`、`limit`→`top_k`）**+ 返回形状**（list → `{"results":[…]}`） |
+  | 2 | `agent_graph_advanced.py` MCP 传输 | `stdio_client` 是 async CM，**且 anyio 要求同 task** |
+  | 3 | `api_v1_agent.py` 审批契约 | 停在 `interrupt_before` 时最后一条是**无文字的 AIMessage**，照搬 `.content` 得空串 |
+  | 4 | `mcp_tool_factory.py` 参数 | 把 **pydantic 实例**喂 `invoke()`（要 dict） |
+  | 5 | `agent_graph_advanced.py` MCP 路径 | `"api/mcp_server.py"` **相对 CWD** ⇒ 从 `api/` 起服务时指向不存在的文件 |
+  | 6 | `browser_tools` 同步 Playwright | **两个入口**：FastAPI 端点 **+ MCP server**（`mcp_server.py:71` 是 async 却同步调 handler） |
+  | 7 | `get_llm_with_mcp_tools` | mcp 1.30 的 `list_tools()` 返回 **`ListToolsResult`**（列表在 `.tools`），直接遍历得元组 |
+
+  **MCP 会话改 B2（单 task 自开自关）**：先前推荐的 B1（AsyncExitStack 池化）**被实测证伪** ——
+  anyio 的 cancel scope 要求「进入与退出在同一个 task」，池化天然跨 task ⇒
+  `RuntimeError: Attempted to exit cancel scope in a different task…`，
+  且**它让应用启动直接失败**（比原 bug 更糟）。已回退并采纳 B2。
+  📌 附带查明：**那个会话池从未生效过**（`initialize_pool()` 无调用方；`release/close` 零调用方）。
+
+  **合并前评审又抓出 2 Critical + 2 Important，并连带挖出第 8、9 个 bug**（都是"修好前面才暴露"的既存缺陷）：
+
+  | # | 位置 | 根因 |
+  |---|---|---|
+  | 8 | `agent_graph_advanced_learning.py:47-54` | 模块级 `tools` 列表**先列了一遍 fetch_webpage / fetch_webpage_html，紧接着又 `extend` 一遍** ⇒ 各出现两次 ⇒ `bind_tools` 发给 DeepSeek 被拒：`400 - 'Tool names must be unique.'` ⇒ **REACT 分支 100% 500** |
+  | 9 | `create_react_subgraph` | **没有任何节点写 `final_output`**，而端点读 `result.get("final_output", "处理完成")` ⇒ 走 REACT 意图时**永远返回占位串**（其余四个子图都写了）⇒ 补 summarize 收尾节点 |
+
+  ⚠️ **两条 Critical 都是本 PR 自己引入/漏掉的**（"同一个形状还有别的入口吗"的第 4、5 次实例）：
+  - **C-1（本 PR 新引入的回归）**：把 handler 改成 async 后，**第三个（同步）调用方没跟着改** ⇒
+    拿到 coroutine ⇒ `str(result)` 写成 `<coroutine object …>` ⇒ REACT 工具调用静默失效。
+    修法**不是加 await**（该图用同步 `.invoke()`），而是**把 offload 放到 async 边界**
+    （`mcp_server.call_tool` 里 `await asyncio.to_thread(handler, …)`），**handler 退回同步** ⇒ 三个调用方都不用动。
+  - **C-2**：`/agent/mcp_tools_dynamic` 是 bug 7 的**孪生兄弟**（同一个 `get_mcp_tools()`，
+    全仓只有两个调用方，改了一个漏了另一个）⇒ 该路由 100% 500。
+  - **I-1**：审批判据原写 `if tool_calls and not content:` ⇒ 模型"先说一句再调工具"时误报 `answered`。
+  - **I-2**：`ROADMAP` 交接锚点未更新。
+
+  **验证**：`api/test_agent_repairs.py` **18 条**（逐条红→绿）· 全套离线层 **68 passed / 1 skipped**（基线 50）·
+  端到端全绿：`mcp_tools_dynamic` 200/6 工具 · `langgraph_chat` 待审批 ·
+  `advanced_chat` CALCULATOR `56088` · **`advanced_chat` REACT 返回真答案**（不再是「处理完成」）·
+  `mcp_chat` `1+1 = **2**。` · 工具健康 **0/6 → 4/6**
+  （剩 2 个卡**环境**：macOS 13.6 不支持 Playwright 1.62 的 chromium 1234）。
+  决策：`docs/decisions/DEC-017-demo就绪路线与LLM换DeepSeek.md`。
+
 - 🔴 **`/rag/search` 的 `mode` 静默兜底 —— 拼错一个字母会被悄悄换成另一个模式**（2026-09-17）。
 
   **修前**：`api_v1_rag.py` 的 mode 分派是个**裸 `else`** ⇒ `mode=garbage` 返回 **200**，
