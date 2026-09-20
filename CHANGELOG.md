@@ -491,6 +491,80 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- 🔴 **🔴A + 🔴B 修了 —— 一条"探针报错码错"，一条"公开 `/docs` 上的安全声明与代码相反"**（2026-09-20 · `DEC-021`）。
+
+  **🔴A · `/ready` 在依赖挂掉时返回 500 而非 503**
+  `health_check()` 有**两种返回类型** —— 健康时 `dict`，不健康时 `JSONResponse(503,…)`。
+  而 `/ready` **无条件**对它调 `.get("status")` ⇒ `JSONResponse` 没有 `.get` ⇒ `AttributeError` ⇒ **500**。
+  实测原文：`AttributeError: 'JSONResponse' object has no attribute 'get'`（`main.py:441`）。
+  ⚠️ **对 K8s/LB，503 与 500 是不同语义**：503 = "暂时别把流量给我"；500 = "我坏了"。
+  **把"依赖挂了"报成"我坏了"，正是就绪探针最不该犯的错。**
+  **修法（`DEC-021` 甲）**：抽出 `_compute_health() -> dict`（**永远返回 dict**），
+  `/health` 显式渲染 200/503，`/ready` 改调它。⇒ **根因（一个函数两种返回类型）消除**。
+  ⚠️ **否掉的两个改法值得记**：**丙**（让 `health_check` 永远返回 dict）看着最小，
+  却会**静默把 `/health` 的 503 变成 200** —— 改动面小、看着无害、**改的却是对外接口语义**，
+  且**只靠 diff 看不出来**。**乙**（在 `/ready` 里做类型判断）只治症状，**根因留给下一个人**。
+  ✅ **`/health` 行为逐字未变**（实测改前=改后：`GET /health -> 200 {"status":"healthy",…}`）。
+
+  **🔴B · 公开 `/docs` 上的安全声明与代码相反**
+  `api/api_v1.py` 的 `create_user` 描述里写着「这个系统内**还没有加入初始管理员**」
+  「当前版本**暂未强制校验管理员身份**」；`api/schemas.py:86` 注释写「管理接口…**暂不加权限控制**」。
+  **三句全是假的**：代码事实是 `api_v1.py:156` = `Depends(require_admin)`（非管理员 **403**）、
+  `main.py:466` 启动即 `ensure_admin_exists(logger)`（**初始管理员是有的**）。
+  ⚠️ **这些字符串是 OpenAPI `description`，会原样渲染进公开的 `/docs`，并被 Postman 导入** ——
+  面向**外部读者**的**安全声明**说反了，**比不说更糟**（会让人以为管理接口是敞开的）。
+  ⇒ 三处按事实改写。回归用例 `test_openapi_descriptions_do_not_deny_admin_enforcement`
+  **直接查 `app.openapi()` 文档对象**（发请求测不出来 —— 它只出现在文档里）。
+
+  **验证**：新增 3 条用例（**均红→绿已验证**）· 全套离线层 **71 passed / 1 skipped / 11 deselected**
+  （68 基线 + 3 新增，**零回归**）· `ROUTES=13` / `OPENAPI_PATHS=59` 与改动前一致。
+
+- ⚠️ **§二 修了 —— `document_preprocessor.py` 里 `remove_noise_markers` 被定义了两次**（2026-09-20）。
+  `:85-86` 是**只有一句 docstring 的空壳**，`:88-103` 才是真实现。Python **后者胜出** ⇒
+  **当前行为是对的**，**但改上面那份不会生效、也不会报错** —— 下一个人照着它改，改完"没反应"。
+  📌 与 `CLAUDE.md` 修复记录 **#7 同型**（`db.py` 的 `get_db()` 重复定义 ⇒ **写入不提交**）—— **本仓已两次踩同一个坑**。
+  ⇒ 删掉空壳，原处留注释说明来历。
+  ⚠️ **这条的测试写法值得记**：它是**结构缺陷**不是运行期行为（两条定义行为恰好相同）
+  ⇒ **"跑一下看输出"永远测不出来** ⇒ 用例改用 `ast` 查**同名方法被定义两次**。
+  回归用例：`test_no_duplicate_method_definitions_in_preprocessor`（**红→绿已验证**，红时报 `[85, 88]`）。
+
+  🔎 **顺带核出一条既存缺陷（未修，已登记为 §三·3.7 / N14）**：
+  `document_preprocessor.py:101` 的 markdown 图片规则（把 `![alt](url)` 收敛成 `alt`）**从未生效** ——
+  比它先跑的 `apply_rules`（`:93`）先把 URL 剥掉，留下残疾的 `![图](`，后面就匹配不上了。
+  ✅ 与本次改动无关（`main` 输出**逐字相同**）。**不修**：改它会**改变文本预处理输出 ⇒ 影响检索与已有语料**，
+  属**行为变更**，按仓规得业务方裁。
+
+- 🔴 **🔴C 修了 —— LLM 工具表改为从 MCP 注册表【派生】（单一事实源）**（2026-09-20 · `DEC-020`）。
+
+  **🔴C 是什么**：`mcp_server.TOOLS`（**6** 个）与 `agent_graph_advanced_learning.tools`（**7** 个，多 `fetch_webpage_html`）
+  **各写各的**。而 `mcp_server.TOOL_HANDLERS` 是**从 `TOOLS` 生成的** ⇒ LLM 看得见那个工具、**却永远取不到 handler**
+  ⇒ 走到那一步只回「未找到工具: fetch_webpage_html」，**不报错、不 500** —— **静默失败**。
+
+  **⚠️ 「先核」推翻了原审计摆的两个选项**（业务方裁「乙」，见 `docs/待办登记…` §十三）：
+
+  | 原选项 | 为什么被推翻 |
+  |---|---|
+  | ① 把它**加进** MCP `TOOLS` | 🔴 **实测它是死的**：`BrowserType.launch: Executable doesn't exist`。它**同样吃 Playwright/Chromium**，而**本仓任何部署方式都不装浏览器**（`Dockerfile`/`docker-compose.yml` 都没有 `playwright install`）⇒ 加进去也**永远 unhealthy**（4/6 → **4/7**），只是把静默失败换个形式 |
+  | ② 手工**摘掉**它 | 只修这一次。根因是「**两份手工维护的清单**」—— **不修根，下次加工具还会漂** |
+
+  **修法**：`from mcp_server import TOOLS as _MCP_TOOLS` ⇒ `tools = [t["func"] for t in _MCP_TOOLS]`。
+  两表**结构上不可能再漂**（以后加工具只需在 `mcp_server.TOOLS` 加一行）。
+  📌 仓里**已有**这个模式的样板（`agent_graph_advanced.py:275`），本次是**抄现成的**，没发明第三种写法。
+
+  **✅ 已核实：实现逐字等价 ⇒ 行为不变。** 本文件自带的 `calculator`/`date_today` 与 `simple_tools` 那两份，
+  代码**逐字相同**（都是 `str(eval(expr))` + 同样的 `except`）⇒ 派生只改变"是哪个对象"，不改变行为。
+
+  ⚠️ **但这是一次【工具 schema 变更】，按本仓 PR 纪律显式声明**：LLM 现在看到的
+  `calculator` / `date_today` 描述来自 `simple_tools`，**docstring 更详细**
+  （多出「输入的必须是纯数学表达式」/「忽略查询参数」）⇒ 会影响 LLM 的工具选择倾向。
+
+  **验证**：新增回归用例 `test_llm_tool_table_is_sourced_from_mcp_registry`（**红→绿已验证**）；
+  全套离线层 **69 passed / 1 skipped / 11 deselected**（68 + 新增 1，**零回归**）；
+  `import main` 的 `ROUTES=13` / `OPENAPI_PATHS=59` **与改动前实测一致**。
+
+  ⬜ **未纳入本次**（已登记）：`api/agent_graph.py:44` 与 `agent_checkpointer.py:43` **各自还有一份手工工具表** ——
+  是否同源化涉及**代际裁决**（M5 范围，`Agent 不代判`）。
+
 - 🔴 **撤回一条我自己发出去的错断言**：「`requirements-test.txt` **不只做减法**（还加了 `gradio`）」—— **是错的**（2026-09-20）。
 
   我用 `diff` 看到 `-test` 里多出一行 `gradio>=4.0.0`，据此断言 FAQ 的「只做减法」不成立，

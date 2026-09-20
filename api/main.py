@@ -374,12 +374,21 @@ async def get_openapi():
     return app.openapi()
 
 # 新增  health 健康检查接口
-@app.get("/health",tags=["公开"])
-async def health_check():
-    """
-    健康检查接口。
-    检查数据库、Redis、Embedding API 是否正常。
-    返回 200 和各项状态，任一不可用则返回 503。
+async def _compute_health() -> dict:
+    """**纯计算**健康状态 —— **永远返回 `dict`，绝不构造 HTTP 响应**。
+
+    🔴 2026-09-20 拆分（全仓审计 🔴A）：
+      此前这里是**两种返回类型** —— 健康时返回 `dict`，不健康时 `return JSONResponse(503, ...)`。
+      而 `/ready`（`main.py:440`）拿到它后**无条件**调 `.get("status")`
+      ⇒ `JSONResponse` 没有 `.get` ⇒ `AttributeError` ⇒ 全局处理器兜住 ⇒
+      **`/ready` 返回 500 而不是 503**（实测：`AttributeError: 'JSONResponse' object has no attribute 'get'`）。
+
+    ⚠️ 对 **K8s / 负载均衡**来说 503 与 500 是**不同语义**：
+      503 = "暂时别把流量给我"；500 = "我坏了"。
+      把"依赖挂了"报成"我坏了"，正是就绪探针最不该犯的错。
+
+    ⇒ 拆成「**算**」与「**渲染响应**」两层：本函数只管算，`/health` 负责渲染。
+      **`/health` 的对外行为（200+dict / 503+错误体）保持逐字不变。**
     """
     health_status = {"status": "healthy","checks": {}}
     is_healthy = True
@@ -407,6 +416,18 @@ async def health_check():
 
     if not is_healthy:
         health_status["status"] = "unhealthy"
+    return health_status
+
+
+@app.get("/health",tags=["公开"])
+async def health_check():
+    """
+    健康检查接口。
+    检查数据库、Redis、Embedding API 是否正常。
+    返回 200 和各项状态，任一不可用则返回 503。
+    """
+    health_status = await _compute_health()
+    if health_status["status"] == "unhealthy":
         return JSONResponse(
             status_code=503,
             content={
@@ -436,8 +457,12 @@ async def readiness_check():
             "status_code": 503}
         )
 
-    # 也可以调用健康检查的逻辑
-    health = await health_check()
+    # 也可以用健康检查的逻辑
+    # 🔴 2026-09-20（审计 🔴A）：改调 `_compute_health()` 而不是 `health_check()`。
+    #    后者在**不健康时会返回 JSONResponse**（不是 dict），而这里对它调 `.get()`
+    #    ⇒ `AttributeError: 'JSONResponse' object has no attribute 'get'` ⇒ **500 而非 503**。
+    #    `_compute_health()` 保证**永远返回 dict**。
+    health = await _compute_health()
     if health.get("status") == "unhealthy":
         return JSONResponse(
             status_code=503,

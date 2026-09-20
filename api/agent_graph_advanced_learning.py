@@ -41,16 +41,30 @@ def date_today(query: str = "") -> str:
     return f"今天是{now.year}年{now.month}月{now.day}日，星期{weekdays[now.weekday()]}"
 
 
-from browser_tools import fetch_webpage, fetch_webpage_html, screenshot_webpage
-from code_executor import execute_python
-# 新的的工具列表
-tools = [
-    web_search, calculator, date_today,
-    fetch_webpage, fetch_webpage_html, screenshot_webpage,
-    execute_python  # 新增
-]
+# 🔴 2026-09-20（业务方裁「乙」）：**LLM 工具表改为从 MCP 注册表【派生】—— 单一事实源。**
+#
+#    此前这里是一份**手工维护**的列表，与 `mcp_server.TOOLS` **各写各的** ⇒ 漂移：
+#      · `mcp_server.TOOLS`   **6** 个
+#      · 本文件的 `tools`     **7** 个（多一个 `fetch_webpage_html`）
+#    而 `mcp_server.TOOL_HANDLERS` 是**从 `TOOLS` 生成的** ⇒ 多出来的那个工具
+#    **永远取不到 handler** ⇒ 走到那一步只回一句「未找到工具: fetch_webpage_html」，
+#    **不报错、不 500** —— 是**静默失败**。
+#
+#    ⚠️ **为什么不选"把它加进 MCP 就好"**：`fetch_webpage_html` **同样依赖 Playwright/Chromium**
+#       （`browser_tools.py:3` 模块级 import + `p.chromium.launch()`），而**本仓任何部署方式
+#       都不装浏览器**（`api/Dockerfile` / `docker-compose.yml` 都没有 `playwright install`）
+#       ⇒ 加进去它**也永远 unhealthy**，只是把「4/6」变成「4/7」。
+#
+#    ⇒ 改为**派生**：两表**结构上不可能再漂** —— 以后加工具只需在 `mcp_server.TOOLS` 加一行。
+#    ⚠️ **这是一次【工具 schema 变更】，须在 PR 里显式声明**：LLM 现在看到的
+#       `calculator` / `date_today` 是 `simple_tools` 那份（**实现与本文件原版逐字等价**，
+#       但 **docstring 更详细** —— 多出「输入的必须是纯数学表达式」/「忽略查询参数」两句）。
+#    回归测试:api/test_agent_repairs.py::test_llm_tool_table_is_sourced_from_mcp_registry
+from mcp_server import TOOLS as _MCP_TOOLS
 
-# 🔴 2026-09-20 删掉了一行 `tools.extend([fetch_webpage, fetch_webpage_html])` ——
+tools = [t["func"] for t in _MCP_TOOLS]
+
+# 🔴 2026-09-20 另删掉了一行 `tools.extend([fetch_webpage, fetch_webpage_html])` ——
 #    上面那个列表**已经包含**这两个工具 ⇒ 加了之后**各出现两次** ⇒
 #    `llm_react.bind_tools(tools)` 发给 LLM 时被拒：
 #      `openai.BadRequestError: 400 - 'Tool names must be unique.'`
@@ -58,6 +72,9 @@ tools = [
 #    ⚠️ 它此前**测不出来** —— `/agent/advanced_chat` 会先在 mem0 那一步 500（bug 1），
 #       根本走不到 REACT 分支;**修好 bug 1 才把它暴露出来**。
 #    回归测试:api/test_agent_repairs.py::test_react_tool_list_has_no_duplicate_names
+#    📌 **本文件下面仍保留自带的 `calculator` / `date_today`** —— 它们被**子图节点**
+#       直接 `.invoke()`（`:145` / `:160`）。⇒ 与 `mcp_server.TOOLS` 里那两个**同名不同对象**。
+#       实现逐字等价，**当前无害**；但属"重复定义"，已登记为清理项（`docs/待办登记…` §三）。
 
 # 重新绑定工具到模型
 llm_with_tools = llm.bind_tools(tools)

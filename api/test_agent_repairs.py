@@ -563,6 +563,42 @@ def test_react_tool_list_has_no_duplicate_names():
     assert not dupes, f"REACT 工具列表有重名（LLM 会拒收）：{dupes}"
 
 
+def test_llm_tool_table_is_sourced_from_mcp_registry():
+    """REACT 的 LLM 工具表必须与 MCP 注册表**同源** —— 否则 LLM 看得见、调不到。
+
+    🔴 实测（2026-09-20）:`mcp_server.TOOLS` 只有 **6** 个工具，而
+       `agent_graph_advanced_learning.tools` 有 **7** 个（多出 `fetch_webpage_html`）。
+       而 `mcp_server.TOOL_HANDLERS` 是**从 `TOOLS` 生成的** ⇒ `fetch_webpage_html`
+       永远取不到 handler ⇒ 走到那一步只回一句「**未找到工具: fetch_webpage_html**」，
+       **不报错、不 500** —— 是**静默失败**。
+
+    ⚠️ **为什么不是"把它加进 MCP 就好"**：`fetch_webpage_html` **同样依赖 Playwright/Chromium**
+       （`browser_tools.py:3` 模块级 `from playwright.sync_api import sync_playwright`
+       + `p.chromium.launch()`），而本仓**任何部署方式都不装浏览器**
+       （`api/Dockerfile` 与 `docker-compose.yml` **都没有 `playwright install`**）
+       ⇒ **加进去它也永远 unhealthy**，只是把「4/6」变成「4/7」。
+       （实测报错：`BrowserType.launch: Executable doesn't exist at …chromium_headless_shell-1234…`）
+
+    ⇒ 修法：让 LLM 工具表**从 MCP `TOOLS` 派生**（**单一事实源**）。
+       这样"两表漂移"这类缺陷**结构上不可能再发生** —— 而不是这次手工对齐、下次再加工具时又漂。
+    """
+    import agent_graph_advanced_learning as L
+    import mcp_server
+
+    mcp_names = {t["func"].name for t in mcp_server.TOOLS}
+    llm_names = {t.name for t in L.tools}
+
+    only_llm = sorted(llm_names - mcp_names)
+    only_mcp = sorted(mcp_names - llm_names)
+
+    assert llm_names == mcp_names, (
+        "LLM 工具表与 MCP 注册表不一致 —— "
+        f"**LLM 有而 MCP 没有**（LLM 会调它，但永远取不到 handler ⇒ 静默失败）：{only_llm}；"
+        f"**MCP 有而 LLM 没有**（注册了却从不暴露）：{only_mcp}。"
+        "两表必须同源（LLM 表应由 mcp_server.TOOLS 派生）。"
+    )
+
+
 def test_react_subgraph_sets_final_output(monkeypatch):
     """REACT 子图必须把最终答案落成 `final_output`。
 
