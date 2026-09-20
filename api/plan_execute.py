@@ -302,7 +302,7 @@ def execute_step_with_quality_check(step: Dict, context: str, user_goal: str, ma
         else:
             print(f"步骤{step['step']} 质量不达标，第{attempt+1}次重试...")
             # 在上下文中加入质量反馈，帮助生成更好的输入
-            context += f"\n[上一轮结果质量不达标，请调整策略]"
+            context += "\n[上一轮结果质量不达标，请调整策略]"  # ⚠️ 2026-09-20 去掉多余的 f（D1/pyflakes：f-string 无占位符）
     
     # 所有重试都不达标，返回最后一次的结果（比什么都不给强）
     return step_result + "\n[注意：此步骤经过多次重试，质量可能不达标]"

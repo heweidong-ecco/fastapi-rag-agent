@@ -53,7 +53,7 @@ def ensure_admin_exists(logger=None):
     if logger:
         logger.warning("=" * 60)
         logger.warning("首次启动：已自动创建管理员账户")
-        logger.warning(f"管理员用户名: admin")
+        logger.warning("管理员用户名: admin")  # ⚠️ 2026-09-20 去掉多余的 f（D1/pyflakes：f-string 无占位符）
         logger.warning(f"管理员 API Key: {api_key}")
         logger.warning("请立即复制并安全保存此 Key，它仅显示这一次！")
         logger.warning("=" * 60)

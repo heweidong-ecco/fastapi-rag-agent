@@ -149,9 +149,10 @@ async def get_mcp_tools():
 MCP Client 工具调用缓存
 """
 import hashlib
-import json
+# ⚠️ 2026-09-20 删（D1/pyflakes 报 redefinition）：此处的 `import json` / `import os`
+#    与文件头（`:5`/`:6`）**重复** ⇒ 删这两行。⚠️ 同段的 `hashlib`/`redis`/`functools`
+#    **不是重复**（文件头没有），**必须留**。
 import redis
-import os
 from functools import wraps
 
 # 复用现有的 Redis 客户端（与 cache.py 相同配置）

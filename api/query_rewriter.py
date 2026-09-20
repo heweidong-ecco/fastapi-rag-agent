@@ -13,8 +13,11 @@ from loguru import logger
 
 # 复用现有的 Redis 客户端（与 cache.py 中相同配置）
 # 从 config 导入 host/port，以正确应用本地开发时 localhost 的覆盖
-from config import REDIS_HOST, REDIS_PORT
+# ⚠️ 2026-09-20 删（D1/pyflakes 报 redefinition）：此处原有**两行**导入，
+#    第一行 `from config import REDIS_HOST, REDIS_PORT` 被**第二行完全覆盖**
+#    （第二行是它的超集），且覆盖前从未使用 ⇒ 删第一行、**保留第二行**（就是下面这行）。
 from config import REDIS_HOST, REDIS_PORT, LLM_API_KEY, LLM_BASE_URL, LLM_MODEL_FAST
+
 redis_client = redis.Redis(
     host=REDIS_HOST,
     port=REDIS_PORT,

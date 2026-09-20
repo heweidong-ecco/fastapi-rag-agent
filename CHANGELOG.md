@@ -243,7 +243,47 @@ All notable changes to this project will be documented in this file.
   **验证（改完立刻重跑）**：逐文件 `ast.parse` ✅ · 离线层 **73 passed / 1 skipped / 11 deselected** ·
   `ROUTES=13` / `OPENAPI_PATHS=59` 与改动前一致 · 删除项逐条复核确认已不在。
 
+### Removed
+
+- **§三·B9 —— 删掉「自动降级」那套（业务方裁：删代码 + 把 docstring 改成实话）**（2026-09-20）。
+
+  `api/tool_health.py` 原先自称「工具健康检查**与自动降级**」，并带 `FALLBACK_MAP` + `get_fallback_tool()`。
+  实测那套是**双重死代码**：
+  ① **全仓零调用**；② **连它引用的名字也不存在** —— `fallback_search`、`chat` **全仓都无定义**
+  ⇒ **就算接上线，它返回的也是一个不存在的工具名。** 它不是"预留的能力"，是**一段从来没能工作过的代码**。
+  **真正的降级在 `api/mcp_server.py:47-61`**：把 `UNHEALTHY` 的工具**移出清单**（不是"换备用工具"）。
+  ⇒ 已删代码，并把模块 docstring 改成实话（写明"**降级不在这里**"）。
+
+- **§三·D1 —— 用 `pyflakes` 量化后清掉「结构类」问题**（2026-09-20）。
+
+  📊 **先量化（此前只有审计的"约 80 处"这个没验证过的数）**：
+  ```bash
+  ./venv/bin/pip install pyflakes     # ⚠️ dev-only，【没有】写进 api/requirements.txt
+  ./venv/bin/python -m pyflakes api/
+  ```
+  **实测**：未使用导入 **107**（不是 80）· `redefinition` **18** · 赋值未用局部变量 **4** · f-string 无占位符 **2**。
+  ✅ **`code_executor.py` 一条都没报** ⇒ pyflakes **正确理解 `__all__` 重导出**，审计那个"例外"不是问题。
+
+  **本轮清掉的（结构类，全部零行为影响）**：
+
+  | 类 | 前 → 后 | 说明 |
+  |---|---|---|
+  | **`redefinition`**（重复导入/重复定义） | **18 → 0** | ⚠️ **与 §二/C2/C3 同一类**。含：`main.py` 的 `logger`（被 `logger = setup_logger()` 覆盖）、`api_v1_rag.py` 的 `StreamingResponse`/`json`/`asyncio`（**三段导入块互相重复**）、`query_rewriter.py` 的 `REDIS_HOST/REDIS_PORT`（被下一行的超集覆盖）、`agent_graph_advanced.py` 的 `json`/`os`、`cost_dashboard.py` 的 `os`、`agent_checkpointer.py` 的 `SqliteSaver`、`agent_graph_advanced_learning.py` 的 `search_user_memory` |
+  | **f-string 无占位符** | **2 → 0** | `auth.py`（`f"管理员用户名: admin"`）· `plan_execute.py` |
+  | **赋值未用局部变量** | 4 → **1**（**故意留的**） | 删了 `redis_url`（只被注释掉的代码用过）与 `main.py` 的 `remaining`/`role`（响应体里没用到：`role` 是**又调了一遍**、`remaining` 直接硬编码 0）。⚠️ **剩下那 1 个（`rate_limiter.py` 的 `last_time`）不是垃圾 ⇒ 见下 N16** |
+
+  ⚠️ **删重复导入时我犯了一次错并当场被抓到**：`query_rewriter.py` 那处，我的改动把**两行都删了**（本意只删第一行、保留第二行那份超集）
+  ⇒ `NameError: name 'REDIS_HOST' is not defined` ⇒ **`api/` 整个 import 不了**。**是 `pytest` 抓到的**（`conftest` 会 import `main`）。已修。
+
+  **⬜ 未清（有意留的）**：**未使用导入 103 个**（`os` 18 · `json` 7 · `asyncio` 6 …，全是 stdlib/framework，**没有带副作用的导入**）。
+  ⇒ 这是一次**跨约 25 个文件的纯机械改动**，diff 大 ⇒ **单独一轮做**（等业务方定）。
+
+  🔴 **顺带核出新发现 N16（未修、已登记 §三·3.9）**：`api/rate_limiter.py` 的 `get_quota_info()`
+  **读出了 `last_time` 却从不用它回填**（`reset_time` 用的是 `now`）⇒ 标准令牌桶应当是
+  `tokens += (now - last_time) * rate` ⇒ **桶可能永不恢复**。改它 = 改限流行为 ⇒ 待业务方裁。
+
 ### Fixed
+
 
 - **§三 清理 · C 类（4 条有行为影响的）—— C1/C2/C3 已修，C5 改成有上限（附红→绿用例）**（2026-09-20）。
 
