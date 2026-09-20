@@ -10,6 +10,31 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- 🟢 **RAGAS 评估链路从库外移回库内**（2026-09-20）。**业务方裁决：只入 RAGAS，不整体入 `archive/`。**
+
+  **背景**：审计把它记成「**RAGAS 三重缺席**」——`ragas` 在 `requirements.txt` 里、
+  `README` 技术栈表列了它、`ROADMAP` M7 写着"复跑"，**但唯一用它的评估脚本被 `.gitignore` 排除在库外**。
+  `docs/CODE_INVENTORY.md §8` 此前就把它列为「**明确建议不要删**」，并给了两条出路。
+
+  **本次动作**：4 个文件从 `archive/` 移入 `api/`（**不是复制，是移出**，避免两份）：
+
+  | 文件 | 大小 |
+  |---|---|
+  | `api/evaluate_with_ragas.py` | 7.9 KB |
+  | `api/eval_dataset.json`（37 条） | 8.6 KB |
+  | `api/ragas_report.json` / `ragas_detailed_report.json` | 0.2 / 34.8 KB |
+
+  **🔴 入库时修掉一处硬编码凭据**：脚本原本内置默认登录口令，而该字面量**在 `.secret-denylist`
+  黑名单里**（凭据门会直接拦下）。已改为从环境变量读（`LOGIN_USER_NAME` / `LOGIN_PASSWORD`，
+  **不设可用默认值**），并在 `get_auth_token()` 里加了快速失败提示。
+
+  **⚠️ 未实跑验证** —— `ragas`/`datasets` 在 `requirements.txt` 里但**本机 venv 未安装**，
+  且脚本需 API 在跑。**"已入库" ≠ "跑通了"**，`README` 里按这个口径写。
+
+  **其余 `archive/` 内容【未入库】**，仍作本地留档：`Agent/` 原系统交付包（2.6 MB）、
+  原系统日志（1 MB）、`data_retention.py` 等实验脚本。理由：`archive/` 被 gitignore 是**有意设计**
+  （「轻量版」定位），且按「删了谁会要加回」过一遍，**只有 RAGAS 一条有对外承诺在支撑**。
+
 - 🔴 **"别人 clone 下来能不能跑" —— 实测后发现【不能】，已修**（2026-09-20）。
 
   **业务方问「README 等等别人 git clone 工作都做好了吗」—— 我去真 clone 了一遍，答案是"没做好"：**

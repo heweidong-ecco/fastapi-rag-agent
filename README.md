@@ -95,7 +95,7 @@
 | **监控** | Prometheus + Grafana | 指标采集与可视化大屏 |
 | **容器化** | Docker + Docker Compose | 一键部署 |
 | **测试** | pytest + Locust | 单元测试、集成测试、性能压测 |
-| **评估** | RAGAS ⬜ **未接入** | ⚠️ 依赖在 `requirements.txt` 里，但**本仓代码 0 处调用**、脚本也不在库 —— 见上方「📈 评估体系」 |
+| **评估** | RAGAS ✅ **脚本已入库** · ⬜ **未实跑** | 脚本与数据集已在 `api/`；`ragas`/`datasets` 在 `requirements.txt` 里，但**本机 venv 未安装** ⇒ **未跑过验证** —— 见「📈 评估体系」 |
 | **CI/CD** | GitHub Actions | 自动测试工作流 |
 
 ## ✨ 核心功能
@@ -111,12 +111,23 @@
 
 ## 📈 评估体系
 
-> 🔴 **2026-09-20 更正**：本段原写「**集成 RAGAS**，自动评估忠实度、答案相关性、上下文召回率和精确率」——
-> **不成立，已改**。实测：`ragas` **确实在 `api/requirements.txt` 里**，但 **`api/` 下 0 处 `import` 它**；
-> 而唯一用它的评估脚本 `archive/scripts/evaluate_with_ragas.py` **被 `.gitignore` 排除、不在库里**。
-> ⇒ **本仓没有可运行的自动评估链路。** 说"集成"是没有依据的断言。
+> 🔴 **2026-09-20 更正记录（保留）**：本段原写「**集成 RAGAS**，自动评估忠实度、答案相关性、上下文召回率和精确率」——
+> **当时不成立**：`ragas` 在 `requirements.txt` 里，但 `api/` 下 0 处 `import` 它，
+> 而唯一用它的脚本被 `.gitignore` 排除在库外（审计称「**RAGAS 三重缺席**」）。
 
--   ⬜ **自动评估（RAGAS）**：**未随本交付入库** —— 依赖装了，但**代码与脚本都不在**。
+> 🟢 **2026-09-20 补（本次）**：**该链路已移入库内** —— 脚本 + 数据集 + 两份历史报告，见下。
+> ⚠️ **但本次没有实跑过它**（原因写在下面那条），**"已入库" ≠ "跑通了"**。
+
+-   ✅ **自动评估（RAGAS）· 脚本与数据集已入库**
+    - `api/evaluate_with_ragas.py` —— 独立脚本，**不被应用 import**，需手动跑
+    - `api/eval_dataset.json` —— 37 条评测集；`api/ragas_report.json` / `ragas_detailed_report.json` —— 历史报告
+    - 跑法：`cd api && python evaluate_with_ragas.py`（前置：`pip install ragas datasets`，且 API 在 `localhost:8000` 跑着）
+    - ⚠️ 登录口令**改从环境变量读**（`LOGIN_USER_NAME` / `LOGIN_PASSWORD`，不设可用默认值），脚本不再内置口令
+-   ⬜ **未实跑验证** —— 本机 venv **未安装** `ragas`/`datasets`（虽在 `requirements.txt` 里），
+    且脚本需 API 在跑 ⇒ **它在本次交付的验收范围内没有被执行过**。要跑通需先补装依赖。
+-   📊 **历史评估证据**（**2026-06-29 由原系统跑出，不是本次复现**）：`eval_size` 37 ·
+    `faithfulness` **0.6267** · `context_recall` **0.7568** · `context_precision` **0.4369** ·
+    `answer_relevancy` **NaN**（该项当时未算出）
 -   **人工评估**：从完整性、简洁性、逻辑性、可用性四个维度进行定性分析。
 -   **Bad Case分析**：持续跟踪并分析失败案例，驱动系统优化。
 
