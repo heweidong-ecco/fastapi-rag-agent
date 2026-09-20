@@ -376,5 +376,6 @@
 | `bad_cases.md` 三项 | 2026-06-28 评估 | `answer_relevancy` 仍为 NaN;`context_precision` 仅 0.4369(当时未开 rerank);评估集缺拒答类样本 |
 | `硬性指标终极核查清单.md` 28 项未勾 | 本仓库文档 | P99/失败率/并发/Grafana 等尚无实测数据 —— M7 的验收依据 |
 | Agent 各类死代码 | `CLAUDE.md` | `'''...'''` 注释保留的旧实现,不影响运行;M5 盘点时统一裁决 |
+| **🔵 RAGAS 实跑验证**<br>**（⬜ 业务方 2026-09-20 指令：排到最后做）** | `DEC-022` 遗留 · PR #39 | **在【本仓 `venv/`】里装 `ragas` / `datasets`，起 API 后实跑，验证评估链路真能跑通。**<br>`ragas`/`datasets` 在 `api/requirements.txt` 里（`:63` / `:100`），**但 venv 里没装** ⇒ PR #39 只做到「**已入库**」，**没跑通过**。<br>**跑法与验收**：`venv/bin/pip install ragas datasets` → `docker compose up -d`（或本地起 API）→ `cd api && python evaluate_with_ragas.py`。<br>⚠️ 脚本的登录口令现在**从环境变量读**（`LOGIN_USER_NAME` / `LOGIN_PASSWORD`），需先备好 `.env`。<br>🔴 **在真跑通之前，README 里 RAGAS 的状态保持「✅ 脚本已入库 · ⬜ 未实跑」—— 不许改口。** |
 
 > **M5 开工前建议先读**:`CLAUDE.md` 的「关键开发模式」与「认证与授权」两节 —— 那里记着几个"看着安全实则有坑"的契约(中间件抛异常不被捕获、`HTTPBearer` 必须 `auto_error=False`、`get_db()` 连接池契约)。**删代码前先知道哪些是承重墙。**

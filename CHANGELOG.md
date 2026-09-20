@@ -30,6 +30,7 @@ All notable changes to this project will be documented in this file.
 
   **⚠️ 未实跑验证** —— `ragas`/`datasets` 在 `requirements.txt` 里但**本机 venv 未安装**，
   且脚本需 API 在跑。**"已入库" ≠ "跑通了"**，`README` 里按这个口径写。
+  ⇒ **已登记为待办**（`ROADMAP.md`「已登记、暂不处理」末条），**业务方指令：排到最后做**。
 
   **其余 `archive/` 内容【未入库】**，仍作本地留档：`Agent/` 原系统交付包（2.6 MB）、
   原系统日志（1 MB）、`data_retention.py` 等实验脚本。理由：`archive/` 被 gitignore 是**有意设计**
