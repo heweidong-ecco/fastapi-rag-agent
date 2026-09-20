@@ -211,6 +211,37 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- 🔴 **两处「审计结论」被实测推翻 —— 一处翻案、一处加重**（2026-09-20 · `docs/待办登记…` §十三）。
+
+  **① `api/websocket_test.html`：审计判它"孤儿"，判错了。**
+  审计的判据（"0 处引用"）**对一个"给人直接在浏览器打开的独立页面"根本不成立** —— 这类页面本来就不被代码引用。
+  实测：`api/api_v1_rag.py:764` 的 `@router.websocket("/ws/agent")` **是活的**
+  （`/api/v1/ws/agent` → **CONNECTED**，首帧 `{"type":"thinking",…}`；`/ws/agent` → **REJECTED**）。
+  ⇒ 它**不是孤儿，是配套页**，只是 ① URL 写错 ② 放在 `api/` 而非被挂载的 `api/static/`。
+  **处置：不是删，是「搬 + 修 URL」** —— 搬进 `api/static/`，URL 改为从 `location` 推导。
+  实测 `GET /static/websocket_test.html` = **200**（**搬之前该路径是 404**）。
+
+  **② 🔴 浏览器工具的失效范围，比 README 写的**大**得多（新条目 N13）。**
+  README「已知限制 #1」原写「浏览器工具**在本机**不可用 …… **环境天花板，非代码缺陷**」——
+  **这句把"本仓部署方式都不装浏览器"说成了"我这台机器的毛病"。**
+  实测：`api/Dockerfile` 与 `docker-compose.yml` **都没有 `playwright install`**
+  （全仓 4 处提及它，**全是文档在解释它跑不了**，无一处是去装）⇒ **`python:3.10-slim` 里同样没有浏览器。**
+  ⇒ **`fetch_webpage` / `fetch_webpage_html` / `screenshot_webpage` 在本仓【任何部署方式】下都不可用。**
+  （已更正该处。⚠️ **要不要让它真能用 = 产品决策**：在 Dockerfile 装 chromium，镜像 +约 300MB。见 `docs/待办登记…` §四·2 丙方案。）
+  ⚠️ 附带更正一处**计数口径**：工具健康 **4/6** 只反映 MCP 注册表里的那 2 个浏览器工具；
+  第三个 `fetch_webpage_html` **压根没注册进 MCP**（那是 🔴C），所以它**不出现在这个分母里**。
+
+- **§四 的 5/6/7 三条已执行**（2026-09-20）：
+  - **`deploy.md`**：两处占位符 clone URL（`你的用户名/你的仓库名`）→ 真实地址（含 `cd` 那行），实测替换 **2 处**、无残留。
+  - **`硬性指标终极核查清单.md`**：⚠️ **加头标，不改内容** —— 核出它是**原系统带进来的原始验收清单**
+    （`3c16073` 2026-07-05，作者是占位符 `你的名字`，**引入后从未改过、0 项被勾过**）⇒ **改内容就成了篡改原始要求**。
+    已注明来历，并写明「`.gitlab-ci.yml` 是**原系统**的要求，本仓 CI 是 GitHub Actions」。
+    📌 顺带核出：README 里「性能目标」表（P99<800ms / 失败率<0.1%）的**出处就是这份清单**。
+  - **`api/websocket_test.html`**：见上。
+  - **`api/websocket两个版本.txt` 删除**（306 行 `.txt` 里装着 **3 份** HTML 迭代版、0 引用、
+    原系统首次提交 `ecb146b` 带进来的）—— 三份互不相同、也都**不是**真页的子集/超集（真页更长）⇒ **已被取代**。
+    内容仍可取回：`git show ecb146b:'api/websocket两个版本.txt'`
+
 - **根 `README.md`：补"整套系统架构图" + 写明原系统出处**（2026-09-20）。
   「技术架构」段新增 `docs/architecture-full.png`（**并显式标注图上工具层的 `rag_search` 已过时** ——
   当前实际是 `fetch_webpage_html`，`api/agent_graph_advanced_learning.py:47-51`；**图记录的是更早一代工具集**）；
@@ -448,10 +479,11 @@ All notable changes to this project will be documented in this file.
   | | 离线测试 job |
   |---|---|
   | 此前用 `requirements-test.txt`（近 5 次） | **1m12s / 1m18s / 1m23s / 1m25s / 1m27s** |
-  | 改用 `requirements.txt`（PR #35，首次） | **3m35s** |
+  | 改用 `requirements.txt` —— 首次（**缓存冷**） | **3m35s** |
+  | 改用 `requirements.txt` —— 第二次（**缓存热**） | **2m50s** ← **以这个为准** |
 
-  ⚠️ **3m35s 是 pip 缓存冷的值** —— cache key 从 `requirements-test.txt` 换成了 `requirements.txt`，**必然 miss**。
-  ⇒ **稳态值未测**（换回本文件后第二次运行即命中缓存）。**但 3m35s 可接受，不动摇 §四·1 的结论。**
+  ⇒ **稳态约 2m50s，是原来的 ~2.1 倍。**（缓存省的是**下载**，省不掉**安装**。）
+  **可接受，不动摇 §四·1 的结论。**
 
   **同时把断言总表里 4 条 ⬜ 转成 ✅**（重跑实测，不是推断）：
   离线层 `68 passed, 1 skipped, 11 deselected`（与文档**逐字一致**）· `test_agent_repairs.py` `18 passed`（且文件里恰 18 个 test 函数）·

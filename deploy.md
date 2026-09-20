@@ -28,8 +28,8 @@ your-project/
 ### 第 1 步：克隆项目
 
 ```bash
-git clone https://github.com/你的用户名/你的仓库名.git
-cd 你的仓库名
+git clone https://github.com/heweidong-ecco/fastapi-rag-agent.git
+cd fastapi-rag-agent
 ```
 
 ### 第 2 步：配置环境变量
@@ -177,8 +177,8 @@ docker --version
 
 ```bash
 # 克隆你的项目（或通过 scp 上传）
-git clone https://github.com/你的用户名/你的仓库名.git
-cd 你的仓库名
+git clone https://github.com/heweidong-ecco/fastapi-rag-agent.git
+cd fastapi-rag-agent
 
 # 配置 .env（参考 Docker 部署章节）
 cp .env.example .env

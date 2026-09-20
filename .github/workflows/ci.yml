@@ -83,9 +83,11 @@ jobs:
         # 安全性已核：实测 `-test` 是 `requirements.txt` 的**真子集**
         #   （含版本约束在内比对整行 ⇒ 只在 `-test` 里的行 = 空），切过去**不丢任何包**。
         # 代价：会多拉 sentence-transformers / transformers / torch 等重包 ⇒ **CI 时间变长**。
-        #   📊 **实测（2026-09-20）**：本 job **3m35s**；而此前用 `requirements-test.txt` 时是 **1m12s–1m27s**。
-        #   ⚠️ 这一次是 **pip 缓存冷**（cache key 从 requirements-test.txt 换成了 requirements.txt ⇒ 必然 miss）
-        #      ⇒ **3m35s 是冷缓存值，不是稳态值**。稳态要再跑一次才知道（换回本文件后第二次运行即命中缓存）。
+        #   📊 **实测（2026-09-20）**：
+        #      · 首次（pip 缓存冷 —— cache key 刚从 requirements-test.txt 换成 requirements.txt）  **3m35s**
+        #      · 第二次（缓存热）                                                                    **2m50s**  ← **以这个为准**
+        #      · 此前用 `requirements-test.txt` 时（近 5 次）                                          **1m12s – 1m27s**
+        #   ⇒ **稳态约 2m50s，是原来的 ~2.1 倍。** 缓存省掉的是**下载**，省不掉**安装**。
         run: pip install -r api/requirements.txt
 
       - name: 跑离线测试
