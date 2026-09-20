@@ -82,9 +82,12 @@ class DocumentPreprocessor:
         lines = [line.strip() for line in text.splitlines()]
         return '\n'.join(lines)
 
-    def remove_noise_markers(self, text: str) -> str:
-        """去除常见的噪声标记（新增 URL、邮箱过滤）"""
-
+    # 🔴 2026-09-20 删掉了一份**空壳定义**（审计 §二）：
+    #    这里原先有**两个** `remove_noise_markers` —— 上一份只有一句 docstring
+    #    （`"""去除常见的噪声标记（新增 URL、邮箱过滤）"""`），下一份才是真实现。
+    #    Python **后者胜出** ⇒ 当前行为是对的，**但改上面那份不会生效、也不会报错**。
+    #    ⚠️ 与 `CLAUDE.md` 修复记录 #7 同型（`db.py` 的 `get_db()` 重复定义 ⇒ 写入不提交）。
+    #    回归测试:api/test_audit_fixes.py::test_no_duplicate_method_definitions_in_preprocessor
     def remove_noise_markers(self, text: str) -> str:
         """去除噪声标记（从配置文件加载规则）"""
         # 

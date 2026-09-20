@@ -487,6 +487,21 @@ All notable changes to this project will be documented in this file.
   **验证**：新增 3 条用例（**均红→绿已验证**）· 全套离线层 **71 passed / 1 skipped / 11 deselected**
   （68 基线 + 3 新增，**零回归**）· `ROUTES=13` / `OPENAPI_PATHS=59` 与改动前一致。
 
+- ⚠️ **§二 修了 —— `document_preprocessor.py` 里 `remove_noise_markers` 被定义了两次**（2026-09-20）。
+  `:85-86` 是**只有一句 docstring 的空壳**，`:88-103` 才是真实现。Python **后者胜出** ⇒
+  **当前行为是对的**，**但改上面那份不会生效、也不会报错** —— 下一个人照着它改，改完"没反应"。
+  📌 与 `CLAUDE.md` 修复记录 **#7 同型**（`db.py` 的 `get_db()` 重复定义 ⇒ **写入不提交**）—— **本仓已两次踩同一个坑**。
+  ⇒ 删掉空壳，原处留注释说明来历。
+  ⚠️ **这条的测试写法值得记**：它是**结构缺陷**不是运行期行为（两条定义行为恰好相同）
+  ⇒ **"跑一下看输出"永远测不出来** ⇒ 用例改用 `ast` 查**同名方法被定义两次**。
+  回归用例：`test_no_duplicate_method_definitions_in_preprocessor`（**红→绿已验证**，红时报 `[85, 88]`）。
+
+  🔎 **顺带核出一条既存缺陷（未修，已登记为 §三·3.7 / N14）**：
+  `document_preprocessor.py:101` 的 markdown 图片规则（把 `![alt](url)` 收敛成 `alt`）**从未生效** ——
+  比它先跑的 `apply_rules`（`:93`）先把 URL 剥掉，留下残疾的 `![图](`，后面就匹配不上了。
+  ✅ 与本次改动无关（`main` 输出**逐字相同**）。**不修**：改它会**改变文本预处理输出 ⇒ 影响检索与已有语料**，
+  属**行为变更**，按仓规得业务方裁。
+
 - 🔴 **🔴C 修了 —— LLM 工具表改为从 MCP 注册表【派生】（单一事实源）**（2026-09-20 · `DEC-020`）。
 
   **🔴C 是什么**：`mcp_server.TOOLS`（**6** 个）与 `agent_graph_advanced_learning.tools`（**7** 个，多 `fetch_webpage_html`）

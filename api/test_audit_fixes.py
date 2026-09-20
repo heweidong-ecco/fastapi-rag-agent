@@ -8,7 +8,9 @@
 ⚠️ 这两条都是**"声明与事实不符"**型 —— 靠跑一遍端点**发现不了 B**（它只出现在 `/docs` 与 Postman 导入里），
    所以 B 的用例直接查 **OpenAPI 文档对象**，而不是发请求。
 """
+import ast
 import contextlib
+import pathlib
 
 import pytest
 
@@ -103,4 +105,44 @@ def test_openapi_descriptions_do_not_deny_admin_enforcement():
         "OpenAPI 描述里仍有**与代码相反**的安全声明（会渲染进公开 /docs）：\n  "
         + "\n  ".join(hits)
         + "\n代码事实：`admin/create_user` 用的是 `Depends(require_admin)`；启动时 `ensure_admin_exists`。"
+    )
+
+
+# ===========================================================================
+# §二 · 一个类里不能有【同名方法定义两次】
+# ===========================================================================
+def test_no_duplicate_method_definitions_in_preprocessor():
+    """`document_preprocessor.py` 的类里，**同名方法不能定义两次**。
+
+    🔴 实测（2026-09-20）：`remove_noise_markers` 被定义了**两次** ——
+       `:85-86` 是**只有一句 docstring 的空壳**，`:88-103` 才是真实现。
+       Python **后者胜出** ⇒ 当前行为是对的，**但改 `:85` 那份不会生效** ——
+       下一个人照着上面那份改，改完"没反应"，且**没有任何报错**。
+
+    ⚠️ **为什么不用"跑一下看输出"来测**：两条定义**在行为上恰好相同**
+       （一条是空的、一条是真的，但真正生效的始终是后面的）
+       ⇒ 无论修没修，跑 `remove_noise_markers()` **都通过**。
+       ⇒ 这是**结构缺陷**，只能用**结构判据**守。
+
+    📌 与 `CLAUDE.md` 修复记录 **#7 同型** —— `db.py` 的 `get_db()` 曾被重复定义 ⇒
+       **写入不提交**（那次是行为真的错了）。⚠️ 本仓已两次踩同一个坑。
+    """
+    src = pathlib.Path(__file__).with_name("document_preprocessor.py").read_text(encoding="utf-8")
+    tree = ast.parse(src)
+
+    problems = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef):
+            continue
+        seen = {}
+        for item in node.body:
+            if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                seen.setdefault(item.name, []).append(item.lineno)
+        for name, linenos in seen.items():
+            if len(linenos) > 1:
+                problems.append(f"{node.name}.{name} 定义了 {len(linenos)} 次，行号：{linenos}")
+
+    assert not problems, (
+        "同一个类里有【同名方法定义多次】—— 先定义的那份**永远不会生效**，"
+        "改它不会报错、也不会有任何效果：\n  " + "\n  ".join(problems)
     )
