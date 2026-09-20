@@ -75,7 +75,10 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         raise ValueError(f"未知工具: {name}")
 
     handler = TOOL_HANDLERS[name]
-    result = handler(arguments)
+    # 🔴 2026-09-20:`handler` 现在是 **async**（它会用 `asyncio.to_thread` 把同步工具
+    #    丢出事件循环）—— 必须 `await`。**同步调用一个 coroutine 会拿到 coroutine 对象**
+    #    然后被 str() 成 "<coroutine object ...>"，工具等于静默失效。
+    result = await handler(arguments)
     return [TextContent(type="text", text=str(result))]
 
 # MCP Server 启动入口

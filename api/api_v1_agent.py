@@ -2,6 +2,7 @@
 API v1 路由集中定义
 所有 /api/v1 前缀的接口在此管理。
 """
+import asyncio
 import json
 import time
 from fastapi import APIRouter, Depends, Path, Query
@@ -36,6 +37,39 @@ import os
 
 router = APIRouter(prefix="/api/v1")
 
+
+def summarize_agent_result(result: dict) -> dict:
+    """把 LangGraph 的返回态整理成对调用方**有意义**的形状。
+
+    🔴 2026-09-20 修（契约缺陷）:
+      这张图带 `interrupt_before=["approval"]` —— **停在审批点时，最后一条消息是
+      "只带工具调用、没有文字"的 AIMessage**（实测:`AIMessage content=''
+      tool_calls=[{'name': 'calculator', …}]`）。
+      而端点原先直接取 `result["messages"][-1].content` ⇒ **返回 200 + 空答案**，
+      调用方**完全看不出"正在等人工审批"**（明明有配套的 `/agent/approve`）。
+      实测复现:POST /agent/langgraph_chat?question=请计算6*7 → `{"answer": ""}`。
+
+    ⚠️ 判据只看"**AI 消息带工具调用且没有文字**"这一种。
+      不能放宽成"最后一条没有文字就算待审批" —— 那样会把
+      "工具刚执行完(ToolMessage)、正要生成最终答案"的正常中途态也误报成待审批。
+    """
+    messages = result.get("messages") or []
+    if not messages:
+        return {"status": "answered", "answer": ""}
+    last = messages[-1]
+    tool_calls = getattr(last, "tool_calls", None) or []
+    content = getattr(last, "content", "") or ""
+    if tool_calls and not content:
+        return {
+            "status": "pending_approval",
+            "answer": "",
+            "pending_tool_calls": [
+                {"name": tc.get("name"), "args": tc.get("args")} for tc in tool_calls
+            ],
+        }
+    return {"status": "answered", "answer": content}
+
+
 # ==================== 以下是 Agent 接口 ====================
 # ==================== AgentGraph 接口 ====================
 @router.post("/agent/langgraph_chat")
@@ -47,18 +81,20 @@ async def langgraph_chat(
     """
     使用 LangGraph Agent 进行对话。
     thread_id 用于区分不同的对话会话。
+
+    ⚠️ 本图带人工审批节点。若返回 `status="pending_approval"`，说明**工具还没执行**，
+    要用返回的 `pending_tool_calls` 走 `/agent/approve`（带同一个 `thread_id`）继续。
     """
     result = agent_graph.invoke(
         {"messages": [HumanMessage(content=question)]},
         config={"configurable": {"thread_id": thread_id}}
     )
-    # 提取最后一条消息的文本内容
-    final_message = result["messages"][-1]
+    summary = summarize_agent_result(result)
     return {
         "question": question,
-        "answer": final_message.content,
         "thread_id": thread_id,
         "requested_by": user_name,
+        **summary,
     }
 
 # ==================== 属于AgentGraph 接口下  新增的： AgentGraph 人工审批接口 ====================
@@ -222,8 +258,17 @@ async def agent_fetch_webpage(
     url: str,
     user_name: str = Depends(get_current_user_hybrid),
 ):
-    """使用Playwright获取网页文本内容"""
-    result = fetch_webpage.invoke({"url": url})
+    """使用Playwright获取网页文本内容
+
+    🔴 2026-09-20 修:必须丢到**线程**里跑 —— `browser_tools` 用的是 Playwright
+       **同步** API，而本端点是 async ⇒ 直接在事件循环所在线程里调会报
+       `playwright._impl._errors.Error: It looks like you are using Playwright
+       Sync API inside the asyncio loop.`（实测）
+       ⛔ 不能把 `browser_tools` 改成 async —— 它同时被 **MCP server 的同步路径**
+          调用（`create_mcp_tool_handler` 里是同步 `tool_func.invoke`）。
+       回归测试:`api/test_agent_repairs.py::test_fetch_webpage_is_not_invoked_on_the_event_loop`
+    """
+    result = await asyncio.to_thread(fetch_webpage.invoke, {"url": url})
     return {"url": url, "content": result, "requested_by": user_name}
 
 # ==================== 新增“网页截图”工具测试接口 ====================
@@ -235,8 +280,13 @@ async def agent_screenshot_webpage(
     url: str,
     user_name: str = Depends(get_current_user_hybrid),
 ):
-    """使用Playwright截取网页并保存为图片"""
-    result = screenshot_webpage.invoke({"url": url})
+    """使用Playwright截取网页并保存为图片
+
+    🔴 2026-09-20 修:同上（`fetch_webpage` 那条的孪生兄弟）——
+       同步 Playwright 必须丢到线程里跑。**两个端点一起修**，防止只改一个。
+       回归测试:`api/test_agent_repairs.py::test_screenshot_webpage_is_not_invoked_on_the_event_loop`
+    """
+    result = await asyncio.to_thread(screenshot_webpage.invoke, {"url": url})
     return {"url": url, "result": result, "requested_by": user_name}
 
 # ==================== 新增 代码执行器 工具 测试接口 ====================

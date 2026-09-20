@@ -79,81 +79,69 @@ def inject_memories_to_prompt(original_prompt: str, state: AgentState) -> str:
 # 状态污染：不同用户的调用可能互相影响。
 # 新增会话池 ，避免并发阻塞，和状况污染
 """
-MCP Client 连接管理（会话池版本）
+MCP Client 连接管理（**单 task 自开自关**版）
+
+🔴 2026-09-20：**会话池已移除** —— 它不是在"修 bug"，而是把一个
+   **从来没真正生效、且架构上不可行**的机制拆掉。两条证据：
+   ① **它没在生效**：`initialize_pool()` **无任何调用方**（`main.py` 不调它，
+      成功启动日志里「MCP 会话池已初始化」**0 次**）；`release_mcp_session()` /
+      `close_all_sessions()` 也**零调用方** ⇒ 实际行为一直是
+      "每次调用新建一个会话、用完不归还"。
+   ② **它不可行**：`stdio_client` 基于 **anyio**，其 cancel scope 要求
+      「**进入与退出在同一个 task**」。池化的生命周期天然跨 task
+      （启动 task 建 · 请求 task 用 · 归还 task 关）⇒ 实测报
+      `RuntimeError: Attempted to exit cancel scope in a different task than
+      it was entered in`，**并让应用启动直接失败**
+      （`Application startup failed. Exiting.`）。
+      ⚠️ 那比原来的缺陷更糟：原来是"应用能跑、只是 MCP 健康检查挂"。
+
+   ⇒ 现在的契约：**谁调用，谁在【自己这个 task 内】把会话开出来、用完关掉。**
+   （代价：每次调用起一个 MCP 子进程。本仓的工具调用量下可接受；
+     要复用会话，得上 HTTP/SSE transport —— 那是另一个方案，见 DEC-017。）
+
+   回归测试：`api/test_agent_repairs.py::test_call_mcp_tool_keeps_session_lifecycle_inside_one_task`
 """
 import asyncio
+import sys
+from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import List
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-# 会话池配置
-POOL_MIN_SIZE = 2      # 最小空闲会话数
-POOL_MAX_SIZE = 10     # 最大会话数
-_semaphore = asyncio.Semaphore(POOL_MAX_SIZE)  # 并发控制
+# ⚠️ MCP server 脚本的**绝对**路径 —— 锚在本文件旁边，**与 CWD 无关**。
+_MCP_SERVER_SCRIPT = Path(__file__).resolve().with_name("mcp_server.py")
 
-# 会话池
-_session_pool: List[ClientSession] = []
-_pool_lock = asyncio.Lock()
 
-async def initialize_pool():
-    """启动时预创建最小数量的会话"""
-    for _ in range(POOL_MIN_SIZE):
-        session = await create_mcp_session()
-        async with _pool_lock:
-            _session_pool.append(session)
-    print(f"MCP 会话池已初始化，当前大小: {len(_session_pool)}")
+@asynccontextmanager
+async def mcp_session():
+    """在**当前 task 内**开一个 MCP 会话，并保证退出时关掉。
 
-async def create_mcp_session():
-    """创建新的 MCP 会话"""
+    ⚠️ `command` 必须是**当前解释器**(`sys.executable`) —— 裸 `"python"` 会落到
+       系统 python，而它**没有本仓依赖**，MCP server 起不来。
+
+    ⚠️ server 脚本路径必须**锚在模块自身位置**，不能写 `"api/mcp_server.py"` ——
+       那是**相对 CWD** 的：本仓起服务的姿势是 `cd api && uvicorn main:app`，
+       从 `api/` 看它解析成 `api/api/mcp_server.py`（**不存在**）⇒ 子进程起不来
+       ⇒ 6 个工具全 unhealthy（报 `ExceptionGroup: unhandled errors in a TaskGroup`，
+       子异常还被 tool_health 的 except 吞掉，**看不出真因**）。
+       实测对照（同一次调用，只换 cwd）:仓库根 → `2`；`api/` → TaskGroup 异常。
+       回归测试:`api/test_agent_repairs.py::test_mcp_server_path_does_not_depend_on_cwd`
+    """
     server_params = StdioServerParameters(
-        command="python",
-        args=["api/mcp_server.py"]
+        command=sys.executable,
+        args=[str(_MCP_SERVER_SCRIPT)]
     )
-    transport = await stdio_client(server_params)
-    session = await ClientSession(transport[0], transport[1])
-    await session.initialize()
-    return session
+    async with stdio_client(server_params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            yield session
 
-async def get_mcp_session():
-    """
-    从池中获取一个 MCP 会话。
-    如果池中有空闲会话，直接返回；
-    如果池为空且未达到上限，创建新会话；
-    如果达到上限，等待其他会话归还。
-    """
-    async with _semaphore:  # 控制最大并发数
-        async with _pool_lock:
-            if _session_pool:
-                return _session_pool.pop()
-        
-        # 池为空，创建新会话
-        return await create_mcp_session()
-
-async def release_mcp_session(session: ClientSession):
-    """
-    归还会话到池中。
-    不关闭会话，保持连接复用。
-    """
-    async with _pool_lock:
-        if len(_session_pool) < POOL_MAX_SIZE:
-            _session_pool.append(session)
-        else:
-            # 池已满，关闭多余会话
-            await session.close()
-
-async def close_all_sessions():
-    """关闭所有会话（应用退出时调用）"""
-    async with _pool_lock:
-        for session in _session_pool:
-            await session.close()
-        _session_pool.clear()
-    print("所有 MCP 会话已关闭")
 
 async def get_mcp_tools():
     """通过 MCP Client 获取所有可用工具"""
-    session = await get_mcp_session()
-    tools = await session.list_tools()
-    return tools
+    async with mcp_session() as session:
+        return await session.list_tools()
 
 # 新增工具调用缓存
 """
@@ -215,9 +203,13 @@ async def call_mcp_tool_with_cache(tool_name: str, arguments: dict) -> str:
     return result
 
 async def call_mcp_tool(tool_name: str, arguments: dict) -> str:
-    """通过 MCP Client 调用工具"""
-    session = await get_mcp_session()
-    result = await session.call_tool(tool_name, arguments)
+    """通过 MCP Client 调用工具。
+
+    ⚠️ 会话在本函数**自己的 task 内**开、用、关（见 `mcp_session` 的说明）——
+    不要改回从池里取，那会跨 task 并让应用起不来。
+    """
+    async with mcp_session() as session:
+        result = await session.call_tool(tool_name, arguments)
     # 结果是一个 Content 列表，提取文本内容
     if result.content:
         return result.content[0].text
@@ -270,11 +262,19 @@ async def tool_execute(state: AgentState):
 
 # ==================== 动态绑定工具到模型 ====================
 async def get_llm_with_mcp_tools():
-    """获取绑定了 MCP 工具的 LLM 实例"""
-    tools = await get_mcp_tools()
+    """获取绑定了 MCP 工具的 LLM 实例。
+
+    🔴 2026-09-20 修（依赖漂移）:此前写的是 `for mcp_tool in tools:` —— 而
+       `mcp 1.30.0` 的 `list_tools()` 返回的是 **`ListToolsResult`**（列表在 `.tools`），
+       **不是列表本身**。直接遍历它 ⇒ pydantic 模型迭代出的是 **(key, value) 元组**
+       ⇒ `AttributeError: 'tuple' object has no attribute 'name'`
+       ⇒ `/agent/mcp_chat`（三代）**500**。
+       回归测试:`api/test_agent_repairs.py::test_get_llm_with_mcp_tools_unpacks_list_tools_result`
+    """
+    tools_result = await get_mcp_tools()
     # 将 MCP 工具列表转换为 LangChain 能理解的格式
     langchain_tools = []
-    for mcp_tool in tools:
+    for mcp_tool in tools_result.tools:
         langchain_tools.append({
             "name": mcp_tool.name,
             "description": mcp_tool.description,
