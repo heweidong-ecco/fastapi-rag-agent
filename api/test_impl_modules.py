@@ -129,27 +129,33 @@ def test_execute_python_impl_handles_no_output_and_errors():
     assert "ZeroDivisionError" in out, out
 
 
-def test_sandbox_whitelist_has_no_exception_classes():
-    """⚠️ **记录一条沙箱限制**（不是断言它"对"）—— 白名单里**没有异常类**。
+def test_sandbox_whitelist_allows_exception_classes():
+    """沙箱白名单里**有**异常类 —— 这是 **N17 放开之后**的行为（2026-09-20 业务方裁）。
 
-    ⇒ 被执行的代码**不能**写 `try: … except ValueError: …`，也不能 `raise ValueError(…)`
-      —— 两者都会先撞 `NameError: name 'ValueError' is not defined`。
+    📌 **这条用例的前身是反过来的**：它当时断言"白名单里**没有**异常类"，
+       并注明「哪天放开了，这条会红、提醒你去更新记录」。
+       ⇒ **它确实红了**，于是改成现在这样 —— **用例按预期完成了它的使命**。
 
-    🔴 **为什么要专门测它**：这是一条**会实际影响"LLM 写的代码能不能跑"**的限制
-       （异常处理是最常见的 Python 写法之一），而它**从代码上看不出来**
-       （`ALLOWED_BUILTINS` 那一长串里"没有异常类"是**沉默的**）。
-       ⇒ 把它变成一条**会红的断言**：哪天有人把异常类加进白名单，这条用例会提醒
-         **去更新这条记录**，而不是让文档悄悄过期。
-
-    📌 已登记为 `docs/待办登记…` §三·**N17**（**未修，待裁**：要不要放开异常类）。
+    ⚠️ 但它**不是简单地删掉断言**：它同时把"**哪些加了、哪些刻意没加**"变成可执行的事实 ——
+       尤其是那几个**退出机制**（`BaseException` / `SystemExit` / `KeyboardInterrupt`）
+       **必须仍然不在白名单里**（否则被执行的代码能**吃掉执行器的中断信号**）。
     """
     from code_executor_impl import create_safe_globals
 
     builtins_ = create_safe_globals()["__builtins__"]
-    for exc in ("Exception", "ValueError", "TypeError", "KeyError", "ZeroDivisionError"):
+
+    # 应当【有】：常见的异常处理写法要靠它们（`try/except`、`raise`）
+    for exc in ("Exception", "ValueError", "TypeError", "KeyError",
+                "IndexError", "ZeroDivisionError", "AssertionError"):
+        assert exc in builtins_, (
+            f"沙箱里应当有 {exc}（N17 已裁「放开」）—— 否则 LLM 写的 try/except 跑不了"
+        )
+
+    # ⛔ 应当【没有】：它们是【退出机制】，不是普通异常
+    for exc in ("BaseException", "SystemExit", "KeyboardInterrupt", "GeneratorExit"):
         assert exc not in builtins_, (
-            f"沙箱白名单里现在**有** {exc} 了 —— 这说明限制已放开，"
-            "请更新本用例与登记文件 §三·N17 的记录（不要只是把断言删掉）。"
+            f"沙箱里**不该**有 {exc} —— 它是退出机制，放开等于允许被执行代码"
+            "捕获/吃掉执行器的中断信号。要捕获，用 Exception 就够了。"
         )
 
 

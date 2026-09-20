@@ -304,7 +304,43 @@ All notable changes to this project will be documented in this file.
   （实测先撞 `NameError`）。⚠️ 这条限制**从代码上看不出来**（"白名单里没有异常类"是**沉默的**），
   而它直接影响「LLM 写出来的代码能不能跑」。⇒ 已固化成一条会红的用例，放开时会提醒更新记录。
 
+### Changed
+
+- **N17 放开沙箱异常类 · N15 把"执行层是模拟"写明**（2026-09-20 · 业务方裁决）。
+
+  **① N17 · 代码执行沙箱放开「异常类」**（`api/code_executor_impl.py`）
+
+  此前 `ALLOWED_BUILTINS` 里**一个异常类都没有** ⇒ 被执行的代码**不能**写
+  `try: … except ValueError: …`，也不能 `raise ValueError(…)`（两者都先撞 `NameError`）。
+  🔴 而**异常处理是 Python 最常见的写法之一**，且这条限制**从代码上看不出来**（"一长串白名单里缺了什么"是**沉默的**）。
+
+  **业务方裁：放开。已执行** —— 加了 13 个（`Exception` + 常见子类）。
+  ⛔ **刻意【不】加的**：`BaseException` / `SystemExit` / `KeyboardInterrupt` / `GeneratorExit` ——
+  它们是**退出机制**，放开等于**允许被执行代码吃掉执行器的中断信号**。要捕获，用 `Exception` 就够了。
+
+  **验证**：`try/except ZeroDivisionError` → `"caught"` ✅ · `raise ValueError('boom')` → `"代码执行出错: ValueError: boom"` ✅
+
+  📌 **那条"锁住旧行为"的用例按预期完成了使命**：它当时断言"白名单里**没有**异常类"，
+  并写明「哪天放开了这条会红、提醒你去更新记录」⇒ **它确实红了** ⇒ 已改成断言**放开后**的行为
+  （并且仍然锁死"那几个退出机制不能进来"）。
+
+  **② N15 · 把 Plan-and-Execute"执行层是模拟"写明**（业务方裁：**选 b**）
+
+  `api/plan_execute.py` 的**模块 docstring 最上方**现在明写：
+  **只有 `calculator` 是真调用，其余工具全部是"请 LLM 模拟执行"**。
+  此前这条**从代码上看不出来** —— 端点 `/agent/plan_execute` 看起来在跑真工具，**实际上只有规划是真的**。
+
+  🔴 **后续（已登记为独立待办，不是"修补"）**：业务方裁决 **"并且要接真工具，大改是必要的"**，
+  并说明：**"之前的代码是有全局 Plan-and-Execute 的执行层，是可用，我没放进来，需要单独新做"**
+  ⇒ **本仓没有可抄的现成代码，要【新做一层】**。登记在 `docs/待办登记…` **§十四**，
+  那里同时列了"新做时必须一并解决"的 5 项（含浏览器工具在本仓仍是死的、prompt 要复用 C1 的同源来源等）。
+
+  🔴 **顺带撞出新条目 N18（未修、待裁）**：沙箱**也不能定义类** ——
+  `class Mine(Exception): pass` ⇒ `NameError: __build_class__ not found`（白名单里没有 `__build_class__`）。
+  ⚠️ 这**不在**本次"放开异常类"的授权范围内 ⇒ 未动，已登记。
+
 ### Fixed
+
 
 - 🔴 **撤回一条我自己报错的"疑似 bug"（N16）**，并删掉那个真正的死变量（2026-09-20）。
 
