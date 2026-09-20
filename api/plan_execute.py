@@ -18,14 +18,39 @@ planner_llm = ChatOpenAI(
 )
 
 # ==================== 任务规划器 ====================
+
+# 🔴 2026-09-20 修（§三·C1，业务方裁「同源」）：**可用工具清单改为从 MCP 注册表派生。**
+#
+#    此前这里**手写了两份互相矛盾**的工具清单（同一个 prompt 里！）：
+#      · 第一份写 `search` —— 而 MCP 注册表里**没有** `search`，真名是 **`web_search`**
+#      · 第二份写 `search / calculator / filter / summarize / generate`
+#        —— 后三个**全仓不存在**
+#    ⇒ **两份都不能照用**，LLM 会被引着规划出根本不存在的工具名。
+#
+#    ⚠️ 与 🔴C 是**同一个根因**：**手工维护的工具清单必然漂**。
+#       ⇒ 改为从 `mcp_server.TOOLS` 派生（单一事实源）—— 以后加工具只需改那一处。
+from mcp_server import TOOLS as _MCP_TOOLS
+
+
+def _available_tool_lines() -> str:
+    """把 MCP 注册表渲染成给 LLM 读的「可用工具」清单（**唯一来源**）。"""
+    lines = []
+    for t in _MCP_TOOLS:
+        fn = t["func"]
+        # 用工具描述的第一行（docstring 首行）—— 与 `bind_tools` 发给 LLM 的是同一份
+        desc = (fn.description or "").strip().splitlines()[0] if fn.description else ""
+        lines.append(f"- {fn.name}：{desc}")
+    return "\n".join(lines)
+
+
 def plan_task(user_goal: str) -> List[Dict]:
     """
     将用户的复杂目标分解为有序的步骤清单。
 
-    返回格式:
+    返回格式（⚠️ `tool` 的取值**只能是** `_available_tool_lines()` 里列出的那些）:
     [
-        {"step": 1, "action": "搜索上周AI新闻", "tool": "search", "input": "2026年7月第一周 AI 重要新闻"},
-        {"step": 2, "action": "筛选与科技公司相关的新闻", "tool": "filter", "input": "科技公司"},
+        {"step": 1, "action": "搜索上周AI新闻", "tool": "web_search", "input": "2026年7月第一周 AI 重要新闻"},
+        {"step": 2, "action": "计算同比增幅", "tool": "calculator", "input": "(120-100)/100"},
         ...
     ]
     """
@@ -36,19 +61,15 @@ def plan_task(user_goal: str) -> List[Dict]:
 - 如果用户需求是“写一段代码”，你应该先自己生成代码文本，然后调用 execute_python 去执行它。
 - 如果某个工具没有列在可用工具清单中，说明它不存在，不要规划使用该工具的步骤。
 
-**可用工具：**
-- search：搜索互联网信息
-- calculator：计算数学表达式
-- execute_python：执行一段已编写好的 Python 代码
-- fetch_webpage：获取网页文本内容
-- screenshot_webpage：截取网页并保存为图片
+**可用工具（**这就是全部**，不要用清单外的名字）：**
+__TOOL_LIST__
 
 **规划规则：**
 1. 每个步骤必须是一个具体的、可执行的操作。
 2. 步骤之间必须有清晰的逻辑顺序，不能跳跃。
 3. 如果某个步骤依赖前面的结果，必须在描述中明确说明。
 4. 每个步骤需要指定使用的工具（tool）和输入（input）。
-5. 可用的工具包括：search（搜索）、calculator（计算）、filter（筛选）、summarize（总结）、generate（生成文本）。
+5. **`tool` 的取值只能来自上面的「可用工具」清单** —— 清单里没有的，就是不存在，不要规划它。
 6. 步骤数量控制在 3-7 个。
 
 **输出格式（严格JSON数组）：**
@@ -57,7 +78,7 @@ def plan_task(user_goal: str) -> List[Dict]:
     {"step": 2, "action": "操作描述", "tool": "工具名", "input": "工具输入"}
 ]
 
-请严格按照JSON格式输出，不要包含任何其他文本。"""
+请严格按照JSON格式输出，不要包含任何其他文本。""".replace("__TOOL_LIST__", _available_tool_lines())
 
     response = planner_llm.invoke([
         SystemMessage(content=system_prompt),

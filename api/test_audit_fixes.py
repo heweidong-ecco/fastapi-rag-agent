@@ -195,3 +195,43 @@ def test_no_stray_docstrings_in_function_bodies():
         + "\n  ".join(hits)
         + "\n修法：上移到 `def` 正下方（若函数已有 docstring，则把那句合并进去并删掉）。"
     )
+
+
+# ===========================================================================
+# §三·C5 · 缓存装饰器"抢不到锁"时【不能无限递归】
+# ===========================================================================
+def test_cached_tool_does_not_recurse_forever_when_lock_never_acquired(monkeypatch):
+    """`cached_tool` 在**始终抢不到锁**时，必须**有上限**，不能无限递归。
+
+    🔴 实测（2026-09-20）：原实现在 `else` 分支里
+           time.sleep(0.1); return wrapper(*args, **kwargs)
+       ⇒ 如果锁**一直**拿不到（持有者崩了没删锁、或一直被别的请求续上），
+         **递归没有上限** ⇒ 栈溢出 / 无限等待。
+
+    ⚠️ 这是**并发正确性**问题，不是风格问题 —— 它只在高并发下暴露，
+       而一旦暴露就是**进程级**故障（RecursionError 把整个请求打死）。
+
+    ✅ 期望行为：等一小段（有上限）之后**降级为直接执行**（这次不写缓存），
+       而不是继续递归 —— 缓存是优化，**不该因为它拿不到就拒服务**。
+    """
+    import tool_cache as T
+
+    # 永远抢不到锁
+    monkeypatch.setattr(T.redis_client, "set", lambda *a, **k: False)
+    monkeypatch.setattr(T.redis_client, "get", lambda *a, **k: None)
+    monkeypatch.setattr(T.redis_client, "delete", lambda *a, **k: None)
+    # 把等待缩短，否则用例会慢（原实现 0.1s × 上千次递归）
+    monkeypatch.setattr(T.time, "sleep", lambda *a, **k: None)
+    monkeypatch.setattr(T, "_LOCK_WAIT_SECONDS", 0.2, raising=False)
+
+    calls = []
+
+    @T.cached_tool(expire_seconds=1)
+    def _probe(x):
+        calls.append(x)
+        return x * 2
+
+    result = _probe(3)          # ⚠️ 老实现会在这里 RecursionError
+
+    assert result == 6, "抢不到锁时应当【降级为直接执行】，把结果正常返回"
+    assert calls == [3], "且只应真正执行一次（不能重复调用工具函数）"

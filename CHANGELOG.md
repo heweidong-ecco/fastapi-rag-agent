@@ -243,7 +243,50 @@ All notable changes to this project will be documented in this file.
   **验证（改完立刻重跑）**：逐文件 `ast.parse` ✅ · 离线层 **73 passed / 1 skipped / 11 deselected** ·
   `ROUTES=13` / `OPENAPI_PATHS=59` 与改动前一致 · 删除项逐条复核确认已不在。
 
+### Fixed
+
+- **§三 清理 · C 类（4 条有行为影响的）—— C1/C2/C3 已修，C5 改成有上限（附红→绿用例）**（2026-09-20）。
+
+  **C1 · 同一个 prompt 里两份互相矛盾的工具清单**（`api/plan_execute.py`）
+  此前 prompt 里手写了**两份**「可用工具」：
+  · 第一份写 `search` —— 而 MCP 注册表里**没有** `search`，真名是 **`web_search`**
+  · 第二份写 `search / calculator / filter / summarize / generate` —— **后三个全仓不存在**
+  ⇒ **两份都不能照用。** 与 🔴C **同一根因**：**手工维护的清单必然漂**。
+  **修法（业务方裁「同源」）**：改为从 `mcp_server.TOOLS` **派生**（新增 `_available_tool_lines()`），
+  并把规划规则第 5 条改成「**`tool` 的取值只能来自上面的清单**」。
+  实测派生结果 = **6 个真工具 + 它们真实的描述**（和 `bind_tools` 发给 LLM 的是同一份）。
+
+  **C2 · 两个常量各定义两次**（`api/token_tracker.py`）
+  `DEFAULT_DAILY_TOKEN_BUDGET` / `ROLE_TOKEN_BUDGET` 在**同一文件**里定义了两次、**值完全相同**，
+  唯一的读取点在后一份之后 ⇒ **前一份被完全遮蔽**（改它不生效、也不报错）。
+  后一份**还带注释**（"免费用户：每天1万token"）⇒ 保留后一份、删前一份。
+  📌 与 §二（`remove_noise_markers` 重复定义）**同型** —— 本仓第 3 次踩。
+
+  **C3 · 导入的常量被 `os.getenv` 覆盖**（`api/jwt_handler.py`）
+  `:5` 从 `config` 导入 `ACCESS_TOKEN_EXPIRE_MINUTES` / `REFRESH_TOKEN_EXPIRE_DAYS`，
+  `:12-13` 又用 `os.getenv` **重新赋值覆盖** ⇒ 那个 import 是**死导入**。
+  ✅ 已核实**两边默认值相同**（15 / 7）、读的是**同一个 env 变量** ⇒ **行为完全等价**。
+  删掉 `:12-13`，**让 `config.py` 成为唯一来源**（与 C2 同一原则：**一处定义**）。
+  ⚠️ **连带**：`import os` 因此没了使用者 —— 已顺手删除（属 D1 范畴，但是本次改动**直接造成**的）。
+
+  **C5 · 抢不到锁时【无上限递归】**（`api/tool_cache.py`）　**[业务方裁：需要调整，不能无限递归]**
+  原实现在 `else` 分支 `time.sleep(0.1); return wrapper(*args, **kwargs)`
+  ⇒ 锁一直拿不到就把**栈打爆**（实测 `RecursionError: maximum recursion depth exceeded`）。
+  ⚠️ 这是**并发正确性**问题、且是**进程级**故障 —— 一触发就把整个请求打死。
+  **修法**：改成**有上限的循环**（`_LOCK_WAIT_SECONDS = 2.0`），超时后**降级为直接执行**（这次不写缓存）。
+  ⇒ 取舍：**缓存是优化，不该因为它拿不到就拒服务。**
+  **红→绿已验证**：用例 `test_cached_tool_does_not_recurse_forever_when_lock_never_acquired`
+  （红时实测 `RecursionError`）。
+
+  **验证（改完立刻重跑）**：逐文件 `ast.parse` ✅ · 离线层 **74 passed / 1 skipped / 11 deselected**
+  （73 基线 + 1 新增）· `ROUTES=13` / `OPENAPI_PATHS=59` 与改动前一致。
+
+  **🔴 顺带核出一条新发现（N15，未修、已登记）**：`api/plan_execute.py` 的 `execute_single_step()`
+  对**除 `calculator` 外**的工具**全是"LLM 模拟执行"**（`"请模拟执行以下操作…"`），**不是真调用**。
+  ⇒ C1 修的是"prompt 列了不存在的工具"，而 N15 是"**列对了也不真执行**"。修它 = 改产品行为，待业务方裁。
+
 ### Changed
+
 
 - **§三 清理 · A 类（11 条"注释说 A、代码做 B"）全部修正**（2026-09-20 · 分支 `chore/section3-cleanup`）。
 
