@@ -38,6 +38,28 @@ All notable changes to this project will be documented in this file.
   **同一批的诚实修正**：README 里 `curl /api/v1/` 应返回 `{"status":"ok","version":"v1"}` —— **这条原本就是对的**
   （实测确认），未改。
 
+- **第 0 步「盘点」三件产出 —— 为的是"改 A 漏 B"这类问题**（2026-09-20）。
+
+  业务方指出一个更根本的隐患：**「你对整个项目还没有完全看透，等下修了这边，又漏那边」**。
+  ⇒ **先盘点再动手**，产出三件：
+
+  | 产出 | 路径 | 作用 |
+  |---|---|---|
+  | **断言总表** | `docs/断言总表-2026-09-20.md` | 把"看透代码"换成"**核断言**"：交付文档 3 份共 **33 条**断言，每条带**当场可跑的核对命令**（已核 12 条，其余标 ⬜ 并写明缺什么；§B–§E 登记为欠账，**不自称完整**） |
+  | **影响面扫描器** | `scripts/impact.sh` + 回归 **11 项** | **改动前的机械防线**：列出全仓谁会因这次改动而变成错的 |
+  | **重写保留清单** | `docs/PR34-重写保留清单-2026-09-20.md` | 把 `694d424` 里**方向无关、已实测**的内容摘出来 ⇒ 重写时不会丢实测 |
+
+  **盘点当场核出 6 条原审计没有的问题**（N1–N6，详见 `docs/待办登记-2026-09-20-全仓审计与方向更正.md` §十一）：
+  🔴 README 论证「P99 不可采信」所依赖的日志**克隆者拿不到**（`.gitignore:9 logs/`，`git ls-files api/logs/` = 0）·
+  🔴 FAQ 说 `-test` 是「只做减法」**不成立**（它还**加了** `gradio`，且比 `requirements.txt` 更长）·
+  ⚠️ `Agent/` 是审计的整片盲区 · ⚠️ 技术栈表列 RAGAS/Locust 而轻量路径装的没有 ·
+  ⚠️ 根级 2 个 md 被 gitignore 但在盘上 · ⚠️ `/rag/search` 对无效 mode **静默兜底**（多花钱、多延迟）。
+
+- **`docs/FAQ.md` 新增「五、Agent 相关」A1–A9**（2026-09-20）。原系统 `Agent/docs/faq_agent.md` 的 Q7–Q15 迁入
+  —— **根 FAQ 此前 0 条 Agent 排障**。⚠️ 迁入时**逐条核了代码**，其中**原 Q13（让人查 `.env` 的 `MEM0_API_KEY`）
+  与 Q14（说可调 Mem0 的 `delete()`）两条在本仓不成立**，已按事实改写（本仓 Mem0 是**本地模式**，
+  没有那个键；`api/memory_store.py` 也**没有** `delete` 方法）。Q1–Q6 与根 FAQ 逐条重复、Q16 与根 Q10 重复，**未迁**。
+
 ### 说明
 
 - 本条的**发现方式**值得记：我是**真去 `git clone` 了一遍、照着 README 盲跑**才发现的。
@@ -188,6 +210,21 @@ All notable changes to this project will be documented in this file.
 - **`CHANGELOG.md`** —— 本文件。
 
 ### Changed
+
+- **根 `README.md`：补"整套系统架构图" + 写明原系统出处**（2026-09-20）。
+  「技术架构」段新增 `docs/architecture-full.png`（**并显式标注图上工具层的 `rag_search` 已过时** ——
+  当前实际是 `fetch_webpage_html`，`api/agent_graph_advanced_learning.py:47-51`；**图记录的是更早一代工具集**）；
+  项目结构树下新增出处说明：**原系统是极狐 GitLab 上的 `agent-assistant`**
+  （证据原在 `Agent/deploy.md`，现见 git 历史 `351f699`）；结构树里的 `Agent/` 一行已删。
+
+- **两处"引用了已删文件"的历史记录 —— 只加日期补注，不篡改原文**（2026-09-20）：
+  - `docs/decisions/DEC-003`：它把 `Agent/docs/api_agent.md` 列为"仓内约定证据"**之一** ⇒ **由 2 处降为 1 处**。
+    ✅ **决策本身不受影响**（主依据是"端点无 Pydantic body"这一**代码事实**，`api/api_v1_agent.py:348-357` 仍在）；
+    `docs/demos.md` 那处**证据未断**。
+  - `docs/凭据轮换手册`：「原始泄露面 3 个被跟踪文件」**现剩 2 个**。⚠️ **口径变了 ≠ 风险变了**
+    —— 被删的那个文件里是**公开占位符**；真正的风险仍是"有没有别处把真口令写进被跟踪文件"。
+
+  **为什么只加补注**：这两份是**事发/决策当时的快照**，改成现状会让记录失真。
 
 - **CI `offline-tests` 的覆盖面：从「1 个文件」扩到「`api/` 全套」+ 两个 job 加 `timeout-minutes`**（2026-09-17 · M6 的后续）。
 
@@ -373,7 +410,36 @@ All notable changes to this project will be documented in this file.
 
 - 本地残留分支 `docs/api-doc-final-review`(已并入 `main`,远端无此分支)。
 
+- **原系统 `Agent/` 目录整体删除（方案甲「拆走再删」，`DEC-018`）**（2026-09-20）。
+
+  业务方问「原 clone 来的 `Agent/` 还有用吗，没有用不用保留，**污染环境**」。
+  实测后判断：**不是"全没用"，是三块有用、四块是污染**：
+
+  | 处置 | 内容 | 依据 |
+  |---|---|---|
+  | **搬** | `architecture_full.png` → `docs/architecture-full.png` + 根 README 引用 | **整套系统**级架构图（仓根那张只到子系统级），**唯一**画了 MCP 层 / 部门制 Agent / 成本控制体系的图 |
+  | **迁** | `faq_agent.md` 的 Q7–Q15 → `docs/FAQ.md` 第五节 | 根 FAQ 原有 **0 条** Agent 排障 |
+  | **删** | `README.md`（自称"生产级"，与根 README **在同一仓里说反话**）· `deploy.md`（与根 `deploy.md` 重叠 + **第三处占位符 clone URL**，审计漏抓）· `.env.example`（**配置面与仓根不同**：多 `MEM0_API_KEY`/`API_KEY`，**少 `LOGIN_PASSWORD`** ⇒ 照抄配不起来）· `docs/api_agent.md` · `docs/architecture_agent.png` | —— |
+
+  ⚠️ **未删任何代码** —— Agent 模块的 12 个 `.py` **全是原系统的**（引入于 `2c1a922` 2026-07-17 / `351f699` 2026-08-17），
+  本项目对其改动 **+405 / −210 行**，而这些文件共 **2974 行** ⇒ **≈ 13.6%（上限）**，其中
+  `tool_health.py`/`browser_tools.py`/`code_executor.py`/`simple_tools.py` **一行未动**。
+  **全部原文仍在 git 历史**（`git show 351f699 --stat`），可恢复。
+
 ### Fixed
+
+- 🔧 **`scripts/impact.sh` 自身两个缺陷 —— 自建的防线，自己先踩了两次**（2026-09-20）。
+
+  ① **假绿灯（严重）**：`printf '%s'` 吃掉末尾换行，而 `wc -l` 数的是**换行数** ⇒ **系统性少算 1**；
+  **恰好 1 处命中时报「0」** —— 输出"零命中"。**一个会给出"没有影响面"假绿灯的防线，比没有防线更危险。**
+  实测：`architecture_agent` 只有 `Agent/README.md` 一处引用，被报成 **0**。
+  ⇒ 改 `'%s\n'`，并补 T9（恰 1 命中 ⇒ 必须报 1）/ T10（计数 == **独立 oracle**）。
+  ② **测试脆**：删 `Agent/` 后回归从 **11/11 掉到 9/11** —— 排查**不是脚本坏，是测试依赖了仓库内容**
+  （T4 的哨兵串、T9 的关键词**都被我自己随后写进了测试文件或别处** ⇒ "零命中"再也构不出来、"恰 1 命中"变成 3）。
+  ⇒ T4 改用**运行时生成**的哨兵；T9 夹具独立成 `scripts/impact_test_fixture.txt` + **运行时读取**
+  （测试里不留 token 字面量）+ **夹具失效守卫** —— 该守卫**当场抓住过一次**我自己把 token 写进测试文件。
+
+  ⚠️ **更正一条此前报出去的数字**：我给业务方报的「`POSTGRES_PASSWORD` 命中 **19** 个」是错的，**实为 20**。
 
 - 🔴 **三条 Agent 路径全断 —— 七处【依赖漂移】，全部修通**（2026-09-20）。
 

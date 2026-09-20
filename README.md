@@ -64,6 +64,22 @@
 
 ![系统架构图](docs/architecture.png)
 
+**整套系统架构图**（上面那张没画到的部分：MCP 工具层 · 部门制 Agent · 成本控制体系）：
+
+![完整系统架构图](docs/architecture-full.png)
+
+> 📌 **2026-09-20**：这张图原在 `Agent/docs/architecture_full.png`，随 `Agent/` 目录处置搬到 `docs/`。
+> 它是**整套系统**级别的图（另一张 `docs/architecture.png` 只到子系统级）。
+>
+> ✅ **已逐项核对，图上组件本仓都有**：
+> FastAPI 网关（路由/认证/限流/日志/文本规范化）· LangGraph **部门制 Agent**
+> （Supervisor + 检索/计算/日期/翻译/ReAct + Checkpointer —— `api/agent_graph_advanced_learning.py:105/134/154/169/197/246`）
+> · **MCP Server 工具注册中心**（`api/mcp_server.py:24`）· RAG 检索管线 · Mem0 / Redis / pgvector
+> · **成本控制体系**（`api/cost_dashboard.py`）· Grafana + Prometheus（`docker-compose.yml:90`）。
+>
+> ⚠️ **一处已过时，别照图核代码**：图上工具层画的是 **`rag_search`**，而当前的实际工具是
+> **`fetch_webpage_html`**（`api/agent_graph_advanced_learning.py:47-51`）。⇒ 这张图记录的是**更早一代**的工具集。
+
 ## ❓ 常见问题
 
 遇到问题请先查阅 [FAQ 与故障排查](docs/FAQ.md)。
@@ -270,14 +286,22 @@ curl -s -X POST localhost:8000/api/v1/rag/hybrid_search -H "Authorization: Beare
 │   ├── metrics.py          # Prometheus 指标
 │   ├── auth.py             # 认证逻辑
 │   └── ...                 # 更多模块
-├── Agent/                  # Agent 子系统文档
-├── docs/                   # 项目文档（FAQ、架构图、Demo）
+├── docs/                   # 项目文档（FAQ、架构图、Demo、决策记录）
 ├── archive/                # 归档的未使用文件（不入库）
 ├── docker-compose.yml      # 服务编排
 ├── prometheus.yml          # Prometheus 配置
 ├── locustfile_v2.py        # 性能压测脚本
 └── README.md               # 本文件
 ```
+
+> 📌 **关于原 `Agent/` 目录（2026-09-20 已处置）**
+>
+> 本仓是在**原系统**的基础上做的。原系统是**极狐 GitLab 上的 `agent-assistant` 项目**
+> （证据：原系统文档里的 `git clone https://jihulab.com/…/agent-assistant.git`，见 git 历史 `351f699` / `2c1a922`）。
+> 它的文档曾以 `Agent/` 目录形式随仓携带，2026-09-20 因**与仓根文档大面积重复、且其 `.env.example`
+> 与 `deploy.md` 会误导**（前者配置面与仓根不同、后者是占位符 URL）而拆解处置：
+> **架构图搬进 `docs/`，Agent 排障 9 条并入 `docs/FAQ.md` 第五节，其余删除。**
+> 全部原文仍在 git 历史里（`git show 351f699 --stat`）。
 
 ## 📄 许可证
 

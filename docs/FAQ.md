@@ -211,3 +211,115 @@ DELETE FROM api_keys WHERE user_name = 'admin';
 2. 增大连接池大小（`.env` 中的 `DB_MAX_CONN`）。
 3. 检查阿里百炼 API 是否被限流（免费额度耗尽会返回 `403 Free quota exhausted`）。
 4. 检查用户级限流是否触发（默认 3次/秒，容量 20；高频压测建议提高限流参数）。
+
+## 五、Agent 相关
+
+> 📌 **本节 2026-09-20 从原系统的 `Agent/docs/faq_agent.md` 迁入**（该目录已处置，`git show 351f699 --stat` 可查原文）。
+> 原文件共 Q1–Q16，其中 **Q1–Q6 与本 FAQ 逐条重复**、**Q16 与上面 Q10 重复** —— 只迁**不重复的 9 条**。
+> ⚠️ **迁入时逐条核过代码**，其中 **A7 原写法是错的**（见该条说明）。
+
+### A1：Agent 调用工具时返回「未找到工具」？
+
+这是 **`mcp_server.py` 的 `TOOLS` 列表与 LLM 工具表不一致** 的典型症状。
+
+```bash
+# ① 看 MCP 注册了哪些工具（这是"能不能调"的权威）
+curl http://localhost:8000/api/v1/agent/mcp_tools_dynamic -H "Authorization: Bearer <token>"
+# ② 看工具健康状态（unhealthy 的会被自动移出可用列表）
+curl http://localhost:8000/api/v1/agent/tool_health -H "Authorization: Bearer <token>"
+```
+
+- **MCP 注册表**在 `api/mcp_server.py:24` 的 `TOOLS`（**当前 6 项**）。
+- **LLM 工具表**在 `api/agent_graph_advanced_learning.py:47-51`（**当前 7 项**）。
+- ⚠️ **两张表不一致时，LLM 看得见、却调不到**，且**不报错、不 500**，只回一句「未找到工具」。
+  🔴 **本仓当前就有这一处**：`fetch_webpage_html` 在 LLM 表里，**不在** MCP `TOOLS` 里 ⇒ 待修（见 `docs/待办登记-2026-09-20-全仓审计与方向更正.md` §一·C）。
+- 不健康的工具（`unhealthy`）会被移出可用列表 —— 这是**设计行为**，不是 bug。
+
+### A2：Agent 的回答不准确或编造信息？
+
+1. 检查是否开了 `strict_mode`（严格模式）。
+2. 用轨迹接口看它到底检索到了什么：
+   ```bash
+   curl http://localhost:8000/api/v1/agent/trace/{thread_id} -H "Authorization: Bearer <token>"
+   ```
+3. 调系统提示词，明确加「不要编造信息」约束。
+4. **先怀疑语料**：本仓知识库里 **35/77 行是测试数据**（见「已知限制 #4」），命中测试垃圾就会答得离谱。
+
+### A3：Agent 反复调用同一个工具、陷入循环？
+
+通常是工具返回的结果不满足 Agent 预期，导致它反复重试。
+
+1. 先用 A1 的两个接口确认工具**本身**是否正常。
+2. 看执行轨迹（可视化页面真实存在：`api/static/trace_viewer.html`）：
+   ```
+   http://localhost:8000/static/trace_viewer.html
+   ```
+3. 给最大工具调用次数加限制 —— 逻辑在 `api/agent_graph_advanced_learning.py:246` 的 `should_continue`。
+
+### A4：Token 统计的数据重启后丢失？
+
+**部分属正常**。统计同时写内存与数据库，**内存缓存重启即清零，数据库里的历史记录仍在**。
+
+```bash
+curl "http://localhost:8000/api/v1/agent/cost/records?days=30" -H "Authorization: Bearer <token>"
+```
+
+持久化写入点在 `api/token_tracker.py`（`INSERT INTO token_usage_logs`）。
+
+### A5：预算检查拦截了正常的调用？
+
+```bash
+curl http://localhost:8000/api/v1/agent/token/budget -H "Authorization: Bearer <token>"
+```
+
+1. 预算用完 ⇒ 管理员可调整用户角色（`free` → `premium`）。
+2. 预估成本过高 ⇒ 检查 `api/token_tracker.py:485` 的 `TOOL_ESTIMATED_COST` 是否合理
+   （该表通过 `/api/v1/agent/budget/estimates` 暴露）。
+
+> ⚠️ **本仓历史坑**：预算闸门曾因**三处单位错配**而**恒放行**（已修，见 `CHANGELOG`）。
+> ⇒ 若你改过 `TOOL_ESTIMATED_COST` 的单位，**必须回归这条**。
+
+### A6：成本面板（Gradio Dashboard）无法访问？
+
+1. 确认服务已起：`docker compose ps`
+2. 地址是 **`http://localhost:8000/dashboard`**（**不是**独立端口）。
+3. 它由 `api/cost_dashboard.py` 挂载，**默认开启**（`api/main.py:523`：`ENABLE_DASHBOARD` 默认 `"true"`）。
+4. ⚠️ **如果你是按 README 的轻量路径起的服务**，命令行里带了 `ENABLE_DASHBOARD=false` ⇒ **面板被刻意跳过**
+   （为了不导入 gradio/matplotlib）。**这不是坏了** —— 去掉那个环境变量即可。
+
+### A7：长期记忆（Mem0）不生效？
+
+> 🔴 **2026-09-20 更正 —— 原系统这条写的是「检查 `.env` 中的 `MEM0_API_KEY`」，在本仓是错的。**
+> 本仓 Mem0 跑的是**本地模式**，**不连云、也没有 `MEM0_API_KEY` 这个键**
+> （`api/memory_store.py:12-39`：向量库 = 本地 `./.mem0/qdrant`；embedder = `DASHSCOPE_API_KEY`；
+> Mem0 自己的 LLM = `LLM_API_KEY`/`LLM_BASE_URL`）。
+> **按原写法去 `.env` 里找那个键，会白找。**
+
+**正确的排查顺序：**
+
+1. **先看是不是 Qdrant 单实例锁** —— 这是本仓最常见的"记忆不生效"：
+   `memory_store.py` 在**模块导入期**就开 `./.mem0/qdrant`，而本地 Qdrant 是单实例锁。
+   ⇒ 症状与处置见上面 **Q1.5**（`pytest` 与应用**不能同时跑**）。
+2. 确认 `DASHSCOPE_API_KEY` 有效（**embedder 走它**，失效则记忆写不进也搜不出）。
+3. 确认 `LLM_*` 四键（若切过 DeepSeek）—— Mem0 内部用 `LLM_MODEL_FAST` 做记忆抽取。
+4. 确认写入成功：
+   ```bash
+   curl "http://localhost:8000/api/v1/agent/memory/search?query=用户偏好" -H "Authorization: Bearer <token>"
+   ```
+5. 确认对话时带了正确的 `memory_space` 参数。
+
+### A8：如何清空某个用户的长期记忆？
+
+⚠️ **本仓没有提供删除单条记忆的 API**（`api/memory_store.py` 里**没有** `delete` 方法 —— 原系统文档说"可调用 Mem0 的 `delete()`"，**在本仓不成立**）。
+
+可行的办法：**直接清本地存储目录** `./.mem0/qdrant`（或设 `MEM0_DIR` 指到别处），重启服务即可。
+⚠️ 这是**整库清空**，不是按用户删。
+
+### A9：Agent 响应速度很慢？
+
+1. **确认 Redis 在跑**（缓存正常是最大的加速项）。
+2. **降模型等级**：查询改写等非关键任务改用 `LLM_MODEL_FAST`（默认 `qwen-turbo`）。
+3. **减少工具调用次数**：优化 REACT 决策提示词，避免不必要的来回。
+4. **检查重排序**：⚠️ 本仓默认模式 `accurate_norerank` **不碰** Cross-Encoder；若你切到 `mode=accurate/full`，
+   要等 **2.3GB** 模型加载 —— **本机（8GB 内存）装不下**（见「已知限制 #2」）。
+5. **看是不是撞了 A3 的工具循环**（循环会让你觉得"慢"，其实是重复调用）。
