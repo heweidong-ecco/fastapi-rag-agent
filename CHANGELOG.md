@@ -238,6 +238,9 @@ All notable changes to this project will be documented in this file.
     已注明来历，并写明「`.gitlab-ci.yml` 是**原系统**的要求，本仓 CI 是 GitHub Actions」。
     📌 顺带核出：README 里「性能目标」表（P99<800ms / 失败率<0.1%）的**出处就是这份清单**。
   - **`api/websocket_test.html`**：见上。
+  - **`api/websocket两个版本.txt` 删除**（306 行 `.txt` 里装着 **3 份** HTML 迭代版、0 引用、
+    原系统首次提交 `ecb146b` 带进来的）—— 三份互不相同、也都**不是**真页的子集/超集（真页更长）⇒ **已被取代**。
+    内容仍可取回：`git show ecb146b:'api/websocket两个版本.txt'`
 
 - **根 `README.md`：补"整套系统架构图" + 写明原系统出处**（2026-09-20）。
   「技术架构」段新增 `docs/architecture-full.png`（**并显式标注图上工具层的 `rag_search` 已过时** ——
