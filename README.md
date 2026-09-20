@@ -101,6 +101,14 @@
 
 ## 🚀 快速开始
 
+**前置要求**（⚠️ 2026-09-20 补 —— 原先没写，而 Python 版本是**硬要求**）：
+
+| 需要 | 说明 |
+|---|---|
+| **Python 3.10** | ⚠️ **必须是 3.10**（`api/Dockerfile` 的基础镜像也是 3.10）。**不要用 `python3`** —— 本机实测 `python3` = **3.14.7**，只有 `python3.10`（3.10.10）可用。命令一律写 `python3.10 -m venv venv` |
+| **Docker + Docker Compose v2** | 只用来跑 PostgreSQL 与 Redis（路径 A 不构建镜像） |
+| 磁盘 / 内存 | 轻量路径几百 MB 即可；**路径 B（Docker 全量）要下 GB 级镜像，8GB 内存的机器上会失败** |
+
 ### 1. 克隆项目
 
 ```bash
@@ -115,15 +123,20 @@ cd fastapi-rag-agent
 
 ```bash
 cp .env.example .env
-# 编辑 .env，至少填这三项：
+# `api/config.py` 的 validate_config 检查【四项】—— 缺任何一项都【拒绝启动】：
 #   DASHSCOPE_API_KEY   —— Embedding 用（阿里百炼）
+#   POSTGRES_PASSWORD   —— ⚠️ 这一项容易漏！.env.example 里给了个占位值 mysecretpassword，
+#                          不改成真的也能起来（本地 Docker 就是那套），但**不能删/留空**
 #   JWT_SECRET_KEY      —— 随便一串随机值
-#   LOGIN_PASSWORD      —— 缺失会【拒绝启动】
+#   LOGIN_PASSWORD      —— 管理员登录口令
 # 生成随机值：python3 -c "import secrets; print(secrets.token_urlsafe(24))"
 #
 # 生成/对话 LLM 默认走 DashScope 的 qwen-turbo / qwen-plus；
 # 想换成 DeepSeek 等 OpenAI 兼容端点，取消 .env.example 第 4–9 行的注释并填 LLM_* 四键。
 ```
+
+> 🔴 2026-09-20 修：此处原写「**三项**」——**漏了 `POSTGRES_PASSWORD`**。
+> 实测 `api/config.py:58-74` 检查的是 **4 项**；漏写会让"删了这一项 ⇒ 起不来 ⇒ 按本表查不到原因"。
 
 ### 3. 启动
 
@@ -132,8 +145,10 @@ cp .env.example .env
 #### ✅ 路径 A · 轻量（推荐）—— DB/Redis 用 Docker，API 跑在本机
 
 ```bash
-# 3a. 只起 DB 与 Redis（这两个是现成镜像，不触发构建）
+# 3a. 起 DB 与 Redis（这两个是现成镜像，不触发构建）
 docker compose up -d postgres redis
+#     ⚠️ 但如果 docker ps 里已经有 postgres-rag / redis-rag，【别跑这句】——
+#        见下方「⚠️ 3a 的前提」：它们可能属于别的 compose 项目，up 会撞名或重建。
 
 # 3b. 建虚拟环境并装依赖
 python3.10 -m venv venv
@@ -143,6 +158,27 @@ venv/bin/pip install -r api/requirements-test.txt      # ← 注意是 -test 那
 cd api
 ENABLE_DASHBOARD=false ../venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
 ```
+
+#### ⚠️ 3a 的前提：**先看容器是不是已经有了**
+
+```bash
+docker ps --format '{{.Names}}' | grep -E 'postgres-rag|redis-rag'
+```
+
+| 结果 | 该怎么做 |
+|---|---|
+| **有**（已存在） | **用 `docker start postgres-rag redis-rag`** —— ⛔ **不要** `docker compose up` |
+| **没有** | `docker compose up -d postgres redis` 才是对的（全新机器） |
+
+> 🔴 **为什么要分这两种（2026-09-20 实测）**：
+> `docker compose up` 是**按 compose 项目**工作的，而容器可能**不属于本项目**。
+> 实测本机：`postgres-rag` / `redis-rag` 的 `com.docker.compose.project` 是 **`my-fixed-name`**、
+> `config_files` 指向**另一个仓库**的 compose 文件；本仓 `docker compose ps` **是空的**（不认领它们）。
+> 此时 `docker compose up -d postgres redis` 的 `--dry-run` 会计划 **`Container postgres-rag Creating`**
+> + 建两个新网络 ⇒ **要么撞名硬失败，要么把容器重建到 `fastapi-rag-agent_app-net`**。
+> ⛔ **而后者正是本仓的红线** —— `agent-eval-gate` 的评测 harness 默认用旧网络名
+> `my-fixed-name_app-net`（见 `docker-compose.yml` 末尾「改名后遗症」），**重建会打断它**。
+> ⇒ **已有容器就 `docker start`**（重启现有容器，网络与端口都不变）。
 
 > 🔴 **为什么用 `requirements-test.txt` 而不是 `requirements.txt`**：
 > 后者含 `sentence-transformers` / `transformers` / `camelot-py[cv]` / `opencv-python`
@@ -180,6 +216,9 @@ curl http://localhost:8000/ready
 再取个 token、跑一次真实检索（**这才是"真的跑起来了"**）：
 
 ```bash
+# ⚠️ 先把 .env 里的值载进当前 shell —— 下面两行【原本没写，照抄会拿到空口令 ⇒ 401】
+set -a; . ./.env; set +a          # 或者手写：export LOGIN_USER_NAME=admin LOGIN_PASSWORD='你的口令'
+
 TOK=$(curl -s -X POST localhost:8000/api/v1/auth/login -H 'Content-Type: application/json' \
   -d "{\"user_name\":\"$LOGIN_USER_NAME\",\"password\":\"$LOGIN_PASSWORD\"}" \
   | python3 -c 'import sys,json;print(json.load(sys.stdin)["access_token"])')
@@ -188,6 +227,10 @@ curl -s -X POST localhost:8000/api/v1/rag/hybrid_search -H "Authorization: Beare
   -H 'Content-Type: application/json' -d '{"question":"测试","top_k":3}'
 # 应返回 {"method":"hybrid (vector + bm25)","docs":[...]} —— docs 里的 "from" 字段是 "vector"/"bm25"/"both"
 ```
+
+> 🔴 2026-09-20 修：`$LOGIN_USER_NAME` / `$LOGIN_PASSWORD` **只存在于 `.env`，它们不是 shell 变量**
+> —— 原版没写怎么把它们导出来，照抄会发出**空用户名/空口令**（`TOK` 取不到，下一句 401）。
+> **这正是本 PR 要消灭的那类"照抄跑不通"。** 已补 `set -a; . ./.env; set +a`。
 
 > ⚠️ **此时知识库是空的**（新装的库没有文档）⇒ `docs` 会是 `[]`，**这是正常的**。
 > 要看非空结果，先按 `docs/demos.md` 灌几篇文档，或参考 `/api/v1/rag/insert`。

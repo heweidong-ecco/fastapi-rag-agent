@@ -30,10 +30,10 @@ All notable changes to this project will be documented in this file.
      末尾指向新的 Agent 指南。
   2. **`docs/FAQ.md` 补 Q1.1–Q1.5** —— 原 FAQ **整份假设 Docker 路径**（Q1–Q3 全是 `docker compose`），
      新增：轻量路径怎么跑 / `Repository not found` / Postgres 连不上（且**要用 `docker start` 而非 `up`**）/
-     `validate_config` 的三个必填项 / `pytest` 撞 Qdrant 单实例锁的逃生口。
+     `validate_config` 的**四个**必填项 / `pytest` 撞 Qdrant 单实例锁的逃生口。
   3. **新增 `docs/给Agent的测试与调试指南.md`** —— 面向**另一个 Agent**：
      可粘贴的 Prompt ×3 · 分层命令行与 marker 对照 · **「看起来像坏了其实不是」对照表（10 条）** ·
-     日志定位法 · **红线 5 条**（别 build 镜像 / 别不带 `rag_test` 跑真库 / 别直推 main / …）· 提交前必跑凭据门。
+     日志定位法 · **红线 6 条**（别 build 镜像 / 别不带 `rag_test` 跑真库 / 别直推 main / …）· 提交前必跑凭据门。
 
   **同一批的诚实修正**：README 里 `curl /api/v1/` 应返回 `{"status":"ok","version":"v1"}` —— **这条原本就是对的**
   （实测确认），未改。

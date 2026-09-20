@@ -27,19 +27,38 @@ ls venv/bin/python && venv/bin/python -V               # ③ 有没有可用的 
 
 ## 1 · 把环境跑起来（**只有两步，不构建镜像**）
 
-```bash
-# ① DB + Redis（现成镜像，不 build）
-docker compose up -d postgres redis
+> ⚠️ 标题说"两步"指的是**两个阶段**：**起依赖** + **起服务**。展开是下面 5 条命令。
 
-# ② 依赖 + 起服务
+```bash
+# ① DB + Redis —— ⚠️ 先判断，别直接 up（见下）
+docker ps --format '{{.Names}}' | grep -E 'postgres-rag|redis-rag' \
+  && docker start postgres-rag redis-rag \
+  || docker compose up -d postgres redis
+
+# ② 依赖
 python3.10 -m venv venv
 venv/bin/pip install -r api/requirements-test.txt      # ← 必须 -test 那份；见下
-cp .env.example .env                                    # 然后填三个必填项
+
+# ③ 环境变量
+cp .env.example .env                                    # 然后填【四项】必填（见下）
+
+# ④ 起服务
 cd api && ENABLE_DASHBOARD=false ../venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
 ```
 
-**必须填的三个（`api/config.py:validate_config` 是 fail-closed，缺了直接拒绝启动）**：
-`DASHSCOPE_API_KEY` · `JWT_SECRET_KEY` · `LOGIN_PASSWORD`
+> 🔴 **①为什么要先判断（2026-09-20 实测）**：`docker compose up` 按 **compose 项目**工作，
+> 而容器可能**不属于本项目**。实测本机 `postgres-rag`/`redis-rag` 的
+> `com.docker.compose.project` 是 **`my-fixed-name`**、config 指向**另一个仓库**，
+> 本仓 `docker compose ps` **是空的** ⇒ 直接 `up` 会计划 **`Container postgres-rag Creating`**
+> ⇒ **撞名硬失败**，或**把容器重建到 `fastapi-rag-agent_app-net`** ——
+> 而后者正是 §6 红线（会打断用旧网络名的 `agent-eval-gate`）。
+> **已有容器 ⇒ `docker start`；全新机器才 `compose up`。**
+
+**必须填的【四项】（`api/config.py:58-74` 的 `validate_config` 是 fail-closed，缺一项即拒绝启动）**：
+`DASHSCOPE_API_KEY` · **`POSTGRES_PASSWORD`** · `JWT_SECRET_KEY` · `LOGIN_PASSWORD`
+
+> ⚠️ 2026-09-20 修：此处原写「三个」——**漏了 `POSTGRES_PASSWORD`**（实测代码检查 4 项）。
+> 它由 `.env.example` 提供了占位值，所以容易漏；但**删掉/留空就会起不来**。
 
 > 🔴 **为什么是 `requirements-test.txt` 不是 `requirements.txt`**
 > 后者含 `sentence-transformers`/`transformers`/`camelot-py[cv]`/`opencv-python` ⇒ **拖 GB 级 torch**，
@@ -127,10 +146,12 @@ POSTGRES_DB=rag_test ../venv/bin/python -m pytest . -q
 | 现象 | 真相 | 怎么确认 |
 |---|---|---|
 | `/ready` 返回 503 `"Internal server error"` | **设计行为** —— 启动后 10 秒内就是 503 | 等 10 秒再打；或看 `main.py:430` |
-| `/agent/tool_health` 显示 **4/6 unhealthy**，`fetch_webpage`/`screenshot_webpage` 恒红 | **环境天花板**，不是代码：本机 macOS **13.6**，而 Playwright **1.62** 要 chromium **1234**，`playwright install chromium` 直接报 `does not support chromium on mac13` | 跑一次 `venv/bin/playwright install chromium` 看报错 |
+| `/agent/tool_health` 显示 **4/6 healthy**（即 **2 个 unhealthy**：`fetch_webpage` / `screenshot_webpage`） | **环境天花板**，不是代码：本机 macOS **13.6**，而 Playwright **1.62** 要 chromium **1234**，`playwright install chromium` 直接报 `does not support chromium on mac13` | 跑一次 `venv/bin/playwright install chromium` 看报错 |
 | `pytest` 报 `Storage folder ./.mem0/qdrant is already accessed by another instance` | **应用正跑着**占着本地 Qdrant 单实例锁 | `pkill -f "uvicorn main:app"`，或从仓库根跑 + `MEM0_DIR=$(mktemp -d)` |
 | 起服务报 `connection to server at "localhost", port 5432 failed: Connection refused` | **Postgres 容器没跑**，不是代码 | `docker ps` |
-| `import main` 抛 `OpenAIError` / `AuthenticationError` | `.env` 的 key 是空或 dummy —— 客户端在**导入期**就构造 | 填真 key |
+| `import main` 抛 **`OpenAIError`** | `.env` 的 key **缺失**（`None`）—— 客户端在**导入期**就构造。⚠️ **只有"缺失"才会这样** | 填上 key |
+| 起得来但一调用就 **401 / `AuthenticationError`** | key 是 **dummy/占位值** —— SDK 不拦，服务照起，**调用时才失败**（CI 正是靠 dummy key 跑离线用例） | 换成真 key |
+| 起服务时报 **`EnvironmentError`** | key 是**空串 `''`** —— 由 `validate_config` 拦下（干净的报错） | 填上真 key |
 | `/rag/*` 返回 `{"docs":[]}` | **新装的库是空的**，正常 | 先 `/rag/insert` 灌文档 |
 | 检索命中「测试文档一」「Python是一门强大的编程语言」 | **知识库里有 35/77 行是测试数据**（`source`= `test`/`test_docs`），已知限制 | 查 `select source,count(*) from documents group by source` |
 | `/agent/langgraph_chat` 返回 `{"status":"pending_approval","answer":""}` | 🔴 **正确行为**，不是空答案 —— 该图带**人工审批节点**，工具**还没执行**，要走 `/agent/approve` | 看响应里的 `pending_tool_calls` |
@@ -161,7 +182,7 @@ sed 's/\x1b\[[0-9;]*m//g' /tmp/api.log | grep -E "^(TypeError|ValueError|Runtime
 
 | 别做 | 为什么 |
 |---|---|
-| ⛔ `docker compose up -d`（不带服务名）**或任何重建** | 它会 **build 含 torch 的镜像**（本机跑不动），**且**重建会让容器落到新网络名 `fastapi-rag-agent_app-net`，而 **`agent-eval-gate` 的 harness 默认用旧网络名 `my-fixed-name_app-net`** ⇒ **打断外部评测**。要恢复用 **`docker start postgres-rag redis-rag`** |
+| ⛔ `docker compose up -d`（**不带服务名**）**或任何重建** | 它会 **build 含 torch 的镜像**（本机跑不动），**且**重建会让容器落到新网络名 `fastapi-rag-agent_app-net`，而 **`agent-eval-gate` 的 harness 默认用旧网络名 `my-fixed-name_app-net`** ⇒ **打断外部评测**。**已有容器要用 `docker start postgres-rag redis-rag`**；⚠️ 即使只带 `postgres redis` 两个服务名，在**已有同名容器**的机器上也会撞名/重建（实测），所以 §1① 先判断再决定用 `start` 还是 `up` |
 | ⛔ 不带 `POSTGRES_DB=rag_test` 跑需要真库的测试 | 会往**真库 `rag_db`** 写文档，而那是评测知识库。**本仓已发生过一次**（35/77 行测试数据就是这么来的） |
 | ⛔ 改 `main` 分支 / 直接 push | `main` 开了**分支保护**，直推会被服务端拒绝。走 **分支 → PR → 两个必需检查** |
 | ⛔ `git commit` 里带明文凭据 | 本仓是 **PUBLIC**。提交前跑 **`bash scripts/check_secrets.sh`**（命中即 `exit 1`） |

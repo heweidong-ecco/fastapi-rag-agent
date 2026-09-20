@@ -12,12 +12,22 @@
 用**轻量路径** —— 它不构建任何镜像，只跑两个现成的 DB/Redis 容器：
 
 ```bash
-docker compose up -d postgres redis          # 只有这两个是现成镜像
+# ⚠️ 先判断容器在不在 —— 已有就用 start，别用 up（理由见下方告示）
+docker ps --format '{{.Names}}' | grep -E 'postgres-rag|redis-rag' \
+  && docker start postgres-rag redis-rag \
+  || docker compose up -d postgres redis      # 只有这两个是现成镜像
+
 python3.10 -m venv venv
 venv/bin/pip install -r api/requirements-test.txt    # ← 注意是 -test 那份（不含 torch）
-cp .env.example .env                          # 然后填 DASHSCOPE_API_KEY / JWT_SECRET_KEY / LOGIN_PASSWORD
+cp .env.example .env                          # 然后填【四项】：见 Q1.4
 cd api && ENABLE_DASHBOARD=false ../venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
 ```
+
+> 🔴 **2026-09-20 修：此处原写「直接 `docker compose up -d postgres redis`」—— 在已有同名容器的机器上是错的。**
+> 实测本机 `postgres-rag`/`redis-rag` 的 `com.docker.compose.project` 是 **`my-fixed-name`**、
+> 配置文件指向**另一个仓库**，而本仓 `docker compose ps` 是空的（不认领）⇒ 直接 `up` 会计划
+> **`Container postgres-rag Creating`** ⇒ **撞名硬失败**，或**重建到 `fastapi-rag-agent_app-net`**
+> —— 后者会打断依赖旧网络名的 `agent-eval-gate`（见 Q1.3）。
 
 ⚠️ **两个 `requirements` 别弄混**：`requirements.txt` **含** `sentence-transformers`/`transformers`/
 `camelot-py[cv]`/`opencv-python`（**拖 GB 级 torch**）；`requirements-test.txt` 是它的**剔重版（只做减法）**。
@@ -49,13 +59,23 @@ docker start postgres-rag redis-rag        # 若已存在但停了：重启【�
 
 ### Q1.4：应用起不来，报 `EnvironmentError` / 提示缺配置？
 
-`api/config.py` 的 `validate_config()` 对**三个必填项**是 **fail-closed**（缺失即拒绝启动）：
+`api/config.py` 的 `validate_config()` 对**四个必填项**是 **fail-closed**（缺失即拒绝启动）：
 
 | 必填 | 说明 |
 |---|---|
-| `DASHSCOPE_API_KEY` | Embedding 用（阿里百炼）。**必须是真 key** —— 空的或 dummy 会在**导入期**构造客户端时就抛 |
+| `DASHSCOPE_API_KEY` | Embedding 用（阿里百炼）。**必须是真 key**（见下方三种情况的准确行为） |
+| **`POSTGRES_PASSWORD`** | ⚠️ **最容易漏的一项** —— `.env.example` 里给了占位值 `mysecretpassword`，所以"看起来不用管"；但**删掉/留空就会拒绝启动** |
 | `JWT_SECRET_KEY` | 随便一串随机值 |
 | `LOGIN_PASSWORD` | 管理员登录口令；**缺失 = 拒绝启动**（刻意不留默认口令） |
+
+> ⚠️ **2026-09-20 更正 —— key 的三种情况，行为不同（我直接对 SDK 实测过）**：
+> | key 的值 | 结果 |
+> |---|---|
+> | **缺失**（`None`） | **导入期**就抛 `OpenAIError`（应用起不来） |
+> | **空串** `''` | SDK **不抛**；由 `validate_config` 拦下，抛 `EnvironmentError`（干净的报错） |
+> | **dummy**（如 `'dummy'`） | **起得来**，直到**真调用时**才 401 |
+>
+> 本处原文写"空的或 dummy 会在导入期抛"—— **两者都不成立**（CI 正是靠 dummy key 才跑得起来）。
 
 ### Q1.5：`pytest` 报 `Storage folder ./.mem0/qdrant is already accessed by another instance of Qdrant client`
 
