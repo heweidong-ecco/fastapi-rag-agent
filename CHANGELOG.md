@@ -459,6 +459,37 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- 🔴 **🔴C 修了 —— LLM 工具表改为从 MCP 注册表【派生】（单一事实源）**（2026-09-20 · `DEC-020`）。
+
+  **🔴C 是什么**：`mcp_server.TOOLS`（**6** 个）与 `agent_graph_advanced_learning.tools`（**7** 个，多 `fetch_webpage_html`）
+  **各写各的**。而 `mcp_server.TOOL_HANDLERS` 是**从 `TOOLS` 生成的** ⇒ LLM 看得见那个工具、**却永远取不到 handler**
+  ⇒ 走到那一步只回「未找到工具: fetch_webpage_html」，**不报错、不 500** —— **静默失败**。
+
+  **⚠️ 「先核」推翻了原审计摆的两个选项**（业务方裁「乙」，见 `docs/待办登记…` §十三）：
+
+  | 原选项 | 为什么被推翻 |
+  |---|---|
+  | ① 把它**加进** MCP `TOOLS` | 🔴 **实测它是死的**：`BrowserType.launch: Executable doesn't exist`。它**同样吃 Playwright/Chromium**，而**本仓任何部署方式都不装浏览器**（`Dockerfile`/`docker-compose.yml` 都没有 `playwright install`）⇒ 加进去也**永远 unhealthy**（4/6 → **4/7**），只是把静默失败换个形式 |
+  | ② 手工**摘掉**它 | 只修这一次。根因是「**两份手工维护的清单**」—— **不修根，下次加工具还会漂** |
+
+  **修法**：`from mcp_server import TOOLS as _MCP_TOOLS` ⇒ `tools = [t["func"] for t in _MCP_TOOLS]`。
+  两表**结构上不可能再漂**（以后加工具只需在 `mcp_server.TOOLS` 加一行）。
+  📌 仓里**已有**这个模式的样板（`agent_graph_advanced.py:275`），本次是**抄现成的**，没发明第三种写法。
+
+  **✅ 已核实：实现逐字等价 ⇒ 行为不变。** 本文件自带的 `calculator`/`date_today` 与 `simple_tools` 那两份，
+  代码**逐字相同**（都是 `str(eval(expr))` + 同样的 `except`）⇒ 派生只改变"是哪个对象"，不改变行为。
+
+  ⚠️ **但这是一次【工具 schema 变更】，按本仓 PR 纪律显式声明**：LLM 现在看到的
+  `calculator` / `date_today` 描述来自 `simple_tools`，**docstring 更详细**
+  （多出「输入的必须是纯数学表达式」/「忽略查询参数」）⇒ 会影响 LLM 的工具选择倾向。
+
+  **验证**：新增回归用例 `test_llm_tool_table_is_sourced_from_mcp_registry`（**红→绿已验证**）；
+  全套离线层 **69 passed / 1 skipped / 11 deselected**（68 + 新增 1，**零回归**）；
+  `import main` 的 `ROUTES=13` / `OPENAPI_PATHS=59` **与改动前实测一致**。
+
+  ⬜ **未纳入本次**（已登记）：`api/agent_graph.py:44` 与 `agent_checkpointer.py:43` **各自还有一份手工工具表** ——
+  是否同源化涉及**代际裁决**（M5 范围，`Agent 不代判`）。
+
 - 🔴 **撤回一条我自己发出去的错断言**：「`requirements-test.txt` **不只做减法**（还加了 `gradio`）」—— **是错的**（2026-09-20）。
 
   我用 `diff` 看到 `-test` 里多出一行 `gradio>=4.0.0`，据此断言 FAQ 的「只做减法」不成立，
