@@ -83,7 +83,9 @@ class RefreshRequest(BaseModel):
         }
     }   
 
-# 管理接口（仅供管理员使用，暂不加权限控制）：
+# 管理接口（**强制管理员**）：
+# ⚠️ 2026-09-20 更正（全仓审计 🔴B）：原文写「仅供管理员使用，**暂不加权限控制**」—— **与代码相反**。
+#    实际 `api/api_v1.py:156` 用的是 `Depends(require_admin)`，非管理员直接 403。
 class UserCreate(BaseModel):
     """管理员创建用户请求"""
     user_name: str = Field(

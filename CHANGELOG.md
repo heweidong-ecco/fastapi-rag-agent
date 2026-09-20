@@ -459,6 +459,34 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- 🔴 **🔴A + 🔴B 修了 —— 一条"探针报错码错"，一条"公开 `/docs` 上的安全声明与代码相反"**（2026-09-20 · `DEC-021`）。
+
+  **🔴A · `/ready` 在依赖挂掉时返回 500 而非 503**
+  `health_check()` 有**两种返回类型** —— 健康时 `dict`，不健康时 `JSONResponse(503,…)`。
+  而 `/ready` **无条件**对它调 `.get("status")` ⇒ `JSONResponse` 没有 `.get` ⇒ `AttributeError` ⇒ **500**。
+  实测原文：`AttributeError: 'JSONResponse' object has no attribute 'get'`（`main.py:441`）。
+  ⚠️ **对 K8s/LB，503 与 500 是不同语义**：503 = "暂时别把流量给我"；500 = "我坏了"。
+  **把"依赖挂了"报成"我坏了"，正是就绪探针最不该犯的错。**
+  **修法（`DEC-021` 甲）**：抽出 `_compute_health() -> dict`（**永远返回 dict**），
+  `/health` 显式渲染 200/503，`/ready` 改调它。⇒ **根因（一个函数两种返回类型）消除**。
+  ⚠️ **否掉的两个改法值得记**：**丙**（让 `health_check` 永远返回 dict）看着最小，
+  却会**静默把 `/health` 的 503 变成 200** —— 改动面小、看着无害、**改的却是对外接口语义**，
+  且**只靠 diff 看不出来**。**乙**（在 `/ready` 里做类型判断）只治症状，**根因留给下一个人**。
+  ✅ **`/health` 行为逐字未变**（实测改前=改后：`GET /health -> 200 {"status":"healthy",…}`）。
+
+  **🔴B · 公开 `/docs` 上的安全声明与代码相反**
+  `api/api_v1.py` 的 `create_user` 描述里写着「这个系统内**还没有加入初始管理员**」
+  「当前版本**暂未强制校验管理员身份**」；`api/schemas.py:86` 注释写「管理接口…**暂不加权限控制**」。
+  **三句全是假的**：代码事实是 `api_v1.py:156` = `Depends(require_admin)`（非管理员 **403**）、
+  `main.py:466` 启动即 `ensure_admin_exists(logger)`（**初始管理员是有的**）。
+  ⚠️ **这些字符串是 OpenAPI `description`，会原样渲染进公开的 `/docs`，并被 Postman 导入** ——
+  面向**外部读者**的**安全声明**说反了，**比不说更糟**（会让人以为管理接口是敞开的）。
+  ⇒ 三处按事实改写。回归用例 `test_openapi_descriptions_do_not_deny_admin_enforcement`
+  **直接查 `app.openapi()` 文档对象**（发请求测不出来 —— 它只出现在文档里）。
+
+  **验证**：新增 3 条用例（**均红→绿已验证**）· 全套离线层 **71 passed / 1 skipped / 11 deselected**
+  （68 基线 + 3 新增，**零回归**）· `ROUTES=13` / `OPENAPI_PATHS=59` 与改动前一致。
+
 - 🔴 **🔴C 修了 —— LLM 工具表改为从 MCP 注册表【派生】（单一事实源）**（2026-09-20 · `DEC-020`）。
 
   **🔴C 是什么**：`mcp_server.TOOLS`（**6** 个）与 `agent_graph_advanced_learning.tools`（**7** 个，多 `fetch_webpage_html`）
