@@ -10,6 +10,40 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- 🔴 **"别人 clone 下来能不能跑" —— 实测后发现【不能】，已修**（2026-09-20）。
+
+  **业务方问「README 等等别人 git clone 工作都做好了吗」—— 我去真 clone 了一遍，答案是"没做好"：**
+
+  | 步 | 原文 | 实测 |
+  |---|---|---|
+  | 1 | `git clone https://github.com/你的用户名/rag-agent-api.git` | ❌ **`Repository not found`** —— **占位符 URL**，照抄必失败 |
+  | 3 | 「一键启动」= `docker compose up -d` | ⚠️ 它会 **build 多 GB 镜像**（`docker-compose.yml:13` 的 `build: context: ./api`，而 `api/requirements.txt` 含 torch 系）⇒ **8GB 内存上跑不动（实测）**，与"一键"的描述严重不符 |
+  | — | **无任何依赖安装步骤** | ❌ README 全文 grep `pip install`/`requirements` = **0 命中** |
+  | — | **`dev.sh` 一次都没提** | ❌ 文件在仓库里，且它正是本仓的本地开发路径 |
+  | — | **`requirements-test.txt`（轻量路径）没提** | ❌ **本仓其实有两条路径**，README 只暗示了重的那条 |
+
+  **修法**：
+  1. **README 快速开始重写** —— 真实 clone URL；**两条启动路径**（**路径 A 轻量**为默认：
+     `docker compose up -d postgres redis` + `pip install -r api/requirements-test.txt` + 本地 uvicorn；
+     路径 B Docker 全量，并明写它的构建代价）；提 `dev.sh`；
+     **验证步骤给出 4 条命令 + 2026-09-20 实测输出原文**（含"库是空的 ⇒ `docs: []` 是正常的"这类坑）；
+     末尾指向新的 Agent 指南。
+  2. **`docs/FAQ.md` 补 Q1.1–Q1.5** —— 原 FAQ **整份假设 Docker 路径**（Q1–Q3 全是 `docker compose`），
+     新增：轻量路径怎么跑 / `Repository not found` / Postgres 连不上（且**要用 `docker start` 而非 `up`**）/
+     `validate_config` 的三个必填项 / `pytest` 撞 Qdrant 单实例锁的逃生口。
+  3. **新增 `docs/给Agent的测试与调试指南.md`** —— 面向**另一个 Agent**：
+     可粘贴的 Prompt ×3 · 分层命令行与 marker 对照 · **「看起来像坏了其实不是」对照表（10 条）** ·
+     日志定位法 · **红线 5 条**（别 build 镜像 / 别不带 `rag_test` 跑真库 / 别直推 main / …）· 提交前必跑凭据门。
+
+  **同一批的诚实修正**：README 里 `curl /api/v1/` 应返回 `{"status":"ok","version":"v1"}` —— **这条原本就是对的**
+  （实测确认），未改。
+
+### 说明
+
+- 本条的**发现方式**值得记：我是**真去 `git clone` 了一遍、照着 README 盲跑**才发现的。
+  在这之前我已经在同一个 PR 里把 README 改成"诚实版"、并写了「已知限制」——
+  **却从没验过"照 README 做能不能跑起来"**。⇒ **"诚实化"不等于"可用"。**
+
 - **`LICENSE`（MIT）+ README「已知限制」诚实清单**（2026-09-20 · B 档：技术预览 Release 的前置）。
 
   **为什么补 LICENSE**：README 一直写「MIT License」，但**仓库里没有这个文件**

@@ -84,9 +84,12 @@
 ### 1. 克隆项目
 
 ```bash
-git clone https://github.com/你的用户名/rag-agent-api.git
-cd rag-agent-api
+git clone https://github.com/heweidong-ecco/fastapi-rag-agent.git
+cd fastapi-rag-agent
 ```
+
+> 🔴 2026-09-20 修：此处原为 `git clone https://github.com/你的用户名/rag-agent-api.git`
+> —— **是占位符，照抄必然 `Repository not found`**（已实测）。现改为真实地址。
 
 ### 2. 配置环境变量
 
@@ -102,27 +105,82 @@ cp .env.example .env
 # 想换成 DeepSeek 等 OpenAI 兼容端点，取消 .env.example 第 4–9 行的注释并填 LLM_* 四键。
 ```
 
-### 3. 一键启动
+### 3. 启动
+
+本仓有**两条**路径。**推荐第一条**：它不需要构建镜像，在 8GB 内存的机器上也能跑。
+
+#### ✅ 路径 A · 轻量（推荐）—— DB/Redis 用 Docker，API 跑在本机
+
+```bash
+# 3a. 只起 DB 与 Redis（这两个是现成镜像，不触发构建）
+docker compose up -d postgres redis
+
+# 3b. 建虚拟环境并装依赖
+python3.10 -m venv venv
+venv/bin/pip install -r api/requirements-test.txt      # ← 注意是 -test 那份
+
+# 3c. 起 API（在 api/ 目录下！）
+cd api
+ENABLE_DASHBOARD=false ../venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
+```
+
+> 🔴 **为什么用 `requirements-test.txt` 而不是 `requirements.txt`**：
+> 后者含 `sentence-transformers` / `transformers` / `camelot-py[cv]` / `opencv-python`
+> —— **拖 GB 级的 torch**。而**本仓默认路径不需要 torch**：默认检索模式是
+> `accurate_norerank`，`api/reranker.py:14` 对 `sentence_transformers` 是**真懒加载**。
+> **代价（已登记）**：`mode=accurate` / `mode=full` 与 `/rag/rerank_search` **在本机跑不了**（要装 torch + 2.3GB 模型）。
+> 完整说明见 `api/requirements-test.txt` 头部注释。
+
+> ⚠️ **必须在 `api/` 目录下起 uvicorn** —— 有一处路径是按相对位置解析的（本仓已把 MCP 那条修成绝对路径，
+> 但习惯上仍建议 `cd api`）。`bash dev.sh` 就是干 3a+3c 这两步的（但它假设依赖已装好）。
+
+#### 🐳 路径 B · Docker 全量
 
 ```bash
 docker compose up -d
 ```
 
-### 4. 验证
+> ⚠️ **它会 `build` API 镜像**（`docker-compose.yml:13` 的 `build: context: ./api`），
+> 而 `api/requirements.txt` 含 torch 系 ⇒ **拉几个 GB、构建很久**。
+> **8GB 内存 / Docker 配额较小的机器上大概率失败**（实测本机不行）。**只有要跑重排序或追求一条命令时才选它。**
+
+### 4. 验证（**以下输出是 2026-09-20 实测的原文**）
 
 ```bash
 curl http://localhost:8000/health
-# 应返回 {"status":"healthy",...}
+# {"status":"healthy","checks":{"database":"ok","redis":"ok","embedding_api":"deferred to external monitoring"}}
 
 curl http://localhost:8000/api/v1/
-# 应返回 {"status":"ok","version":"v1"}
+# {"status":"ok","version":"v1"}
+
+curl http://localhost:8000/ready
+# {"status":"ready"}      ← ⚠️ 启动后 10 秒内会返回 503，那是设计行为，不是坏了
 ```
+
+再取个 token、跑一次真实检索（**这才是"真的跑起来了"**）：
+
+```bash
+TOK=$(curl -s -X POST localhost:8000/api/v1/auth/login -H 'Content-Type: application/json' \
+  -d "{\"user_name\":\"$LOGIN_USER_NAME\",\"password\":\"$LOGIN_PASSWORD\"}" \
+  | python3 -c 'import sys,json;print(json.load(sys.stdin)["access_token"])')
+
+curl -s -X POST localhost:8000/api/v1/rag/hybrid_search -H "Authorization: Bearer $TOK" \
+  -H 'Content-Type: application/json' -d '{"question":"测试","top_k":3}'
+# 应返回 {"method":"hybrid (vector + bm25)","docs":[...]} —— docs 里的 "from" 字段是 "vector"/"bm25"/"both"
+```
+
+> ⚠️ **此时知识库是空的**（新装的库没有文档）⇒ `docs` 会是 `[]`，**这是正常的**。
+> 要看非空结果，先按 `docs/demos.md` 灌几篇文档，或参考 `/api/v1/rag/insert`。
 
 ### 5. 访问文档
 
 -   Swagger UI：http://localhost:8000/docs
--   Grafana 监控：http://localhost:3000 (admin/admin)
--   Prometheus：http://localhost:9090
+-   Grafana 监控：http://localhost:3000 (admin/admin) —— ⚠️ **仅路径 B 会起它**（路径 A 只起 postgres/redis）
+-   Prometheus：http://localhost:9090 —— 同上
+
+## 🤖 用另一个 Agent 来测这个项目？
+
+见 **`docs/给Agent的测试与调试指南.md`** —— 里面有可直接粘贴的 Prompt、分层命令行、每个失败的已知原因。
 
 ## 📁 项目结构
 
