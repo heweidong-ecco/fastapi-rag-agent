@@ -62,19 +62,23 @@ def create_mcp_tool_handler(tool_func):
         一个可调用的函数，接收 arguments 字典，返回字符串结果。
         如果工具调用失败，返回结构化的错误信息，不会抛出异常。
     """
-    async def handler(arguments: dict) -> str:
+    def handler(arguments: dict) -> str:
         """工具调用处理器（带错误处理）。
 
-        🔴 2026-09-20 **改成 async + 丢线程**（依赖/环境漂移的连带问题）:
-           MCP server（`mcp_server.py:71-79` 的 `call_tool`）**是 async 服务**，
-           而它原先**同步**调用本处理器 ⇒ **同步工具就在 MCP server 的事件循环里跑**
-           ⇒ `browser_tools` 的同步 Playwright 直接报
-           `It looks like you are using Playwright Sync API inside the asyncio loop.`
-           ⇒ `fetch_webpage` / `screenshot_webpage` **永远 unhealthy**（健康检查 4/6 而非 6/6）。
+        ⚠️ **本处理器必须保持【同步】** —— 它有**三个**调用方，其中一个是同步的:
+          1. `mcp_server.py` 的 `call_tool`（async 服务）—— 它在**边界处**用
+             `await asyncio.to_thread(handler, arguments)` 把同步工具丢出事件循环
+             ⇒ 同步 Playwright 才不会报 `Sync API inside the asyncio loop`
+          2. `agent_graph_advanced_learning.py:230`（**同步**节点）
+             `result = handler(tool_args)` —— 若本处理器改成 async，
+             这里会拿到 coroutine，`str(result)` 写成 `<coroutine object …>`
+             ⇒ 三代 REACT 分支的工具调用**静默失效**（实测）
+          3. 测试
 
-          ⚠️ **同一个 bug 有两个入口**:先前只修了 **FastAPI 端点**那条，
-             而健康检查走的是 **MCP** 这条 ⇒ "修好了"但工具健康检查照旧。
-             回归测试:`api/test_agent_repairs.py::test_mcp_tool_handler_runs_sync_tool_off_the_event_loop`
+        🔴 2026-09-20 的教训:先把它改成了 async（为修 MCP 那条），
+           **当场就可能砸掉第 2 个调用方** —— 是合并前评审抓到的。
+           修法改成"**在 async 边界 offload，处理器保持同步**"：三处调用方都不用动。
+           📌 这是"修一条路径时必须问：**同一个形状还有别的入口吗**"的第 4 次实例。
         """
         try:
             # 🔴 2026-09-20 修:此前是
@@ -88,9 +92,7 @@ def create_mcp_tool_handler(tool_func):
             #    ⚠️ 后果被健康检查放大:它的判据是"结果里含『工具调用失败』⇒ unhealthy"
             #       ⇒ 这个 bug 让 **6 个工具全标红**，与传输层修没修好无关。
             #    回归测试:api/test_agent_repairs.py::test_mcp_tool_handler_passes_dict_to_invoke
-            # ⚠️ 丢到线程里跑 —— 工具可能是**同步**的（如 browser_tools 的 Playwright
-            #    同步 API），直接在事件循环里执行会炸（见上面的注释）。
-            result = await asyncio.to_thread(tool_func.invoke, arguments)
+            result = tool_func.invoke(arguments)
             return str(result)
         except Exception as e:
             # 捕获所有异常，返回结构化的错误信息，避免 Agent 崩溃

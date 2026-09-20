@@ -101,13 +101,12 @@ MCP Client 连接管理（**单 task 自开自关**版）
 
    回归测试：`api/test_agent_repairs.py::test_call_mcp_tool_keeps_session_lifecycle_inside_one_task`
 """
-import asyncio
+# 🔴 2026-09-20:此处原先**重复 import 了一遍** `asyncio` / `mcp` / `stdio_client`
+#    （本文件 :8 与 :27-28 已经有了）—— 已删除。`sys` / `asynccontextmanager` /
+#    `Path` 是本段新增、别处没有，故只补这三个。
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import List
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
 
 # ⚠️ MCP server 脚本的**绝对**路径 —— 锚在本文件旁边，**与 CWD 无关**。
 _MCP_SERVER_SCRIPT = Path(__file__).resolve().with_name("mcp_server.py")

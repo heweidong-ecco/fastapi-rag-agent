@@ -327,48 +327,50 @@ def test_mcp_tool_handler_passes_dict_to_invoke():
 
     handler = f.create_mcp_tool_handler(probe)
 
-    assert asyncio.iscoroutinefunction(handler), (
-        "处理器必须是 **async** —— 见 test_mcp_tool_handler_runs_sync_tool_off_the_event_loop"
-    )
-    assert asyncio.run(handler({"x": "hello"})) == "got:hello"
+    # ⚠️ 处理器保持**同步** —— 理由见 test_mcp_server_call_tool_offloads_sync_handler。
+    assert not asyncio.iscoroutinefunction(handler)
+    assert handler({"x": "hello"}) == "got:hello"
 
 
-def test_mcp_tool_handler_runs_sync_tool_off_the_event_loop():
-    """处理器必须把**同步**工具丢到线程里跑。
+def test_mcp_server_call_tool_offloads_sync_handler(monkeypatch):
+    """把同步工具**丢出事件循环**这件事，必须发生在 **async 边界**（`mcp_server.call_tool`）。
 
-    🔴 实测（2026-09-20）:`mcp_server.py:71-79` 的 `call_tool` **是 async**，
-       却**同步**调用 `handler(arguments)` ⇒ 同步 Playwright 就在 **MCP server 的事件
-       循环**里执行 ⇒
-       `It looks like you are using Playwright Sync API inside the asyncio loop.`
-       ⇒ `fetch_webpage` / `screenshot_webpage` **永远 unhealthy**（其余 4 个工具没这问题，
-          所以健康检查是 4/6 而不是 0/6）。
+    背景（两条都要满足，缺一条都不行）:
+      · MCP server（`mcp_server.py:71` 的 `call_tool`）**是 asyncio 服务** ⇒ 同步工具
+        直接在它的处理器里跑 ⇒ 同步 Playwright 报
+        `It looks like you are using Playwright Sync API inside the asyncio loop.`
+      · 但**不能在工厂里把 handler 改成 async** —— 处理器有**第三个调用方**：
+        `agent_graph_advanced_learning.py:230` 在**同步**节点里 `result = handler(tool_args)`，
+        拿到 coroutine 后 `str(result)` 会写成 `<coroutine object …>`（实测）
+        ⇒ 三代 REACT 分支的工具调用**静默失效**。
 
-    ⚠️ 这一条是"半拉子修复"防线:先前只修了 **FastAPI 端点**那条调用路径，
-       健康检查走的是 **MCP** 这条 —— 于是"修好了"但工具健康检查照旧。**同一个 bug 两个入口。**
+    ⇒ **正确的落点是在 async 边界处 offload**（`await asyncio.to_thread(handler, …)`），
+      处理器本身保持同步 ⇒ 三个调用方都不用改。
+
+    🔴 这一条是"修一条路径时必须问：同一个形状还有别的入口吗"的**第四次**实例 ——
+       前三次见 DEC-017 §六。
     """
-    from langchain_core.tools import tool
-
-    import mcp_tool_factory as f
+    import mcp_server as ms
 
     seen = {}
 
-    @tool
-    def probe(x: str) -> str:
-        """probe 工具（测试用）"""
+    def _sync_handler(arguments):
         try:
             asyncio.get_running_loop()
             seen["on_loop"] = True
         except RuntimeError:
             seen["on_loop"] = False
-        return f"got:{x}"
+        return "OFFLOADED_OK"
 
-    handler = f.create_mcp_tool_handler(probe)
-    out = asyncio.run(handler({"x": "hello"}))
+    monkeypatch.setitem(ms.TOOL_HANDLERS, "probe", _sync_handler)
 
-    assert out == "got:hello"
+    out = asyncio.run(ms.call_tool("probe", {}))
+
+    assert out[0].text == "OFFLOADED_OK"
     assert seen["on_loop"] is False, (
-        "同步工具不能在事件循环所在线程里执行 —— 必须丢到线程里"
+        "同步工具不能在事件循环所在线程里执行 —— 必须在 async 边界处丢到线程里"
     )
+
 
 
 # ===========================================================================
@@ -509,6 +511,121 @@ def test_stopped_at_approval_is_reported_not_silently_empty():
     assert out["status"] == "pending_approval"
     assert [t["name"] for t in out["pending_tool_calls"]] == ["calculator"]
     assert out.get("answer", "") == "", "等待审批时不该伪造答案"
+
+
+def test_stopped_at_approval_also_when_the_model_wrote_text_first():
+    """⚠️ 反向漏洞：模型**既写文字又调工具**时，同样是在等审批。
+
+    真实 LLM 常见这种形态（"我来帮你算一下。" + tool_calls）。原判据写成
+    `if tool_calls and not content:` ⇒ 这种形态被判成 `answered`，
+    **调用方照样不知道要去 `/agent/approve`** —— 原缺陷原样保留。
+
+    ⚠️ 判据只需看 `tool_calls`：图的接线是 `agent → (approval) → tools`，
+       **只要有 tool_calls 就一定停在审批点**；而 ToolMessage **没有 `tool_calls` 属性**，
+       本来就不会误报（见下一条用例）。
+    """
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    from api_v1_agent import summarize_agent_result
+
+    stopped = {
+        "messages": [
+            HumanMessage(content="6*7=?"),
+            AIMessage(content="我来帮你算一下。",
+                      tool_calls=[{"name": "calculator", "args": {"expression": "6*7"},
+                                   "id": "c1", "type": "tool_call"}]),
+        ]
+    }
+    out = summarize_agent_result(stopped)
+
+    assert out["status"] == "pending_approval"
+    assert [t["name"] for t in out["pending_tool_calls"]] == ["calculator"]
+
+
+def test_react_tool_list_has_no_duplicate_names():
+    """REACT 子图绑定的工具列表**不能有重名** —— LLM 会直接拒收。
+
+    🔴 实测（2026-09-20）:模块级 `agent_graph_advanced_learning.tools` 在第 47-51 行
+       已列了 `fetch_webpage` / `fetch_webpage_html` / `screenshot_webpage`，
+       紧接着第 54 行又 `tools.extend([fetch_webpage, fetch_webpage_html])`
+       ⇒ **两个工具各出现两次** ⇒ `llm_react.bind_tools(tools)` 发给 DeepSeek 时被拒：
+       `openai.BadRequestError: 400 - {'error': {'message': 'Tool names must be unique.'}}`
+       ⇒ **3 代 Agent 的 REACT 分支 100% 500**。
+
+    ⚠️ 它此前**测不出来**，因为 `/agent/advanced_chat` 会先在 mem0 那一步 500（bug 1），
+       根本走不到 REACT 分支 —— **修好 bug 1 才把它暴露出来**。
+       📌 这也是"真把 API 起来逐个打"比"只跑单测"更能发现问题的一个实例。
+    """
+    import agent_graph_advanced_learning as L
+
+    names = [t.name for t in L.tools]
+    dupes = sorted({n for n in names if names.count(n) > 1})
+    assert not dupes, f"REACT 工具列表有重名（LLM 会拒收）：{dupes}"
+
+
+def test_react_subgraph_sets_final_output(monkeypatch):
+    """REACT 子图必须把最终答案落成 `final_output`。
+
+    🔴 实测（2026-09-20）:该子图只有 `agent` 与 `tools` 两个节点，**没有任何节点写
+       `final_output`**，而端点读的是 `result.get("final_output", "处理完成")`
+       ⇒ **走 REACT 意图时永远返回占位串「处理完成」**（其余四个子图都写了）。
+
+    ⚠️ 用**替身 LLM**（替换 `ChatOpenAI`）驱动，不真调模型：
+       模型返回一条**不带 tool_calls** 的消息 ⇒ `should_continue` 直接 END。
+    """
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    import agent_graph_advanced_learning as L
+
+    class _Bound:
+        def invoke(self, messages):
+            return AIMessage(content="三步计划是：先学语法，再写小项目，最后读源码。")
+
+    class _FakeLLM:
+        def __init__(self, **kwargs):
+            pass
+
+        def bind_tools(self, tools):
+            return _Bound()
+
+    monkeypatch.setattr(L, "ChatOpenAI", _FakeLLM)
+
+    graph = L.create_react_subgraph()
+    out = graph.invoke({"messages": [HumanMessage(content="帮我规划学习路线")]})
+
+    assert out.get("final_output") == "三步计划是：先学语法，再写小项目，最后读源码。", (
+        "REACT 子图没写 final_output ⇒ 端点只会返回占位串「处理完成」"
+    )
+
+
+def test_mcp_tools_dynamic_handles_list_tools_result(client, auth_headers, monkeypatch):
+    """`/agent/mcp_tools_dynamic` 也必须解 `.tools` —— 与 bug 7 是**同一个 bug 的第二个入口**。
+
+    🔴 实测（2026-09-20）:`get_mcp_tools()` 返回 `ListToolsResult`，而该端点写的是
+       `for t in tools` + `len(tools)` ⇒ `AttributeError: 'tuple' object has no attribute
+       'name'` ⇒ **该路由 100% 500**。
+
+    ⚠️ 这是"修一条路径时必须问：同一个形状还有别的入口吗"的**第五次**实例 ——
+       `get_mcp_tools` 全仓只有**两个**调用方，改了一个漏了另一个，grep 一次就能发现。
+    """
+    from mcp.types import ListToolsResult, Tool
+
+    import api_v1_agent
+
+    async def _fake_get_mcp_tools():
+        return ListToolsResult(tools=[
+            Tool(name="calculator", description="算数", inputSchema={"type": "object"}),
+            Tool(name="date_today", description="日期", inputSchema={"type": "object"}),
+        ])
+
+    monkeypatch.setattr(api_v1_agent, "get_mcp_tools", _fake_get_mcp_tools)
+
+    r = client.get("/api/v1/agent/mcp_tools_dynamic", headers=auth_headers)
+
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert [t["name"] for t in body["tools"]] == ["calculator", "date_today"]
+    assert body["total"] == 2
 
 
 def test_completed_run_returns_the_answer_normally():

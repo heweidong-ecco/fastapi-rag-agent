@@ -49,9 +49,14 @@ def summarize_agent_result(result: dict) -> dict:
       调用方**完全看不出"正在等人工审批"**（明明有配套的 `/agent/approve`）。
       实测复现:POST /agent/langgraph_chat?question=请计算6*7 → `{"answer": ""}`。
 
-    ⚠️ 判据只看"**AI 消息带工具调用且没有文字**"这一种。
-      不能放宽成"最后一条没有文字就算待审批" —— 那样会把
-      "工具刚执行完(ToolMessage)、正要生成最终答案"的正常中途态也误报成待审批。
+    ⚠️ 判据是「**最后一条消息带 `tool_calls`**」—— 只看这一条。
+      · 图的接线是 `agent → (approval) → tools`，**只要有 tool_calls 就一定停在审批点**。
+      · **不能**再加 `and not content`：真实 LLM 常见"既写文字又调工具"
+        （"我来帮你算一下。" + tool_calls），那种形态同样在等审批，
+        加了这个条件就会误报 `answered` ⇒ 调用方照样不知道要去 `/agent/approve`
+        （**原缺陷原样保留**，2026-09-20 由合并前评审指出并加了用例）。
+      · **也**不会把中途态误报：`ToolMessage` **没有 `tool_calls` 属性**，
+        所以"工具刚跑完、正要生成最终答案"那一态天然被排除。
     """
     messages = result.get("messages") or []
     if not messages:
@@ -59,10 +64,12 @@ def summarize_agent_result(result: dict) -> dict:
     last = messages[-1]
     tool_calls = getattr(last, "tool_calls", None) or []
     content = getattr(last, "content", "") or ""
-    if tool_calls and not content:
+    if tool_calls:
         return {
             "status": "pending_approval",
-            "answer": "",
+            # ⚠️ 保留模型已经写出的文字（真实 LLM 常"先说一句再调工具"）——
+            #    但 `status` 明确告诉调用方：**这还不是最终答案**，工具尚未执行。
+            "answer": content,
             "pending_tool_calls": [
                 {"name": tc.get("name"), "args": tc.get("args")} for tc in tool_calls
             ],
@@ -440,7 +447,14 @@ async def agent_mcp_tools_dynamic(
     user_name: str = Depends(get_current_user_hybrid),
 ):
     """通过 MCP Client 动态获取当前可用的工具列表"""
-    tools = await get_mcp_tools()
+    tools_result = await get_mcp_tools()
+    # 🔴 2026-09-20 修:`get_mcp_tools()` 返回的是 **`ListToolsResult`**（列表在 `.tools`），
+    #    **不是列表本身** —— 与本文件另一处（`get_llm_with_mcp_tools`）是**同一个 bug 的
+    #    两个入口**，先前只修了那一个 ⇒ 本路由 `for t in tools` 必
+    #    `AttributeError: 'tuple' object has no attribute 'name'` ⇒ **100% 500**；
+    #    且 `len(tools)` 同样不对。
+    #    回归测试:`api/test_agent_repairs.py::test_mcp_tools_dynamic_handles_list_tools_result`
+    _tools = tools_result.tools
     return {
         "tools": [
             {
@@ -448,9 +462,9 @@ async def agent_mcp_tools_dynamic(
                 "description": t.description,
                 "inputSchema": t.inputSchema
             }
-            for t in tools
+            for t in _tools
         ],
-        "total": len(tools),
+        "total": len(_tools),
         "requested_by": user_name,
     }
 

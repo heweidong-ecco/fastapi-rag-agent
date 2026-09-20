@@ -336,8 +336,27 @@ All notable changes to this project will be documented in this file.
   且**它让应用启动直接失败**（比原 bug 更糟）。已回退并采纳 B2。
   📌 附带查明：**那个会话池从未生效过**（`initialize_pool()` 无调用方；`release/close` 零调用方）。
 
-  **验证**：`api/test_agent_repairs.py` **14 条**（逐条红→绿）· 全套离线层 **64 passed / 1 skipped**（基线 50）·
-  端到端三条路径全部 200 且内容正确 · 工具健康 **0/6 → 4/6**
+  **合并前评审又抓出 2 Critical + 2 Important，并连带挖出第 8、9 个 bug**（都是"修好前面才暴露"的既存缺陷）：
+
+  | # | 位置 | 根因 |
+  |---|---|---|
+  | 8 | `agent_graph_advanced_learning.py:47-54` | 模块级 `tools` 列表**先列了一遍 fetch_webpage / fetch_webpage_html，紧接着又 `extend` 一遍** ⇒ 各出现两次 ⇒ `bind_tools` 发给 DeepSeek 被拒：`400 - 'Tool names must be unique.'` ⇒ **REACT 分支 100% 500** |
+  | 9 | `create_react_subgraph` | **没有任何节点写 `final_output`**，而端点读 `result.get("final_output", "处理完成")` ⇒ 走 REACT 意图时**永远返回占位串**（其余四个子图都写了）⇒ 补 summarize 收尾节点 |
+
+  ⚠️ **两条 Critical 都是本 PR 自己引入/漏掉的**（"同一个形状还有别的入口吗"的第 4、5 次实例）：
+  - **C-1（本 PR 新引入的回归）**：把 handler 改成 async 后，**第三个（同步）调用方没跟着改** ⇒
+    拿到 coroutine ⇒ `str(result)` 写成 `<coroutine object …>` ⇒ REACT 工具调用静默失效。
+    修法**不是加 await**（该图用同步 `.invoke()`），而是**把 offload 放到 async 边界**
+    （`mcp_server.call_tool` 里 `await asyncio.to_thread(handler, …)`），**handler 退回同步** ⇒ 三个调用方都不用动。
+  - **C-2**：`/agent/mcp_tools_dynamic` 是 bug 7 的**孪生兄弟**（同一个 `get_mcp_tools()`，
+    全仓只有两个调用方，改了一个漏了另一个）⇒ 该路由 100% 500。
+  - **I-1**：审批判据原写 `if tool_calls and not content:` ⇒ 模型"先说一句再调工具"时误报 `answered`。
+  - **I-2**：`ROADMAP` 交接锚点未更新。
+
+  **验证**：`api/test_agent_repairs.py` **18 条**（逐条红→绿）· 全套离线层 **68 passed / 1 skipped**（基线 50）·
+  端到端全绿：`mcp_tools_dynamic` 200/6 工具 · `langgraph_chat` 待审批 ·
+  `advanced_chat` CALCULATOR `56088` · **`advanced_chat` REACT 返回真答案**（不再是「处理完成」）·
+  `mcp_chat` `1+1 = **2**。` · 工具健康 **0/6 → 4/6**
   （剩 2 个卡**环境**：macOS 13.6 不支持 Playwright 1.62 的 chromium 1234）。
   决策：`docs/decisions/DEC-017-demo就绪路线与LLM换DeepSeek.md`。
 
