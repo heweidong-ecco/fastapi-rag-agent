@@ -54,7 +54,7 @@
 > | 项 | 说明 |
 > |---|---|
 > | ~~🔴 **`api/plan_execute.py:298-301`**~~ | ✅ **2026-09-21 已修**（业务方裁「修 —— 去掉裸 except，保留失败原因」）—— 见 **`DEC-030`**：裸 `except: pass` → `except Exception as e`，**真实失败原因写进结果**；补 2 条用例（红→绿已证），全套 **116 passed**（114 + 2） |
-> | **#5 RAGAS 实跑验证** | 业务方裁过「**排最后**」⇒ **现在它是下一个**。⚠️ **但「环境已齐」这句是错的** —— 见下方 **`🔴 RAGAS 的两个拦路虎`** |
+> | ~~**#5 RAGAS 实跑验证**~~ | ✅ **2026-09-21 已完成 —— 37 条全量跑通，四指标零 NaN**（见 **`DEC-031`** / **`DEC-032`**）。faithfulness **0.8997** · answer_relevancy **0.6615** · context_recall **0.6757** · context_precision **0.6734** |
 > | ~~复盘 §三 的 3 条行动项~~ | ✅ **2026-09-21 已全部执行**（① 已落 `CLAUDE.md`「判据」纪律一节 · ② 见复盘 **§五** · ③ **撤回** —— **本仓根本没有那个脚本**，全仓搜 `stash` 零命中） |
 > | **`ci.yml:9` 的「48 passed / 1 skipped」没被断言** | ⚠️ 2026-09-21 新核出（复盘 **§五·B**）—— **门只断言退出码，不断言跑了几个** ⇒ **那道绿的含意比你以为的窄**。**未改**（属独立决策） |
 > | **`get_user_role()` 硬编码** | 仍是 `admin`/`test_user`/其他=FREE ⇒ **没有升级机制** —— 属**新功能**，非"收窄" |
@@ -62,18 +62,26 @@
 > | **两套配额口径的实测值** | `DEC-029` 只是**钉住**（3.0 次/天），**没改行为** |
 > | **`~/.claude/hooks/doc-open-reminder.py:67`** | ⚠️ **仓外（用户级）** —— `render()` 崩了 ⇒ `return 0` 静默放行，**与同目录另两个门不一致**。**本仓不动，只登记**（复盘 **§五·D**） |
 >
-> ### 🔴 RAGAS 的两个拦路虎（**2026-09-21 实测** · 更正上文"环境已齐"）
+> ### ✅ RAGAS 的两个拦路虎 —— **2026-09-21 已全部解决**
+>
+> **当时实测到的（留档）**：
 > ```
 > ① ragas / datasets      ❌ venv 里根本没装
->                           （它们在 api/requirements.txt 里，但本机 venv 没按它全装）
-> ② evaluate_with_ragas.py:35-45  ❌【硬编码走 DashScope】
->     eval_llm = ChatOpenAI(model="qwen-plus",      base_url="dashscope…")
->     eval_embeddings = OpenAIEmbeddings(model="text-embedding-v2", base_url="dashscope…")
->                           ↑ 而下方环境事实写着：DashScope 的 chat 免费额度【已耗尽 403】
+> ② evaluate_with_ragas.py:35-45  ❌【硬编码走 DashScope】，而它 chat 额度已耗尽 403
 > ```
-> ⇒ **就算装好包也跑不动** —— 该脚本**绕开了项目已经切过去的 DeepSeek**。
-> **要实跑，得先把 judge LLM 换到 DeepSeek**（embedding 那边 DashScope 仍可用）。
-> 📌 **这正是复盘那一条**：**"环境已齐"是当时的【推断】，没对着这个脚本的实际要求核过**。
+> 📌 **当时写"环境已齐"是【推断】**，没对着脚本的实际要求核过 —— 见复盘。
+>
+> **怎么解决的**：
+> * ① ⇒ **独立 `venv-ragas/`**（`ragas==0.1.21` + `datasets==2.21.0`）。
+>   **为什么不装进产品 venv**：`--dry-run` 实测，**两条路都会砸坏它**（`openai` 主版本跳跃 / `langchain` 降级）。
+> * ② ⇒ judge LLM **改读 `.env`**，走项目已有的 DeepSeek；embedding 留 DashScope。
+>
+> 🔴 **跑通后又撞出第三处**（见 `DEC-032`）：**RAGAS 的 `faithfulness` 对中文答案恒为 `nan`**
+> （它把句子过滤写死成 ASCII 句点）。**三处不兼容分属三个不同系统** —— 故难查。
+>
+> ⚠️ **`ragas==0.1.21` 必须钉**：脚本用 0.1.x 的 `evaluate()` 签名，**0.4.x 已变**。
+> ⚠️ **`ZhFaithfulness` 是【子类覆盖】不是上游修复** ⇒ 升级 ragas 后**会静默失效**（又变回 nan）。
+> **判据：跑完看有没有 nan**，不是"代码里有没有那个类"。
 >
 > ### ⚠️ 环境事实（本会话实测，供接续者）
 > * **Docker 起着**（`postgres-rag` / `redis-rag` 都 healthy）⇒ 全套是 **`114 passed / 0 failed`**
