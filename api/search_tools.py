@@ -13,6 +13,13 @@ client = OpenAI(
     base_url=LLM_BASE_URL,
 )
 
+# 🔴 2026-09-21 加（§十四 · ③-a）：**单次搜索的 HTTP 超时（秒）**。
+#    选 20 秒的理由：搜索本来就可能慢，但**没有上限**是不可接受的 ——
+#    一次卡住的调用会把整条调用链挂住（`plan_execute` 是同步的，还会连带阻塞事件循环）。
+#    ⚠️ 这与 `execute_python` 的 5 秒**不是一回事**：那是**沙箱执行**的上限（已改成子进程硬杀），
+#       这是**网络往返**的上限。
+SEARCH_TIMEOUT_SECONDS = 20
+
 
 @tool
 def web_search(query: str) -> str:
@@ -43,6 +50,11 @@ def web_search(query: str) -> str:
                 }
             },
             temperature=0.1,
+            # 🔴 2026-09-21 加（§十四 · ③-a）：**超时**。
+            #    此前**没有** —— 网络卡住时这个调用会**一直等**。
+            #    ⚠️ 以前执行层是「LLM 模拟」所以不痛；**N15 真调之后，一次卡住的搜索
+            #    会把调用链一路挂住**（而 `plan_execute` 是同步的，还会阻塞事件循环）。
+            timeout=SEARCH_TIMEOUT_SECONDS,
         )
 
         # 提取搜索结果
@@ -58,6 +70,7 @@ def web_search(query: str) -> str:
                     {"role": "user", "content": f"请根据你的知识回答以下问题：{query}"}
                 ],
                 temperature=0.1,
+                timeout=SEARCH_TIMEOUT_SECONDS,   # 🔴 2026-09-21（③-a）：兜底那条路也要有上限
             )
             return f"（注：实时搜索不可用，以下为基于模型知识的回答）\n{fallback_response.choices[0].message.content}"
         except:

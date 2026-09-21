@@ -203,3 +203,86 @@ def test_strip_code_fence(raw, expected):
     import plan_execute as P
 
     assert P._strip_code_fence(raw) == expected
+
+
+# ===========================================================================
+# ③-b · 预算与记账 —— `plan_execute` 以前【完全不查预算、不记账】
+# ===========================================================================
+def _fake_llm(usage, content="ok"):
+    class _R:
+        pass
+
+    class _L:
+        model_name = "fake-model"
+
+        def invoke(self, messages):
+            r = _R()
+            r.content = content
+            r.usage_metadata = usage
+            return r
+
+    return _L()
+
+
+def test_invoke_llm_raises_budget_exceeded(monkeypatch):
+    """预算不足时**必须抛 `BudgetExceededError`** —— 端点据此报 QUOTA_EXCEEDED（而不是漏成 500）。
+
+    🔴 这条守的是：`/agent/plan_execute` **以前根本不查预算** ⇒ 免费用户的每日配额管不到它。
+    """
+    import plan_execute as P
+
+    monkeypatch.setattr(P, "check_budget_before_call", lambda *a, **k: (False, "预算已用完"))
+
+    called = []
+    llm = _fake_llm({"input_tokens": 1, "output_tokens": 1})
+    monkeypatch.setattr(llm, "invoke", lambda m: called.append(1))
+
+    with pytest.raises(P.BudgetExceededError, match="预算已用完"):
+        P._invoke_llm(llm, [], purpose="plan_execute.plan", user_name="u1")
+
+    assert called == [], "预算不足时**不该**还去调 LLM（钱已经花出去了）"
+
+
+def test_invoke_llm_records_real_usage(monkeypatch):
+    """正常时按 `usage_metadata` 的【真实 token】记账（照 2 代 `/agent/mcp_chat` 的模式）。"""
+    import plan_execute as P
+
+    monkeypatch.setattr(P, "check_budget_before_call", lambda *a, **k: (True, "充足"))
+    recorded = {}
+    monkeypatch.setattr(P, "record_usage", lambda **kw: recorded.update(kw))
+
+    P._invoke_llm(
+        _fake_llm({"input_tokens": 123, "output_tokens": 45}),
+        [], purpose="plan_execute.quality_check", user_name="u1",
+    )
+
+    assert recorded["prompt_tokens"] == 123
+    assert recorded["completion_tokens"] == 45
+    assert recorded["purpose"] == "plan_execute.quality_check"
+    assert recorded["user_name"] == "u1", "记账必须落到【发起人】头上，否则配额管不到他"
+    assert recorded["model"] == "fake-model"
+
+
+def test_invoke_llm_does_not_fabricate_usage(monkeypatch):
+    """没有 `usage_metadata` 时**如实不记** —— 不编一个数字塞进账里。"""
+    import plan_execute as P
+
+    monkeypatch.setattr(P, "check_budget_before_call", lambda *a, **k: (True, "充足"))
+    recorded = []
+    monkeypatch.setattr(P, "record_usage", lambda **kw: recorded.append(kw))
+
+    P._invoke_llm(_fake_llm(None), [], purpose="plan_execute.plan", user_name="u1")
+
+    assert recorded == [], "没有真实用量却记了账 —— 那是在【编数字】"
+
+
+def test_plan_execute_entry_points_accept_user_name():
+    """两个入口必须能收 `user_name` —— 否则记账落不到人头上，配额就是摆设。"""
+    import inspect
+
+    import plan_execute as P
+
+    for fn in (P.plan_task, P.execute_plan, P.execute_plan_with_replan):
+        assert "user_name" in inspect.signature(fn).parameters, (
+            f"{fn.__name__} 没有 user_name 形参 ⇒ 记账会落到 'unknown'，配额管不到任何人"
+        )

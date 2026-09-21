@@ -28,6 +28,11 @@ from langchain_openai import ChatOpenAI
 from config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL_CHAT
 from langchain_core.messages import HumanMessage, SystemMessage
 
+# ⚠️ 2026-09-21（§十四 · ③-b）：接上**预算与记账**。
+#    实测过：这两个 import **不会拉起任何重包**（psycopg2 / sqlalchemy / numpy / … 都不进）——
+#    `token_tracker` 走的是**函数内惰性导入** `db`（2026-09-17 切开点 2）。
+from token_tracker import check_budget_before_call, record_usage
+
 # ==================== 初始化规划专用 LLM ====================
 planner_llm = ChatOpenAI(
     model=LLM_MODEL_CHAT,
@@ -62,6 +67,43 @@ def _available_tool_lines() -> str:
     return "\n".join(lines)
 
 
+# ==================== 预算与记账（③-b） ====================
+
+class BudgetExceededError(Exception):
+    """Token 预算不足 —— 由 `_invoke_llm` 抛出，端点层捕获后转成 QUOTA_EXCEEDED。"""
+
+
+def _invoke_llm(llm, messages, purpose: str, user_name: str = "unknown") -> object:
+    """**统一的 LLM 调用入口**：先查预算 → 调用 → 再记【真实用量】。
+
+    🔴 2026-09-21 新增（§十四 · ③-b）。**此前 `plan_execute` 完全不查预算、不记账** ——
+       而它会**真跑 LLM**（规划 1 次 + 每步动态输入 1 次 + 每步质量检查 1 次），
+       ⇒ **免费用户的每日配额根本管不到 `/agent/plan_execute` 这条路**。
+
+    📌 **照抄 2 代 `/agent/mcp_chat` 的模式**（`agent_graph_advanced.py:303/315`），**不另起炉灶**：
+       同样是 `check_token_budget` → 调用 → 从 `usage_metadata` 取真实 token → `record_usage`。
+       这里只是把它包成**一个入口**，免得在四个调用点各抄一遍。
+    """
+    allowed, reason = check_budget_before_call(user_name, purpose=purpose)
+    if not allowed:
+        raise BudgetExceededError(reason)
+
+    response = llm.invoke(messages)
+
+    # ⚠️ 有 `usage_metadata` 才记账 —— 没有就**如实不记**，不编一个数字进去
+    usage = getattr(response, "usage_metadata", None) or {}
+    if usage:
+        record_usage(
+            model=getattr(llm, "model_name", None) or getattr(llm, "model", "unknown"),
+            prompt_tokens=usage.get("input_tokens", 0),
+            completion_tokens=usage.get("output_tokens", 0),
+            purpose=purpose,
+            user_name=user_name,
+            thread_id="plan_execute",
+        )
+    return response
+
+
 def _tool_arg_field(tool_name: str):
     """派生某个工具**唯一入参**的字段名（**从 MCP 注册表，不手写**）。
 
@@ -87,7 +129,7 @@ def _tool_arg_field(tool_name: str):
         return fields[0] if len(fields) == 1 else None
     return None
 
-def plan_task(user_goal: str) -> List[Dict]:
+def plan_task(user_goal: str, user_name: str = "unknown") -> List[Dict]:
     """
     将用户的复杂目标分解为有序的步骤清单。
 
@@ -124,10 +166,13 @@ __TOOL_LIST__
 
 请严格按照JSON格式输出，不要包含任何其他文本。""".replace("__TOOL_LIST__", _available_tool_lines())
 
-    response = planner_llm.invoke([
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=f"用户目标：{user_goal}\n\n请为此目标制定详细的步骤计划：")
-    ])
+    response = _invoke_llm(
+        planner_llm,
+        [SystemMessage(content=system_prompt),
+         HumanMessage(content=f"用户目标：{user_goal}\n\n请为此目标制定详细的步骤计划：")],
+        purpose="plan_execute.plan",
+        user_name=user_name,
+    )
 
     # 解析LLM返回的JSON
     try:
@@ -152,7 +197,8 @@ executor_llm = ChatOpenAI(
 )
 
 # 新增：动态重规划
-def execute_plan_with_replan(plan: List[Dict], user_goal: str = "") -> str:
+def execute_plan_with_replan(plan: List[Dict], user_goal: str = "",
+                             user_name: str = "unknown") -> str:
     """
     执行计划，并在某一步彻底失败时自动触发重规划。
     包含循环检测和工具降级策略。
@@ -190,13 +236,13 @@ def execute_plan_with_replan(plan: List[Dict], user_goal: str = "") -> str:
             continue
 
         # 1. 动态生成输入 —— ⚠️ 2026-09-20 删（§三·B10）：
-        #    此处原有一行 `dynamic_input = generate_dynamic_input(step, context, user_goal)`,
+        #    此处原有一行 `dynamic_input = generate_dynamic_input(step, context, user_goal, user_name)`,
         #    但**下面那行根本不用它**（`execute_step_with_quality_check` 的签名里没有这个参数）。
         #    ⇒ 它是**纯重复**：这个函数**内部自己就调 `generate_dynamic_input`**（见 :264），
         #      而且真的用了（:267）。⇒ 原来那句 = **每走到这个分支白花一次 LLM 调用**。
         #
         # 2. 执行步骤（带重试）
-        step_result = execute_step_with_quality_check(step, context, user_goal)
+        step_result = execute_step_with_quality_check(step, context, user_goal, user_name)
         
         # 3. 判断是否彻底失败
         if "执行失败（已重试" in step_result:
@@ -251,11 +297,11 @@ def execute_plan_with_replan(plan: List[Dict], user_goal: str = "") -> str:
 
 
 # 修改原有的 execute_plan 函数，改为调用带重规划的版本
-def execute_plan(plan: List[Dict], user_goal: str = "") -> str:
+def execute_plan(plan: List[Dict], user_goal: str = "", user_name: str = "unknown") -> str:
     """
     执行计划（默认启用动态重规划）。
     """
-    return execute_plan_with_replan(plan, user_goal)
+    return execute_plan_with_replan(plan, user_goal, user_name)
 
 def _strip_code_fence(text: str) -> str:
     """去掉 LLM 常加的 ``` 围栏。
@@ -274,7 +320,7 @@ def _strip_code_fence(text: str) -> str:
     return "\n".join(lines).strip()
 
 
-def generate_dynamic_input(step: Dict, context: str, user_goal: str) -> str:
+def generate_dynamic_input(step: Dict, context: str, user_goal: str, user_name: str = "unknown") -> str:
     """生成这一步交给工具的**入参值**（该工具那个唯一字段的值）。
 
     🔴 2026-09-21 改（§十四 · N15）：真调用之后，这里产出的**不再是一句给 LLM 看的描述**，
@@ -306,10 +352,12 @@ def generate_dynamic_input(step: Dict, context: str, user_goal: str) -> str:
 
 请输出该参数的值："""
 
-    response = executor_llm.invoke([
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=user_prompt)
-    ])
+    response = _invoke_llm(
+        executor_llm,
+        [SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)],
+        purpose="plan_execute.dynamic_input",
+        user_name=user_name,
+    )
     return _strip_code_fence(response.content)
 
 # ==================== 质量评估专用 LLM（轻量、快速） ====================
@@ -325,7 +373,8 @@ quality_checker_llm = ChatOpenAI(
     temperature=0  # 评估需要确定性
 )
 
-def check_step_quality(step: Dict, step_result: str, user_goal: str, context: str) -> bool:
+def check_step_quality(step: Dict, step_result: str, user_goal: str, context: str,
+                       user_name: str = "unknown") -> bool:
     """
     评估单步执行结果的质量。
     返回 True 表示达标，False 表示需要重试。
@@ -347,16 +396,19 @@ def check_step_quality(step: Dict, step_result: str, user_goal: str, context: st
 
 请判断此步骤的执行结果是否达标："""
 
-    response = quality_checker_llm.invoke([
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=user_prompt)
-    ])
+    response = _invoke_llm(
+        quality_checker_llm,
+        [SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)],
+        purpose="plan_execute.quality_check",
+        user_name=user_name,
+    )
     
     verdict = response.content.strip().upper()
     return "PASS" in verdict
 
 
-def execute_step_with_quality_check(step: Dict, context: str, user_goal: str, max_retries: int = 3) -> str:
+def execute_step_with_quality_check(step: Dict, context: str, user_goal: str,
+                                    user_name: str = "unknown", max_retries: int = 3) -> str:
     """
     执行步骤，并加入质量检查。
     如果结果不达标，会重新生成输入并重试，最多重试 max_retries 次。
@@ -366,14 +418,14 @@ def execute_step_with_quality_check(step: Dict, context: str, user_goal: str, ma
         dynamic_input = generate_dynamic_input(step, context, user_goal)
         
         # 2. 执行步骤
-        step_result = execute_step_with_retry(step, dynamic_input, context)
+        step_result = execute_step_with_retry(step, dynamic_input, context, user_name)
         
         # 3. 如果执行本身失败（工具调用失败），直接返回失败
         if "执行失败" in step_result:
             return step_result
         
         # 4. 质量检查
-        if check_step_quality(step, step_result, user_goal, context):
+        if check_step_quality(step, step_result, user_goal, context, user_name):
             return step_result
         else:
             print(f"步骤{step['step']} 质量不达标，第{attempt+1}次重试...")
@@ -383,7 +435,8 @@ def execute_step_with_quality_check(step: Dict, context: str, user_goal: str, ma
     # 所有重试都不达标，返回最后一次的结果（比什么都不给强）
     return step_result + "\n[注意：此步骤经过多次重试，质量可能不达标]"
 
-def execute_step_with_retry(step: Dict, input_data: str, context: str, max_retries: int = 2) -> str:
+def execute_step_with_retry(step: Dict, input_data: str, context: str,
+                            user_name: str = "unknown", max_retries: int = 2) -> str:
     """
     带重试机制的单步执行器。
     """
@@ -394,7 +447,9 @@ def execute_step_with_retry(step: Dict, input_data: str, context: str, max_retri
         except Exception as e:
             if attempt < max_retries:
                 # 失败时，重新生成输入参数
-                input_data = generate_dynamic_input(step, context + f"\n[上一步尝试失败，原因：{str(e)}]", "")
+                input_data = generate_dynamic_input(
+                    step, context + f"\n[上一步尝试失败，原因：{str(e)}]", "", user_name
+                )
             else:
                 return f"执行失败（已重试{max_retries}次）：{str(e)}"
 

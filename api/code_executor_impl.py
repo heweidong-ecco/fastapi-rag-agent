@@ -11,8 +11,13 @@
 
 📌 `code_executor.py` 只是给 `execute_python_impl` 套一层 `@tool` 外壳（供 Agent 调用）。
 """
-import io
-import contextlib
+# ⚠️ 2026-09-21（③-a）：`io` / `contextlib` 的 import **删掉了** ——
+#    执行搬进子进程后，它们只在 `_SANDBOX_CHILD` 那段**脚本字符串**里用（子进程自己 import），
+#    父进程里已无引用。**不是清理历史遗留**，是本次改动**自己造成的**未使用导入。
+import json
+import os
+import subprocess
+import sys
 
 # 安全沙箱配置
 ALLOWED_BUILTINS = [
@@ -82,6 +87,46 @@ ALLOWED_MODULES = [
 MAX_EXEC_TIME = 5  # 最长执行5秒
 MAX_OUTPUT_LENGTH = 2000  # 最大输出字符数
 
+# 🔴 2026-09-21（§十四 · ③-a）：**真·超时 —— 把执行放进【子进程】，超时【硬杀】。**
+
+# ⚠️ **此前 `MAX_EXEC_TIME` 只被【定义】、从未被使用** —— 实测：
+#      `execute_python_impl("i=0\nwhile True:\n    i+=1")` **永不返回**（4 秒后仍在跑）。
+#    而工具描述却对 LLM **承诺**「最长执行时间：5秒」。
+#    以前是「LLM 模拟执行」所以不痛；**N15 让执行层真跑代码之后，这就是个洞。**
+
+# **为什么必须换机制**（另外三条路都核过，都不成立）：
+#   · `signal.alarm` —— ⚠️ **只在【主线程】有效**，而 MCP 服务端用
+#     `asyncio.to_thread(handler, args)` 调工具 ⇒ 执行发生在 **worker 线程**，alarm 装不上
+#   · 线程 + `join(timeout)` —— **杀不掉 Python 线程** ⇒ 线程照跑，
+#     只是"你以为超时了"（**假超时**，比没有更糟：它给了一个错误的安全感）
+#   · `PyThreadState_SetAsyncExc` —— 对紧循环**不可靠**，拿它当安全承诺的地基不诚实
+#   · **子进程 + 超时硬杀** —— ✅ **唯一能真正打断死循环的**
+
+# **收益不止超时**：子进程是**全新解释器**（更强隔离），白名单从**同一个模块**重建
+#   （⇒ 单一事实源，不会与主进程漂），且它崩了（段错误 / OOM）**也带不走主进程**。
+# **代价**：每次调用多一次进程启动（~100ms 量级）—— 对"执行代码"这类工具可以接受。
+
+# ⚠️ 子进程脚本：**从 `code_executor_impl` 重建白名单**（不手抄一份 —— 抄了必漂）。
+_SANDBOX_CHILD = r'''
+import sys, io, contextlib, json
+sys.path.insert(0, sys.argv[1])          # 由父进程传入本模块所在目录
+from code_executor_impl import create_safe_globals, MAX_OUTPUT_LENGTH
+code = sys.stdin.read()
+buf = io.StringIO()
+try:
+    with contextlib.redirect_stdout(buf):
+        exec(code, create_safe_globals())
+    out = buf.getvalue()
+    if len(out) > MAX_OUTPUT_LENGTH:
+        out = out[:MAX_OUTPUT_LENGTH] + "\n... (输出过长，已截断)"
+    if not out.strip():
+        out = "代码执行成功，但无输出内容。"
+    payload = {"ok": True, "out": out}
+except BaseException as e:                # BaseException：连 SystemExit 也要抓住，否则子进程静默退出
+    payload = {"ok": False, "out": "代码执行出错: %s: %s" % (type(e).__name__, e)}
+sys.stdout.write(json.dumps(payload))
+'''
+
 
 def create_safe_globals() -> dict:
     """创建一个安全沙箱的执行环境"""
@@ -142,22 +187,32 @@ def execute_python_impl(code: str) -> str:
                 f"请先生成代码文本，再将代码作为参数传入。"
             )
 
+    # 🔴 2026-09-21（③-a）：执行搬进**子进程**，超时**硬杀**（详见上面 `_SANDBOX_CHILD` 的注释）。
+    here = os.path.dirname(os.path.abspath(__file__))
     try:
-        safe_env = create_safe_globals()
-        output_buffer = io.StringIO()
-
-        with contextlib.redirect_stdout(output_buffer):
-            exec(code, safe_env)
-
-        result = output_buffer.getvalue()
-
-        if len(result) > MAX_OUTPUT_LENGTH:
-            result = result[:MAX_OUTPUT_LENGTH] + "\n... (输出过长，已截断)"
-
-        if not result.strip():
-            return "代码执行成功，但无输出内容。"
-
-        return result
-
+        proc = subprocess.run(
+            [sys.executable, "-c", _SANDBOX_CHILD, here],
+            input=code,
+            capture_output=True,
+            text=True,
+            timeout=MAX_EXEC_TIME,
+        )
+    except subprocess.TimeoutExpired:
+        # ⚠️ `subprocess.run` 在超时时会**先杀子进程再抛异常** ⇒ 这里返回即代表"已经停下来了"
+        return (
+            f"代码执行出错: 超过最长执行时间（{MAX_EXEC_TIME} 秒）—— 已【强制终止】。\n"
+            f"提示：检查是否有死循环；或把计算量拆小、分多次执行。"
+        )
     except Exception as e:
         return f"代码执行出错: {type(e).__name__}: {str(e)}"
+
+    # 子进程没能给出可解析的结果（崩溃 / 被 OOM 杀 / 段错误）—— 如实报，不假装成功
+    try:
+        payload = json.loads(proc.stdout)
+    except Exception:
+        return (
+            f"代码执行出错: 沙箱子进程没有正常返回（returncode={proc.returncode}）。"
+            f"\nstderr 前 300 字：{(proc.stderr or '').strip()[:300]}"
+        )
+
+    return payload["out"]

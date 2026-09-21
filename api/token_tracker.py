@@ -495,6 +495,11 @@ PURPOSE_ESTIMATED_COST = {
     "answer_generation": 0.02,   # 生成最终答案
     "query_rewrite": 0.005,      # 查询改写
     "embedding": 0.0005,         # Embedding 调用
+    # ⚠️ 2026-09-21 加（§十四 · ③-b）：与上面 `PURPOSE_ESTIMATED_TOKENS` 的三个键**必须一一对应**
+    #    （两套表并存不可互相替代 —— 见下面那段说明）。
+    "plan_execute.plan": 0.01,
+    "plan_execute.dynamic_input": 0.005,
+    "plan_execute.quality_check": 0.003,
 }
 
 def estimate_tool_cost(tool_name: str) -> float:
@@ -525,6 +530,12 @@ PURPOSE_ESTIMATED_TOKENS = {
     "answer_generation": 800,
     "query_rewrite": 300,
     "embedding": 100,
+    # ⚠️ 2026-09-21 加（§十四 · ③-b）：`plan_execute` 这条路的三种 LLM 调用。
+    #    此前 `plan_execute` **完全不查预算、不记账** —— 它会真跑 LLM，而账上一行不记
+    #    ⇒ **免费用户的每日配额管不到它**（`/agent/plan_execute`）。见 DEC-027。
+    "plan_execute.plan": 500,           # 把目标分解成步骤清单
+    "plan_execute.dynamic_input": 300,  # 每步：生成该工具那个字段的值
+    "plan_execute.quality_check": 200,  # 每步：判定结果是否达标
 }
 
 # 未知工具/用途时的保守兜底（Token）

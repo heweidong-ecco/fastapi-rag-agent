@@ -13,7 +13,7 @@ from agent_graph import agent_graph
 from langchain_core.messages import HumanMessage, ToolMessage
 # 多分支路由（意图分类）高级 Agent：定义在 agent_graph_advanced_learning.py
 from agent_graph_advanced_learning import build_advanced_agent
-from plan_execute import plan_task, execute_plan
+from plan_execute import plan_task, execute_plan, BudgetExceededError
 from agent_checkpointer import checkpointer_agent
 from memory_store import add_user_memory, search_user_memory
 # ⛔ 2026-09-21 注释（N13 · **# 可扩展能力**）：`browser_tools` 依赖未安装的 chromium
@@ -191,10 +191,26 @@ async def agent_plan_execute(
     #    函数在上一行**已经有 docstring** ⇒ 它是**空操作**；
     #    且它描述的是「规划」这一**子步骤**，不是整个函数的职责。
     #    ⇒ 改成**普通注释**（保留信息、去掉误导）。
-    plan = plan_task(goal)
-
-    # 2. 执行
-    execution_result = execute_plan(plan, goal)
+    # 🔴 2026-09-21 改（§十四 · ③-a/③-b），两件事一起：
+    #
+    #  ① **丢到线程里跑** —— `plan_task` / `execute_plan` 是**同步**的，直接在 async 端点里调
+    #     会**阻塞事件循环**（一个慢请求卡住**整个 API**）。
+    #     以前执行是「LLM 模拟」所以很快；**N15 真调工具之后会真发网络请求、真跑代码**，
+    #     阻塞的代价从"理论问题"变成"现实问题"。
+    #     📌 同型先例：`/agent/fetch_webpage` 那两个端点也是因为这个才用 `asyncio.to_thread`。
+    #
+    #  ② **接住 `BudgetExceededError`** —— `plan_execute` 现在**查预算并记账**（③-b）。
+    #     预算耗尽要报 **QUOTA_EXCEEDED**，而不是漏成 500。
+    #     ⚠️ 用 `AppException` 是**路由层**抛的，能被全局处理器接住
+    #     （中间件里抛的接不住 —— 见 `CLAUDE.md` 的那条警告；这里是路由层，安全）。
+    try:
+        plan = await asyncio.to_thread(plan_task, goal, user_name)
+        execution_result = await asyncio.to_thread(execute_plan, plan, goal, user_name)
+    except BudgetExceededError as e:
+        raise AppException(
+            ErrorCode.QUOTA_EXCEEDED,
+            f"今日 Token 预算已用完，无法执行本任务。{e}",
+        )
 
     return {
         "goal": goal,

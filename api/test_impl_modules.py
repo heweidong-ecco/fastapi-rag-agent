@@ -216,3 +216,32 @@ def test_execute_python_impl_rejects_natural_language_requests():
 
     out = execute_python_impl("帮我写一段计算斐波那契的代码")
     assert "不是可执行的 Python 代码" in out, out
+
+
+def test_sandbox_enforces_max_exec_time(monkeypatch):
+    """🔴 **`MAX_EXEC_TIME` 真的生效** —— 死循环会被【硬杀】。
+
+    📌 这条用例守的是一件「**以前是假的**」的事（2026-09-21 · §十四 · ③-a）：
+       此前 `MAX_EXEC_TIME` **只被定义、从未被使用** —— 实测死循环
+       （`while True: i += 1`）**永不返回**；而工具描述却对 LLM **承诺**「最长执行时间：5秒」。
+       ⚠️ 以前执行层是「LLM 模拟执行」所以不痛；**N15 让执行层真跑代码之后，这就是个洞。**
+
+    ⚠️ **为什么必须换子进程**：另外三条路都不成立 ——
+       · `signal.alarm` 在 **worker 线程**里装不上（MCP 用 `asyncio.to_thread` 调工具）
+       · 线程 `join(timeout)` **杀不掉 Python 线程** ⇒ 假超时（比没有更糟：给了错误的安全感）
+       · `PyThreadState_SetAsyncExc` 对**紧循环不可靠**
+
+    把超时压到 1 秒，免得这条用例本身拖慢整个套件。
+    """
+    import time
+
+    import code_executor_impl as CE
+
+    monkeypatch.setattr(CE, "MAX_EXEC_TIME", 1)
+
+    t0 = time.time()
+    out = CE.execute_python_impl("i = 0\nwhile True:\n    i += 1")
+    dt = time.time() - t0
+
+    assert "超过最长执行时间" in out, f"死循环竟然返回了别的东西：{out!r}"
+    assert dt < 10, f"用了 {dt:.1f}s —— 超时没生效（子进程没被杀掉）"
