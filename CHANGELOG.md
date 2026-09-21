@@ -235,6 +235,41 @@ All notable changes to this project will be documented in this file.
 - **`docs/复盘/`** —— 过程错误记录机制,含 `模板-复盘.md` 与当日 3 份复盘。
 - **`CHANGELOG.md`** —— 本文件。
 
+### Changed
+
+- 🟢 **Plan-and-Execute 的「执行层」现在【真调用工具】了（N15 · 2026-09-21 · 业务方裁「从零新做」，见 `DEC-026`）**
+
+  **此前**：`execute_single_step()` **只对 `calculator` 真调用**，其余**全部走「请 LLM 模拟执行」** ——
+  端点 `/agent/plan_execute` 看起来在跑真工具，**实际只有规划是真的**。
+
+  **现在**：从 MCP 注册表取**真 handler** 真调；入参字段名从工具的 `args_schema` **派生**（不手写映射）。
+  新增 `_strip_code_fence()` 去掉 LLM 常加的 ` ``` `（否则 `execute_python` 直接语法错）。
+  ⚠️ **失败一律抛异常**，不吞成字符串 —— 否则上游的重试机制会**看起来在重试、其实没有**。
+
+  **🔴 执行中撞出一个真缺陷并已修：沙箱里【不能 `import`】**
+
+  ```
+  import math            → ❌ ImportError: __import__ not found    ← LLM 最常写的写法
+  不 import，直接用 math  → ✅ 4.0                                  ← 模块是【直接注入全局域】的
+  ```
+
+  而 `execute_python` 的工具描述对 LLM 说的是「**允许的模块**：math, json, …」——
+  那会让 LLM 写 `import math` **必炸**。**与 §三·A「注释说 A、代码做 B」同型，但后果更重：
+  它直接导致 LLM 写出来的代码跑不了。**
+  以前是"模拟执行"所以看不出来 —— **真执行层一上线，这个坑立刻变成现实。**
+  ⇒ 工具描述已改为 **「不要写 `import`，模块已直接可用」**+正反例。
+  ⛔ **没有**选择放开 `__import__`（N18 的边界论证已定它是逃逸通道）。
+  ⚠️ **这是一次【工具 schema 变更】**（`execute_python` 的 description 是 LLM 读的那份）。
+
+  **验证**：新增 `api/test_plan_execute_tools.py` **14 条**，其中
+  `test_execute_single_step_does_not_ask_the_llm` 是**决定性判据**（把 LLM 换成"一调就炸"的替身）。
+  **红→绿实测**：新用例对**旧实现 12 条红** / 对**新实现 14 条绿**；
+  全套（不含新用例文件）新旧实现**逐位相同**（`15 failed / 69 passed / 3 skipped`）⇒ **零回归**。
+
+  **⚠️ 未验证**：`web_search`（需网络，**接线了但没跑过**）· 端到端 `POST /agent/plan_execute`
+  （需 LLM + API 在跑）· **超时/成本/权限那一串还没做**（下一步）。
+  代价已如实写进 `api/plan_execute.py` 的模块 docstring：**真调会真的发网络请求、真的执行代码**。
+
 ### Fixed
 
 - **代码执行沙箱现在能定义类了（N18 · 2026-09-21 · 业务方裁「放开」，见 `DEC-023`）。**

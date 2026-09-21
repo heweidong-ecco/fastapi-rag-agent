@@ -2,26 +2,24 @@
 Plan-and-Execute 模块
 实现任务规划与逐步执行。
 
-> ## 🔴 **必读：这条路径的「执行层」目前是【LLM 模拟】，不是真调用工具**
+> ## ✅ **执行层现在是【真调用工具】**（2026-09-21 重写 · §十四 · N15）
 >
-> **现状（2026-09-20 核实）**：`execute_single_step()` 只对 **`calculator`** 做真调用
-> （`str(eval(input_data))`），**其余所有工具走的是"请 LLM 模拟执行"那条分支** ——
-> 也就是说，`web_search` / `fetch_webpage` / `screenshot_webpage` / `execute_python`
-> **都不会真的被调用**，结果是让 LLM "编"一个出来。
+> **此前（2026-09-20 核实）**：`execute_single_step()` **只对 `calculator` 真调用**，
+> 其余全部走「请 LLM 模拟执行」—— 端点 `/agent/plan_execute` 看起来在跑真工具，
+> **实际只有规划是真的**。
 >
-> ⚠️ **这条以前没人写出来** —— 端点 `/agent/plan_execute` 看起来在跑真工具，
->    实际上**只有规划是真的**。
+> **现在**：`execute_single_step()` 从 MCP 注册表取**真 handler** 并**真调用**，
+> 入参字段名从工具的 `args_schema` **派生**（不手写映射）。
 >
-> ### 后续（**已登记为独立待办，不是"修补"**）
+> ⚠️ **真调的代价 —— 这些现在会真的发生**：
+>   · **会真的发起网络请求**（`web_search`）
+>   · **会真的执行代码**（`execute_python`，沙箱内、5 秒上限）
+>   · **耗时与失败率都不再由 LLM"编"决定** —— 会有真超时、真报错
+>   · 📌 **浏览器工具已按 N13 从注册表摘掉**（依赖未安装的 chromium）⇒
+>     执行层**当前只有 4 个工具可用**：`calculator` / `date_today` / `web_search` / `execute_python`
 >
-> 业务方 2026-09-20 的裁决与说明：
-> * **选 b**（保留模拟，但**把话说清楚** —— 就是本段）
-> * **并且要接真工具**：**"大改是必要的"**
-> * ⚠️ **关键信息**：**原系统里本来就有一套【可用的】全局 Plan-and-Execute 执行层，
->   但没有被带进本仓** ⇒ **需要【单独新做】**，不是在现有代码上打补丁。
->
-> 📌 登记位置：`docs/待办登记-2026-09-20-全仓审计与方向更正.md` §三·**N15**
->   与 §十四（新做的执行层）。
+> 📌 登记位置：`docs/待办登记-2026-09-20-全仓审计与方向更正.md` §十四（N15）。
+>   裁决记录：业务方 2026-09-20「**从零新做**」，原话「**大改是必要的**」。
 """
 import os
 import json
@@ -50,7 +48,7 @@ planner_llm = ChatOpenAI(
 #
 #    ⚠️ 与 🔴C 是**同一个根因**：**手工维护的工具清单必然漂**。
 #       ⇒ 改为从 `mcp_server.TOOLS` 派生（单一事实源）—— 以后加工具只需改那一处。
-from mcp_server import TOOLS as _MCP_TOOLS
+from mcp_server import TOOLS as _MCP_TOOLS, TOOL_HANDLERS as _TOOL_HANDLERS
 
 
 def _available_tool_lines() -> str:
@@ -63,6 +61,31 @@ def _available_tool_lines() -> str:
         lines.append(f"- {fn.name}：{desc}")
     return "\n".join(lines)
 
+
+def _tool_arg_field(tool_name: str):
+    """派生某个工具**唯一入参**的字段名（**从 MCP 注册表，不手写**）。
+
+    🔴 **为什么要派生而不是写死**：与 §三·C1（工具清单同源）**同一个道理** ——
+       手工维护的映射必然与注册表漂移。加工具 / 改参数名时，这里自动跟上。
+
+    返回：
+      · 字段名（`str`）—— 该工具正好有**一个**入参时
+      · `None` —— 工具不存在 / 没有入参 / 入参不是单一字段
+        ⇒ 调用方据此走**降级**（不猜参数名，宁可报明确错误）
+    """
+    for t in _MCP_TOOLS:
+        fn = t["func"]
+        if fn.name != tool_name:
+            continue
+        schema = getattr(fn, "args_schema", None)
+        if schema is None:
+            return None
+        try:
+            fields = list(schema.model_fields.keys())
+        except AttributeError:  # 不是 pydantic v2 模型
+            return None
+        return fields[0] if len(fields) == 1 else None
+    return None
 
 def plan_task(user_goal: str) -> List[Dict]:
     """
@@ -234,28 +257,60 @@ def execute_plan(plan: List[Dict], user_goal: str = "") -> str:
     """
     return execute_plan_with_replan(plan, user_goal)
 
-def generate_dynamic_input(step: Dict, context: str, user_goal: str) -> str:
-    """
-    动态输入生成器：根据当前上下文和步骤信息，生成最优的工具输入参数。
-    """
-    system_prompt = """你是一个执行助手。根据当前任务步骤、上下文和用户目标，生成这一步的具体输入参数。
-- 如果需要搜索，请生成最精准的搜索关键词。
-- 如果需要计算，请提取出具体的数学表达式。
-- 如果需要筛选或总结，请明确筛选条件或总结的重点。
+def _strip_code_fence(text: str) -> str:
+    """去掉 LLM 常加的 ``` 围栏。
 
-请只输出具体的输入参数，不要包含其他任何文字。"""
+    🔴 **这条不是洁癖**：`execute_python` 要的是**可直接执行的代码**，
+       LLM 很爱回 ```` ```python\\nprint(1)\\n``` ```` ⇒ 那会**直接语法错**。
+       实测里这是「代码类工具」最常见的一种"看着对、其实跑不了"。
+    """
+    t = text.strip()
+    if not t.startswith("```"):
+        return t
+    lines = t.splitlines()
+    lines = lines[1:]                                    # 去掉 ``` 或 ```python
+    if lines and lines[-1].strip().startswith("```"):
+        lines = lines[:-1]                               # 去掉收尾的 ```
+    return "\n".join(lines).strip()
+
+
+def generate_dynamic_input(step: Dict, context: str, user_goal: str) -> str:
+    """生成这一步交给工具的**入参值**（该工具那个唯一字段的值）。
+
+    🔴 2026-09-21 改（§十四 · N15）：真调用之后，这里产出的**不再是一句给 LLM 看的描述**，
+       而是**要直接塞进 `handler({字段名: 值})` 的那个值**。
+       不把这个说清楚，LLM 会按"通用输入"写 —— 例如给 `execute_python` 回一句中文描述、
+       而不是代码 ⇒ 真调用时立刻崩。
+    """
+    tool_name = step.get("tool", "")
+    field = _tool_arg_field(tool_name)
+    tool_desc = ""
+    for t in _MCP_TOOLS:
+        if t["func"].name == tool_name:
+            tool_desc = (t["func"].description or "").strip()
+            break
+
+    system_prompt = f"""你是一个执行助手。你要为一次**工具调用**生成它需要的那个参数值。
+
+**目标工具**：`{tool_name}`
+**工具说明**：{tool_desc}
+**要生成的参数名**：`{field if field else '（该工具入参不是单一字段）'}`
+
+⚠️ 只输出**参数的值本身**：不要输出参数名、不要 JSON、不要解释、不要引号包裹、不要代码围栏。
+⚠️ 值的形态必须符合那个工具的期望 —— 例如 `execute_python` 要**可直接执行的 Python 代码**、
+   `calculator` 要**纯数学表达式**、`web_search` 要**搜索关键词**。"""
 
     user_prompt = f"""用户目标：{user_goal}
 当前执行步骤：{json.dumps(step, ensure_ascii=False)}
 历史执行上下文：{context if context else '无'}
 
-请为此步骤生成最优的输入参数："""
+请输出该参数的值："""
 
     response = executor_llm.invoke([
         SystemMessage(content=system_prompt),
         HumanMessage(content=user_prompt)
     ])
-    return response.content
+    return _strip_code_fence(response.content)
 
 # ==================== 质量评估专用 LLM（轻量、快速） ====================
 quality_checker_llm = ChatOpenAI(
@@ -345,27 +400,33 @@ def execute_step_with_retry(step: Dict, input_data: str, context: str, max_retri
 
 
 def execute_single_step(step: Dict, input_data: str, context: str) -> str:
-    """
-    真正的单步执行逻辑。
-    根据工具名调用相应函数，或使用LLM模拟未知工具。
+    """**真正的单步执行** —— 把这一步交给 MCP 注册表里那个工具【真调用】。
+
+    🔴 2026-09-21 重写（§十四 · N15 · 业务方裁「**从零新做**」）。
+       此前这里**只对 `calculator` 真调用**，其余**全部走「请 LLM 模拟执行」** ——
+       端点 `/agent/plan_execute` 看起来在跑真工具，**实际只有规划是真的**。
+
+    现在的做法（**与 MCP 服务端同一套机制**，不另起炉灶）：
+      ① 从 `TOOL_HANDLERS` 取该工具的**真 handler**（注册表是唯一事实源）
+      ② 从 `args_schema` **派生**它唯一入参的字段名（`_tool_arg_field`，不手写映射）
+      ③ `handler({字段名: input_data})` —— **真调用，返回真结果**
+
+    ⚠️ **失败一律【抛异常】，不吞成错误字符串** —— 上游两条路都是靠异常工作的：
+       · `execute_step_with_retry()` 捕获后**重新生成输入再试一次**
+       · `execute_plan_with_replan()` 的「失效工具降级」分支
+       ⇒ 改成"返回错误字符串"会让**重试机制静默失效**（看起来在重试、其实没有）。
     """
     tool_name = step["tool"]
-    
-    # 对于已有的真实工具，直接调用
-    if tool_name == "calculator":
-        try:
-            return str(eval(input_data))
-        except Exception as e:
-            return f"计算错误: {e}"
-    
-    # 对于系统中没有的工具，用LLM来模拟执行
-    else:
-        prompt = f"""请模拟执行以下操作。
-操作：{step['action']}
-工具：{tool_name}
-工具输入：{input_data}
-执行上下文：{context}
 
-请直接输出操作结果。"""
-        response = executor_llm.invoke([HumanMessage(content=prompt)])
-        return response.content
+    handler = _TOOL_HANDLERS.get(tool_name)
+    if handler is None:
+        raise ValueError(f"未找到工具: {tool_name}")
+
+    field = _tool_arg_field(tool_name)
+    if field is None:
+        raise ValueError(
+            f"工具 {tool_name} 的入参不是【单一字段】— 当前执行层不支持。"
+            f"要么把该工具改成单字段，要么在这里为它加一条显式映射（别猜参数名）。"
+        )
+
+    return str(handler({field: input_data}))
