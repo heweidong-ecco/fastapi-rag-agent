@@ -280,8 +280,10 @@ def execute_plan_with_replan(plan: List[Dict], user_goal: str = "",
             continue
 
         # 1. 动态生成输入 —— ⚠️ 2026-09-20 删（§三·B10）：
-        #    此处原有一行 `dynamic_input = generate_dynamic_input(step, context, user_goal, user_name)`,
+        #    此处原有一行 `dynamic_input = generate_dynamic_input(step, context, user_goal)`，
         #    但**下面那行根本不用它**（`execute_step_with_quality_check` 的签名里没有这个参数）。
+        #    📌 2026-09-21：这句话里的 `user_goal` 后面**曾经被误加过一个 `, user_name`** ——
+        #       那是一次**盲替换命中注释**的事故（见 :472 的修复记录），此处已还原。
         #    ⇒ 它是**纯重复**：这个函数**内部自己就调 `generate_dynamic_input`**（见 :264），
         #      而且真的用了（:267）。⇒ 原来那句 = **每走到这个分支白花一次 LLM 调用**。
         #
@@ -469,7 +471,17 @@ def execute_step_with_quality_check(step: Dict, context: str, user_goal: str,
     """
     for attempt in range(max_retries + 1):
         # 1. 动态生成输入（每次重试都可能生成不同的输入）
-        dynamic_input = generate_dynamic_input(step, context, user_goal)
+        # 🔴 2026-09-21 修：这里**原本漏传 `user_name`** ——
+        #    本次端到端实测（`POST /agent/plan_execute`）才暴露出来：
+        #      `token_usage_logs` 里 `plan_execute.dynamic_input` 的 4 条**全记在 `unknown` 头上**，
+        #      而 `plan` / `quality_check` 的记在 `admin` 头上。
+        #    ⇒ 后果：**这部分的额度算不到发起人头上 ⇒ 配额管不住他**（正是 ③-b 要解决的问题）。
+        #    ⚠️ **它是怎么漏的**：那次改动用的是**盲替换** `s.replace(old, new, 1)`，
+        #       **命中了 `:283` 注释里的同一串**（注释在前 ⇒ 先被替换），**真正的这行反而没改到**。
+        #       📌 本仓复盘反复记的那一类：「**判据选错 / 注释当代码**」—— 这次是我自己犯的。
+        #       教训：**改完要按行号核**，别只看"替换成功了几处"。
+        #    回归用例：`test_plan_execute_tools.py::test_dynamic_input_records_usage_for_the_real_user`
+        dynamic_input = generate_dynamic_input(step, context, user_goal, user_name)
         
         # 2. 执行步骤
         step_result = execute_step_with_retry(step, dynamic_input, context, user_name)
