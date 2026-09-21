@@ -16,7 +16,9 @@ from agent_graph_advanced_learning import build_advanced_agent
 from plan_execute import plan_task, execute_plan
 from agent_checkpointer import checkpointer_agent
 from memory_store import add_user_memory, search_user_memory
-from browser_tools import fetch_webpage, screenshot_webpage
+# ⛔ 2026-09-21 注释（N13 · **# 可扩展能力**）：`browser_tools` 依赖未安装的 chromium
+#    ⇒ 两个端点每调必 500。装好 chromium 后连同下面两个端点一起取消注释。
+# from browser_tools import fetch_webpage, screenshot_webpage
 from code_executor import execute_python
 from tool_health import run_health_check, get_tool_health, UNHEALTHY, _tool_health
 from mcp_server import TOOLS_DEFINITION
@@ -261,43 +263,67 @@ async def search_memory(
 
 
 # ==================== 单独的浏览器工具测试接口 ====================
-
-
-@router.post("/agent/fetch_webpage")
-async def agent_fetch_webpage(
-    url: str,
-    user_name: str = Depends(get_current_user_hybrid),
-):
-    """使用Playwright获取网页文本内容
-
-    🔴 2026-09-20 修:必须丢到**线程**里跑 —— `browser_tools` 用的是 Playwright
-       **同步** API，而本端点是 async ⇒ 直接在事件循环所在线程里调会报
-       `playwright._impl._errors.Error: It looks like you are using Playwright
-       Sync API inside the asyncio loop.`（实测）
-       ⛔ 不能把 `browser_tools` 改成 async —— 它同时被 **MCP server 的同步路径**
-          调用（`create_mcp_tool_handler` 里是同步 `tool_func.invoke`）。
-       回归测试:`api/test_agent_repairs.py::test_fetch_webpage_is_not_invoked_on_the_event_loop`
-    """
-    result = await asyncio.to_thread(fetch_webpage.invoke, {"url": url})
-    return {"url": url, "content": result, "requested_by": user_name}
-
-# ==================== 新增“网页截图”工具测试接口 ====================
-# 添加一个“网页截图”工具（使用page.screenshot()），让Agent能把网页保存为图片。
-
-
-@router.post("/agent/screenshot_webpage")
-async def agent_screenshot_webpage(
-    url: str,
-    user_name: str = Depends(get_current_user_hybrid),
-):
-    """使用Playwright截取网页并保存为图片
-
-    🔴 2026-09-20 修:同上（`fetch_webpage` 那条的孪生兄弟）——
-       同步 Playwright 必须丢到线程里跑。**两个端点一起修**，防止只改一个。
-       回归测试:`api/test_agent_repairs.py::test_screenshot_webpage_is_not_invoked_on_the_event_loop`
-    """
-    result = await asyncio.to_thread(screenshot_webpage.invoke, {"url": url})
-    return {"url": url, "result": result, "requested_by": user_name}
+#
+# ⛔⛔ 2026-09-21 整块注释（N13 · 业务方裁「挂起 + 直接注释掉 + 标『# 可扩展能力』」）
+#
+#   **# 可扩展能力 —— 装上 chromium 后取消下面的注释即可启用。**
+#
+#   为什么挂起（两条都实测过，缺一不可）：
+#     ① 本仓**任何部署方式都没装 chromium**（`api/Dockerfile` / `docker-compose.yml`
+#        都没有 `playwright install`）⇒ 不只是"本机的问题"
+#     ② 本机**缓存里的 chromium 是旧 build（1228，556 MB）**，而 playwright 1.62 要 build **1234**
+#        ⇒ 版本不匹配，**装了旧的也照样跑不了**
+#   实测报错原文：
+#     `BrowserType.launch: Executable doesn't exist at .../chromium_headless_shell-1234/...`
+#
+#   为什么**不是**留一个会 500 的端点：那正是本仓反复在防的
+#     「**看起来能用、其实不能用**」。宁可不暴露。
+#   ⚠️ 代价：`ROUTES` 由 **14 → 12**（在 PR 里显式声明过）。
+#
+#   重新启用时**必须一起做**（否则会踩回 2026-09-20 修过的那个坑）：
+#     · 取消 `api/mcp_server.py` 里 `TOOLS` 的两行 + `browser_tools` 的 import
+#     · 取消 `api/tool_health.py` 里 `TEST_ARGS_MAP` 的两项
+#     · 取消 `api/api_v1_agent.py` 顶部的 `from browser_tools import ...`
+#     · 把 `api/test_agent_repairs.py` 里那两条 skip 掉的用例恢复
+#   保留下来的知识（**别丢**）：这两个端点**必须**用 `asyncio.to_thread` 跑 ——
+#     `browser_tools` 是 Playwright **同步** API，直接在 async 端点里调会报
+#     `It looks like you are using Playwright Sync API inside the asyncio loop.`（实测）。
+#     对应用例现在 skip 着，重新启用时取消 skip。
+#
+# @router.post("/agent/fetch_webpage")
+# async def agent_fetch_webpage(
+#     url: str,
+#     user_name: str = Depends(get_current_user_hybrid),
+# ):
+#     """使用Playwright获取网页文本内容
+#
+#     🔴 2026-09-20 修:必须丢到**线程**里跑 —— `browser_tools` 用的是 Playwright
+#        **同步** API，而本端点是 async ⇒ 直接在事件循环所在线程里调会报
+#        `playwright._impl._errors.Error: It looks like you are using Playwright
+#        Sync API inside the asyncio loop.`（实测）
+#        ⛔ 不能把 `browser_tools` 改成 async —— 它同时被 **MCP server 的同步路径**
+#           调用（`create_mcp_tool_handler` 里是同步 `tool_func.invoke`）。
+#        回归测试:`api/test_agent_repairs.py::test_fetch_webpage_is_not_invoked_on_the_event_loop`
+#     """
+#     result = await asyncio.to_thread(fetch_webpage.invoke, {"url": url})
+#     return {"url": url, "content": result, "requested_by": user_name}
+#
+# # ==================== 新增“网页截图”工具测试接口 ====================
+# # 添加一个“网页截图”工具（使用page.screenshot()），让Agent能把网页保存为图片。
+#
+# @router.post("/agent/screenshot_webpage")
+# async def agent_screenshot_webpage(
+#     url: str,
+#     user_name: str = Depends(get_current_user_hybrid),
+# ):
+#     """使用Playwright截取网页并保存为图片
+#
+#     🔴 2026-09-20 修:同上（`fetch_webpage` 那条的孪生兄弟）——
+#        同步 Playwright 必须丢到线程里跑。**两个端点一起修**，防止只改一个。
+#        回归测试:`api/test_agent_repairs.py::test_screenshot_webpage_is_not_invoked_on_the_event_loop`
+#     """
+#     result = await asyncio.to_thread(screenshot_webpage.invoke, {"url": url})
+#     return {"url": url, "result": result, "requested_by": user_name}
 
 # ==================== 新增 代码执行器 工具 测试接口 ====================
 

@@ -306,6 +306,38 @@ All notable changes to this project will be documented in this file.
 
 ### Removed
 
+- **浏览器工具已从工具表里【摘掉】（N13 · 2026-09-21 · 业务方裁「挂起 + 注释掉 + 标 `# 可扩展能力`」，见 `DEC-025`）**
+
+  **🔴 动手前实测，发现比原记录描述的【更糟】**：
+
+  ```
+  mcp_server.TOOLS   = 6 个
+  LLM 看到的工具表     = 同样 6 个（从 TOOLS 派生）
+  实跑 fetch_webpage  → ❌ BrowserType.launch: Executable doesn't exist
+                        (.../chromium_headless_shell-1234/...)
+  ```
+
+  ⇒ 那 2 个工具**不只是"不可用"，是已经在 LLM 手里、每调必炸** —— LLM 会白费一轮。
+
+  **两条独立的阻塞原因（都实测过）**：
+  1. 本仓**任何部署方式都没装 chromium**（`Dockerfile` / `compose` 里都没有 `playwright install`）
+  2. 本机缓存里是 chromium **1228**（556 MB），而 playwright 1.62 要 **1234** ⇒ **装了旧的也照样跑不了**
+
+  **执行（4 处一起，否则不一致）**：`mcp_server.py`（`TOOLS` 两行 + import）·
+  `tool_health.py`（`TEST_ARGS_MAP` 两项）· `api_v1_agent.py`（import + 两个 REST 端点整块）·
+  `test_agent_repairs.py`（两条用例改 **`@pytest.mark.skip`**，**不是删**）。
+
+  ⚠️ **那两条 skip 掉的用例不是"没用了"** —— 它们守的是
+  「**同步 Playwright 不能在事件循环所在线程里跑**」那个真坑（2026-09-20 实测修过）。
+  **重新启用端点时必须一并取消 skip。**
+
+  **数字变化**：`TOOLS` **6 → 4** · LLM 工具表 **6 → 4** · `OPENAPI_PATHS` **59 → 57**。
+
+  📌 **顺带核出一件事（不是本次引入的）**：`len(app.routes)` **没变**（预期 14→12）——
+  因为三个子路由器是以 `_IncludedRouter` 对象**整体**计入的，**在子路由器里加/删端点它根本不动**。
+  ⇒ 本仓一直当门用的 `ROUTES` 那半边，**对子路由器内的端点增删是瞎的**；真正守住的是 `OPENAPI_PATHS`。
+  **已登记，未擅自改门。**
+
 - **§三 清理 · B 类（死代码 / 多余调用）—— 删 5 处、保留并标注 4 处**（2026-09-20 · 分支 `chore/section3-cleanup`）。
 
   **⚠️ 动手前每条判据都【重跑过】** —— 因为 §五 已证明审计的"孤儿"结论会错（`get_thread_cost` 其实是活的）。
