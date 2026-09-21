@@ -235,6 +235,19 @@ All notable changes to this project will be documented in this file.
 - **`docs/复盘/`** —— 过程错误记录机制,含 `模板-复盘.md` 与当日 3 份复盘。
 - **`CHANGELOG.md`** —— 本文件。
 
+### Added
+
+- **`CLAUDE.md` 新增「推送节奏(跨项目纪律)」**（2026-09-21 · 业务方给定原文）。
+
+  **为什么本仓也要存一份**：用户级 `~/.claude/CLAUDE.md` **不入库** ⇒ **克隆者 / 换机器看不到**，
+  而本仓是 PUBLIC 仓。**两处核心段落逐字一致**（已用脚本核过：15 行完全相同），
+  本仓版本额外带「来源」与「本仓实测补充」两段（**那两段是本仓特有的**）。
+
+  **它记的是这次会话实测到的**：一整个会话里 `git push` / `git fetch` **断了 4 轮**，
+  而 `gh api` / `gh pr create` **全程能通** —— 是**传输抖动，不是权限/证书问题**。
+  附两条判据：**fetch 失败时本地 `origin/*` ref 是旧的（提示会骗人）**；
+  **回查 PR 用 `gh pr view --json state,mergeCommit`，别信 `gh pr merge` 的退出码**。
+
 ### Changed
 
 - 🔴 **真执行层的配套：超时 / 成本（③ · 2026-09-21 · 见 `DEC-027`）—— 三项其实是【同一个洞的三个面】**
