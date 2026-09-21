@@ -188,6 +188,65 @@ def test_tool_exception_propagates(monkeypatch):
 
 
 # ===========================================================================
+# 🔴 「降级」不许把失败原因吃掉 —— 否则「炸了」与「真跑出来」长得一样
+# ===========================================================================
+def test_downgraded_step_keeps_the_real_reason(monkeypatch):
+    """工具的**降级分支**必须留下真实失败原因，不能只剩一句编好的兜底文案。
+
+    ⚠️ **判据为什么是"那个原因串在不在"，而不是"输出像不像失败"**：
+       兜底文案「工具 X 当前不可用，使用备用策略生成结果。」**读起来像【有意降级】**，
+       而它实际是 `except: pass` **吞掉的一个异常** —— **跑一下看不出**。
+       只有断言**真实原因**（`工具内部炸了`）在里面，才能把这两者分开。
+
+    📌 **同一个洞的第三面**：`execute_single_step` 的 docstring（`:562`）明文写
+       「**失败一律【抛异常】，不吞成错误字符串** —— 上游两条路都是靠异常工作的」，
+       **并且点名了就是这个降级分支** —— 而**那个分支自己正是反面**。
+       （另两面：`test_unknown_tool_raises_instead_of_returning_a_string` ·
+         `test_tool_exception_propagates`）
+
+    驱动方式（不碰真 LLM）：
+      让每一步都"彻底失败" ⇒ 同一工具连败 3 次进 `failed_tools` ⇒ 下一步走降级分支。
+    """
+    import plan_execute as P
+
+    def _explode(args):
+        raise RuntimeError("工具内部炸了")
+
+    monkeypatch.setitem(P._TOOL_HANDLERS, "calculator", _explode)
+    # 每步都判"彻底失败" ⇒ 把同一工具推到 3 连败
+    monkeypatch.setattr(P, "execute_step_with_quality_check",
+                        lambda step, context, goal, name: "执行失败（已重试1次）：假装失败")
+    # 重规划不许真调 LLM：给一份**同样只用 calculator**的计划，把循环推到降级分支
+    monkeypatch.setattr(P, "plan_task",
+                        lambda ctx: [_step("calculator") for _ in range(5)])
+
+    out = P.execute_plan_with_replan([_step("calculator") for _ in range(5)], "目标", "u1")
+
+    assert "工具内部炸了" in out, (
+        "降级分支把真实失败原因吞了 ⇒ **兜底文案与真结果无法区分**。\n"
+        f"实际输出：\n{out}"
+    )
+
+
+def test_plan_execute_has_no_bare_except():
+    """结构判据：`plan_execute.py` 里**不许有裸 `except:`**（连 `KeyboardInterrupt` 都吞）。
+
+    ⚠️ 与上一条**互补**：上一条管"原因有没有留下"，这一条管"别把整个解释器的中断信号也吃掉"。
+       两者**跑真实业务都看不出**，所以都得是**结构性**判据。
+    """
+    import ast
+    import pathlib
+
+    src = pathlib.Path(__file__).with_name("plan_execute.py").read_text(encoding="utf-8")
+    bare = [
+        node.lineno
+        for node in ast.walk(ast.parse(src))
+        if isinstance(node, ast.ExceptHandler) and node.type is None
+    ]
+    assert not bare, f"plan_execute.py 存在裸 except（行 {bare}）—— 请写成 except Exception"
+
+
+# ===========================================================================
 # 代码围栏：LLM 很爱给 execute_python 包 ```，包着会直接语法错
 # ===========================================================================
 @pytest.mark.parametrize(

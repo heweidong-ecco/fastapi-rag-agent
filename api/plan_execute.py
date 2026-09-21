@@ -292,13 +292,26 @@ def execute_plan_with_replan(plan: List[Dict], user_goal: str = "",
         
         # 检查工具是否已失效
         if tool_name in failed_tools:
-            # 工具已失效，跳过这一步（或用LLM模拟）
-            fallback_result = f"工具 {tool_name} 当前不可用，使用备用策略生成结果。"
-            # 可选：用LLM模拟该工具的输出
+            # 工具已失效 —— **仍然试一次真调用**，但**失败原因必须留下**。
+            # 🔴 2026-09-21 修（复盘 `docs/复盘/2026-09-21-拿动作成功当结果正确.md` §五·A）。
+            #    改前是：`fallback_result = <一句编好的串>` + `except: pass`，三处问题：
+            #      ① 与 `execute_single_step` 的 docstring 契约**正好相反** ——
+            #         `:562` 明文写「**失败一律【抛异常】，不吞成错误字符串** ——
+            #         上游两条路都是靠异常工作的」，**并且点名了本分支**。
+            #      ② **裸 `except:`** ⇒ 连 `KeyboardInterrupt` / `SystemExit` 也吞。
+            #      ③ **失败原因被 `pass` 丢掉** ⇒ 产物与真结果**下游无法区分**
+            #         （旧输出是 N 行一模一样的套话，连"哪一步、为什么"都读不出来）。
+            #    ⇒ 现在：仍试真调用；失败就把**真实原因**写进结果，不用编好的套话。
+            #    ⚠️ 判据见 `test_downgraded_step_keeps_the_real_reason` —— 它必须是
+            #       「真实原因串在不在」这种**结构性**判据：套话读起来像【有意降级】，
+            #       **跑一下看不出**它是被吞掉的异常。
             try:
                 fallback_result = execute_single_step(step, step.get("input", ""), context)
-            except:
-                pass
+            except Exception as e:
+                fallback_result = (
+                    f"工具 {tool_name} 已连续失败 3 次，本次降级**未执行**；"
+                    f"真实原因：{type(e).__name__}: {e}"
+                )
             result_summary = f"步骤{step_num}（{tool_name}已降级处理）：{fallback_result[:200]}"
             
             results.append(result_summary)

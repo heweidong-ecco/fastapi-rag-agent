@@ -338,6 +338,41 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- 🔴 **`plan_execute` 的降级分支【吃掉真实失败原因】—— 已修**（2026-09-21 · 见 `DEC-030`）
+
+  **它让「炸了」与「真跑出来」在下游长得一模一样** —— 与
+  `docs/复盘/2026-09-21-拿动作成功当结果正确.md` 的根因**是同一条**。
+
+  ```python
+  # 改前（api/plan_execute.py:298-301）
+  fallback_result = f"工具 {tool_name} 当前不可用，使用备用策略生成结果。"  # ← 先填一个【编好的】串
+  try:
+      fallback_result = execute_single_step(step, step.get("input", ""), context)
+  except:            # ← 裸 except（连 KeyboardInterrupt 也吞）
+      pass           # ← 失败原因【被丢掉】
+  ```
+
+  **四处问题**：① 与 `execute_single_step` 的 docstring（`:562`「失败一律抛异常，
+  不吞成错误字符串」，**并点名了本分支**）**正好相反**；② 裸 `except:`；
+  ③ **失败原因被 `pass` 丢掉**；④ 编好的串进 `results`/`context`，**下游当它是真内容** ——
+  而文案「使用备用策略生成结果」**读起来像有意降级**。
+
+  **实测（改前）**：输出是 **5 行完全相同的套话**，连"哪一步、为什么"都读不出来，
+  真实原因 `工具内部炸了` **一个字都没有**。
+
+  **本次动作**：`except: pass` → `except Exception as e`，**真实原因写进结果**。
+  降级本身**保留**（它存在的意义就是"工具死了别让整条计划崩"）——
+  问题**不在"它吞了"，在"它把原因也一起吞了"**。
+
+  **补 2 条【结构性】用例**（跑一下看不出，所以判据必须是结构性的）：
+  `test_downgraded_step_keeps_the_real_reason`（结果里必须有真实原因串）·
+  `test_plan_execute_has_no_bare_except`（`ast` 查全文件不许再有裸 `except:`）。
+
+  **红→绿已证** · 全套 **116 passed / 3 skipped / 11 deselected**（改前 114 ⇒ **+2，零回归**）。
+
+  **⬜ 未做**：让降级分支**直接抛异常**（= 完全按 docstring 字面，但会改变端点的失败形态）
+  —— 属**独立决策**，本次不取（`DEC-030` §遗留）。
+
 - 🔴 **查出【两套配额口径不一致】并把 `plan_execute` 的真实每日上限钉住**（遗留 #3 · 2026-09-21 · 见 `DEC-029`）
 
   **本仓同时存在两套配额，口径不同、且互不知情**：
