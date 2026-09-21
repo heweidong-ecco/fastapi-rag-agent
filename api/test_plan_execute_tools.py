@@ -203,3 +203,145 @@ def test_strip_code_fence(raw, expected):
     import plan_execute as P
 
     assert P._strip_code_fence(raw) == expected
+
+
+# ===========================================================================
+# ③-b · 预算与记账 —— `plan_execute` 以前【完全不查预算、不记账】
+# ===========================================================================
+def _fake_llm(usage, content="ok"):
+    class _R:
+        pass
+
+    class _L:
+        model_name = "fake-model"
+
+        def invoke(self, messages):
+            r = _R()
+            r.content = content
+            r.usage_metadata = usage
+            return r
+
+    return _L()
+
+
+def test_invoke_llm_raises_budget_exceeded(monkeypatch):
+    """预算不足时**必须抛 `BudgetExceededError`** —— 端点据此报 QUOTA_EXCEEDED（而不是漏成 500）。
+
+    🔴 这条守的是：`/agent/plan_execute` **以前根本不查预算** ⇒ 免费用户的每日配额管不到它。
+    """
+    import plan_execute as P
+
+    monkeypatch.setattr(P, "check_budget_before_call", lambda *a, **k: (False, "预算已用完"))
+
+    called = []
+    llm = _fake_llm({"input_tokens": 1, "output_tokens": 1})
+    monkeypatch.setattr(llm, "invoke", lambda m: called.append(1))
+
+    with pytest.raises(P.BudgetExceededError, match="预算已用完"):
+        P._invoke_llm(llm, [], purpose="plan_execute.plan", user_name="u1")
+
+    assert called == [], "预算不足时**不该**还去调 LLM（钱已经花出去了）"
+
+
+def test_invoke_llm_records_real_usage(monkeypatch):
+    """正常时按 `usage_metadata` 的【真实 token】记账（照 2 代 `/agent/mcp_chat` 的模式）。"""
+    import plan_execute as P
+
+    monkeypatch.setattr(P, "check_budget_before_call", lambda *a, **k: (True, "充足"))
+    recorded = {}
+    monkeypatch.setattr(P, "record_usage", lambda **kw: recorded.update(kw))
+
+    P._invoke_llm(
+        _fake_llm({"input_tokens": 123, "output_tokens": 45}),
+        [], purpose="plan_execute.quality_check", user_name="u1",
+    )
+
+    assert recorded["prompt_tokens"] == 123
+    assert recorded["completion_tokens"] == 45
+    assert recorded["purpose"] == "plan_execute.quality_check"
+    assert recorded["user_name"] == "u1", "记账必须落到【发起人】头上，否则配额管不到他"
+    assert recorded["model"] == "fake-model"
+
+
+def test_invoke_llm_does_not_fabricate_usage(monkeypatch):
+    """没有 `usage_metadata` 时**如实不记** —— 不编一个数字塞进账里。"""
+    import plan_execute as P
+
+    monkeypatch.setattr(P, "check_budget_before_call", lambda *a, **k: (True, "充足"))
+    recorded = []
+    monkeypatch.setattr(P, "record_usage", lambda **kw: recorded.append(kw))
+
+    P._invoke_llm(_fake_llm(None), [], purpose="plan_execute.plan", user_name="u1")
+
+    assert recorded == [], "没有真实用量却记了账 —— 那是在【编数字】"
+
+
+def test_plan_execute_entry_points_accept_user_name():
+    """两个入口必须能收 `user_name` —— 否则记账落不到人头上，配额就是摆设。"""
+    import inspect
+
+    import plan_execute as P
+
+    for fn in (P.plan_task, P.execute_plan, P.execute_plan_with_replan):
+        assert "user_name" in inspect.signature(fn).parameters, (
+            f"{fn.__name__} 没有 user_name 形参 ⇒ 记账会落到 'unknown'，配额管不到任何人"
+        )
+
+
+# ===========================================================================
+# ③ 的遗留 · LLM 调用自身的超时 + 整条计划的总时长上限
+# ===========================================================================
+def test_llm_clients_have_explicit_timeouts():
+    """三个 LLM 客户端**必须显式设超时** —— 否则吃 openai SDK 默认的 `read=600s`。
+
+    🔴 这条守的是「**③ 只补了工具调用、漏了 LLM 调用**」那半边：
+       实测（2026-09-21）三个客户端都是 `timeout=None` ⇒ 吃 SDK 默认
+       `connect=5s / read=600s / write=600s`，**且 SDK 还会自己 max_retries=2**
+       ⇒ **一次调用最坏等 600 × (1+2) = 30 分钟**；而 `plan_execute` 最坏跑
+       「3–7 步 × 每步重试 3 次 × 每步 2 次 LLM 调用」⇒ **理论上能挂几个小时**。
+
+    ⚠️ 这里**断言"非 None"而不是断言具体秒数** —— 秒数是可以调的参数，
+       而"**必须显式**"才是要守的性质（回到 SDK 默认 = 回到 10 分钟）。
+    """
+    import plan_execute as P
+
+    for name in ("planner_llm", "executor_llm", "quality_checker_llm"):
+        llm = getattr(P, name)
+        assert llm.request_timeout is not None, (
+            f"{name} 没设超时 ⇒ 会吃 openai SDK 默认的 read=600s（10 分钟）"
+        )
+        assert llm.max_retries is not None, (
+            f"{name} 的 max_retries 是 None ⇒ 吃 SDK 默认 2 —— 最坏时长不可算"
+        )
+
+
+def test_plan_stops_when_total_budget_exceeded(monkeypatch):
+    """**整条计划**要有总时长上限 —— 而且停下来时必须【如实说没跑完】。
+
+    ⚠️ 判据有两层，缺一不可：
+      ① 真的停下来了（不是继续跑）
+      ② 输出里**明说"结果不完整"** —— 不能让它看起来像正常结束
+    """
+    import plan_execute as P
+
+    # ⚠️ **不要用 `0`** —— 那是个**边界**不是"已超"：判据是 `elapsed > budget`，
+    #    而第一次检查时 `elapsed ≈ 0`（`time.time()` 微秒精度，两次连续调用甚至可能同值）
+    #    ⇒ `0 > 0` 为 False ⇒ 第一步照跑。用 `-1` 才是**确定的"已超"状态**。
+    monkeypatch.setattr(P, "PLAN_TOTAL_BUDGET_SECONDS", -1)
+
+    called = []
+    monkeypatch.setattr(
+        P, "execute_step_with_quality_check",
+        lambda *a, **k: called.append(1) or "不该被调用",
+    )
+
+    out = P.execute_plan_with_replan(
+        [{"step": 1, "action": "a", "tool": "calculator", "input": "1+1"},
+         {"step": 2, "action": "b", "tool": "calculator", "input": "2+2"}],
+        "目标", "u1",
+    )
+
+    assert called == [], "总预算已超，却还执行了步骤"
+    assert "超过总时长预算" in out, out
+    assert "结果不完整" in out, f"停下来时没如实说明结果不完整：{out!r}"
+    assert "2 个步骤未执行" in out, f"没报出剩余步骤数：{out!r}"
