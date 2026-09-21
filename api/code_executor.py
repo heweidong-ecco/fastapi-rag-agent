@@ -40,8 +40,12 @@ def execute_python(code: str) -> str:
 
     **重要：此工具只能执行代码，不能生成或编写代码。**
 
+    **重要：不要写 `import`！**
+    下列模块**已经直接可用**（已注入到执行环境里），**直接调用即可**：
+    `math` · `json` · `datetime` · `collections` · `itertools` · `functools` · `re` · `statistics` · `random`
+    例：写 `print(math.sqrt(16))` ✅ ／ **不要**写 `import math` ❌（会报 `ImportError: __import__ not found`）
+
     **安全限制：**
-    - 允许的模块：math, json, datetime, collections, itertools, functools, re, statistics, random
     - 禁止文件操作、网络访问、系统命令
     - 最长执行时间：5秒
     - 最大输出长度：2000字符
