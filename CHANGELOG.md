@@ -338,6 +338,62 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- 🔴 **RAGAS 实跑验证【终于跑通】—— 卡住它的是三方不兼容，不是本仓 RAG**（2026-09-21 · 见 `DEC-031` / `DEC-032`）
+
+  **业务方裁过「排最后」的那条待办，做完了。** 结论：**37 条全量跑通，四个指标全是真实数值**。
+
+  | 指标 | **旧报告**（原系统 · 2026-06-29） | **本次**（2026-09-21） |
+  |---|---|---|
+  | `faithfulness` | 0.6267 | **0.8997** |
+  | `answer_relevancy` | **NaN** 🔴 | **0.6615** |
+  | `context_recall` | 0.7568 | 0.6757 |
+  | `context_precision` | 0.4369 | **0.6734** |
+
+  ⚠️ **两列【不能直接比】** —— 中间隔着三次修复 + 不同的运行环境。**只作参考，不当结论。**
+
+  **🔴 顺带查出：入库的那份 `ragas_report.json` 是【非法 JSON】**（裸露 `NaN` 常量）——
+  `jq` / `JSON.parse` / 任何严格解析器都会拒。**新报告是合法 JSON。**
+
+  ---
+
+  **三处不兼容（各自属于【不同的系统】，所以特别难查）**：
+
+  | # | 症状 | 根因方 | 根因 | 修法 |
+  |---|---|---|---|---|
+  | **1** | `faithfulness` **恒 `nan`** | **RAGAS 自己** | `_faithfulness.py:216` 写死 `endswith(".")` ⇒ **中文 `。` 全被滤掉** ⇒ 0 语句 ⇒ `nan`（**静默**，`raise_exceptions=True` 都不抛） | 子类覆盖，**只放宽句末标点** |
+  | **2** | `answer_relevancy` 400 | **DeepSeek** | `strictness=3` ⇒ 要 `n=3`，而它**只支持 `n=1`** | `strictness = 1` |
+  | **3** | `answer_relevancy` 400 | **DashScope** | `OpenAIEmbeddings` 默认 `check_embedding_ctx_length=True` ⇒ **把文本 tokenize 成 id 数组发出去**，OpenAI 认、DashScope 不认 | `check_embedding_ctx_length=False` |
+
+  **三条根因都是拿【决定性对照实验】定的**，不是读代码猜的。例（第 1 条）：
+
+  ```
+  中文答案 "…Web 开发。它也是…领域。" → 切 2 句 → 按 endswith('.') 过滤后 【0 条】 ⇒ nan
+  英文答案 "Python is…. It is…."     → 切 2 句 → 按 endswith('.') 过滤后 【2 条】 ⇒ 正常
+  ```
+
+  ⚠️ **第 3 条最容易误判**：连 `embed_query("一句普通中文")` 都挂 —— 与长短、中英文、批量**都无关**，
+  看起来像"embedding 服务挂了"。而**应用自己**的 embedding 是好的 ⇒ 是**客户端配置差异**，不是服务不可用。
+
+  ---
+
+  **依赖隔离**（`DEC-031`）：`requirements.txt` 的 `ragas>=0.1.18` **没钉死**，`pip install --dry-run` 实测：
+
+  | 装法 | 它会做什么 |
+  |---|---|
+  | 默认（解析到 `0.4.3`） | `openai` **1.109.1 → 2.54.0**（主版本跳跃） |
+  | 钉 `ragas==0.1.21` | `langchain` **0.3.30 → 0.2.17**（降级） |
+
+  **两条路都会动到产品 venv 的核心依赖**（116 绿就建在上面）⇒ 改为**独立 `venv-ragas/`**。
+  ✅ **产品 venv 逐包比对【零差异】**（160 包存底可复验）。
+
+  **judge LLM 改走 `.env`**（原硬编码 DashScope，而它 chat 额度已耗尽 403）——
+  顺带修掉"项目换模型时脚本不跟着换，却看起来还在正常工作"这个隐患。
+
+  ⚠️ **`ragas==0.1.21` 是必须钉的**：脚本写的是 **0.1.x 的 API**，`evaluate()` 签名在 0.4.x 已变。
+
+  **⬜ 未做**：`strictness=1` 的方差代价未量化 · `ZhFaithfulness` 是子类覆盖、**升级 ragas 后会静默失效** ·
+  指标本身的有效性（阈值定多少）**未评估** —— 本次只回答「**能不能跑通**」，答案是**能**。
+
 - 🔴 **`plan_execute` 的降级分支【吃掉真实失败原因】—— 已修**（2026-09-21 · 见 `DEC-030`）
 
   **它让「炸了」与「真跑出来」在下游长得一模一样** —— 与

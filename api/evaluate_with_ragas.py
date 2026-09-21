@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from datasets import Dataset
 from ragas import evaluate
 from ragas.metrics import (
+    Faithfulness,       # ← 2026-09-21 加：本脚本要用【修正过的子类】替掉它（见下方 ZhFaithfulness）
     faithfulness,
     answer_relevancy,
     context_recall,
@@ -32,18 +33,83 @@ API_PASSWORD = os.getenv("LOGIN_PASSWORD", "")
 TOP_K = 3
 
 # 用于生成答案和 RAGAS 评估的 LLM
+# 🔴 2026-09-21 改（业务方裁 · 见 `DEC-031`）：**judge LLM 从【硬编码 DashScope】改为【读 `.env`】。**
+#
+#    **为什么必须改**：DashScope 的 **chat 免费额度已耗尽（403）** ⇒
+#    这个脚本**装好包也跑不动**。而更别扭的是 —— 它**硬编码走 DashScope**，
+#    **绕开了项目早就切过去的 DeepSeek**（本仓 `.env` 的 `LLM_*` 三项就是 DeepSeek）。
+#
+#    ⚠️ 顺带修掉一个隐患：原写法把 `qwen-plus` 和 DashScope 的 base_url **写死在脚本里**，
+#       ⇒ 项目换模型时**这个脚本不会跟着换**，而它看起来"还在正常工作"。
 eval_llm = ChatOpenAI(
-    model="qwen-plus",
-    api_key=os.getenv("DASHSCOPE_API_KEY"),
-    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-    temperature=0
+    model=os.getenv("LLM_MODEL_CHAT", "deepseek-chat"),
+    api_key=os.getenv("LLM_API_KEY"),
+    base_url=os.getenv("LLM_BASE_URL"),
+    temperature=0,
 )
 
+# ⚠️ **embedding 保持 DashScope**（业务方 2026-09-21 明确）——
+#    chat 额度耗尽了，但 **embedding 那边仍可用**（`text-embedding-v2`，1536 维）。
+#    📌 与 `api/config.py` 的 embedding 配置**同源**（同一个模型名 / base_url），
+#       差别只在这里显式取 `DASHSCOPE_API_KEY`（本脚本独立于应用运行）。
+#
+# 🔴 2026-09-21 加 `check_embedding_ctx_length=False` —— **必须加，否则必炸**。
+#    实测（见 `DEC-032`）：
+#      `True`（**默认值**）→ 400 `InvalidParameter: Value error,
+#                            contents is neither str nor list of str.: input.contents`
+#      `False`            → ✅ 维度 1536
+#    原因：`OpenAIEmbeddings` 默认**先把文本 tokenize 成 token-id 数组**再发出去
+#    （`input` 是 list[int]）。**OpenAI 官方接口接受这种形式，DashScope 的不接受。**
+#    ⚠️ 连 `embed_query("一句普通中文")` 都会挂 —— 与问题长短、中英文**都无关**。
 eval_embeddings = OpenAIEmbeddings(
     model="text-embedding-v2",
     api_key=os.getenv("DASHSCOPE_API_KEY"),
-    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
+    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+    check_embedding_ctx_length=False,
 )
+
+# ============================================================================
+# 🔴 RAGAS 与【中文 + DeepSeek】的三处不兼容 —— 均在 2026-09-21 实测定位并修掉
+# ============================================================================
+# 三处**都不是本仓 RAG 系统的错**，是评估链三方之间的不兼容。见 `DEC-032`。
+
+# ① `answer_relevancy` 的 `strictness`（默认 3）⇒ 向 judge 要 **n=3** 个补全。
+#    ⚠️ **DeepSeek 明确拒绝**：`Invalid n value (currently only n = 1 is supported)` ⇒ 400 ⇒ nan。
+#    ⇒ 收到 1。（`strictness` 是 RAGAS 官方参数，不是我们发明的开关。）
+answer_relevancy.strictness = 1
+
+
+# ② `faithfulness` 对**中文答案恒为 nan** —— RAGAS 自己的 bug。
+#    `ragas/metrics/_faithfulness.py:216` 把"什么算一句话"写死成 **ASCII 句点**：
+#        sentences = [s for s in sentences if s.strip().endswith(".")]
+#    而中文答案以 `。` 结尾 ⇒ **全部被滤掉** ⇒ 提示里 0 条语句 ⇒ `No statements were
+#    generated from the answer.` ⇒ `score = np.nan`（**静默 nan，连
+#    `raise_exceptions=True` 都不抛**）。
+#
+#    ✅ 决定性实验（对照）：
+#        中文答案 "…Web 开发。它也是…领域。"  → 切 2 句 → 过滤后 **0 条** → nan
+#        英文答案 "Python is…. It is…."     → 切 2 句 → 过滤后 **2 条** → 正常
+#
+#    ⇒ 只放宽"句末标点"这一条判断，**其余逻辑一个字不动**。实测 nan → **0.857**。
+class ZhFaithfulness(Faithfulness):
+    """`Faithfulness` 的中文修正版 —— 句末标点不只认 ASCII `.`。"""
+
+    _SENTENCE_END = "。．.！？!?；;"
+
+    def _create_statements_prompt(self, row):
+        answer, question = row["answer"], row["question"]
+        sentences = self.sentence_segmenter.segment(answer)
+        # ⬇ 原版是 `sentence.strip().endswith(".")` —— 中文句号一个都过不去。
+        sentences = [
+            s for s in sentences if s.strip() and s.strip()[-1] in self._SENTENCE_END
+        ]
+        sentences = "\n".join([f"{i}:{x}" for i, x in enumerate(sentences)])
+        return self.statement_prompt.format(
+            question=question, answer=answer, sentences=sentences
+        )
+
+
+zh_faithfulness = ZhFaithfulness()
 
 # 生成最终答案的简单链
 answer_prompt = ChatPromptTemplate.from_messages([
@@ -201,7 +267,8 @@ def main():
     print("\n4. 运行 RAGAS 评估...")
     result = evaluate(
         ragas_dataset,
-        metrics=[faithfulness, answer_relevancy, context_recall, context_precision],  # 新增 context_precision
+        # ⚠️ `zh_faithfulness`（修正过的子类），**不是** `faithfulness`（对中文恒 nan，见文件上方）。
+        metrics=[zh_faithfulness, answer_relevancy, context_recall, context_precision],
         llm=eval_llm,
         embeddings=eval_embeddings,
     )
