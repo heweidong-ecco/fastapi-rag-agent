@@ -424,3 +424,53 @@ def test_llm_timeouts_are_calibrated_to_measurement():
         f"最坏单次 = {worst_single}s ≥ 总预算 {P.PLAN_TOTAL_BUDGET_SECONDS}s —— "
         f"【一次卡住就能吃光整个计划的预算】，总预算形同虚设。"
     )
+
+
+# ===========================================================================
+# 🔴 把「FREE 用户对 plan_execute 的【真实】每日上限」钉住
+# ===========================================================================
+# 实测（2026-09-21）：一次 `plan_execute`（4 步目标）的真实 token 消耗。
+# 测法：查 `token_usage_logs` 里 `user_name='admin'` 的**累计值** → 跑一次 → 再查 → 取差值。
+#   ⇒ 27916 − 24570 = **3346 tokens**（该次 9 次 LLM 调用：1 规划 + 4 动态输入 + 4 质量检查）
+# ⚠️ 会随目标步数浮动（3 步 + 一次真网络搜索那次更贵）⇒ 这里以 4 步的 3346 为基准。
+_MEASURED_PLAN_EXECUTE_TOKENS = 3346
+
+
+def test_free_users_real_daily_limit_on_plan_execute_is_known():
+    """钉住 FREE 用户对 `plan_execute` 的**真实**每日上限 —— 以及「**哪套配额在生效**」。
+
+    🔴 本仓有**两套互不知情的配额**，口径不同：
+
+      | 口径 | 出处 | FREE 限额 |
+      |---|---|---|
+      | **请求次数** | `permission.ROLE_QUOTA`（中间件用） | **100/天** |
+      | **Token** | `token_tracker.ROLE_TOKEN_BUDGET`（`_invoke_llm` 用） | **10_000/天** |
+
+    **两者都在拦**，而 `plan_execute` 一次请求实测要花 **~3346 tokens**
+    ⇒ **实际生效的是 token 那套**，**次数配额（100）根本用不完**。
+
+    ⚠️ **「FREE 每天约 3 次」这个数【没有任何人选择过】** ——
+       它是两个独立系统的**意外交集**。本用例把它变成**已知且被测的**。
+
+    📌 **谁改了 `ROLE_TOKEN_BUDGET`、或让 `plan_execute` 变贵/变便宜，这条会红** ——
+       提醒去**重新测一次**并更新记录（`DEC-029`）。
+       ⭐ **这不是"防改动"，是"防不知情"。**
+    """
+    from permission import UserRole, ROLE_QUOTA
+    from token_tracker import ROLE_TOKEN_BUDGET
+
+    by_requests = ROLE_QUOTA[UserRole.FREE]                      # 次数口径
+    by_tokens = ROLE_TOKEN_BUDGET["free"] / _MEASURED_PLAN_EXECUTE_TOKENS  # token 口径
+
+    assert by_tokens < by_requests, (
+        "对 plan_execute 而言，【token 口径本该比次数口径严】—— 现在不是了。\n"
+        "⇒ 是不是有人把 `ROLE_TOKEN_BUDGET['free']` 调大了、或单次成本降下来了？\n"
+        "⇒ 请**重新实测单次 token 消耗**，并更新本用例与 DEC-029。"
+    )
+
+    assert 2 <= by_tokens <= 5, (
+        f"FREE 用户每天实际能跑 **{by_tokens:.1f}** 次 plan_execute —— 与记录（**3.0**）不符。\n"
+        f"  （token 预算 {ROLE_TOKEN_BUDGET['free']} ÷ 实测单次 {_MEASURED_PLAN_EXECUTE_TOKENS}）\n"
+        f"⚠️ 若这是【有意】改的，请**重新实测单次消耗**、更新这条用例与 `DEC-029`；\n"
+        f"⚠️ 若是【无意】的（比如改了预算表却没意识到会波及这条最贵的接口），那正好——本条就是为这个而设。"
+    )
