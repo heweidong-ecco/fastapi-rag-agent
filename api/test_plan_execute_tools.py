@@ -383,3 +383,44 @@ def test_dynamic_input_receives_the_real_user_name(monkeypatch):
         "⇒ 这部分 token 会记在 `unknown` 头上 ⇒ 配额管不到真正用的人。\n"
         "⚠️ 检查是不是又漏传了（历史事故：盲替换命中了注释，真正的调用点没改到）。"
     )
+
+
+# ===========================================================================
+# ③ 遗留 #4 · 超时必须是【按实测校准】的 —— 既不能误杀，也不能吃光总预算
+# ===========================================================================
+# 实测基线（2026-09-21 · 28 次真实调用 · 见 `plan_execute.py` 里那张表）
+_MEASURED_LLM_MAX_SEC = {"plan": 2.68, "dynamic_input": 1.77, "quality_check": 1.56}
+_MIN_HEADROOM = 5  # 至少 5 倍余量
+
+
+def test_llm_timeouts_are_calibrated_to_measurement():
+    """超时**必须是按实测校准的** —— 两个方向都锁。
+
+    · **下界**：每个超时 ≥ 实测 max 的 `_MIN_HEADROOM` 倍
+      ⇒ 防止有人把它收得太紧（**LLM 延迟是重尾分布，观测到的 max ≠ P99**，收紧了会误杀正常请求）
+    · **上界**：最坏单次（`timeout × (1+retries)`）**必须 < 总预算**
+      ⇒ 否则【**一次卡住就能把整个计划的预算吃光**】，总预算形同虚设
+
+    📌 这条是**遗留 #4** 的产物：原来那几个数（60/30/20）是**拍的**，对实测 max 有 13–22 倍余量；
+       `plan` 的 60s 尤其糟 —— 60×(1+1)=120 **正好等于总预算** ⇒ **一次卡住就掐掉整个计划**。
+    ⭐ 本用例把「**校准过**」这件事变成**可执行的**，而不是只写在注释里（注释会被改，判据不会）。
+    """
+    import plan_execute as P
+
+    pairs = [
+        ("planner_llm", P.PLANNER_LLM_TIMEOUT, _MEASURED_LLM_MAX_SEC["plan"]),
+        ("executor_llm", P.EXECUTOR_LLM_TIMEOUT, _MEASURED_LLM_MAX_SEC["dynamic_input"]),
+        ("quality_checker_llm", P.QUALITY_LLM_TIMEOUT, _MEASURED_LLM_MAX_SEC["quality_check"]),
+    ]
+
+    for name, timeout, measured in pairs:
+        assert timeout >= measured * _MIN_HEADROOM, (
+            f"{name} 超时 {timeout}s 对实测 max {measured}s 只剩 {timeout / measured:.1f} 倍余量 —— "
+            f"至少要 {_MIN_HEADROOM} 倍。⚠️ LLM 延迟重尾，收太紧会误杀正常请求。"
+        )
+
+    worst_single = max(t for _, t, _ in pairs) * (1 + P.LLM_MAX_RETRIES)
+    assert worst_single < P.PLAN_TOTAL_BUDGET_SECONDS, (
+        f"最坏单次 = {worst_single}s ≥ 总预算 {P.PLAN_TOTAL_BUDGET_SECONDS}s —— "
+        f"【一次卡住就能吃光整个计划的预算】，总预算形同虚设。"
+    )
