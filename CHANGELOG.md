@@ -237,6 +237,34 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **代码执行沙箱现在**能定义类**了（N18 · 2026-09-21 · 业务方裁「放开」，见 `DEC-023`）。**
+
+  此前：
+  ```python
+  execute_python_impl("class Mine(Exception): pass")
+  # → 代码执行出错: NameError: __build_class__ not found
+  ```
+
+  **🔴 决定性的那条证据 —— 放开它【不增加任何能力】**：
+
+  | 写法 | 放开前 |
+  |---|---|
+  | `class Mine(Exception): pass` | ❌ 报错 |
+  | `Mine = type("Mine", (Exception,), {})` | ✅ **`ok Mine`** —— **早就能用** |
+
+  白名单里**本来就有 `type`** ⇒ 「动态建类」**早就可达**，加 `__build_class__`
+  **只是让 `class` 这种写法也成立**。与 N17（放开异常类）是**同一条逻辑**：
+  放开的是**语言构造**，不是**逃逸通道**。
+
+  ⚠️ **执行时发现 N18 其实是【两件事】**：只加 `__build_class__` **不够** ——
+  实测报 `NameError: name '__name__' is not defined`（`class` 要用它填 `__module__`）
+  ⇒ 还要给**执行全局域**加 `__name__`。
+
+  🔒 **边界未放宽**（已写成可执行断言，不是文字承诺）：`__import__` / `open` / `eval` / `exec`
+  仍不在白名单，且**实测三种逃逸尝试全部报错**。
+  ⛔ 四个**退出机制**（`BaseException` / `SystemExit` / `KeyboardInterrupt` / `GeneratorExit`）
+  **仍刻意不放**。回归用例：`api/test_impl_modules.py::test_sandbox_allows_class_definition`。
+
 - **`docs/重构计划-2026-09-15.md` 里「教你用已删文件」的命令已修**（2026-09-20）。
   该文档 **§〇 环境准备**里的 `venv/bin/pip install -r api/requirements-test.txt` ——
   而 **`-test` 已于同日被业务方裁决删除** ⇒ **照抄这条命令会直接失败**。

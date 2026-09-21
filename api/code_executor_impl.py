@@ -45,6 +45,25 @@ ALLOWED_BUILTINS = [
     "IndexError", "KeyError", "NameError", "NotImplementedError",
     "OSError", "RuntimeError", "StopIteration", "TypeError",
     "ValueError", "ZeroDivisionError",
+
+    # ⚠️ 2026-09-21 加（§十四·N18 · 业务方裁「放开」）：`__build_class__` —— **让 `class` 语法成立**。
+    #
+    #    此前被执行的代码**不能定义类**：
+    #      `class Mine(Exception): pass` ⇒ `NameError: __build_class__ not found`
+    #
+    #    🔴 **为什么放开它【不增加任何新能力】**（实测，2026-09-21）：
+    #       白名单里**本来就有 `type`** ⇒ 「动态建类」这个能力**早就可达**了：
+    #         `Mine = type("Mine", (Exception,), {})`        → 可用 ✅
+    #         `M    = type("M", (), {"f": lambda self: 42})` → 可用 ✅
+    #       ⇒ 加 `__build_class__` **只是让 `class` 这种写法也成立**，
+    #         **不是新开一条能力，更不是新开一条逃逸路径**。
+    #
+    #    与 N17（放开异常类）是**同一条逻辑**：放开的是**语言构造**，不是**逃逸通道**。
+    #    实测：`__build_class__` 本身只是类创建的**原语**，白名单里仍**没有**
+    #    `__import__` / `open` / `eval` / `exec` ⇒ 逃逸面未变。
+    #
+    #    ⛔ **仍然【不】放开的**：见上面 N17 那段列的四个**退出机制**。
+    "__build_class__",
 ]
 
 ALLOWED_MODULES = [
@@ -67,6 +86,17 @@ MAX_OUTPUT_LENGTH = 2000  # 最大输出字符数
 def create_safe_globals() -> dict:
     """创建一个安全沙箱的执行环境"""
     safe_globals = {"__builtins__": {}}
+
+    # ⚠️ 2026-09-21 加（§十四·N18）：`__name__` —— **`class` 语句要用它填 `__module__`**。
+    #
+    #    只加 `__build_class__`（见 ALLOWED_BUILTINS）**还不够** —— 实测报的是
+    #      `NameError: name '__name__' is not defined`
+    #    （`__build_class__` 的调用点会去全局域取 `__name__`）。
+    #    ⇒ **N18 实际是两件事**：白名单要放 `__build_class__`，执行全局域要给 `__name__`。
+    #
+    #    🔒 安全性：`__name__` 只是个**字符串**，不提供任何逃逸能力。
+    #       它必须是**执行全局域**（`safe_globals`）的键，**不是** builtins 的键 —— 放错位置无效。
+    safe_globals["__name__"] = "__sandbox__"
 
     # 只注入允许的内置函数
     import builtins
