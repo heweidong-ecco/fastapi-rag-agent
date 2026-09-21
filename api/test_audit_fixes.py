@@ -235,3 +235,51 @@ def test_cached_tool_does_not_recurse_forever_when_lock_never_acquired(monkeypat
 
     assert result == 6, "抢不到锁时应当【降级为直接执行】，把结果正常返回"
     assert calls == [3], "且只应真正执行一次（不能重复调用工具函数）"
+
+
+# ===========================================================================
+# §三·3.7 / N14 · markdown 图片规则【不是死代码】—— 别删
+# ===========================================================================
+def test_markdown_image_rule_is_not_dead():
+    """`document_preprocessor.remove_noise_markers` 里那条 markdown 图片规则，**不是死代码**。
+
+    🔴 **登记文件原写「这条规则从未生效」—— 实测证明那是错的**（2026-09-21）：
+       它在 `legal` / `medical` 两个域**正在干活**（那两个域的配置里【没有】图片规则）
+       ⇒ **删掉它，那两个域的图片处理会坏。**
+
+    ⚠️ **为什么要有这条用例**：本仓规矩是「**有结构才执行，只有文字就漏**」——
+       光在那行代码上写注释"别删"，下一个会话照样会删。
+
+    判据（三个域各跑一次）：
+      · `legal` / `medical` —— 靠**硬编码这一条**把 `![alt](url)` 收敛成 `alt`
+      · `default` —— 配置里有一条**逐字等价**的规则**先跑** ⇒ 这一条多余；
+        但 `default` 的 URL 规则**排在图片规则之前**，把 `![alt](http://…)` 打成 `![alt](`
+        ⇒ **两条图片规则都不匹配**（🔴 **真问题在这里**）
+    """
+    from document_preprocessor import DocumentPreprocessor
+
+    # ① legal / medical 域：硬编码那条【在干活】—— 两个域都必须收敛成功
+    for dom in ("legal", "medical"):
+        out = DocumentPreprocessor(domain=dom).remove_noise_markers("看图 ![图](http://x/y.png) 结束")
+        assert out == "看图 图 结束", (
+            f"domain={dom} 的图片收敛坏了（得到 {out!r}）⇒ "
+            "`document_preprocessor.remove_noise_markers` 里那条 markdown 图片规则"
+            "被删了/失效了。⚠️ 它不是死代码：legal/medical 两个域的配置里【没有】图片规则，"
+            "靠的就是它。"
+        )
+
+    # ② default 域：相对路径也要收敛（这一条是配置里那条等价规则在做）
+    d = DocumentPreprocessor(domain="default")
+    assert d.remove_noise_markers("看图 ![图](local.png) 结束") == "看图 图 结束"
+
+    # ③ 🔴 **故意锁住当前已知的缺陷** —— `default` 域 + http 图片仍然残废。
+    #    这条断言红了 = 有人把 default 域的规则顺序修好了 ⇒ 请去更新登记与代码注释，
+    #    而不是让文档悄悄过期（与 N17 那条用例同一个设计）。
+    out = d.remove_noise_markers("看图 ![图](http://x/y.png) 结束")
+    assert out == "看图 ![图](  结束", (
+        f"`default` 域的 http 图片行为变了（得到 {out!r}）。\n"
+        "  · 若这是【修好了】（变成 '看图 图 结束'）⇒ 请更新 "
+        "`docs/待办登记-2026-09-20-全仓审计与方向更正.md` §三·3.7 "
+        "与 `document_preprocessor.py` 里那段 N14 注释。\n"
+        "  · 若只是【变了但没修好】⇒ 请查清原因，这可能是回归。"
+    )

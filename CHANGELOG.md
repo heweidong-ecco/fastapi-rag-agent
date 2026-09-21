@@ -237,7 +237,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
-- **代码执行沙箱现在**能定义类**了（N18 · 2026-09-21 · 业务方裁「放开」，见 `DEC-023`）。**
+- **代码执行沙箱现在能定义类了（N18 · 2026-09-21 · 业务方裁「放开」，见 `DEC-023`）。**
 
   此前：
   ```python
@@ -264,6 +264,31 @@ All notable changes to this project will be documented in this file.
   仍不在白名单，且**实测三种逃逸尝试全部报错**。
   ⛔ 四个**退出机制**（`BaseException` / `SystemExit` / `KeyboardInterrupt` / `GeneratorExit`）
   **仍刻意不放**。回归用例：`api/test_impl_modules.py::test_sandbox_allows_class_definition`。
+- **🔴 更正一条【错误的记录】：markdown 图片规则「从未生效」是错的（N14 · 2026-09-21）**
+
+  **错在哪**：原来只测了 `default` **一个域**，就下了全局结论。
+  而 `domain` 是**用户传的**（`api_v1_rag.py:259` · `/rag/upload_document` · **无白名单**）
+  ⇒ `legal` / `medical` **生产可达**。
+
+  **实测三个域**：
+
+  | 域 | `![图](http://x/y.png)` | 那条硬编码规则 |
+  |---|---|---|
+  | `default` | 🔴 `看图 ![图](  结束`（残废） | **多余**（配置里有等价规则且先跑） |
+  | **`legal`** | ✅ `看图 图 结束` | ⭐ **正在生效** —— 该域配置里没有图片规则 |
+  | **`medical`** | ✅ `看图 图 结束` | ⭐ **同上** |
+
+  ⇒ **它不是死代码 —— 删了会弄坏 `legal`/`medical` 两个域。**
+  真问题只有一处：`default` 域的 URL 规则**排在图片规则之前**，把 `![alt](http://…)` 打残。
+
+  **本次做法（业务方裁「乙′」：不改行为，只改注释）**：
+  - `api/document_preprocessor.py` 原处加准确注释（三域实测 + "删不得"的理由）
+  - 🔒 **回归用例** `api/test_audit_fixes.py::test_markdown_image_rule_is_not_dead`
+    —— 三域各断言一次，并**故意锁住 `default` 域的坏行为**（哪天修好了会红、提示更新记录）
+  - ✅ **已做"会红"验证**：把它当死代码注释掉 ⇒ 用例红，报「domain=legal 的图片收敛坏了」
+
+  ⚠️ **仍待裁的是「甲′」**：要不要**修** `default` 域（图片规则提到 URL 规则之前）——
+  **那是行为变更**，会改变该域文本预处理输出 ⇒ 影响已有语料 ⇒ **未做**。
 
 - **`docs/重构计划-2026-09-15.md` 里「教你用已删文件」的命令已修**（2026-09-20）。
   该文档 **§〇 环境准备**里的 `venv/bin/pip install -r api/requirements-test.txt` ——
