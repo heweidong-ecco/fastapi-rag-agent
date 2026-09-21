@@ -345,3 +345,41 @@ def test_plan_stops_when_total_budget_exceeded(monkeypatch):
     assert "超过总时长预算" in out, out
     assert "结果不完整" in out, f"停下来时没如实说明结果不完整：{out!r}"
     assert "2 个步骤未执行" in out, f"没报出剩余步骤数：{out!r}"
+
+
+def test_dynamic_input_receives_the_real_user_name(monkeypatch):
+    """`generate_dynamic_input` 必须收到**真实发起人**。
+
+    🔴 这条是**端到端实测**才发现的问题（2026-09-21）：
+       `token_usage_logs` 里 `plan_execute.dynamic_input` 的 **4 条全记在 `unknown` 头上**，
+       而 `plan` / `quality_check` 的记在 `admin` 头上。
+       ⇒ 后果：**这部分额度算不到发起人头上 ⇒ 配额管不住他**（正是 ③-b 要解决的问题）。
+
+    ⚠️ **根因值得记住**：那次改动用的是**盲替换** `s.replace(old, new, 1)` ——
+       **命中了注释里的同一串**（注释在前 ⇒ 先被替换），**真正的调用点反而没改到**。
+       📌 所以这条用例守的是「**调用点真的传了**」，
+          ⛔ 不是「函数签名里有这个参数」（签名一直是对的）。
+
+    ⚠️ 也**不能**只靠 `token_usage_logs` 来守 —— 那要真连库。这里用替身把判据做成**离线的**。
+    """
+    import plan_execute as P
+
+    seen = {}
+
+    def _fake_gen(step, context, user_goal, user_name="unknown"):
+        seen["user_name"] = user_name
+        return "假输入"
+
+    monkeypatch.setattr(P, "generate_dynamic_input", _fake_gen)
+    monkeypatch.setattr(P, "execute_step_with_retry", lambda *a, **k: "假结果")
+    monkeypatch.setattr(P, "check_step_quality", lambda *a, **k: True)
+
+    P.execute_step_with_quality_check(
+        {"step": 1, "tool": "calculator", "action": "算一下"}, "", "目标", "someone_real"
+    )
+
+    assert seen.get("user_name") == "someone_real", (
+        f"`generate_dynamic_input` 收到的是 {seen.get('user_name')!r} —— **不是真实发起人**。\n"
+        "⇒ 这部分 token 会记在 `unknown` 头上 ⇒ 配额管不到真正用的人。\n"
+        "⚠️ 检查是不是又漏传了（历史事故：盲替换命中了注释，真正的调用点没改到）。"
+    )

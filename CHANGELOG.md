@@ -325,6 +325,31 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- 🔴 **端到端实测发现并修掉一个③-b 的真 bug：`generate_dynamic_input` 漏传 `user_name`**（2026-09-21）
+
+  **怎么发现的**：第一次真跑 `POST /agent/plan_execute` 之后查 `token_usage_logs`：
+
+  ```
+  admin    | 5 条   ← plan + quality_check
+  unknown  | 4 条   ← 【dynamic_input 全记在 unknown 头上】
+  ```
+
+  ⇒ **这部分额度算不到发起人头上 ⇒ 配额管不住他** —— 正是 ③-b 要解决的问题。
+
+  **根因（值得单独记）**：那次③-b 改动用的是**盲替换** `s.replace(old, new, 1)` ——
+  **命中了 `plan_execute.py:283`【注释里】的同一串**（注释在前 ⇒ 先被替换），
+  **真正的调用点（:472）反而没改到**。
+  📌 本仓复盘反复记的那一类：「**判据选错 / 注释当代码**」—— **这次是我自己犯的**。
+  ⇒ 教训：**改完要按行号核**，别只看「替换成功了几处」。
+
+  **修法**：`:472` 补上 `user_name`；`:283` 那句被污染的注释还原并注明来历。
+  回归用例 `test_dynamic_input_receives_the_real_user_name`
+  —— 守的是「**调用点真的传了**」，⛔ 不是「签名里有这个参数」（签名一直是对的）。
+  **红→绿实测**：退回修复 ⇒ 用例红，报 `收到的是 'unknown' —— 不是真实发起人`。
+
+  **端到端复验**：重启 API 再跑一次 ⇒ `unknown` **仍是那 4 条（没增加）**，
+  新增的 `dynamic_input` **4 条全记在 `admin`** ✅
+
 - 🔴 **`web_search` 改成【真抓取】—— 此前它根本没在搜索（N19 · 2026-09-21 · 见 `DEC-028`）**
 
   **核 N15 的遗留「`web_search` 没离线验证过」时，一验就爆。实测三次调用，没有一次是真的在搜：**
