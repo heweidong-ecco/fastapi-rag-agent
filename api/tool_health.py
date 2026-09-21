@@ -30,8 +30,12 @@ TEST_ARGS_MAP = {
     "calculator": {"expression": "1+1"},
     "date_today": {},
     "web_search": {"query": "test"},
-    "fetch_webpage": {"url": "https://example.com"},
-    "screenshot_webpage": {"url": "https://example.com"},
+    # ⛔ 2026-09-21 注释（N13）：**# 可扩展能力** —— 这两个工具已从 `mcp_server.TOOLS` 摘掉
+    #    （依赖未安装的 chromium，调用必失败）。**留着它们没用**：`run_health_check` 是
+    #    **按 `mcp_server.TOOLS` 遍历**的，表里多两项不会被查到。
+    #    装好 chromium 后，取消注释并**同时**取消 `mcp_server.py` 里对应的两行。
+    # "fetch_webpage": {"url": "https://example.com"},
+    # "screenshot_webpage": {"url": "https://example.com"},
     "execute_python": {"code": "print('health check')"},
 }
 

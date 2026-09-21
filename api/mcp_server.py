@@ -10,7 +10,14 @@ from mcp.types import Tool, TextContent
 # 导入所有工具（从各自独立的模块）
 from simple_tools import calculator, date_today  # 新增导入
 from search_tools import web_search
-from browser_tools import fetch_webpage, screenshot_webpage
+# ⛔ 2026-09-21 注释（N13 · 业务方裁「挂起 + 注释掉 + 标『# 可扩展能力』」）：
+#    `browser_tools` 的三个工具依赖 Playwright 的 chromium，而**本仓任何部署方式都没装它**
+#    （`api/Dockerfile` / `docker-compose.yml` 都没有 `playwright install`）⇒ 调用必抛
+#      `BrowserType.launch: Executable doesn't exist at .../chromium_headless_shell-1234/...`
+#    📌 **实测（2026-09-21）**：本机 playwright 是 1.62（要 build **1234**），
+#       缓存里只有旧的 **1228**（556 MB）⇒ 版本不匹配，**照样跑不了**。
+#    ⇒ **# 可扩展能力**：装好 chromium 后，把下面这两行取消注释即可启用（见 `TOOLS`）。
+# from browser_tools import fetch_webpage, screenshot_webpage
 from code_executor import execute_python
 
 # 导入工厂函数
@@ -25,8 +32,16 @@ TOOLS = [
     {"func": calculator, "version": "1.0.0"},
     {"func": date_today, "version": "1.0.0"},
     {"func": web_search, "version": "2.0.0"},  # 已升级到 v2
-    {"func": fetch_webpage, "version": "1.0.0"},
-    {"func": screenshot_webpage, "version": "1.0.0"},
+    # ⛔ 2026-09-21 注释（N13）：**# 可扩展能力** —— 依赖未安装的 chromium，调用必失败。
+    #    两个原因缺一不可（都实测过）：
+    #      ① 本仓任何部署方式都没装 chromium（Dockerfile / compose 里都没有 `playwright install`）
+    #      ② 本机缓存里的 chromium 是旧 build（1228），而 playwright 1.62 要 1234 ⇒ 版本不匹配
+    #    ⇒ 取消注释前**先确认 chromium 真的装好了**，并用
+    #      `api/test_agent_repairs.py` 里那两条（现已 skip）的用例验回来。
+    #    📌 **为什么注释掉而不是留着**：这两行在 `TOOLS` 里 ⇒ LLM 的工具表**从 TOOLS 派生**
+    #       （2026-09-20 裁「乙」）⇒ 留着就等于**给 LLM 一个每调必炸的工具**（实测确认过）。
+    # {"func": fetch_webpage, "version": "1.0.0"},
+    # {"func": screenshot_webpage, "version": "1.0.0"},
     {"func": execute_python, "version": "1.5.0"},  # 已迭代多次
 ]
 

@@ -421,6 +421,11 @@ def test_get_llm_with_mcp_tools_unpacks_list_tools_result(monkeypatch):
 # ===========================================================================
 # (f) 同步 Playwright 不能在事件循环所在线程里跑
 # ===========================================================================
+@pytest.mark.skip(
+    reason="N13（2026-09-21）：该端点已按业务方裁决【注释掉】（浏览器工具依赖未安装的 chromium，"
+           "本仓任何部署方式都跑不了）。⛔ 这不是「这条用例没用了」—— 它守的坑是真的："
+           "重新启用端点时**必须一并取消本 skip**，否则「同步 Playwright 跑在事件循环里」会踩回来。"
+)
 def test_fetch_webpage_is_not_invoked_on_the_event_loop(client, auth_headers, monkeypatch):
     """🔴 实测（2026-09-20）:`playwright._impl._errors.Error: It looks like you are
     using Playwright Sync API inside the asyncio loop.`（`browser_tools.py:13`）
@@ -456,6 +461,10 @@ def test_fetch_webpage_is_not_invoked_on_the_event_loop(client, auth_headers, mo
     )
 
 
+@pytest.mark.skip(
+    reason="N13（2026-09-21）：同上（`fetch_webpage` 那条的孪生兄弟）—— 端点已注释掉。"
+           "重新启用端点时必须一并取消本 skip。"
+)
 def test_screenshot_webpage_is_not_invoked_on_the_event_loop(client, auth_headers, monkeypatch):
     """同上（两个端点都要修 —— 防止只改一个）。"""
     import asyncio as aio
