@@ -271,7 +271,24 @@ All notable changes to this project will be documented in this file.
   ⚠️ 那 15 条失败**全是 `redis ConnectionError`**（Docker 没起），两版一致。
 
   **⬜ 遗留**：`web_search` 仍未离线验证（超时加了但没实跑）· 端到端未实跑 ·
-  ⚠️ **`plan_execute` 仍无"总时长上限"**（单次工具调用有，整条计划的没有）。
+  权限收窄（产品决策，未做）。
+
+  **🔴 同日补记 —— ③ 漏掉了另一半：LLM 调用自身也没有超时**
+
+  做完之后回头核出来的（**同一类问题，漏了一半**）：三个 `ChatOpenAI(...)` 都是 `timeout=None`
+  ⇒ 吃 openai SDK 默认 `read=600s`，且 SDK 自己还会 `max_retries=2`
+  ⇒ **一次 LLM 调用最坏等 `600 × (1+2) = 30 分钟`**；而 `plan_execute` 最坏跑
+  「3–7 步 × 每步重试 3 次 × 每步 2 次 LLM 调用」⇒ **理论上能挂几个小时。**
+
+  **补法**：三个客户端显式设超时（规划 60s / 参数生成 30s / 质量检查 20s）+ `max_retries=1`
+  （⚠️ 重试本身就是"再来一遍完整超时"，层数越多最坏时长越难算）
+  ⇒ **最坏情况第一次变得可算**。另加 **`PLAN_TOTAL_BUDGET_SECONDS = 120`** 的整条计划预算
+  —— **单次调用有上限 ≠ 整条计划有上限**。
+  **⚠️ 超预算停下时必须【如实说没跑完】**：输出里明写「**结果不完整**，剩余 N 个步骤未执行」，
+  不能让它看起来像正常结束。
+
+  **验证**：新增 **2 条**用例 · 全套 `15 failed / 90 passed / 3 skipped` vs 基线
+  `15 failed / 88 passed / 3 skipped` ⇒ **+2 passed（正是新增那 2 条），failed 一条没多**。
 
 - 🟢 **Plan-and-Execute 的「执行层」现在【真调用工具】了（N15 · 2026-09-21 · 业务方裁「从零新做」，见 `DEC-026`）**
 

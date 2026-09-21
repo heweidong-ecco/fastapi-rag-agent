@@ -23,6 +23,7 @@ Plan-and-Execute 模块
 """
 import os
 import json
+import time
 from typing import List, Dict
 from langchain_openai import ChatOpenAI
 from config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL_CHAT
@@ -33,12 +34,41 @@ from langchain_core.messages import HumanMessage, SystemMessage
 #    `token_tracker` 走的是**函数内惰性导入** `db`（2026-09-17 切开点 2）。
 from token_tracker import check_budget_before_call, record_usage
 
+# 🔴 2026-09-21 加（③ 的遗留 —— 同一类问题的另一半）：
+#    **③ 只补了「工具调用」的超时，没补「LLM 调用」的。**
+#
+#    实测：三个 `ChatOpenAI(...)` 都是 `timeout=None` ⇒ 吃 **openai SDK 的默认值**：
+#      `connect=5s, read=600s（10 分钟）, write=600s`，且 SDK 还会自己 `max_retries=2`
+#    ⇒ **一次 LLM 调用最坏可等 600 × (1+2) = 30 分钟。**
+#    而 `plan_execute` 最坏跑「3–7 步 × 每步重试 3 次 × 每步 2 次 LLM 调用」
+#    ⇒ **理论上能挂几个小时。**
+#
+#    ⇒ 这里把**超时与重试都显式写死**，让最坏情况**可算**：
+#       单次 LLM 调用最坏 = `timeout × (1 + max_retries)`
+#    ⚠️ 与 `SEARCH_TIMEOUT_SECONDS`（20s，网络搜索）和 `MAX_EXEC_TIME`（5s，沙箱执行）
+#       **是三件不同的事**，别混：一个是模型往返、一个是外部搜索、一个是本地跑代码。
+PLANNER_LLM_TIMEOUT = 60      # 规划：prompt 大、输出是一份 JSON 计划
+EXECUTOR_LLM_TIMEOUT = 30     # 每步的参数值生成：输入小、输出一句话或一段代码
+QUALITY_LLM_TIMEOUT = 20      # 质量检查：只回 PASS / FAIL
+
+# ⚠️ **显式设成 1**（SDK 默认是 2）—— 重试本身就是"再来一遍完整超时"，
+#    层数越多，最坏时长越难算。1 次重试已经能盖住大多数瞬时抖动。
+LLM_MAX_RETRIES = 1
+
+# `plan_execute` 的**总时长预算（秒）** —— 见 `execute_plan_with_replan` 里的用法。
+# ⚠️ 为什么需要它：单次调用有上限 ≠ 整条计划有上限。
+#    一个 7 步的计划 × 每步重试，哪怕每步都很"守规矩"，加起来也能很久。
+PLAN_TOTAL_BUDGET_SECONDS = 120
+
+
 # ==================== 初始化规划专用 LLM ====================
 planner_llm = ChatOpenAI(
     model=LLM_MODEL_CHAT,
     api_key=LLM_API_KEY,
     base_url=LLM_BASE_URL,
-    temperature=0  # 规划需要确定性，不能有随机性
+    temperature=0,  # 规划需要确定性，不能有随机性
+    timeout=PLANNER_LLM_TIMEOUT,
+    max_retries=LLM_MAX_RETRIES,
 )
 
 # ==================== 任务规划器 ====================
@@ -193,7 +223,9 @@ executor_llm = ChatOpenAI(
     model=LLM_MODEL_CHAT,
     api_key=LLM_API_KEY,
     base_url=LLM_BASE_URL,
-    temperature=0.1
+    temperature=0.1,
+    timeout=EXECUTOR_LLM_TIMEOUT,      # 🔴 2026-09-21：见上方共用说明
+    max_retries=LLM_MAX_RETRIES,
 )
 
 # 新增：动态重规划
@@ -214,7 +246,19 @@ def execute_plan_with_replan(plan: List[Dict], user_goal: str = "",
     max_replans = 5
     replan_count = 0
 
+    # 🔴 2026-09-21 加（③ 的遗留）：**总时长预算**。
+    #    **单次调用有上限 ≠ 整条计划有上限** —— 一个 3–7 步的计划，
+    #    哪怕每步都"守规矩"，叠起来也能很久（每步最多 2 次 LLM 调用 + 1 次工具，
+    #    外面还套着"最多 3 次重试"和"最多 5 次重规划"）。
+    #    ⚠️ 与单次超时的关系：单次超时管"这一下别卡死"，总预算管"这件事别没完没了"。
+    t0 = time.time()
+    timed_out = False
+
     while current_plan and replan_count <= max_replans:
+        if time.time() - t0 > PLAN_TOTAL_BUDGET_SECONDS:
+            timed_out = True
+            break
+
         step = current_plan[0]
         step_num = step["step"]
         tool_name = step.get("tool", "unknown")
@@ -292,6 +336,14 @@ def execute_plan_with_replan(plan: List[Dict], user_goal: str = "",
         
     if replan_count > max_replans:
         results.append(f"[系统] 已达到最大重规划次数（{max_replans}次），执行终止。")
+    elif timed_out:
+        # ⚠️ **如实说明"没跑完"** —— 不能让它看起来像正常结束。
+        #    剩余步骤数一起报出来，调用方才知道**结果是不完整的**。
+        results.append(
+            f"[系统] 已超过总时长预算（{PLAN_TOTAL_BUDGET_SECONDS} 秒），执行【提前终止】——"
+            f"**结果不完整**，剩余 {len(current_plan)} 个步骤未执行。"
+            f"提示：把目标拆得更小，或减少步骤数后重试。"
+        )
 
     return "\n".join(results)
 
@@ -370,7 +422,9 @@ quality_checker_llm = ChatOpenAI(
     model=LLM_MODEL_CHAT,
     api_key=LLM_API_KEY,
     base_url=LLM_BASE_URL,
-    temperature=0  # 评估需要确定性
+    temperature=0,  # 评估需要确定性
+    timeout=QUALITY_LLM_TIMEOUT,      # 🔴 2026-09-21：见上方共用说明
+    max_retries=LLM_MAX_RETRIES,
 )
 
 def check_step_quality(step: Dict, step_result: str, user_goal: str, context: str,
