@@ -159,6 +159,44 @@ def test_sandbox_whitelist_allows_exception_classes():
         )
 
 
+def test_sandbox_allows_class_definition():
+    """沙箱**能定义类** —— 这是 **N18 放开 `__build_class__` 之后**的行为（2026-09-21 业务方裁）。
+
+    📌 **为什么放开它不增加能力**（本用例把这条论证变成可执行的事实）：
+       白名单里**本来就有 `type`** ⇒ 「动态建类」**早就可达**了。
+       加 `__build_class__` 只是让 `class` **这种写法**也成立。
+
+    ⚠️ 本用例同时锁死**边界没被放宽**：导入 / 文件 / 求值那几件仍然进不来。
+    """
+    from code_executor_impl import create_safe_globals, execute_python_impl
+
+    builtins_ = create_safe_globals()["__builtins__"]
+    assert "__build_class__" in builtins_, (
+        "沙箱里应当有 __build_class__（N18 已裁「放开」）—— 否则 LLM 写的 `class` 跑不了"
+    )
+
+    # ① `class` 语法现在真的成立（此前 NameError: __build_class__ not found）
+    out = execute_python_impl("class Mine(Exception): pass\nprint('ok', Mine.__name__)")
+    assert out == "ok Mine\n", out
+
+    # ② 它**没有**新开能力：`type()` 这条路早就能做到同样的事（放开前就能跑）
+    out = execute_python_impl('M = type("M", (Exception,), {})\nprint("ok", M.__name__)')
+    assert out == "ok M\n", out
+
+    # ③ 🔴 **边界没被放宽** —— 导入 / 文件 / 求值仍然进不来
+    for name in ("__import__", "open", "eval", "exec", "compile", "globals", "locals"):
+        assert name not in builtins_, (
+            f"沙箱里**不该**有 {name} —— 它是逃逸通道，放开会让 __build_class__ 变成真突破口"
+        )
+
+    # ④ 真·逃逸尝试必须失败（不是「没列出来」，是「跑不了」）
+    for code in ('__import__("os").system("echo pwned")',
+                 'open("/etc/passwd").read()',
+                 'eval("1+1")'):
+        out = execute_python_impl(code)
+        assert out.startswith("代码执行出错:"), f"逃逸尝试竟然没被拦: {code!r} → {out!r}"
+
+
 def test_execute_python_impl_truncates_long_output():
     """输出超长必须**截断并写明** —— 否则会把 LLM 的上下文冲掉。"""
     from code_executor_impl import execute_python_impl, MAX_OUTPUT_LENGTH
