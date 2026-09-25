@@ -33,6 +33,15 @@ archive/
 .pytest_cache/
 .mem0/
 screenshots/
+
+# ⚠️ TODO 待办目录里散落的图片 —— 【不入库】（2026-09-25 加）
+#   由来：业务方发来的【邮件截图】会落在这个目录里，而截图含**邮箱地址**与
+#   **与 GitHub 的私人往来** —— 本仓是 **PUBLIC**，入库即泄露。
+#   📌 为什么不是笼统排 `*.jpg`：本仓其他地方可能有**需要入库**的插图（如 README 配图），
+#      所以只锁这个目录。
+fastapi-rag-agent-TODO待办/*.jpg
+fastapi-rag-agent-TODO待办/*.jpeg
+fastapi-rag-agent-TODO待办/*.png
 *.db
 
 
