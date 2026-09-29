@@ -9,7 +9,20 @@
             "type": "command",
             "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/pre-commit-gates.py\"",
             "timeout": 180,
-            "statusMessage": "提交前三道门（凭据 / 链接 / 孤儿）"
+            "statusMessage": "提交前四道门（凭据 / 链接 / 孤儿 / 模块spec）"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/spec-remind.py\"",
+            "timeout": 10,
+            "statusMessage": "模块 spec 提醒"
           }
         ]
       }

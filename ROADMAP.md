@@ -91,7 +91,7 @@ bash scripts/list_endpoints.sh          # 默认 http://127.0.0.1:8000
 > | **状态收敛到本文件一份** | 原先 6 份各自声称写了"当前状态" ⇒ 归档 9 份 + `fastapi-rag-agent-TODO待办/归档/README.md` 对照表（`DEC-035`） |
 > | **建四层文档体系** | `docs/契约/`（3+1 份）· `docs/说明/`（4）· `docs/原理/` · `docs/规范/`（2）· `docs/历史/`（2）· `docs/文档地图.md`（`DEC-036/037`） |
 > | **入口文档拆分** | `CLAUDE.md` **557 → 218** · `ROADMAP.md` **791 → 258** · `README.md` **342 → 319** |
-> | **把规矩做成门** | `.claude/hooks/pre-commit-gates.py`（**提交前三道门**：凭据 / 链接 / 孤儿）· `.claude/commands/交接.md`（`/交接`） |
+> | **把规矩做成门** | `.claude/hooks/pre-commit-gates.py`（**提交前三道门**：凭据 / 链接 / 孤儿）· `.claude/commands/handoff.md`（`/handoff`）· `.claude/commands/specs.md`（`/specs`） |
 > | **四个检查脚本** | `list_endpoints.sh` · `check_doc_links.sh` · `check_doc_orphans.sh` · `backup.sh` |
 > | **在建档过程里挖出 10+ 个真问题** | 向量索引代码/实况不一致 · `is_active` 不生效 · 端口暴露面 · 19 个模块零测试 · README 三处已证伪的说法… |
 >

@@ -57,6 +57,50 @@ GATES = [
     ("孤儿检查", "scripts/check_doc_orphans.sh"),
 ]
 
+# ── 第 ④ 道门（**内联，不是外部脚本**）：新增模块必须有 spec ──
+# 判据：`docs/specs/<模块名>.md` 是否存在（模块名 = `api/xxx.py` 去掉 `.py`）
+#
+# ⚠️ **只管【新增】的模块**（`--diff-filter=A`），**不管改已有的** ——
+#    "改了代码要不要更新 spec"是**判断**，机械判不了（那交给 `spec-remind.py` 提醒）。
+SPECS_DIR = ("docs", "specs")
+NOT_A_MODULE = ("conftest.py",)
+
+
+def new_modules_without_spec(repo: str):
+    """返回：**本次新增、但没有 spec** 的模块文件列表。"""
+    try:
+        r = subprocess.run(["git", "diff", "--cached", "--name-only", "--diff-filter=A"],
+                           cwd=repo, capture_output=True, text=True, timeout=30)
+    except Exception:
+        return None                      # git 跑不起来 ⇒ 交给调用方按"跳过"处理
+    if r.returncode != 0:
+        return None
+    bad = []
+    for f in r.stdout.splitlines():
+        f = f.strip()
+        if not (f.startswith("api/") and f.endswith(".py")):
+            continue
+        base = os.path.basename(f)
+        if base.startswith("test_") or base in NOT_A_MODULE:
+            continue                     # 测试不算产品模块
+        spec = os.path.join(repo, *SPECS_DIR, base[:-3] + ".md")
+        if not os.path.exists(spec):
+            bad.append((f, os.path.join(*SPECS_DIR, base[:-3] + ".md")))
+    return bad
+
+
+def is_doc_only(repo: str) -> bool:
+    """本次 staged 是否【只有文档/脚本】改动（那就不必要求 spec）。"""
+    try:
+        r = subprocess.run(["git", "diff", "--cached", "--name-only"],
+                           cwd=repo, capture_output=True, text=True, timeout=30)
+    except Exception:
+        return False
+    files = [x.strip() for x in r.stdout.splitlines() if x.strip()]
+    if not files:
+        return False
+    return not any(f.endswith(".py") for f in files)
+
 
 def main() -> int:
     try:
@@ -92,10 +136,25 @@ def main() -> int:
         else:
             failed.append((name, r))
 
+    # ── 第 ④ 道门：新增模块必须有 spec（**硬拦**，业务方 2026-09-29 裁定）──
+    spec_bad = None
+    if not is_doc_only(repo):
+        spec_bad = new_modules_without_spec(repo)
+
     # ── 有门没过 ⇒ 阻止 ──
-    if failed:
+    if failed or spec_bad:
         print("", file=sys.stderr)
         print("⛔ 提交前的门【未通过】—— 已阻止本次 commit。", file=sys.stderr)
+        if spec_bad:
+            print("", file=sys.stderr)
+            print("──── 模块 spec 门（新增模块必须有 spec）────", file=sys.stderr)
+            for src, spec in spec_bad:
+                print(f"   🔴 新增了 {src}，但 {spec} 不存在", file=sys.stderr)
+            print("", file=sys.stderr)
+            print("   ⇒ 为什么硬拦：**没有 spec 的模块，别人不知道它存在、也不知道做到哪。**",
+                  file=sys.stderr)
+            print("   ⇒ 建 spec 的模板见 docs/specs/README.md（**⭐ 关键节是「看代码会误判的地方」**）",
+                  file=sys.stderr)
         for name, r in failed:
             print("", file=sys.stderr)
             print(f"──── {name} ────", file=sys.stderr)
@@ -111,9 +170,15 @@ def main() -> int:
 
     # ── 全过（或跳过）⇒ 放行 ──
     parts = [f"{n} ✅" for n in passed]
+    if spec_bad == []:
+        parts.append("模块spec门 ✅")
+    elif spec_bad is None:
+        parts.append("模块spec门 ⚠️ 跳过（git 读不到 staged）")
+    elif is_doc_only(repo):
+        parts.append("模块spec门 ⏭ 本次无 .py 改动")
     if skipped:
         parts.append("⚠️ 跳过：" + " · ".join(skipped))
-    print(f"🔒 提交前三道门：{' ｜ '.join(parts) or '（无门可跑）'}", file=sys.stderr)
+    print(f"🔒 提交前四道门：{' ｜ '.join(parts) or '（无门可跑）'}", file=sys.stderr)
     return 0
 
 
