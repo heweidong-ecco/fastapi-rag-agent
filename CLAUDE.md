@@ -13,11 +13,19 @@
 > **主线换了**：不是"收拾仓库 / 清遗留"，是 **把它变成一个【能分享的链接】（上公网）**。
 > 路线已拍板：**路线 C = 域名 + Cloudflare 隧道**。
 >
-> 📄 **先读两份工作文档**（业务方 2026-09-24 引入）：
-> * **`fastapi-rag-agent-TODO待办/施工单-本项目.md`** —— 命令级、可直接照做（阶段 ②–⑧）
-> * **`fastapi-rag-agent-TODO待办/现状与差距.md`** —— 现状实测 + 四硬门差距
+> ## 🔴 **先读 `ROADMAP.md`**（**2026-09-29 起：它是唯一权威**）
+>
+> 状态 / 进度 / 功能现状 / 接口怎么查 / 待办总账 —— **全部收敛到那一份**。
+> （📌 之前有 **6 份文档各自声称写了"当前状态"**，已汇总；其余见 `fastapi-rag-agent-TODO待办/归档/README.md`。）
+>
+> 📄 **两份配套工作文档**：
+> * **`fastapi-rag-agent-TODO待办/施工单-本项目.md`** —— 命令级、可直接照做（阶段 ④–⑧ ；**进度留痕表已移入 `ROADMAP.md`**）
+> * ⚠️ **`fastapi-rag-agent-TODO待办/现状与差距.md` 已【归档】** ⇒
+>   现为 **`fastapi-rag-agent-TODO待办/归档/现状与差距.md`**（其 §3.1「根因 = torch」**已被 `DEC-034` 推翻**）
 >
 > 📌 **`docs/重构计划-2026-09-15.md` 已成【档案】，不是待办**（它下面那段仍保留，供查历史）。
+> 🔴 **2026-09-29 补充**：该文件**已移入** `fastapi-rag-agent-TODO待办/归档/重构计划-2026-09-15.md`，
+> 且它**标题里那句「当前最高优先级」已失效**（归档头里写明了）。
 
 ## 🔴 两条【高等级约束】—— 业务方 2026-09-24 裁定（全文见 **`docs/decisions/DEC-033`**）
 
@@ -59,7 +67,7 @@
 
 ---
 
-> ## 🔴 以下为【档案】（2026-09-15 时期）：`docs/重构计划-2026-09-15.md`
+> ## 🔴 以下为【档案】（2026-09-15 时期）：`fastapi-rag-agent-TODO待办/归档/重构计划-2026-09-15.md`
 >
 > **开工前先读它。** 其余 M5 裁决工作**让位于它**。
 >
@@ -74,7 +82,7 @@
 > - ⇒ **"切模块"不是测试的前置条件**
 > - 执行顺序：**基线 → 修 bug → 归档 → 切模块 → M6**
 >
-> 另两处登记：`ROADMAP.md`「当前指针」最上方 · `docs/重构计划-2026-09-15.md` 正文
+> 另两处登记：`ROADMAP.md`「当前指针」最上方 · `fastapi-rag-agent-TODO待办/归档/重构计划-2026-09-15.md` 正文
 
 ## 推送节奏(跨项目纪律)
 
@@ -151,7 +159,16 @@
 复盘里那三条**全都发生在【改代码 / 写脚本的过程中】**，而**不在显而易见的"提交/收尾"时刻**。
 ⇒ **触发时机**：**任何批量编辑之后** · **任何"我写进去了"之后** · **任何 `git` 写操作之后**。
 
-## ⚡ superpowers skills · 必用表（用户级 · 14 个）
+## ⚡ 用户级 skills · 必用表（**目录共 20 个 · 本表已定级 14 个**）
+
+> 🔴 **2026-09-29 更正**：原标题写「用户级 · **14 个**」—— **目录里实际是 20 个**
+> （`ls -d ~/.claude/skills/*/` 实测，**全部是真实目录、无 symlink**）。
+> **本表列的 14 个只是其中一部分**，且**不全是 superpowers 的**
+> （`agent-system-creator` / `gate-review` / `new-project-launch` / `留痕-checks` 是**自建**的）。
+>
+> ⬜ **表外还有 6 个，本表【未定级】**：
+> `agent-system-creator` · `gate-review` · `grilling` · `new-project-launch` · `skill-creator` · `留痕-checks`
+> （⚠️ **`留痕-checks` 虽未进表，但在下面被单独讨论** —— 它有本仓适配裁决，见 §冲突与例外）
 
 > **用户指令（2026-09-17）**：「使用用户级中 superpowers 的 skills……**如果命中必须用**，
 > 先写好，过程中我再动态调整。」
@@ -221,7 +238,67 @@
 
 ## 项目概述
 
-基于 FastAPI、PostgreSQL+pgvector 和 Redis 构建的生产级 RAG（检索增强生成）+ Agent API 服务。使用阿里云百炼 DashScope 提供 Embedding（`text-embedding-v2`）和 LLM（`qwen-turbo`、`qwen-plus`），本地加载 BGE-Reranker-v2-m3 Cross-Encoder 模型进行重排序。
+> 📌 **2026-09-29 改写**：原文是「基于 FastAPI、PostgreSQL+pgvector 和 Redis 构建的**生产级**
+> RAG + Agent API 服务。使用阿里云百炼 DashScope 提供 Embedding（`text-embedding-v2`）
+> **和 LLM（`qwen-turbo`、`qwen-plus`）**」—— 其中 **LLM 那半句已过时**（见下）。
+> 业务方 2026-09-29 裁定：**分两段写，一段"它是什么"、一段"它现在到哪"**。
+
+### 它是什么（技术实质）
+
+基于 **FastAPI + PostgreSQL(pgvector) + Redis** 的 **RAG + Agent API 服务**。
+
+| 环节 | 用什么 |
+|---|---|
+| **LLM** | 🔴 **DeepSeek** —— `LLM_MODEL_CHAT` / `LLM_API_KEY` / `LLM_BASE_URL` 三个键控制<br>（📌 由 `docs/decisions/DEC-017` 裁决「**LLM 换 DeepSeek**」；**业务方 2026-09-29 确认这是当前实况**） |
+| **Embedding** | **阿里云百炼 DashScope `text-embedding-v2`**（1536 维）—— ⚠️ **与 LLM 不是同一家，别混** |
+| **重排序** | 本地 `BAAI/bge-reranker-v2-m3` Cross-Encoder（**真懒加载**，见 `api/reranker.py:14`） |
+| **向量存储** | PostgreSQL + **pgvector** |
+| **缓存 / 限流 / 配额** | **Redis** |
+| **Agent 框架** | **LangGraph**（+ LangChain） |
+| **可观测** | Prometheus（代码级）+ Grafana（🔴 **手工配置，仓库无 provisioning**，见 `DEC-034` §遗留①） |
+
+🔌 **对外接口：57 个端点**（`agent` 28 · `rag` 15 · `debug` 4 · `auth` 2 · 其余 8 组各 1）。
+⛔ **这份文档【不列】接口清单** —— 手写的必然过期。**跑命令**：
+
+```bash
+bash scripts/list_endpoints.sh
+```
+
+### 它现在到哪（2026-09-29）
+
+```
+✅ ② 本机验证跑通          五条判据全过（5 容器 healthy + 能问答）
+🔵 后端全部完成            ← 【当前阶段】硬门 A/C/D + R1–R4 限额熔断 + eval 接入
+⬜ 前端开发                4 个页面 + 硬门 B 界面 + 停止按钮 + 接管队列 + R3.2 熔断卡片
+⬜ ④ 测内存定机器 → ⑤ 买域名 → ⑥ 上云 → ⑦ 开隧道 → ⑧ 保护/自验/发链接
+```
+
+🎯 **目标**：**把它变成一个【能分享的链接】**（路线 C = 域名 + Cloudflare 隧道）。
+🔴 **当前状态 / 进度 / 待办总账 ⇒ 一律以 `ROADMAP.md` 为准**（2026-09-29 起它是唯一权威）。
+
+---
+
+## ⭐ 目标 vs 实测 —— **本仓的一条纪律**
+
+> 🔴 **不把【目标】写成【指标】。** 这份文档里凡是"性能/能力"的描述，都可能混着两类东西：
+> **设计目标**（想达到）与 **实测结果**（达到了）。**不标清楚 = 对方点开就发现对不上。**
+
+| 项 | 是目标还是实测 | 出处 |
+|---|---|---|
+| **P99 < 800ms** · **失败率 < 0.1%** · **10 并发不崩** | 🔴 **目标**（**从未实测**） | `README.md` 性能表 ← 出自 `归档/硬性指标终极核查清单.md`（**原系统**的验收清单，28 项**全未勾**） |
+| **57 个端点** | ✅ **实测**（2026-09-29，从 `/openapi.json`） | `scripts/list_endpoints.sh` |
+| **5 容器 healthy · 能问答 · 知识库 77 行** | ✅ **实测**（2026-09-29） | `ROADMAP.md` 阶段② |
+| ~~「`/rag/stream_search` SSE 实现**带真中断**」~~ | ⚠️ **不成立** —— 只 `except CancelledError`（`api_v1_rag.py:676`），**不关上游 HTTP 流** | `后端补齐清单` **B2**（硬门 C · **最易假完成**） |
+| ~~「停止按钮会将已生成的部分内容保存为对话历史」~~ | ⚠️ **不成立** —— **全仓无前端、无停止按钮**；代码里**没找到**落库逻辑 | `后端补齐清单` **B3**（⬜ 待核） |
+| **四层限额** | 🔴 **缺 2 层半**（单次半 · 单会话缺 · 全局日级缺） | `ROADMAP.md` 功能现状表 |
+| **熔断** | 🔴 **完全没有** | 同上下 |
+| **引用溯源 / 人工接管 / 前端** | 🟡 后端部分有 · **界面全无** | 同上下 |
+
+> 📌 **本仓已经吃过这个亏**：`README.md` 的性能表**没标"这是目标"**，
+> 而压测基线**跑在坏环境上**（77–97% 错误率，见 `施工单 §8` 第 4 条）。
+> ⇒ **要引用那几个数，先说明它是目标。**
+>
+> 🔴 **要当前状态 ⇒ 看 `ROADMAP.md` 的「功能现状表」** —— 那份是**逐条核过代码**的。
 
 ## 常用命令
 
@@ -255,8 +332,17 @@ locust -f locustfile_hybrid.py
 `api/main.py` 创建 FastAPI 应用，并按以下顺序挂载中间件：
 
 1. **HTTP 日志 + Prometheus 指标** — 每个请求生成唯一 `request_id`（ContextVar 实现，线程安全），记录 method/path/status/duration，通过 `metrics.py` 采集指标
-2. **RateLimitMiddleware（限流）** — 两层令牌桶：全局（100次/秒，容量150）→ 用户级（3次/秒，容量20）。使用 Redis Lua 脚本保证原子性。跳过 `/`、`/docs`、`/openapi.json`、`/auth/login`、`/auth/refresh`、`/admin/create_user` 等公开路径
-3. **QuotaMiddleware（配额）** — 按角色限制每日调用次数（免费用户：100次/天，付费用户：10000次/天，管理员：不限）。通过 X-API-Key 请求头或 Bearer JWT 识别用户身份
+2. **RateLimitMiddleware（限流）** — 两层令牌桶：全局（100次/秒，容量150）→ 用户级（3次/秒，容量20）。使用 Redis Lua 脚本保证原子性
+   > 🔴 **2026-09-29 更正（跳过名单）**：原文写 `/auth/login` · `/auth/refresh` · `/admin/create_user` ——
+   > ⚠️ **缺 `/api/v1` 前缀**。**这正是 2026-09-16 修过的那个 bug**（三个 router 都带前缀 ⇒ 名单对不上 ⇒ 等于没跳过），
+   > 而 CLAUDE.md 一直在用**修前的旧写法**。
+   > ✅ **实际名单是 `api/main.py:107-111` 的 `PUBLIC_PATHS`，共 11 条**：
+   > `/` · `/docs` · `/redoc` · `/docs/oauth2-redirect` · `/openapi.json` · `/health` · `/ready` · `/metrics` ·
+   > **`/api/v1/auth/login`** · **`/api/v1/auth/refresh`** · **`/api/v1/admin/create_user`**
+   > （📌 **两个中间件共用它** —— `main.py:120` 与 `:202`）
+3. **QuotaMiddleware（配额）** — 按角色限制每日调用次数（免费 100次/天 · 付费 10000次/天 · 管理员不限，出处 `api/permission.py:11-15`）。通过 X-API-Key 或 Bearer JWT 识别身份
+   > 🔴 **必知**：`api/main.py:222` 是 `if user_name:`，**没有 `else` 分支** ⇒
+   > **匿名请求直接落到 `:262` 放行，完全绕过配额**。⇒ 这正是**硬门 R1.3「限额必须对匿名生效」**要修的（见 `ROADMAP.md`）
 4. **TextNormalizationMiddleware（文本规范化）** — 自动将请求体中的全角字符转为半角，跳过 URL、Token 等非自然语言字段
 
 > ⚠️ **中间件异常处理要点**：FastAPI 的 `@app.exception_handler(AppException)` 只捕获路由层抛出的异常。**在中间件 dispatch 中抛出的 `AppException` 不会被该处理器捕获**，会落到通用 `Exception` 处理器返回 500。因此中间件拒绝请求时必须直接返回 `JSONResponse`（限流/配额中间件均如此实现）。
@@ -265,19 +351,40 @@ locust -f locustfile_hybrid.py
 
 三个路由模块均挂载在 `/api/v1` 前缀下：
 
+> 🔴 **2026-09-29 更正**：原文写 `/rag/stream_search` 是「SSE 实现**带真中断**」—— **不成立**（见 §「关键开发模式」的 SSE 条）。
+> 且**漏了 6 条端点**（下表已补）。⛔ **完整清单别照这张表 —— 跑 `scripts/list_endpoints.sh`。**
+
 | 文件 | 职责 |
 |------|------|
-| `api/api_v1.py` | 公开接口（`/`）、认证（`/auth/login`、`/auth/refresh`）、管理员创建用户、调试接口（查看缓存状态、限流配额、Embedding 性能对比） |
-| `api/api_v1_rag.py` | 文档管理（`/rag/insert`、`/rag/insert_batch`、`/rag/upload_document`）、检索（`/rag/pg_search`、`/rag/hybrid_search`、`/rag/rerank_search`、`/rag/rewrite_search`、`/rag/search`）、流式生成（`/rag/stream_search`，SSE 实现带真中断）、带引用的答案生成、WebSocket Agent（`/api/v1/ws/agent`、`/api/v1/ws/test`）、文档清理规则 |
-| `api/api_v1_agent.py` | LangGraph Agent 对话（`/agent/langgraph_chat`）、人工审批节点（`/agent/approve`）、多分支路由高级 Agent（`/agent/advanced_chat`）、Plan-Execute 模式、长期记忆（Mem0）、浏览器工具（Playwright）、Python 代码执行器、MCP Client 对话（`/agent/mcp_chat`）、MCP 工具列表、工具健康检查、Token 预算追踪与成本看板数据、执行轨迹可视化 |
+| `api/api_v1.py` | 公开接口（`/`）、认证（`/api/v1/auth/login`、`/api/v1/auth/refresh`）、管理员建用户、调试接口（**含 `POST /rag/benchmark-embedding`** —— 它**在这个文件里，不在 `api_v1_rag.py`**）、`/api/v1/users/{user_id}`、`/api/v1/tool/benchmark` |
+| `api/api_v1_rag.py` | **15 条**：文档管理（`/rag/insert` · `/rag/insert_batch` · `/rag/upload_document` · **`DELETE /rag/documents/{doc_id}`**）、检索（`/rag/pg_search` · `/rag/hybrid_search` · `/rag/rerank_search` · `/rag/rewrite_search` · `/rag/search` · **`/rag/jwt_ask`**）、流式生成（`/rag/stream_search`，**SSE，但无"真中断"**）、**`/rag/ask`**（`tags=["模拟类测试"]`，按 `requested_by` 过滤的真检索，**无 `answer` 字段**）、**`/rag/async_ask`** 与 **`/rag/parallel_ask`**（⚠️ **两者是模拟**，返回假文档）、WebSocket（`/api/v1/ws/agent` · `/api/v1/ws/test`） |
+| `api/api_v1_agent.py` | **28 条**：LangGraph Agent 对话、人工审批（`/agent/approve`）、多分支路由高级 Agent、Plan-Execute、长期记忆（Mem0）、浏览器工具（Playwright）、Python 代码执行器、MCP Client 对话、MCP 工具列表、工具健康检查、Token 预算与成本看板、执行轨迹可视化 |
+
+> ⚠️ **两条 WebSocket 不在 OpenAPI 里**（OpenAPI 规范不支持 WS）⇒ `list_endpoints.sh` 的 57 条**不含它们**。
+> 判据：`curl -i -H "Upgrade: websocket" ... /api/v1/ws/agent` → **101 Switching Protocols**（实测）。
 
 ### RAG 检索管线（`api/rag_pipeline.py`）
 
-`RAGPipeline` 类支持三种检索模式，由可独立开关的环节组合而成：
+> 🔴 **2026-09-29 更正**：原文写「支持**三种**检索模式（fast / accurate / full）」—— **实际 4 种**，
+> 而且把 `fast` 描述成「**仅**向量检索」**也是错的**（它**含 BM25**）。
 
-- **fast（快速）**：仅向量检索（pgvector 余弦相似度）
-- **accurate（精确）**：查询改写 → 混合检索（向量 + BM25）→ RRF 融合 → Cross-Encoder 重排序
-- **full（完整）**：查询扩展 → 改写 → 混合检索 → RRF 融合 → 重排序 → LLM 生成答案
+`RAGPipeline` 类由**可独立开关的环节**组合而成。**实际 4 种模式**
+（枚举与工厂在 **`api/api_v1_rag.py:467-476`**，**不在 `rag_pipeline.py`**）：
+
+| mode | 查询改写 | 查询扩展 | **BM25** | Cross-Encoder 重排序 | 依赖 torch |
+|---|:--:|:--:|:--:|:--:|:--:|
+| **`fast`** | ✗ | ✗ | **✅** | ✗ | ✗ |
+| **`accurate`** | ✅ | ✗ | ✅ | ✅ | ⚠️ **是** |
+| **`accurate_norerank`** ⭐ **默认值** | ✅ | ✗ | ✅ | ✗ | ✗ |
+| **`full`** | ✅ | ✅ | ✅ | ✅ | ⚠️ **是** |
+
+- ⭐ **`accurate_norerank` 是默认值**（`api/api_v1_rag.py:482`）—— **不依赖 torch**，所以本机在
+  **镜像里没装 torch 系**（`DEC-034` 构建期裁掉）的情况下**仍能跑**。
+- ⛔ **`mode` 是受限枚举**：传别的值（如 `fst`）会得到 **422**，**不会被静默兜底**
+  （2026-09-17 修，见 `docs/decisions/DEC-013`）。
+- ⚠️ **`fast` 不是"只查向量"** —— 它走 **BM25 + 向量 + RRF 融合**，只是不做改写/扩展/重排序。
+
+管线中的关键模块：
 
 管线中的关键模块：
 - `query_rewriter.py` — 基于 LLM 的查询扩展（生成多个变体）和上下文感知改写（指代消解、口语转书面语）。结果缓存在 Redis（1小时 TTL）
@@ -287,13 +394,31 @@ locust -f locustfile_hybrid.py
 
 ### Agent 系统（LangGraph）
 
-**三个 Agent 实现，注意区分：**
+> 🔴 **2026-09-29 更正**：原文写「**三个** Agent 实现」—— **实际 6 套**（5 套图/Executor + 1 套 Plan-Execute）。
+> 原文**漏了 `agent_checkpointer.py`（挂 `/agent/memory_chat`）、`/ws/agent` 的内联 Executor、
+> 以及 `plan_execute.py`（它被误归到下面"配套基础设施"里，但它自己就是一个挂在 `/agent/plan_execute` 上的独立实现）**。
 
-| 文件 | 路由接口 | 特点 |
-|------|---------|------|
-| `agent_graph.py` | `/agent/langgraph_chat` | 基础 Agent：LLM 决策节点 → 工具执行循环（DuckDuckGo 搜索、计算器、日期）。带人工审批节点（`interrupt_before=["approval"]`），配合 `/agent/approve` 接口 |
-| `agent_graph_advanced.py` | `/agent/mcp_chat` | **MCP Client 版**高级 Agent：通过 MCP 协议动态调用工具（会话池管理，避免并发阻塞）、Mem0 长期记忆注入、多级 Token 预算检查（单次/单线程/每日）、工具调用缓存。全局实例 `mcp_agent` |
-| `agent_graph_advanced_learning.py` | `/agent/advanced_chat` | **意图分类路由版**高级 Agent：supervisor 分类器（SEARCH/CALCULATOR/DATE/TRANSLATE/REACT）→ 专用子图（搜索部门/计算器部门/日期部门/翻译部门/ReAct 部门）。注意：此文件原名 `agent_graph_advanced_learning1.0.0.py`，含点号无法作为模块导入，已重命名 |
+**共 6 套，都挂在线上**（`docs/CODE_INVENTORY.md` §2 说的「4 套」**也低估了** —— 它自己的表里就有 5 行，且未计 `plan_execute`）：
+
+| # | 文件 | 路由 | 是什么 |
+|---|---|---|---|
+| 1 | `agent_graph.py` | `/agent/langgraph_chat` · `/agent/approve` | **基础 Agent**：LLM 决策 → 工具循环（**DuckDuckGo** 搜索、计算器、日期）。带人工审批 `interrupt_before=["approval"]` |
+| 2 | **`agent_checkpointer.py`** | **`/agent/memory_chat`** | **检查点版**：`build_checkpointer_agent()`，状态持久化（MemorySaver / SqliteSaver） |
+| 3 | `agent_graph_advanced.py` | `/agent/mcp_chat` | **MCP Client 版**：MCP 协议动态调工具（会话池）、Mem0 记忆注入、多级 Token 预算、工具缓存。全局实例 `mcp_agent` |
+| 4 | `agent_graph_advanced_learning.py` | `/agent/advanced_chat` | **意图分类路由版**：supervisor（SEARCH/CALCULATOR/DATE/TRANSLATE/REACT）→ 专用子图。⚠️ 原名 `…learning1.0.0.py`，**含点号无法导入**，已重命名 |
+| 5 | **`api_v1_rag.py` 内联** | **`/api/v1/ws/agent`** | **WebSocket 版**：`create_tool_calling_agent` + `AgentExecutor`（`api_v1_rag.py:714`）。**也是 DuckDuckGo** |
+| 6 | **`plan_execute.py`** | **`/agent/plan_execute`** | **Plan-and-Execute**：非 LangGraph 图，含动态重规划与质量检查 |
+
+> 🔴 **哪一套是"产品版本"—— 【未裁】**，属 **M5 的代际收敛**（留 / 并 / 删）。
+> `CODE_INVENTORY` §7 明写「**2 代与 3 代 Agent 的先后顺序从代码判不出**」⇒ **只能业务方定**。
+> ⇒ 在那之前，**6 套并存是现状，不是 bug**。
+
+#### ⚠️ 搜索工具目前是**两代并存**（别读成"全仓已换真抓取"）
+
+- **新**：`api/search_tools.py` 的 `web_search`（**真抓取** `cn.bing.com` 解析）—— 由 `DEC-028` 引入。
+  **只接在 2 处**：MCP 注册表（`api/mcp_server.py`）与 `agent_graph_advanced_learning.py`。
+- **旧**：**DuckDuckGo 仍残留在 3 个文件** —— `agent_graph.py:43` · `agent_checkpointer.py:43` · `api_v1_rag.py:736`（`/ws/agent`）。
+  ⚠️ **而本机实测 `duckduckgo.com` 网络不通**（`search_tools.py:48` 注释记着）⇒ **那 3 条链上的搜索会失败**。
 
 Agent 配套基础设施：
 - `agent_checkpointer.py` — 基于 MemorySaver（默认）/ SqliteSaver（`AGENT_CHECKPOINT_BACKEND=sqlite`）的检查点持久化，保证对话连续性
@@ -340,9 +465,30 @@ Agent 配套基础设施：
 - **错误处理**：所有业务错误统一使用 `AppException(ErrorCode, message)` 抛出。`ErrorCode` 枚举值与 HTTP 状态码的映射保存在 `ERROR_CODE_TO_HTTP_STATUS`。全局异常处理器同时捕获 `AppException` 和未处理的 `Exception`。⚠️ 中间件中不要抛 `AppException`（见上），直接返回 `JSONResponse`
 - **数据库访问**：始终使用 `get_db()` 上下文管理器——自动从连接池获取连接，成功时提交，异常时回滚，最终归还连接。禁止直接创建原始连接
 - **缓存策略**：Embedding 调用统一走 `embedding_client.get_embedding()`，内部先查 Redis 缓存再调 API。启动时 `warmup_cache()` 预热10个热点查询的 Embedding。查询改写结果同样在 Redis 中缓存
-- **SSE 流式输出**：答案可通过 Server-Sent Events 流式返回，支持真中断（停止按钮会将已生成的部分内容保存为对话历史，避免 Token 浪费）
+- **SSE 流式输出** —— ⚠️ **2026-09-29 更正，原文两处不成立**：
+  > 原写「答案可通过 SSE 流式返回，**支持真中断**（**停止按钮**会将已生成的部分内容保存为对话历史）」。
+  >
+  > | 原说法 | 实测 |
+  > |---|---|
+  > | 「支持真中断」 | ❌ **不成立**。全仓**唯一**的中断处理是 `api/api_v1_rag.py:676` 的 `except asyncio.CancelledError` ⇒ 只有 `print` + `yield [DONE]`。**全仓无 `is_disconnected` / `aclose`** ⇒ **不关上游 LLM 的 HTTP 流** |
+  > | 「停止按钮保存部分内容」 | ❌ **不成立**。**全仓无前端、无停止按钮**（`api/static/` 只有 3 个调试测试页）。⚠️ **更细一层**：`append_chat_history` 两行（`:670` / `:672`）**在 `try` 内、流跑完之后** ⇒ **中断路径根本走不到它们** |
+  >
+  > ✅ **能成立的部分**：SSE 本身是**真的**（`StreamingResponse` + `text/event-stream`，`api_v1_rag.py:687`），逐字返回已验证。
+  > ✅ **正常跑完**的轮次**确实**会写对话历史（Redis，24h）。
+  > 🔴 **这属硬门 C，本仓自标「最容易假完成」** ⇒ 见 `后端补齐清单` **B2 / B3**
 - **文档处理管道**：`document_preprocessor.py`（文本规范化）→ `document_parser.py`（解析 PDF/Word/Markdown/HTML）→ `chunker.py`（按文档类型选择分块策略）→ `embedding_client.py`（向量化）→ 入库
-- **模型命名约定**：DashScope 模型名必须用 `qwen-turbo` / `qwen-plus` / `text-embedding-v2`。**不要使用 `qwen3.7-plus`**（DashScope 不存在该模型，调用会报错；历史代码中的误写已全部修正）
+- **模型命名约定** —— ⚠️ **2026-09-29 重写**（原文写「DashScope 模型名必须用 `qwen-turbo`/`qwen-plus`/`text-embedding-v2`」，**已过时**）：
+  > | 用途 | 现状 |
+  > |---|---|
+  > | **生成 / 对话 LLM** | 🔴 **不再固定** —— 由 `LLM_MODEL_FAST` / `LLM_MODEL_CHAT` 决定。<br>代码默认值仍是 `qwen-turbo`/`qwen-plus`（`api/config.py:54-55`），**但本机 `.env` 已覆盖成 `deepseek-v4-flash`**（`LLM_BASE_URL=https://api.deepseek.com`） |
+  > | **Embedding** | ✅ **固定 `text-embedding-v2`（DashScope）—— 不得改动**<br>（`api/embedding_client.py:15` 是**唯一真正的调用点**） |
+  > | ⛔ 禁用 | `qwen3.7-plus` —— **DashScope 无此模型**，调用会报错。**历史误写已全部修正**（全仓仅剩 1 条注释，`api/plan_execute.py:462`） |
+  >
+  > 🔴 **两条【已知不一致】，改代码时留意**（**是代码问题，不是文档问题**）：
+  > 1. `api/agent_checkpointer.py:58` · `api/agent_graph_advanced.py:316` · `:364` 三处
+  >    `record_usage(model="qwen-turbo")` —— **与实际调用的 DeepSeek 模型不符**
+  > 2. `api/token_tracker.py:48-52` 的 `PRICING` 表**没有 DeepSeek 条目** ⇒ 走兜底单价（qwen-turbo 价）
+  >    ⇒ **金额口径不准**（⚠️ **Token 口径不受影响**，所以 80% 预警仍然准）
 
 ## 本次复审修复记录（2026-08-17）
 
@@ -378,8 +524,27 @@ Agent 配套基础设施：
 
 ### 已知遗留问题 / 环境注意
 
-- **DashScope LLM 免费额度**：本机测试时 embedding API（`text-embedding-v2`）正常，但 **chat 模型（qwen-turbo/qwen-plus）免费额度已耗尽**，调用 LLM 的功能（答案生成、查询改写、Agent 对话）会返回 `403 Free quota exhausted`。这是账户配额问题，不是代码 bug——充值或开启付费后即可恢复
-- **venv 环境**：测试专用 venv（在本仓库之外）中已将 `transformers` 降级为 4.44.2、`numpy` 降级为 1.26.4，以兼容 torch 2.2.2（重排序/CrossEncoder 依赖）。该 venv 还有 gradio/starlette、langchain-chroma/langchain-core 的版本冲突警告，属既有问题，不影响本应用运行
-- **重排序模型**：`BAAI/bge-reranker-v2-m3` 约 2.3GB，首次调用 `rerank_search` 或 `accurate` 管线时自动下载（懒加载），需要网络
+- **DashScope 现在只承担 Embedding** —— 🔴 **2026-09-29 更正**：原文写「**chat 模型（qwen-turbo/qwen-plus）免费额度已耗尽**，调用 LLM 的功能会返回 403」——
+  ⚠️ **这条对当前路径已不适用**：LLM 已切 **DeepSeek**（`DEC-017` §二 第 2 条：「✅ 换 DeepSeek · **实测真调通**」）⇒ **聊天不再打 DashScope chat 配额**。
+  ✅ **但仍有一条残留依赖**：`DASHSCOPE_API_KEY` **是启动必需项**（`api/config.py:39` + `validate_config()` 缺则拒启）——
+  因为 **Embedding 仍走 DashScope**。⚠️ `DEC-017` §二 第 3 条注明：「**剩余额度 API 不提供，测不出来**」⇒ **embedding 额度不足会打挂 `get_embedding()`，且事前看不见**。
+- **venv 环境** —— 🔴 **2026-09-29 更正**：原文写「测试专用 venv（**在本仓库之外**）」—— **错**。
+  **本仓根目录下就有两个**（**已被 `.gitignore` 排除、不入库**）：
+  `venv/`（产品用，`.gitignore:5`）· `venv-ragas/`（评估用，`.gitignore:13`）。
+  其中已将 `transformers` 降级 4.44.2、`numpy` 降级 1.26.4，以兼容 torch 2.2.2（重排序依赖）。
+  ⚠️ 该 venv 还有 gradio/starlette、langchain-chroma/langchain-core 的版本冲突警告，属既有问题，不影响运行。
+- **重排序模型**：`BAAI/bge-reranker-v2-m3` 约 2.3GB（**模型名硬编码在 `api/reranker.py:17`**），首次调用 `rerank_search` 或 `accurate`/`full` 管线时自动下载（**真懒加载**），需要网络。
+  ⚠️ **而 `api/requirements.txt` 已裁掉 torch 系**（`DEC-034` 构建期）⇒ **镜像里跑不了重排序**，只有开发机可以。
+  ⚠️ 顺带：`.env.example` 里有个 `RERANKER_MODEL_NAME` 键，**全仓零引用**（**死键**，别被它误导）。
+
+### 🔴 2026-09-29 核查新发现（原文档没有）
+
+| # | 发现 | 位置 |
+|---|---|---|
+| 1 | **`PRICING` 表没有 DeepSeek 条目** ⇒ 成本金额走 qwen-turbo 兜底单价 ⇒ **金额口径不准**（Token 口径不受影响） | `api/token_tracker.py:48-52` |
+| 2 | **三处 `record_usage(model="qwen-turbo")` 与实际调用的模型不符** | `api/agent_checkpointer.py:58` · `api/agent_graph_advanced.py:316` · `:364` |
+| 3 | **80% 预算预警是"拉取式"** —— 只在 `POST /agent/mcp_chat` 的响应体 `budget_warning` 字段里出现，**不推送、不落告警表**；`/rag/*`、`/agent/langgraph_chat`、`/ws/agent` **拿不到预警** | `api/token_tracker.py:721-742`；唯一调用点 `api/api_v1_agent.py:483` |
+| 4 | **`.env.example` 里的 `RERANKER_MODEL_NAME` 是死键**（全仓零引用） | `.env.example` |
+| 5 | **两条 WebSocket 不在 OpenAPI 里** ⇒ `scripts/list_endpoints.sh` 的 57 条**不含** `/api/v1/ws/agent` · `/api/v1/ws/test` | `api/api_v1_rag.py:773` · `:818` |
 - ~~`api/logger_config.py` 第 44 行之后有一段约 70 行的 SLS 远程日志参考文档以 `'''...'''` 字符串形式内嵌~~ ⚠️ **2026-09-20 实测更正：这条不存在** —— `logger_config.py` **只有 45 行**，且 `SLS` 在该文件里出现 **0 次**。**不要去找那段 SLS**。
 - `agent_graph_advanced.py`、`mcp_server.py` 等文件内有多处 `'''...'''` 注释掉的旧实现，属学习保留内容，不影响运行
