@@ -93,6 +93,7 @@ bash scripts/list_endpoints.sh          # 默认 http://127.0.0.1:8000
 > | **入口文档拆分** | `CLAUDE.md` **557 → 218** · `ROADMAP.md` **791 → 258** · `README.md` **342 → 319** |
 > | ⭐ **建 `docs/specs/` 逐模块规格** | **回答「这个模块做到哪」** —— 业务方原话：「**每个模块我需要去看代码才知道**」。<br>**8 份已写**（只写实测知道的）· 42 个模块留 🔴 缺 · 对账跑 **`/specs`**（`DEC-038`） |
 > | ⭐ **把规矩做成 4 道门 + 2 个命令** | **提交前**：凭据 / 链接 / 孤儿 / **模块spec**（任一不过就拦）<br>**写代码后**：提醒更新 spec · **手动**：`/specs` · `/handoff` |
+> | ⭐ **「用路径指向别处」** | **待办总账 → 摘要 + 指针**（内容在 `docs/待办总表.md`）· 入口文档减重<br>⚠️ **用【纯文本指针】，⛔ 不是 `@import`**（官方：import 照样加载，**不减重**） |
 > | **把规矩做成门** | `.claude/hooks/pre-commit-gates.py`（**提交前三道门**：凭据 / 链接 / 孤儿）· `.claude/commands/handoff.md`（`/handoff`）· `.claude/commands/specs.md`（`/specs`） |
 > | **四个检查脚本** | `list_endpoints.sh` · `check_doc_links.sh` · `check_doc_orphans.sh` · `backup.sh` |
 > | **在建档过程里挖出 10+ 个真问题** | 向量索引代码/实况不一致 · `is_active` 不生效 · 端口暴露面 · 19 个模块零测试 · README 三处已证伪的说法… |
