@@ -534,7 +534,13 @@ Agent 配套基础设施：
   其中已将 `transformers` 降级 4.44.2、`numpy` 降级 1.26.4，以兼容 torch 2.2.2（重排序依赖）。
   ⚠️ 该 venv 还有 gradio/starlette、langchain-chroma/langchain-core 的版本冲突警告，属既有问题，不影响运行。
 - **重排序模型**：`BAAI/bge-reranker-v2-m3` 约 2.3GB（**模型名硬编码在 `api/reranker.py:17`**），首次调用 `rerank_search` 或 `accurate`/`full` 管线时自动下载（**真懒加载**），需要网络。
-  ⚠️ **而 `api/requirements.txt` 已裁掉 torch 系**（`DEC-034` 构建期）⇒ **镜像里跑不了重排序**，只有开发机可以。
+  ⚠️ **而镜像里【没装】torch 系** ⇒ **容器里跑不了重排序**，只有开发机可以。
+  🔴 **2026-09-29 更正（我原先写错了）**：原文写「**`api/requirements.txt` 已裁掉 torch 系**」—— **错**。
+  ✅ **事实**：`api/requirements.txt` **一个字没动** —— 那 5 个包**都还在**。
+  **真正发生的是**：`api/Dockerfile:73` 在**构建期**用
+  `grep -vE '^(sentence-transformers|transformers|locust|ragas|datasets)' requirements.txt > /tmp/req-light.txt`
+  **过滤掉再装** ⇒ **仓里仍只有一份清单，镜像里少 5 个包**（`DEC-034` 决策二的原文就是这么写的）。
+  ⇒ **要在本机跑重排序，`pip install -r api/requirements.txt` 是够的**（它含那 5 个）；**容器里才没有**。
   ⚠️ 顺带：`.env.example` 里有个 `RERANKER_MODEL_NAME` 键，**全仓零引用**（**死键**，别被它误导）。
 
 ### 🔴 2026-09-29 核查新发现（原文档没有）

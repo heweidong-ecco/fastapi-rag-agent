@@ -58,6 +58,56 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- 🟢 **文档体系·第二批：补齐 8 项缺口**（2026-09-29）。业务方指令：「**下一批，全部 1–8 补完整**」。
+
+  | # | 项 | 文件 |
+  |---|---|---|
+  | 1 | 架构文档（人看的） | **`docs/说明/架构.md`** |
+  | 2 | 测试说明 | **`docs/说明/测试.md`** |
+  | 3 | 开发规范 | **`docs/规范/开发规范.md`** |
+  | 4 | `schema.sql` | **`api/schema.sql`** |
+  | 5 | 自动化运维 | **`scripts/backup.sh`**（🟡 **部分** —— 见下） |
+  | 6 | `CONTRIBUTING.md` | **`CONTRIBUTING.md`** |
+  | 7 | `SECURITY.md` | **`SECURITY.md`** |
+  | 8 | 版本与兼容策略 | **`docs/契约/版本与兼容.md`** |
+
+  ⚠️ **第 5 项只补了 1/3，如实标注**：定时（要台常开的机器）· 告警（**卡在业务决策**，
+  没有合理默认值）· 资源限制（要先测占用，属阶段④）**都还没做**。
+  见 `docs/说明/运维.md` §八 · `DEC-036` 附录。
+
+  🔴 **建档过程又挖出几件要紧的**（写文档本身就是一种核查）：
+  1. **中间件的【执行顺序】与【源码顺序】相反**（实测 `app.user_middleware[0]` 是 TextNormalization）
+     ⇒ **被 429 的请求不进 Prometheus 指标、没有 `X-Request-ID`**
+  2. **`/rag/search` 与 `/rag/stream_search` 的召回【不同源】** ——
+     前者走管线（改写+向量+BM25+RRF+重排），后者**是内联裸 SQL 只查向量**
+     ⇒ **同一个 `top_k`，两条链返回的文档集不一样**（此前没有任何文档写过）
+  3. **RRF 有两份实现**（`rag_pipeline.py:201` vs `hybrid_search.py:12`），**测试里还有第三份副本**
+  4. **13 个 LLM 客户端构造点，只有 `plan_execute.py` 的 3 个设了 `timeout`**；
+     其余裸用 SDK 默认（**`read=600s`**）
+  5. **19 个模块零测试覆盖** —— 含 `hybrid_search.py`（ROADMAP 标 ✅「混合检索」）、
+     `answer_with_citations.py`（硬门 B 主体）、`agent_checkpointer.py`（硬门 D 地基）
+  6. **`evaluate_with_ragas.py:45` 的 `LLM_MODEL_CHAT` 默认值 `"deepseek-chat"`**
+     ≠ `config.py:55` 的 `"qwen-plus"` ⇒ **同键两默认值**
+  7. ⚠️ **测试基线数字已过时**（文档写 68 passed，与现在的 120 用例对不上）
+
+- 🟢 **`scripts/backup.sh` —— 本仓第一个备份脚本**（2026-09-29）。
+  ⚠️ **在此之前本仓【没有任何备份机制】** —— 无脚本、无 cron。
+  而 `documents` 表（知识库 + 1536 维向量）是**最不可再生的资产**。
+
+  **三条设计**：① 先判 `docker ps`（不是"我以为它在跑"）
+  ② ⭐ **校验**（文件 >1KB？表定义 ≥6 个？）—— **不能只看退出码 0**
+  ③ 轮转（只删本脚本产出的文件）
+  **⛔ 默认导出到 `~/Desktop/Product-external/backups/`** —— 备份含全部业务数据，
+  而本仓是 PUBLIC ⇒ **哪怕 gitignore 了也不该放仓里**。
+
+  ✅ **已真跑验证**：1.6 MB / 6 表 / 6 个 COPY 段 / 抽验到真实数据。
+
+- 🟢 **`api/schema.sql` —— 从活库生成的建表脚本**（2026-09-29）。
+  此前**表结构只存在于代码里**（`db.py:create_table()`），新人/新环境看不到全貌。
+  **决定：生成，不手写**（同 `list_endpoints.sh` 的思路，不会漂移）。
+  ✅ **已真验**：灌进临时库 → **6 张表全部建出** → 索引确认 `hnsw` → 删临时库。
+  🔴 **它同时坐实了那条不一致**：文件里是 **`hnsw`**，而 `db.py:100` 写的是 **`ivfflat`**。
+
 - 🟢 **建立文档体系（四层）**（2026-09-29）。**业务方裁定，全文见 `docs/decisions/DEC-036`。**
 
   **背景（实测）**：活文档 76 份里 —— **过程记录类 65 份（85%）**，产品文档类 10 份，
