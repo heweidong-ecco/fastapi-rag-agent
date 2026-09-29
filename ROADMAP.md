@@ -1,7 +1,13 @@
-# ROADMAP · fastapi-rag-agent 生产级 RAG + Agent API 服务
+# ROADMAP · fastapi-rag-agent · RAG + Agent API 服务
+
+> 🔴 **2026-09-29 改标题**：原文写「**生产级** RAG + Agent API 服务」——
+> **已删「生产级」**，与 `README.md:21-23` 的立场对齐（那里写明了理由：
+> 「性能数字**全部未实测**……称它生产级是**没有依据的断言**」）。
+> ⚠️ **当时我改了 `CLAUDE.md` 却漏了这里** —— 同一份仓里两个口径。
 
 - 版本:**0.3** · 日期:**2026-09-29** · 图例:✅ 完成 · 🔵 进行中 · ⬜ 待办 · ⏸ 暂缓
 - 🔴 **本文件是本项目【唯一】的状态权威** —— 换会话、换机器，从这里读起。
+- 📍 **不知道某件事该去哪份文档？看 `docs/文档地图.md`**（四层体系的索引）。
 - 📌 **2026-09-29 做过一次汇总**：此前有 **6 份文档各自声称写了"当前状态"**（散落一地），
   现已收敛到**本文件一份**；那 6 份**加「已归档」头 + 移进** `fastapi-rag-agent-TODO待办/归档/`。
   📄 **旧路径 → 新位置**对照表见 **`fastapi-rag-agent-TODO待办/归档/README.md`**
@@ -14,7 +20,8 @@
 
 ### ① 这是什么
 
-基于 **FastAPI + PostgreSQL(pgvector) + Redis** 的**生产级 RAG + Agent API 服务**。
+基于 **FastAPI + PostgreSQL(pgvector) + Redis** 的 **RAG + Agent API 服务**。
+（⚠️ **不称"生产级"** —— 见本文件顶部；README `:21-23` 有完整理由。）
 本地加载 BGE-Reranker-v2-m3 做精排；LLM 走 DeepSeek，Embedding 走阿里云 DashScope（`text-embedding-v2`）。
 
 🎯 **目标**：把它变成一个**能分享的链接**（上公网）。
