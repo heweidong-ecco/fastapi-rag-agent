@@ -1,5 +1,5 @@
 {
-  "$comment": "本仓【项目级】Claude Code 配置（会入库、团队共享）。用户级配置在 ~/.claude/settings.json。",
+  "$comment": "本仓【项目级】Claude Code 配置（会入库、团队共享）。用户级配置在 ~/.claude/settings.json。本仓的门一览见 .claude/README.md。",
   "hooks": {
     "PreToolUse": [
       {
@@ -7,9 +7,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/pre-commit-secrets.py\"",
-            "timeout": 60,
-            "statusMessage": "凭据门（提交前自动跑）"
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/pre-commit-gates.py\"",
+            "timeout": 180,
+            "statusMessage": "提交前三道门（凭据 / 链接 / 孤儿）"
           }
         ]
       }

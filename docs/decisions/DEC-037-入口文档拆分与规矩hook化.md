@@ -3,7 +3,7 @@
 - 日期：2026-09-29
 - 状态：**已采纳并执行**
 - 关联：`DEC-036`（文档体系分四层）· `docs/规范/文档体系-外部依据.md`（**本决策的全部依据**）·
-  `docs/历史/`（新建）· `docs/原理/`（新建）· `.claude/hooks/pre-commit-secrets.py`（新建）
+  `docs/历史/`（新建）· `docs/原理/`（新建）· `.claude/hooks/pre-commit-gates.py`（新建）
 
 ## 决策事项
 
@@ -111,7 +111,7 @@ ROADMAP.md  791 行   ← 其中 540 行是「历史」一块
 
 ⇒ **本仓的「提交前必跑 `check_secrets.sh`」一直是【靠人记得】的** —— 而**漏跑的那次，没人会发现**。
 
-**产出**：`.claude/hooks/pre-commit-secrets.py` + `.claude/settings.json`（项目级，会入库、团队共享）。
+**产出**：`.claude/hooks/pre-commit-gates.py` + `.claude/settings.json`（项目级，会入库、团队共享）。
 
 **行为**：命中 `git commit` ⇒ **先跑凭据门** ⇒ 不通过就**阻止提交**（exit 2）。
 **三条克制**（写在脚本 docstring 里）：只管 `git commit` · **门跑不起来时不阻止**（否则 hook 坏了会把人锁死）· 不打印凭据值。

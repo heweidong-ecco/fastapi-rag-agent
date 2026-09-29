@@ -1,0 +1,101 @@
+# `.claude/` —— 本仓的**门**都在这里
+
+> ## 这份文件是什么
+>
+> **本仓挂了哪些自动门、在哪、拦什么。**
+>
+> 📌 **为什么要有它**：门**挂在别处就等于没有门**（`docs/复盘/2026-09-16-八个PR跳过了留痕门.md`）——
+> 而**新会话不会主动去看 `.claude/` 里有什么**。
+
+---
+
+## 一 · 本仓挂的门（**2 道**）
+
+### ① 提交前的门 —— `.claude/hooks/pre-commit-gates.py`
+
+**触发**：`PreToolUse` 匹配 `Bash` ⇒ 命令里含 **`git commit`** 时。
+**做**：跑下面**三道检查**，**任一不通过就阻止提交**（exit 2）。
+
+| # | 门 | 脚本 | 拦住什么 |
+|---|---|---|---|
+| 1 | **凭据门** | `scripts/check_secrets.sh` | PUBLIC 仓里混进**明文凭据**（**进了历史就改不掉**） |
+| 2 | **链接检查** | `scripts/check_doc_links.sh` | 文档里**指向不存在的路径** |
+| 3 | **孤儿检查** | `scripts/check_doc_orphans.sh` | 建了文档**但没人指向它**（索引挂空） |
+
+> ⚠️ **它只管 `git commit`** —— 不拦 `add` / `push` / `status`。
+> ⚠️ **门本身跑不起来时不阻止**（只警告）—— 否则 hook 坏了会把人锁死。
+
+### ② 用户级的 4 道门（**不在本仓，但会影响你**）
+
+它们在 `~/.claude/hooks/`，**跨项目通用**：
+
+| 脚本 | 何时触发 | 干什么 |
+|---|---|---|
+| `outward-guard.py` | `PreToolUse` on `Bash` | 对外/不可逆动作（git commit、推送、删文件）**要人工确认** |
+| `bulk-write-guard.py` | `PreToolUse` on `Bash` | 批量改写（循环/sed）前**要求先看命中范围** |
+| `kb-write-guard.sh` | `PreToolUse` on `Edit\|Write` | 写**避坑库**时的检查（`KB_WRITE_GUARD=1` 门控） |
+| `doc-open-reminder.py` | `UserPromptSubmit` | 提醒**打开要用户批注的文档 + 给绝对路径** |
+
+> 📌 **它们不在本仓 ⇒ 克隆的人没有**。本仓的规矩里凡依赖它们的，**要写明"这条靠用户级门"**。
+
+---
+
+## 二 · 手动跑的门（**不在 hook 里，要自己跑**）
+
+| 命令 | 什么时候跑 | 为什么不在 hook 里 |
+|---|---|---|
+| `bash scripts/list_endpoints.sh` | 要知道**有哪些接口** | 它需要服务在跑 |
+| `bash scripts/backup.sh` | 要备份数据库 | **不该每次提交都跑** |
+| `bash scripts/impact.sh <关键词>` | 改代码前看**影响面** | 按需 |
+
+---
+
+## 三 · 目录约定
+
+```
+.claude/
+├── README.md                     ← 本文件：门的一览
+├── settings.json                 ← 注册 hook（⛔ 不要 gitignore 它）
+└── hooks/
+    └── pre-commit-gates.py       ← 提交前三道门
+```
+
+> 🔴 **`.claude/` 必须入库**（本仓实测：**没有被 `.gitignore` 挡**）。
+> 理由：hook 脚本要靠它分发；`.gitignore` 掉 ⇒ **克隆的人没有门**。
+> 📌 官方说明：skills / agents / commands 有「回退到主检出」机制，**hooks 没有**。
+> ⬜ **本仓不用 worktree**（业务方 2026-09-29 裁定：**用 subagent 代替**）。
+
+---
+
+## 四 · ⚠️ 一条已知的**结构弱点**（业务方 2026-09-29 裁「**甲**」：就这样）
+
+> **这些门本身就在仓里 ⇒ 写它的 Agent 有权限改它。**
+
+```
+.claude/hooks/pre-commit-gates.py   ← 能改
+scripts/check_secrets.sh            ← 能改
+.claude/settings.json               ← 能删
+```
+
+**⇒ 理论上，AI 能让自己面前的门失效，而没有任何机制会拦。**
+
+**为什么仍然选「甲」**（业务方裁定）：
+* ✅ **能提交进 git ⇒ 可审查**（改了什么看得见）
+* ✅ **克隆的人也有门**
+* ⚠️ 反面是「乙：放 `~/.claude/`」—— AI 碰不到，但**不入库、别人看不到、也审不了**
+
+📌 **依据**：那份《多项目 + 多 worktree》文档说，方案乙**唯一的理由**是
+「**不想让 AI 碰得到约束自己用的规则**」。业务方权衡后**选了甲**。
+
+> ### ⭐ 所以这里有一条**结构性补偿**
+>
+> **门改没改，是可以用命令查的**：
+> ```bash
+> git log --oneline -- .claude/ scripts/check_*.sh     # 谁什么时候动过门
+> git diff HEAD -- .claude/ scripts/check_*.sh         # 有没有未提交的改动
+> ```
+> ⇒ **选甲的前提是【改动能被看见】** —— 而不是"相信不会改"。
+
+## 变更记录
+
+- 2026-09-29 建立（业务方裁「甲」；hook 从 1 道扩到 3 道）。
