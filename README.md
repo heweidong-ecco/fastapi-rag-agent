@@ -308,7 +308,7 @@ curl -s -X POST localhost:8000/api/v1/rag/hybrid_search -H "Authorization: Beare
 > 本仓是在**原系统**的基础上做的。原系统是**极狐 GitLab 上的 `agent-assistant` 项目**
 > （证据：原系统文档里的 `git clone https://jihulab.com/…/agent-assistant.git`，见 git 历史 `351f699` / `2c1a922`）。
 > 它的文档曾以 `Agent/` 目录形式随仓携带，2026-09-20 因**与仓根文档大面积重复、且其 `.env.example`
-> 与 `deploy.md` 会误导**（前者配置面与仓根不同、后者是占位符 URL）而拆解处置：
+> 与 `Agent/deploy.md` 会误导**（前者配置面与仓根不同、后者是占位符 URL）而拆解处置：
 > **架构图搬进 `docs/`，Agent 排障 9 条并入 `docs/FAQ.md` 第五节，其余删除。**
 > 全部原文仍在 git 历史里（`git show 351f699 --stat`）。
 
@@ -319,7 +319,8 @@ curl -s -X POST localhost:8000/api/v1/rag/hybrid_search -H "Authorization: Beare
 > 🔴 2026-09-20 补：本行此前只写「MIT License」而**仓库里没有 `LICENSE` 文件**
 > （GitHub API 的 `license` 字段也是 `null`）—— **声明与事实不符**。现已补上文件。
 
-> 一键部署文件：[deploy.md](deploy.md)
+> 一键部署文件：[`docs/说明/部署.md`](docs/说明/部署.md)
+> 📌 **2026-09-29 移动**：原来在仓根（`deploy.md`），已按文档体系归入 `docs/说明/`。
 
 ## ⚠️ 已知限制（诚实清单）
 

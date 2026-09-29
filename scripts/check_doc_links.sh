@@ -68,18 +68,25 @@ for root, dirs, files in os.walk(REPO):
             docs.append(os.path.join(root, f))
 docs.sort()
 
-# ---------- 2. 已归档文件索引：basename -> 路径 ----------
+# ---------- 2. 文件名索引 ----------
 ARCHIVE_DIRNAMES = {"归档", "archive"}
 # ⚠️ 通用文件名不做 basename 匹配 —— 否则 `归档/README.md` 会被错误地"解析"到
 #    根 `archive/README.md`，**反而掩盖了真问题**（2026-09-29 实测踩过）。
 GENERIC_NAMES = {"README.md", "readme.md", "index.md", "CLAUDE.md", "LICENSE.md"}
-archived = {}
+
+archived = {}      # basename -> 归档夹里的路径（🟡）
+alive = {}         # basename -> 仓里任何位置的路径（⚫ 名字提及，非路径）
 for root, dirs, files in os.walk(REPO):
     dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
-    if os.path.basename(root) in ARCHIVE_DIRNAMES:
-        for f in files:
-            if f not in GENERIC_NAMES:
-                archived.setdefault(f, os.path.join(root, f))
+    in_archive = os.path.basename(root) in ARCHIVE_DIRNAMES
+    for f in files:
+        if not f.endswith(".md") or f in GENERIC_NAMES:
+            continue
+        full = os.path.join(root, f)
+        if in_archive:
+            archived.setdefault(f, full)
+        else:
+            alive.setdefault(f, full)
 
 # ---------- 3. 读豁免清单 ----------
 # 两种写法：
@@ -90,13 +97,19 @@ cand_pats, file_pats = [], []
 if os.path.exists(IGNORE_FILE):
     with open(IGNORE_FILE, encoding="utf-8") as fh:
         for ln in fh:
-            ln = ln.strip()
-            if not ln or ln.startswith("#"):
+            # ⚠️ 顺序要紧：**先跳过整行注释，再去行尾注释**。
+            #   （2026-09-29 实测踩过：把这两步搞反了 ⇒ 注释行被当成正则编译，
+            #     里面一个 `**` 就触发 `re.PatternError: multiple repeat`，**整份检查器挂掉**。）
+            if ln.lstrip().startswith("#"):
                 continue
-            if ln.startswith("@file:"):
-                file_pats.append(re.compile(ln[len("@file:"):]))
-            else:
-                cand_pats.append(re.compile(ln))
+            ln = re.sub(r"\s+#.*$", "", ln).strip()   # 行尾注释
+            if not ln:
+                continue
+            try:
+                pat = (file_pats if ln.startswith("@file:") else cand_pats)
+                pat.append(re.compile(ln[len("@file:"):] if ln.startswith("@file:") else ln))
+            except re.error as e:
+                print(f"❌ 豁免清单里有条正则写错了，跳过：{ln!r} → {e}", file=sys.stderr)
 else:
     print(f"⚠️  没找到豁免清单 {IGNORE_FILE} —— 外部引用会全部落进 🔴", file=sys.stderr)
 
@@ -139,18 +152,24 @@ for d in docs:
 
                 hit = next((p for p in (p_local, p_root, p_strip)
                             if p and os.path.exists(p)), None)
+                base = os.path.basename(cand)
                 if hit:
                     buckets["ok"].append((rel_self, lineno, cand, ""))
-                elif os.path.basename(cand) in archived:
-                    buckets["archived"].append((rel_self, lineno, cand,
-                                                archived[os.path.basename(cand)]))
+                elif base in archived:
+                    buckets["archived"].append((rel_self, lineno, cand, archived[base]))
+                elif base in alive:
+                    # ⭐ **文件名在仓里存在，只是没写全路径** ⇒ 这是「**名字提及**」，不是断链。
+                    #    例：「原来在仓根（`deploy.md`）」「（`接口契约.md` · `运维.md`）」
+                    #    ⚠️ **判据**：读者**按名字能搜到** ⇒ 不是"点开是空的"。
+                    buckets["nameref"].append((rel_self, lineno, cand, alive[base]))
                 elif is_ignored(cand, rel_self):
                     buckets["external"].append((rel_self, lineno, cand, ""))
                 else:
                     buckets["broken"].append((rel_self, lineno, cand, ""))
 
-ok, arch, ext, bad = (buckets["ok"], buckets["archived"],
-                      buckets["external"], buckets["broken"])
+ok, arch, nameref, ext, bad = (buckets["ok"], buckets["archived"],
+                               buckets["nameref"], buckets["external"],
+                               buckets["broken"])
 
 def show(title, items, with_target=False):
     if not items:
@@ -168,11 +187,13 @@ def show(title, items, with_target=False):
 print(f"扫描 {len(docs)} 份 .md")
 print(f"  ✅ 可解析     {len(ok)}")
 print(f"  🟡 已归档     {len(arch)}   （目标在归档夹 ⇒ 属预期）")
+print(f"  ⚪ 名字提及   {len(nameref)}   （只写了文件名，但**该名字在仓里存在** ⇒ 搜得到）")
 print(f"  ⚫ 外部/已删  {len(ext)}   （豁免清单：另一个仓 / 上级仓 / 已删目录 / 历史简写）")
 print(f"  🔴 真断链     {len(bad)}")
 
 if MODE == "all":
     show("🟡 已归档（**属预期，不用改**）", arch, with_target=True)
+    show("⚪ 名字提及（**不是缺陷** —— 名字搜得到，只是没写全路径）", nameref, with_target=True)
     show("⚫ 外部/已删（豁免清单命中）", ext)
     show("✅ 可解析", ok)
 elif MODE != "quiet":
