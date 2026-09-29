@@ -1,0 +1,18 @@
+{
+  "$comment": "本仓【项目级】Claude Code 配置（会入库、团队共享）。用户级配置在 ~/.claude/settings.json。",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/pre-commit-secrets.py\"",
+            "timeout": 60,
+            "statusMessage": "凭据门（提交前自动跑）"
+          }
+        ]
+      }
+    ]
+  }
+}

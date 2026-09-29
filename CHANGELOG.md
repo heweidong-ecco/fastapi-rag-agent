@@ -71,11 +71,48 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- 🟢 **入口文档拆分（渐进式披露）+ 规矩 hook 化**（2026-09-29）。**业务方裁定，全文见 `docs/decisions/DEC-037`。**
+
+  **背景**：业务方「**`CLAUDE` `ROADMAP` 里面的内容太多太复杂……做索引，不要堆满**」，并要求
+  **先搜权威规范**（调研结果 → `docs/规范/文档体系-外部依据.md`）。
+  **Anthropic 官方原文**：「target under **200 lines** per CLAUDE.md file.
+  Longer files consume more context and **reduce adherence**」——
+  而 `CLAUDE.md` 是 **557 行 = 官方目标的 2.8 倍**。
+
+  | 项 | 拆前 | 拆后 |
+  |---|---:|---:|
+  | **`CLAUDE.md`** | **557** | **210** |
+  | **`ROADMAP.md`** | **791** | **258** |
+  | 新增 `docs/历史/` | — | 609 行（2 份） |
+
+  **拆的机制选择**（官方原文为据，见 `DEC-037` 🅰️）：
+  * ⛔ **不用 `@import`** —— 官方：「imported files **still load and enter the context window at launch**」
+    ⇒ **不省上下文**
+  * 🟡 **暂不用 `.claude/rules/`** —— 只有**带 `paths`** 的才真按需加载；**无 `paths` 的等同 CLAUDE.md**
+  * ✅ **直接删 / 移出** —— 唯一真减负的。理由：超标的**主因不是"没拆分"，是"内容不该在这儿"**
+
+  **新增两层**：`docs/历史/`（过程层的延伸）· `docs/原理/`（Diátaxis 的 Explanation ——
+  原 `docs/说明/架构.md` 挪出，因为那层混了 How-to 与 Explanation）。
+
+  **新增 hook**：`.claude/hooks/pre-commit-secrets.py` + `.claude/settings.json` ——
+  命中 `git commit` **自动跑凭据门**，不通过就**阻止提交**。
+  依据两条指向同一结论：**官方**「CLAUDE.md is **context, not enforcement**，该用 hook」·
+  **本仓前科**「8 个 PR 一次都没跑过 `/留痕-checks`」⇒「**门挂在别处，就等于没有门**」。
+
+  🔴 **拆的过程差点丢内容，是【核对抓出来的】**：
+  * `qwen3.7-plus` 禁令 ⇒ 已补进 `docs/契约/环境变量.md` §4
+  * 文档处理管道的链路描述 ⇒ 已补成 `docs/原理/架构.md` **§3.4**
+  * 还发现 `ROADMAP` 末尾一条指针**指着刚被删的章节** ⇒ 已改向
+  * 以及 `ROADMAP` 里「🟢 阶段②」**有两份完全相同的拷贝** ⇒ 删掉旧的那份
+
+  ⚠️ **`CLAUDE.md` 210 行，仍差 10 行到官方目标** —— 剩下的是「必守的规矩」，
+  再压要动到"每条分支都要用的"，代价大于收益。⬜ 若要达标，下一刀该切 **skills 表（77 行）**。
+
 - 🟢 **文档体系·第二批：补齐 8 项缺口**（2026-09-29）。业务方指令：「**下一批，全部 1–8 补完整**」。
 
   | # | 项 | 文件 |
   |---|---|---|
-  | 1 | 架构文档（人看的） | **`docs/说明/架构.md`** |
+  | 1 | 架构文档（人看的） | **`docs/原理/架构.md`** |
   | 2 | 测试说明 | **`docs/说明/测试.md`** |
   | 3 | 开发规范 | **`docs/规范/开发规范.md`** |
   | 4 | `schema.sql` | **`api/schema.sql`** |
