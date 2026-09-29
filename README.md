@@ -92,17 +92,13 @@
 
 ## 🛠 技术栈
 
-| 类别 | 技术 | 说明 |
-| :--- | :--- | :--- |
-| **Web框架** | FastAPI | 高性能异步API框架 |
-| **数据库** | PostgreSQL + pgvector | 关系型数据库 + 向量检索 |
-| **缓存** | Redis | Embedding缓存、工具调用缓存、限流计数器 |
-| **重排序** | BGE-Reranker | Cross-Encoder模型，提升检索精度 |
-| **监控** | Prometheus + Grafana | 指标采集与可视化大屏 |
-| **容器化** | Docker + Docker Compose | 一键部署 |
-| **测试** | pytest + Locust | 单元测试、集成测试、性能压测 |
-| **评估** | RAGAS ✅ **脚本已入库** · ⬜ **未实跑** | 脚本与数据集已在 `api/`；`ragas`/`datasets` 在 `requirements.txt` 里，但**本机 venv 未安装** ⇒ **未跑过验证** —— 见「📈 评估体系」 |
-| **CI/CD** | GitHub Actions | 自动测试工作流 |
+**FastAPI** + **PostgreSQL(pgvector)** + **Redis** + **LangGraph**（+ LangChain）。
+重排序本地 `BAAI/bge-reranker-v2-m3`；**Embedding 固定走阿里云百炼 DashScope**；
+**生成 LLM 可换**（本机 `.env` 走 DeepSeek）；Agent 侧还有 **MCP 工具协议**与 **Mem0 长期记忆**。
+
+> 📄 **逐项 + 落点**见 `docs/原理/架构.md` §1 · **环境变量**见 `docs/契约/环境变量.md`
+> 📌 **2026-09-29 压缩**：原表 11 行（含 RAGAS / CI/CD 两行）——
+> 那两行的**状态**已移到 `docs/说明/测试.md` 与「📈 评估体系」，**避免两处真相**。
 
 ## ✨ 核心功能
 
@@ -132,25 +128,16 @@
 
 ## 📈 评估体系
 
-> 🔴 **2026-09-20 更正记录（保留）**：本段原写「**集成 RAGAS**，自动评估忠实度、答案相关性、上下文召回率和精确率」——
-> **当时不成立**：`ragas` 在 `requirements.txt` 里，但 `api/` 下 0 处 `import` 它，
-> 而唯一用它的脚本被 `.gitignore` 排除在库外（审计称「**RAGAS 三重缺席**」）。
+| 项 | 状态 |
+|---|---|
+| **RAGAS 脚本 + 数据集** | ✅ **已入库**（`api/evaluate_with_ragas.py` · `api/eval_dataset.json` 37 条 + 2 份历史报告） |
+| **是否实跑过** | 🔴 **⬜ 没有** —— 本机 venv **未装** `ragas`/`datasets`，且脚本需 API 在跑 ⇒ **"已入库" ≠ "跑通了"** |
+| 历史评估数字（2026-06-29 **由原系统**跑出） | `faithfulness` 0.6267 · `context_recall` 0.7568 · `context_precision` 0.4369 |
 
-> 🟢 **2026-09-20 补（本次）**：**该链路已移入库内** —— 脚本 + 数据集 + 两份历史报告，见下。
-> ⚠️ **但本次没有实跑过它**（原因写在下面那条），**"已入库" ≠ "跑通了"**。
+> 🔴 **2026-09-29 压缩（原 22 行 → 6 行）**：原文有一段「**RAGAS 三重缺席**」的更正史 ——
+> **那是历史**，已在 `CHANGELOG.md` 与 `docs/decisions/DEC-022` 留档。
+> ✅ **要当前状态 ⇒ 看上面的表**；要**跑法与前置** ⇒ `docs/说明/测试.md`。
 
--   ✅ **自动评估（RAGAS）· 脚本与数据集已入库**
-    - `api/evaluate_with_ragas.py` —— 独立脚本，**不被应用 import**，需手动跑
-    - `api/eval_dataset.json` —— 37 条评测集；`api/ragas_report.json` / `ragas_detailed_report.json` —— 历史报告
-    - 跑法：`cd api && python evaluate_with_ragas.py`（前置：`pip install ragas datasets`，且 API 在 `localhost:8000` 跑着）
-    - ⚠️ 登录口令**改从环境变量读**（`LOGIN_USER_NAME` / `LOGIN_PASSWORD`，不设可用默认值），脚本不再内置口令
--   ⬜ **未实跑验证** —— 本机 venv **未安装** `ragas`/`datasets`（虽在 `requirements.txt` 里），
-    且脚本需 API 在跑 ⇒ **它在本次交付的验收范围内没有被执行过**。要跑通需先补装依赖。
--   📊 **历史评估证据**（**2026-06-29 由原系统跑出，不是本次复现**）：`eval_size` 37 ·
-    `faithfulness` **0.6267** · `context_recall` **0.7568** · `context_precision` **0.4369** ·
-    `answer_relevancy` **NaN**（该项当时未算出）
--   **人工评估**：从完整性、简洁性、逻辑性、可用性四个维度进行定性分析。
--   **Bad Case分析**：持续跟踪并分析失败案例，驱动系统优化。
 
 ## 🚀 快速开始
 
@@ -293,45 +280,20 @@ curl -s -X POST localhost:8000/api/v1/rag/hybrid_search -H "Authorization: Beare
 
 ## 📁 项目结构
 
-```
-.
-├── api/                    # 应用代码
-│   ├── main.py             # FastAPI 应用入口
-│   ├── api_v1.py           # V1 版本路由
-│   ├── rag_pipeline.py     # 综合检索管线
-│   ├── reranker.py         # Cross-Encoder 重排序
-│   ├── query_rewriter.py   # 查询改写
-│   ├── hybrid_search.py    # 混合检索
-│   ├── db.py               # 数据库操作
-│   ├── cache.py            # Redis 缓存
-│   ├── config.py           # 环境变量集中管理
-│   ├── exceptions.py       # 错误码与异常定义
-│   ├── schemas.py          # Pydantic 模型
-│   ├── deps.py             # 依赖注入
-│   ├── chunker.py          # 文档分块
-│   ├── document_parser.py  # 多格式文档解析
-│   ├── document_preprocessor.py # 文档预处理管道
-│   ├── rate_limiter.py     # 令牌桶限流
-│   ├── quota_limiter.py    # 配额管理
-│   ├── metrics.py          # Prometheus 指标
-│   ├── auth.py             # 认证逻辑
-│   └── ...                 # 更多模块
-├── docs/                   # 项目文档（FAQ、架构图、Demo、决策记录）
-├── archive/                # 归档的未使用文件（⚠️ **被 .gitignore 排除，不在库里**）
-├── docker-compose.yml      # 服务编排
-├── prometheus.yml          # Prometheus 配置
-├── locustfile_v2.py        # 性能压测脚本
-└── README.md               # 本文件
-```
+> 🔴 **2026-09-29 删掉了一张手写的目录树**（原来 28 行，列了 20 个文件 + `...`）。
+> **为什么删**：手写的**文件清单必然过期** ——
+> 它列 20 个，实际 `api/` 下有 **68 个 `.py`**；`docs/` 那行还写着「FAQ、架构图、Demo、决策记录」，
+> 而现在是 **7 层 20+ 份**。📌 与「接口清单不写进文档」（跑 `list_endpoints.sh`）**是同一个理由**。
 
-> 📌 **关于原 `Agent/` 目录（2026-09-20 已处置）**
->
-> 本仓是在**原系统**的基础上做的。原系统是**极狐 GitLab 上的 `agent-assistant` 项目**
-> （证据：原系统文档里的 `git clone https://jihulab.com/…/agent-assistant.git`，见 git 历史 `351f699` / `2c1a922`）。
-> 它的文档曾以 `Agent/` 目录形式随仓携带，2026-09-20 因**与仓根文档大面积重复、且其 `.env.example`
-> 与 `Agent/deploy.md` 会误导**（前者配置面与仓根不同、后者是占位符 URL）而拆解处置：
-> **架构图搬进 `docs/`，Agent 排障 9 条并入 `docs/FAQ.md` 第五节，其余删除。**
-> 全部原文仍在 git 历史里（`git show 351f699 --stat`）。
+| 要找… | 去哪 |
+|---|---|
+| **有哪些文档 / 每份干什么** | ⭐ **`docs/文档地图.md`** |
+| **代码怎么组织的**（模块全景 / 请求流 / 依赖枢纽） | **`docs/原理/架构.md`** |
+| **表结构** | `docs/契约/数据模型.md` + **`api/schema.sql`** |
+
+> 📌 **关于原 `Agent/` 目录（2026-09-20 已处置）** —— 🔴 **2026-09-29 移往 `docs/历史/`**：
+> 原系统（极狐 GitLab 的 `agent-assistant`）的文档曾以 `Agent/` 随仓携带，
+> 因**与仓根文档大面积重复**而拆解处置。**原文见 `docs/历史/开发历程.md` 与 git 历史 `351f699`。**
 
 ## 📄 许可证
 
