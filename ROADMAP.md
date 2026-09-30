@@ -125,7 +125,7 @@ bash scripts/list_endpoints.sh          # 默认 http://127.0.0.1:8000
 |---|---|---|---|
 | 1 | 🟢 ~~GitHub 账号被封停~~ ⇒ **✅ 已于 2026-09-29 18:11 UTC 恢复** | （原：`git push` / `gh` / CI 全做不了） | **Ciro / GitHub Support 已解除**（工单 **#4789618**）<br>✅ **收尾 6 项（G1–G6）2026-09-30 全部裁定** —— 含 **轮换两把 Key** · **可推** · **节奏改「小批多次」**<br>📄 `fastapi-rag-agent-TODO待办/GitHub账号封停-事件记录-20260924.md` |
 | 2 | 🔴 **Grafana provisioning 缺口** | **上云会"容器起来了但没看板"** | 阶段⑥ **之前必须补**（`DEC-034` §遗留①） |
-| 3 | 🟢 ~~有 commit 未推送~~ ⇒ **✅ 2026-09-30 已推** | （原：本机之外没有副本 —— `CLAUDE.md`「本地 = 不 durable」） | **业务方裁「可以推」⇒ 已按【小批多次】分 3 次推上去**（`db00f56→ba1baca→6d0df39→f3f42e0`）<br>🔎 **判据**：`git ls-remote origin refs/heads/docs/project-side-recon` = 本地 `HEAD`；`git rev-list --count origin/docs/project-side-recon..HEAD` = **0**<br>⚠️ **节奏已改**：**小批多次**（原「攒着一次推」）⇒ `DEC-039`<br>⚠️ **但那是分支** —— **合进 `main` 要等 PR #60**<br>📌 **实时数别写在这里**（写死了必过期 —— 09-29 写「8+」实测 15；09-30 写「23」实测 25）：<br>`git rev-list --count origin/main..HEAD` |
+| 3 | 🟢 ~~有 commit 未推送~~ ⇒ **✅ 2026-09-30 已推** | （原：本机之外没有副本 —— `CLAUDE.md`「本地 = 不 durable」） | **业务方裁「可以推」⇒ 已按【小批多次】分 3 次推上去**（`db00f56→ba1baca→6d0df39→f3f42e0`）<br>🔎 **判据**：`git ls-remote origin refs/heads/docs/project-side-recon` = 本地 `HEAD`；`git rev-list --count origin/docs/project-side-recon..HEAD` = **0**<br>⚠️ **节奏已改（长期）**：**小批多次**（原「攒着一次推」）⇒ `DEC-039`<br>⚠️ **但那是分支** —— **业务方 2026-09-30 裁「先别合，等下轮」** ⇒ 合进 `main` 要等 **PR #60**<br>📌 **实时数别写在这里**（写死了必过期 —— 09-29 写「8+」实测 15；09-30 写「23」实测 25）：<br>`git rev-list --count origin/main..HEAD` |
 
 ---
 
