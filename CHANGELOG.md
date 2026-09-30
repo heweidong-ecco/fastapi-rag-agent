@@ -108,6 +108,45 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- 🟢 **加第 ③ 道门：改路由文件 ⇒ 自动查「有没有没鉴权的」（2026-09-30）。**
+
+  **起因**：核 `api_v1.py` 时**手工扫"哪些路由没鉴权"，第一版扫出 0 条** ——
+  因为 `FastAPI 0.141` 起 `include_router` 的结果被包成 **`_IncludedRouter`**
+  （直接遍历 `app.routes`，在本仓只能看到 **58 条里的 5 条**）。
+
+  🔴 **而那个坑【仓里早就写着】** —— `api/test_public_paths.py:17-20` 一字不差 ——
+  **它挂在一个谁都不会去读的地方（测试文件的 docstring），当天被踩了两次。**
+  ⇒ 所以**不是再写一条规矩**（那天规矩写了三条、犯了五次），
+  而是**把知识挪到"一定会撞上"的位置**。
+
+  | 产出 | 是什么 |
+  |---|---|
+  | `docs/规范/开发规范.md` **§1.5** | 「加路由 ⇒ 加鉴权」+ 两个真栽过的坑（A 中间件不鉴权 · B `_IncludedRouter`） |
+  | `scripts/check_route_auth.py` | 递归进 `_IncludedRouter`；`--baseline` 比对 / `--write-baseline` |
+  | `scripts/route-auth-baseline.txt` | **基线 = 10 条已知的债**（见 `docs/待办总表.md` 🅗 的 `S1`/`S2`/`S14`） |
+  | `.claude/hooks/route-auth-remind.py` | `PostToolUse`（改了 `main.py`/`api_v1*.py` 才触发） |
+
+  ⚠️ **为什么是"和基线比"而不是"必须为 0"**：现有 10 条是**已知的债**（业务方 2026-09-30 裁「加鉴权」，尚未实施）
+  ⇒ 设成"必须 0"**当下就红**；设成"**别变多**"才能真正拦住新引入的。
+  📌 同源立场：`api/test_plan_execute_tools.py` 的自述「**这不是『防改动』，是『防不知情』**」。
+
+  **实测**：非路由文件 **0.05s** 静默 · 路由文件 **~10s** · **变多时指出具体哪条 + 怎么修**。
+  ⚠️ 第一版跑 **91 秒**，根因是 **Gradio/PostHog 遥测**（本机网络不通时卡 TCP connect）——
+  **与 `api/conftest.py:20` 记的是同一个**；在 `import main` 前关掉遥测后降到 9–13s。
+
+  📄 复盘：`docs/复盘/2026-09-30-判据在手边却没查.md`
+
+- 🟢 **`CLAUDE.md` 顶部加「三个直接入口」**（2026-09-30）。
+
+  **起因**：业务方问「`docs/待办总表.md` 有在 `CLAUDE` 或 `ROADMAP` 里被路径指向吗？
+  不然下次 `/clear` 之后肯定被埋没了；`specs` 关联的索引做了吗？」
+  ⇒ **实测两条都有指向**（`CLAUDE.md:195/200` · `ROADMAP.md:165` · `docs/文档地图.md:36`），
+  **链路是通的**（顶部 →「先读 `ROADMAP.md`」→ 📋 待办总账 → `docs/待办总表.md`）。
+
+  ⚠️ **但业务方的直觉指对了一个真问题：那两处在 `CLAUDE.md` 第 195/200 行（正文后半）** ——
+  **不是"埋没"（该文件是全文加载的），但是"多一跳"**，而新会话常只读顶部就动手。
+  ⇒ 顶部补一格：**待办总表 / `docs/specs/` / 文档地图**，一跳直达。
+
 - 🟢 **「用路径指向别处」—— 建 `docs/待办总表.md` + ROADMAP/CLAUDE 减重**（2026-09-29）。
 
   **业务方原话**：「**用路径指向别处** —— 这样 `ROADMAP` / `CLAUDE.md` 就不会太重。」
