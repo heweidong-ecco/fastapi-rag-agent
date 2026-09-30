@@ -56,7 +56,7 @@
 | `api/hybrid_search.py` | 139 | ✅ [`specs/hybrid_search.md`](./hybrid_search.md) | 🟡 **可用，但它在全仓是【第二份 RRF 实现】** |
 | `api/jwt_handler.py` | 74 | 🔴 **缺** | ❓ 未知 |
 | `api/logger_config.py` | 46 | 🔴 **缺** | ❓ 未知 |
-| `api/main.py` | 565 | 🔴 **缺** | ❓ 未知 |
+| `api/main.py` | 586 | ✅ [`specs/main.md`](./main.md) | 🟡 **可用** —— 应用装配 + **3 条中间件** + 全局异常处理 + 看板挂载<br>🔴 **但有 4 处错误文案不准确**（见下）· 2026-09-30 起**限流分桶会验签了**（修 `B9-b`） |
 | `api/mcp_server.py` | 112 | 🔴 **缺** | ❓ 未知 |
 | `api/mcp_tool_factory.py` | 108 | 🔴 **缺** | ❓ 未知 |
 | `api/memory_store.py` | 72 | 🔴 **缺** | ❓ 未知 |
