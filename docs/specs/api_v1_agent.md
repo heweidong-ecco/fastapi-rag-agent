@@ -1,0 +1,629 @@
+# `api/api_v1_agent.py`
+
+| 项 | 内容 |
+|---|---|
+| **状态** | 🟡 **可用，但 28 个路由【全都非流式】** —— `StreamingResponse` / `text/event-stream` / `yield` **全为 0**<br>🔵 **改造中**：本文件下方有 **实施计划 ②**（人工接管）与 **③**（流式与取消） |
+| **对外提供** | 28 个路由（`/agent/langgraph_chat` · `/agent/approve` · `/agent/mcp_chat` · `/agent/advanced_chat` · `/agent/plan_execute` · `/agent/token/*` …）· `summarize_agent_result()` |
+| **谁在用** | 前端（未做）· `test_public_paths.py` 等 |
+| **规模** | 743 行 |
+
+## ✅ 做了什么
+
+- **对话链**：`langgraph_chat`(:84) · `advanced_chat`(:154) · `plan_execute`(:183) · `memory_chat`(:227) · `mcp_chat`(:450)
+- **人工审批**：`POST /agent/approve`（`:112`）—— 批准 / 拒绝，靠 `agent_graph` 的 `interrupt_before`
+- **⭐ `summarize_agent_result()`（`:43`）** —— 把图的运行结果翻成 `{"status": "pending_approval"/"answered", …}`，
+  并**把模型已写出的文字一并返回**（真实 LLM 常"先说一句再调工具"）
+- **预算**：`check_budget` 依赖（`:423`，抛 `AppException(QUOTA_EXCEEDED)`）· 6 个 `/agent/token/*` 查询路由
+- **工具**：`/agent/tool_health` · `/agent/tool_versions` · `/agent/available_tools` · `/agent/mcp_tools_dynamic`
+
+## 🟡 做到哪 / 缺什么
+
+- 🔴 **28 个路由全非流式** ⇒ **硬门 A 的缺口**（见计划 ③ 的 B1）
+- 🔴 **没有「待接管队列」端点** —— 有**单条**状态查询，**没有任何端点能列出"当前有哪些会话在等接管"**（见计划 ② 的 B5）
+- 🔴 **`/agent/approve` 的参数是 query 不是 body**（`:113-115`）⇒ 前端联调会踩
+- ⬜ 零散的 `/agent/token/*` 与 `/agent/cost/*` 有重复嫌疑（**未核**）
+
+## ⚠️ 看代码会误判的地方 ⭐
+
+| 看代码会以为 | 实际 |
+|---|---|
+| 🔴 **「`status=answered` 就是拿到最终答案了」** | ⚠️ **要看 `status`** —— 返回 `pending_approval` 时 `answer` 里是**模型"先说的一句"**，**工具还没执行**。`summarize_agent_result` 的 docstring（`:55-61`）专门讲了这点：**不能加 `and not content`**，否则这种形态会被**误报成 `answered`** |
+| 🔴 **「审批已经能用了，硬门 D 算完成」** | ⛔ **不能** —— **触发条件是「任意 `tool_calls`」**（`agent_graph.py:100-137`）⇒ **问一句"今天几号"也会进审批**。**硬门 D 要的是"该被接管时被接管"，不是"全都接管"** |
+| ⚠️ **「`/agent/approve` 收 JSON body」** | ⛔ **不是** —— `thread_id` 与 `approved` **都是 query 参数**（`:113-115`） |
+| ⚠️ **「审批状态是持久化的」** | ⚠️ **默认不是** —— `agent_graph.py:148` 用的是 `MemorySaver()`（**进程内存**）⇒ **重启即丢**。只有设了 `AGENT_CHECKPOINT_BACKEND=sqlite` 才落盘 |
+
+## 关联
+
+`docs/specs/agent_graph.md`（审批节点的本尊）· `docs/specs/agent_checkpointer.md` ·
+`docs/specs/api_v1_rag.md`（③ 的另一半）· `docs/specs/main.md` ·
+`后端补齐清单` **B1 · B2 · B3 · B4 · B5 · B6**
+
+---
+
+# 🔵 实施计划 ② · **人工接管**（2026-09-30 立 · 待执行）
+
+> **来源**：`后端补齐清单-待裁-20260929.md` 的 **B4 · B5 · B6**（**业务方已裁：全部为「甲」**）。
+> **三者是同一件事的三段**：**什么时候该停（B4）→ 停在哪看得到（B5）→ 批了怎么接着跑（B6）**。
+
+**目标**：让硬门 D 从「**有地基、但语义是错的**」变成「**该转人工时才转，且转过去看得见、批完接得上**」。
+
+**架构**：B4 改 `agent_graph.py` 的**条件边**（`should_continue` 从"有没有 tool_calls"改成"在不在敏感白名单"）；
+B5 新增一个**待接管注册表** + 一个查询端点；B6 给 `/agent/approve` 加**改写后提交**。
+
+---
+
+## Task 0 · **前置决策**：白名单里放哪些工具？（⛔ 决策二的附问，还没答）
+
+> `决策二` 已裁「**工具白名单**」，但**"白名单里放哪些工具"这个子问题还空着**。
+> ⬜ **我不替你定** —— 但把判断材料摆出来：
+
+| 工具 | 有没有**外部副作用** | 建议 |
+|---|---|---|
+| ⭐ **`search_tool`**（`DuckDuckGoSearchRun`） | 🔴 **有** —— **它把查询内容发到第三方** | ✅ **放进白名单** |
+| `calculator` | ⛔ 无 —— 纯本地计算 | ❌ 不放 |
+| `date_today` | ⛔ 无 —— 纯本地取时间 | ❌ 不放 |
+
+> ### ⇒ 我的建议：**白名单第一版 = `{search_tool}`**
+>
+> **理由**：**"敏感操作"的现实定义就是"会对外产生副作用"** —— 而 `search_tool`
+> **会把用户的问题原文发给 DuckDuckGo**。这**不是"贵不贵"的问题，是"数据出去了"的问题**。
+> ⚠️ 而 `calculator` / `date_today` 是纯本地的，**审批它们只会让人烦**（现状就是这个问题）。
+>
+> ### 🔴 而「空白名单」这个状态**必须明确表态**（三方文档都指出来了）
+>
+> 若白名单为空 ⇒ `needs_approval` 恒 `False` ⇒ **审批永不触发** ⇒
+> **硬门 D 变成"有地基但从不启用"** —— 那是**验收上过不去**的。
+> ⇒ **不许让它悄悄为空。** 见 Task 1 的 Step 4（启动时校验）。
+
+- [ ] **Step 1**：把「白名单第一版放哪些工具」的裁定写进 `后端补齐清单` 的 **B4 · ✍️ 裁**栏，再开工。
+
+---
+
+## Task 1 · **B4** · 触发条件改成「工具白名单」
+
+**Files:**
+- Modify: `api/agent_graph.py`（`should_continue` `:95-103` · 条件边 `:130-137`）
+- Test: `api/test_approval_trigger.py`（新建）
+- Modify: `CHANGELOG.md`
+
+**Interfaces:**
+- Produces: `SENSITIVE_TOOLS: frozenset[str]` —— 从 env `SENSITIVE_TOOLS`（**逗号分隔的工具名**）
+- Produces: `needs_approval(tool_calls: list[dict]) -> bool`
+- ⚠️ `should_continue` 的返回值**从 2 种变 3 种**：`"approval"` / `"tools"` / `END`
+
+- [ ] **Step 1: 写失败测试**
+
+```python
+# api/test_approval_trigger.py
+"""硬门 D 的触发条件（B4）。
+
+🔴 改前的现状：**只要产生任意 tool_calls 就进审批** ⇒ 问一句"今天几号"也会停下来等人批。
+   那条路在验收上是**过不去**的 —— 硬门 D 要的是「**该被接管时被接管**」，不是「全都接管」。
+
+⚠️ 不碰 DB / Redis / 网络 —— 只测路由函数的返回值。
+"""
+import os
+
+os.environ.setdefault("SENSITIVE_TOOLS", "search_tool")
+
+from agent_graph import needs_approval, should_continue           # noqa: E402
+
+
+def _calls(*names):
+    return [{"name": n, "args": {}} for n in names]
+
+
+def test_local_only_tools_do_not_need_approval():
+    """🔴 本条对应"问个日期也进审批"那个现状 —— 它必须**不**触发。"""
+    assert needs_approval(_calls("date_today")) is False
+    assert needs_approval(_calls("calculator")) is False
+
+
+def test_external_side_effect_tool_needs_approval():
+    """`search_tool` 会把问题发到第三方 ⇒ 是敏感操作。"""
+    assert needs_approval(_calls("search_tool")) is True
+
+
+def test_mixed_calls_need_approval():
+    """只要**有任何一个**敏感 ⇒ 整体审批（不能"挑着执行"）。"""
+    assert needs_approval(_calls("date_today", "search_tool")) is True
+
+
+def test_no_tool_calls_ends_the_graph():
+    """没有 tool_calls ⇒ 结束，⛔ 不是"去审批"。"""
+    from langchain_core.messages import AIMessage
+    from langgraph.graph import END
+
+    assert should_continue({"messages": [AIMessage(content="答案是 42")]}) == END
+
+
+def test_unknown_tool_is_not_sensitive_by_default():
+    """⛔ 白名单是**白名单** —— 没登记的工具**不**进审批。
+
+    ⚠️ 这条是**故意的取舍**：默认"不敏感"意味着**新加的工具默认不过审批**。
+       要它过，就得改 `SENSITIVE_TOOLS`（env）或改本文件。
+       📌 若哪天裁定改成"默认敏感"，**改这一条 + 写明理由**，别悄悄改。
+    """
+    assert needs_approval(_calls("some_new_tool")) is False
+```
+
+- [ ] **Step 2: 跑，确认失败**
+
+```bash
+python -m pytest api/test_approval_trigger.py -q
+```
+预期：`ImportError: cannot import name 'needs_approval'`
+
+- [ ] **Step 3: 实现（`api/agent_graph.py`）**
+
+在 `search_tool = DuckDuckGoSearchRun()` **之前**加：
+
+```python
+# ==================== 人工审批的【触发条件】（B4 · 2026-09-30 改）====================
+# 🔴 改前：**只要产生任意 `tool_calls` 就进审批** ⇒ 问一句"今天几号"也会停下来等人批。
+#
+# 现在：**只有【会对外产生副作用】的工具**才需要审批。
+#   判据：「敏感」= **这个工具会把数据发到本机之外 / 产生不可撤销的外部效果**。
+#   ⇒ `search_tool`（把问题原文发给 DuckDuckGo）**算**；
+#      `calculator` / `date_today`（纯本地）**不算**。
+#
+# ⚠️ 从 env 读，逗号分隔。**默认值是 `search_tool`** —— 见 Task 0 的裁定。
+SENSITIVE_TOOLS = frozenset(
+    n.strip() for n in os.getenv("SENSITIVE_TOOLS", "search_tool").split(",") if n.strip()
+)
+
+
+def needs_approval(tool_calls: list) -> bool:
+    """这一批工具调用里，**有没有任何一个**需要人工审批。
+
+    ⚠️ 有任何一个敏感 ⇒ **整批都要批** —— ⛔ 不能"挑着执行敏感之外的"。
+       理由：这批调用是**模型一次决定的**，拆开执行会让它看到的执行结果与它设想的不一致。
+    """
+    names = {tc.get("name") for tc in tool_calls or []}
+    return bool(names & SENSITIVE_TOOLS)
+```
+
+把 `should_continue`（`:95`）改成：
+
+```python
+def should_continue(state: AgentState):
+    """路由函数：没有工具调用 ⇒ 结束；有 **敏感** 工具调用 ⇒ 先审批；否则直接执行。
+
+    ⚠️ 返回值有 **3 种**了（改前只有 2 种）—— 条件边的映射表要跟着改（见 `build_agent_graph`）。
+    """
+    last_message = state["messages"][-1]
+    tool_calls = getattr(last_message, "tool_calls", None) or []
+    if not tool_calls:
+        return END
+    if needs_approval(tool_calls):
+        return "approval"
+    return "tools"
+```
+
+把条件边（`:130-137`）改成：
+
+```python
+    workflow.add_conditional_edges(
+        "agent",
+        should_continue,
+        {
+            "approval": "approval",   # 敏感工具 ⇒ 先停，等人批
+            "tools": "tools",         # 非敏感 ⇒ 直接执行（这是本次改动的关键）
+            END: END,
+        }
+    )
+```
+
+- [ ] **Step 4: 加"白名单不许为空"的启动校验**
+
+在 `build_agent_graph()` **之前**加：
+
+```python
+def validate_approval_config():
+    """启动时校验审批配置 —— ⛔ 不许让白名单【悄悄为空】。
+
+    为什么必须有这条：白名单为空 ⇒ `needs_approval` 恒 False ⇒ **审批永不触发** ⇒
+    **硬门 D 变成"有地基但从不启用"** —— 而**没有任何报错**，验收时才发现。
+    ⇒ 让它**启动就报**，别等到验收。
+
+    📌 同型前科：本仓 `embedding_client.py:10` 的模块级 `OpenAI(api_key=...)`
+    —— key 为空会**炸掉整条 import 链**（`ROADMAP` 待办 **T1**）。
+      那条是"**意外**为空就炸"；本条是"**该配的东西没配**就炸"，**方向相反、目的一样**。
+    """
+    if not SENSITIVE_TOOLS:
+        raise EnvironmentError(
+            "SENSITIVE_TOOLS 为空 ⇒ 人工审批永远不会触发，硬门 D 名存实亡。\n"
+            "请在 .env 里配置至少一个会对外产生副作用的工具名，例如：\n"
+            "    SENSITIVE_TOOLS=search_tool"
+        )
+```
+
+然后在 `agent_graph = build_agent_graph()` 那行**之前**调用 `validate_approval_config()`。
+
+- [ ] **Step 5: 跑测试**
+
+```bash
+python -m pytest api/test_approval_trigger.py -q                        # → 5 passed
+python -m pytest api/ -m "not integration and not needs_db" -q            # → 全绿
+```
+
+⚠️ **可能红**：`api/test_agent_repairs.py` 里有关于审批语义的用例（`:55-64` 那段注释就是它留下的）。
+**红是预期的** —— 改的就是这个语义。**逐条看**：把"问日期会进审批"那类断言**改掉并写明新口径**，
+⛔ **不要为了让测试过而回退实现**。
+
+- [ ] **Step 6: 补 `.env.example` + CHANGELOG + 提交**
+
+```bash
+# .env.example 加一行（带注释说明它是干什么的）：
+#   SENSITIVE_TOOLS=search_tool    # 需要人工审批的工具（逗号分隔）
+git add api/agent_graph.py api/test_approval_trigger.py .env.example CHANGELOG.md
+git commit -m "feat(硬门D): B4 —— 审批触发改成敏感工具白名单，问日期不再进审批"
+```
+
+---
+
+## Task 2 · **B5** · 待接管队列（数据 + 端点）
+
+**Files:**
+- Create: `api/pending_approvals.py` + `docs/specs/pending_approvals.md`（⛔ 新建模块必须同时建 spec）
+- Create: `api/test_pending_approvals.py`（无 marker）
+- Modify: `api/api_v1_agent.py`（新端点 + 在 `langgraph_chat` 里登记）
+
+**Interfaces:**
+- Produces: `register(thread_id, user_name, tool_calls) -> None` · `resolve(thread_id) -> None` · `list_pending() -> list[dict]`
+- Produces: `GET /agent/pending` —— 返回 `[{"thread_id", "user_name", "since", "tool_calls"}]`
+
+> ### 🔴 一个**必须写在 spec 里**的耦合
+>
+> **没法从 `MemorySaver` 里"列出所有卡住的会话"** —— 它只按 thread_id 取，**没有"列出全部"的 API**。
+> ⇒ **必须自己建一张注册表**，在对话返回 `pending_approval` 时登记、在 `/agent/approve` 后注销。
+>
+> ⚠️ **而这张注册表放哪，必须与 checkpoint 后端一致**：
+> · 默认 `MemorySaver`（`agent_graph.py:148`）⇒ 状态本来就在内存 ⇒ 注册表放内存**是一致的**
+> · 但若设了 `AGENT_CHECKPOINT_BACKEND=sqlite` ⇒ **状态落盘了、注册表还在内存** ⇒
+>   **重启后：图还在等审批，队列里却查不到** ⇒ 会话变孤儿
+> ⇒ **本计划 v1 只支持内存**，并在 `pending_approvals.py` 顶部**写明这个限制** + 启动时若检测到 sqlite 后端就**警告**。
+
+- [ ] **Step 1: 写失败测试**
+
+```python
+# api/test_pending_approvals.py
+"""待接管队列（B5）。⚠️ 不碰 DB / Redis —— 纯内存注册表。"""
+import pending_approvals as pa
+
+
+def test_register_then_list():
+    pa.clear()                                   # 测试隔离
+    pa.register("t1", "admin", [{"name": "search_tool", "args": {"q": "x"}}])
+    rows = pa.list_pending()
+    assert len(rows) == 1
+    assert rows[0]["thread_id"] == "t1"
+    assert rows[0]["user_name"] == "admin"
+    assert "since" in rows[0]
+
+
+def test_resolve_removes_it():
+    """批完必须注销 —— 否则它会**永远留在队列里**，变成假待办。"""
+    pa.clear()
+    pa.register("t2", "admin", [])
+    pa.resolve("t2")
+    assert pa.list_pending() == []
+
+
+def test_resolve_unknown_thread_is_a_noop():
+    """重复注销 / 注销不存在的 ⇒ ⛔ **不许抛异常**（`/agent/approve` 会调到）。"""
+    pa.clear()
+    pa.resolve("never-registered")               # 不应抛
+
+
+def test_register_twice_keeps_latest():
+    """同一 thread 再次登记 ⇒ 更新，⛔ 不产生两条。"""
+    pa.clear()
+    pa.register("t3", "admin", [{"name": "a", "args": {}}])
+    pa.register("t3", "admin", [{"name": "b", "args": {}}])
+    rows = pa.list_pending()
+    assert len(rows) == 1 and rows[0]["tool_calls"][0]["name"] == "b"
+```
+
+- [ ] **Step 2: 跑，确认失败**（`ModuleNotFoundError: pending_approvals`）
+
+- [ ] **Step 3: 实现 `api/pending_approvals.py`**
+
+```python
+"""待接管会话的注册表（B5）。
+
+⚠️ **为什么需要它**：`MemorySaver`（`agent_graph.py:148`）**没有"列出所有 thread"的 API**
+   ⇒ **没法从 checkpoint 里反查"谁卡在审批"** ⇒ 只能自己记账。
+
+🔴 **已知限制（v1）**：本表在**内存**里 ⇒ **进程重启即清空**。
+   与默认的 `MemorySaver` **是一致的**（那个也在内存）。
+   ⛔ **但若设了 `AGENT_CHECKPOINT_BACKEND=sqlite`**：图的状态落盘了，本表还在内存 ⇒
+      **重启后图仍在等审批，而队列里查不到** ⇒ 会话变孤儿。启动时会给警告（见 `warn_if_backend_mismatch`）。
+"""
+import threading
+import time
+
+_lock = threading.Lock()
+_pending: dict[str, dict] = {}
+
+
+def register(thread_id: str, user_name: str, tool_calls: list) -> None:
+    """登记一个卡在审批的会话。同一 thread 重复登记 ⇒ 覆盖。"""
+    with _lock:
+        _pending[thread_id] = {
+            "thread_id": thread_id,
+            "user_name": user_name,
+            "tool_calls": list(tool_calls or []),
+            "since": time.time(),
+        }
+
+
+def resolve(thread_id: str) -> None:
+    """会话已不再等待审批 ⇒ 注销。⚠️ 注销不存在的**是正常的**（幂等），不抛异常。"""
+    with _lock:
+        _pending.pop(thread_id, None)
+
+
+def list_pending() -> list[dict]:
+    """按"卡住时间"升序 —— **卡得最久的排最前**（最该先处理）。"""
+    with _lock:
+        return sorted((dict(v) for v in _pending.values()), key=lambda r: r["since"])
+
+
+def clear() -> None:
+    """仅供测试隔离用。"""
+    with _lock:
+        _pending.clear()
+
+
+def warn_if_backend_mismatch(logger=None) -> None:
+    """checkpoint 落盘了、而本表在内存 ⇒ 重启后队列会丢。启动时提醒。"""
+    import os
+    if os.getenv("AGENT_CHECKPOINT_BACKEND") == "sqlite":
+        msg = ("AGENT_CHECKPOINT_BACKEND=sqlite ⇒ 图状态会落盘，"
+               "但待接管队列(pending_approvals)仍在内存 ⇒ 重启后队列会丢、会话变孤儿。"
+               "见 docs/specs/pending_approvals.md")
+        (logger.warning if logger else print)(msg)
+```
+
+- [ ] **Step 4: 建 `docs/specs/pending_approvals.md`**（把上面那段「已知限制」原样搬进去 —— 它正是"看代码会误判"的那类）
+
+- [ ] **Step 5: 接端点（`api/api_v1_agent.py`）**
+
+```python
+from pending_approvals import list_pending, register, resolve
+
+
+@router.get("/agent/pending")
+async def list_pending_approvals(
+    user_name: str = Depends(get_current_user_hybrid),
+):
+    """列出**当前等待人工接管**的会话（硬门 D 的入口）。
+
+    判据（`通用/四硬门 §2` 的 L2 分水岭）：**能被前端当作一个独立可点的入口**。
+    """
+    rows = list_pending()
+    return {"count": len(rows), "items": rows, "requested_by": user_name}
+```
+
+在 `langgraph_chat`（`:84`）里，拿到 `summary` **之后**：
+
+```python
+    if summary.get("status") == "pending_approval":
+        register(thread_id, user_name, summary.get("pending_tool_calls") or [])
+    else:
+        resolve(thread_id)      # 本轮没卡住 ⇒ 清掉上一次的登记（否则会残留成假待办）
+```
+
+在 `approve_agent_action`（`:112`）里，**每条 return 之前**调 `resolve(thread_id)`。
+
+- [ ] **Step 6: 跑 + 提交**
+
+---
+
+## Task 3 · **B6** · 接管后续跑（含"改写后提交"）
+
+**Files:**
+- Modify: `api/api_v1_agent.py`（`/agent/approve`）
+- Test: `api/test_approval_resume.py`（**无 marker**，用假图）
+
+**Interfaces:**
+- Produces: `POST /agent/approve` 增加可选参数 **`edited_answer: str | None`**
+
+- [ ] **Step 1: 写失败测试**（用假图，⛔ 不真跑 LLM）
+
+```python
+# api/test_approval_resume.py
+"""接管后续跑（B6）。
+
+🔴 判据（`通用/四硬门 §3-D`）：**接管后会话【上下文连续】** —— 不是重开一轮。
+
+⚠️ 用假图替掉 `agent_graph`：真图要调 LLM，**那会让这条测试变成"要联网、要花钱"**。
+   本文件测的是【接线与语义】，不是模型质量。
+"""
+import api_v1_agent as m
+
+
+class _FakeGraph:
+    """记录被怎么调用，并能按剧本返回。"""
+    def __init__(self):
+        self.calls = []
+        self._state = type("S", (), {"next": ("approval",)})()
+
+    def get_state(self, config):
+        return self._state
+
+    def update_state(self, config, values=None):
+        self.calls.append(("update_state", values))
+
+    def invoke(self, arg, config):
+        self.calls.append(("invoke", arg))
+        # 续跑时传的是 None（= 从 checkpoint 继续），⛔ 不是新的 HumanMessage
+        return {"messages": []}
+
+
+def test_resume_invokes_with_none_not_a_new_message(monkeypatch):
+    """🔴 **核心判据**：续跑必须 `invoke(None, config)`。
+
+    ⛔ 若某天有人改成 `invoke({"messages": [HumanMessage(question)]}, …)`，
+       那就是**重开一轮** —— 上下文断了，而**接口返回看着一切正常**。
+    """
+    fake = _FakeGraph()
+    monkeypatch.setattr(m, "agent_graph", fake)
+    m.approve_agent_action(thread_id="t1", approved=True, user_name="admin")
+    assert ("invoke", None) in fake.calls, f"续跑没有用 None 续跑：{fake.calls}"
+
+
+def test_edit_note_is_written_into_state(monkeypatch):
+    """改写后提交：人工改的答案要进 state，**否则改了等于没改**。"""
+    fake = _FakeGraph()
+    monkeypatch.setattr(m, "agent_graph", fake)
+    m.approve_agent_action(thread_id="t1", approved=True, user_name="admin",
+                           edited_answer="人工改过的答案")
+    values = [v for (k, v) in fake.calls if k == "update_state"]
+    assert any("人工改过的答案" in str(v) for v in values), (
+        f"edited_answer 没有被写进 state：{values}"
+    )
+```
+
+- [ ] **Step 2: 跑，确认失败**
+
+```bash
+python -m pytest api/test_approval_resume.py -q
+```
+预期：`TypeError: approve_agent_action() got an unexpected keyword argument 'edited_answer'`
+（⚠️ 若它**直接通过**，说明 `invoke(None, …)` 那半条测的是现状 —— 那就把该断言留着当**回归守卫**，
+并在 docstring 里写明"这是钉住现有正确行为的守卫，不是新功能"）
+
+- [ ] **Step 3: 给 `/agent/approve` 加 `edited_answer`**
+
+```python
+@router.post("/agent/approve")
+async def approve_agent_action(
+    thread_id: str,
+    approved: bool,
+    edited_answer: str = None,                 # 新增：人工改写后的答案（可选）
+    user_name: str = Depends(get_current_user_hybrid),
+):
+    """
+    人工审批：批准 / 拒绝 / **改写后提交**。
+
+    🔴 续跑用的是 `agent_graph.invoke(None, config)` —— **`None` 表示"从 checkpoint 继续"**，
+       ⛔ **不是**新开一轮。改成传新消息 = 上下文断裂，而接口返回**看着一样**。
+       守卫见 `api/test_approval_resume.py`。
+
+    `edited_answer`：人工把答案改过之后再放行。**不给就按原样续跑。**
+    """
+    from langchain_core.messages import AIMessage
+    from pending_approvals import resolve
+
+    config = {"configurable": {"thread_id": thread_id}}
+    current_state = agent_graph.get_state(config)
+
+    if current_state.next != ("approval",):
+        resolve(thread_id)
+        return {"status": "error", "message": "当前没有等待审批的任务"}
+
+    if approved:
+        if edited_answer is not None:
+            # ⚠️ 用 update_state 把人工的改写**推进 messages**，而不是"跳过模型直接返回"
+            #    —— 后者会让接下来的节点看不到这个改写。
+            agent_graph.update_state(
+                config, {"messages": [AIMessage(content=edited_answer)]}
+            )
+        result = agent_graph.invoke(None, config)      # ⭐ None = 续跑
+    else:
+        ...   # 拒绝分支：保持原样，只需在 return 前 resolve(thread_id)
+
+    resolve(thread_id)
+    return {"status": "approved" if approved else "rejected", ...}
+```
+
+- [ ] **Step 4: 跑 + 提交**
+
+```bash
+python -m pytest api/test_approval_resume.py -q                       # → passed
+python -m pytest api/ -m "not integration and not needs_db" -q          # → 全绿
+git add api/api_v1_agent.py api/test_approval_resume.py
+git commit -m "feat(硬门D): B6 —— 接管后续跑可带人工改写，并用测试钉住'从 checkpoint 续跑'"
+```
+
+---
+
+# 🔵 实施计划 ③ · **流式与取消**（2026-09-30 立 · 待执行）
+
+> **来源**：`后端补齐清单-待裁-20260929.md` 的 **B1 · B2 · B3**。
+> **业务方已裁**：**B1 范围 = 只做 `/agent/langgraph_chat`**；**B2 验收 = 先以本机证据为准**。
+> ⚠️ **排最后** —— B2 自标「**最容易假完成**」，且它的落点**依赖 B1 做完**。
+
+## Task 4 · **B1** · Agent 端 SSE（**范围：只 `/agent/langgraph_chat`**）
+
+**Files:** Modify `api/api_v1_agent.py`（导 `StreamingResponse`、新增流式路由）· Test `api/test_agent_sse.py`
+
+**Interfaces:** `POST /agent/langgraph_chat/stream` —— `media_type="text/event-stream"`
+
+> ### ⛔ **一条硬约束（本次核查发现⑥）**
+> **不能照抄 `api_v1_rag.py:655-662` 的写法** —— 那里 `.stream()` 是**同步迭代**，
+> 在 async 生成器里 `for` **会阻塞事件循环**（`:662` 的 `await asyncio.sleep(0.01)` 是唯一让出点）。
+> ⇒ Agent 端要用 **`astream`** 之类的异步迭代。
+
+- [ ] Step 1 写失败测试（**测"是不是真流式"，不是"有没有这个路由"**）：
+
+```python
+def test_stream_chunks_arrive_over_time_not_all_at_once():
+    """🔴 判据来自 `通用/四硬门 §3-A`：**chunk 的时间戳必须递增**。
+
+    ⛔ 反例：前端 `setInterval` 切字符 = **假流式**。
+       ⚠️ 用 `TestClient` 拿到的是**已缓冲的整段** ⇒ **它测不出"真流式"**。
+       ⇒ 本用例只断言 **契约**（`content-type` 是 `text/event-stream`、body 以 `data:` 分段）；
+          **"逐字到达"必须用真服务 + 真 HTTP 测**（见 Step 4 的判据）。
+    """
+    ...assert "text/event-stream" in resp.headers["content-type"]
+    ...assert resp.text.count("data:") >= 2
+```
+
+- [ ] Step 2 跑 → 失败 → Step 3 实现（**`astream` + `StreamingResponse`**）
+- [ ] Step 4 ⭐ **真服务的判据**（⛔ 别只用 TestClient）：
+
+```bash
+# 逐字节到达 = 真流式。看时间戳是否递增、连接是否保持不关闭
+curl -N -s -X POST "http://127.0.0.1:8000/api/v1/agent/langgraph_chat/stream?question=你好&thread_id=t1" \
+  -H "Authorization: Bearer $TOKEN" | while IFS= read -r line; do echo "$(date +%T.%3N)  $line"; done
+```
+  ⇒ 对照 `通用/四硬门 §3-A` 的 4 条判据（①逐字出现 ②`text/event-stream` **保持不关闭** ③**时间戳递增** ④日志里 token 计数**随 chunk 增长**）
+- [ ] Step 5 建/更 `docs/specs/api_v1_agent.md`（本文件）的状态行 → 提交
+
+## Task 5 · **B2** · 服务端 cancel **传播到上游**（🔴🔴 自标「最容易假完成」）
+
+**Files:** Modify `api/api_v1_rag.py:572`（`stream_search`）+ Agent 流式端点 · Test `api/test_cancel_propagation.py`
+
+**要补三件**：① 检测客户端断开（`request.is_disconnected()`）② **主动关上游 HTTP 流**（生成器 `close()` / 放进 `with` / `async` 客户端 `aclose()`）③ **`finally` 兜底**
+
+> ### ✅ 验收口径（**业务方 2026-09-30 已裁：先以本机证据为准**）
+> **判据 = 日志有 cancel 事件 + token 计数在该时间点【停止增长】**。
+> ⚠️ **已知代价**：**证明不了"上游计费真的停"** —— 本机没有 DashScope 侧账单。
+> ⇒ **接受它**；上云后（阶段⑦/⑧）若有机会再补真链路，但**不作为本轮验收前提**。
+
+- [ ] Step 1 写测试：**cancel 后计数必须停止**
+```python
+def test_token_counter_stops_after_cancel(...):
+    """🔴 判据③（`通用/四硬门 §3-C`）：**token 计数在该时间点停止增长**。
+
+    ⚠️ "前端停了"证明不了任何事 —— 那可能只是**前端不再显示**，而后端还在烧钱。
+       本用例断言的是**服务端计数**。
+    """
+```
+- [ ] Step 2 跑 → 失败（**现状**：`api_v1_rag.py` 全文 `is_disconnected` / `finally` / `aclose` **均为 0 命中**）
+- [ ] Step 3 实现三件（⚠️ **`finally` 是兜底，不是全部** —— 只在 `except` 里写兜底是本仓栽过的形态，见 `search_tools.py:16` 的注释：「**那次调用返回的是 200，兜底永远不触发**」）
+- [ ] Step 4 ⭐ **判据（本机）**：真服务流式途中 Ctrl-C / 关连接，然后
+```bash
+# ① 后端日志里出现 cancel 事件；② 之后 /agent/token/recent 的计数不再增长
+```
+- [ ] Step 5 提交，并在 `docs/specs/api_v1_rag.md` 里把「不关上游 HTTP 流」那条**划掉**
+
+## Task 6 · **B3** · 先核：中断时"已生成的那半截"怎么处理
+
+- [ ] **不写代码先核**：`stream_search` 里**到底有没有**「半截答案落库 / 已用 token 记账」
+- [ ] 已有线索（**未下结论**）：`api_v1_rag.py:676` 只有 `print` + `yield "data: [DONE]"`
+- [ ] 判据：cancel 后 **①** 已产生的 token **有记账**（否则账单对不上）**②** 半截答案**处理方式是明确的**（存 / 弃，二者都要有说法）
+- [ ] 核完把结论写进本 spec，**再决定补不补**

@@ -17,6 +17,10 @@
 - 🔴 **零测试覆盖**（`docs/说明/测试.md` §六 **#3**）
 - 🔴 **`backend=="redis"` 分支忽略 `REDIS_URL`**（见下）
 - 🔴 **`record_usage(model="qwen-turbo")` 与实际调用的模型不符**（`:58`）—— 成本记账口径不准
+  **✅ 2026-09-30 业务方裁「修」** ⇒ 改成 `getattr(llm, "model_name", None) or getattr(llm, "model", "unknown")`
+  （**照抄 `plan_execute.py:154`**）。⚠️ **必须与"`PRICING` 补 deepseek 条目"同批** ——
+  只改这里不补价 ⇒ 落到 `_DEFAULT_PRICING` **兜底价**，**比明确配一个更糟**（看不出来是兜底）。
+  📄 另两处在 `docs/specs/agent_graph_advanced.md` ⚠️②（`:316` `:364`）—— **三处一起改**。
 - ⚠️ **它也是 6 套 Agent 之一** —— 哪套是产品版本**【未裁】**（M5）
 
 ## ⚠️ 看代码会误判的地方 ⭐
