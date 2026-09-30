@@ -1,0 +1,14 @@
+# 无鉴权路由基线（scripts/check_route_auth.py --write-baseline 生成）
+# 每一行 = 一条「不在 PUBLIC_PATHS、且没有鉴权依赖」的路由。
+# ⚠️ 这份基线【不是「允许清单」】—— 它是「已知的债」，见 docs/待办总表.md 🅗 的 S1/S2/S14。
+# ⛔ 变多 = 新引入了没鉴权的路由 ⇒ 该拦；变少 = 修好了 ⇒ 重新生成基线。
+/api/v1/
+/api/v1/debug/cache_stats
+/api/v1/debug/count
+/api/v1/debug/quota/{user_name}
+/api/v1/debug/rate_limit/{user_name}
+/api/v1/rag/async_ask
+/api/v1/rag/benchmark-embedding
+/api/v1/rag/parallel_ask
+/api/v1/tool/benchmark
+/api/v1/users/{user_id}

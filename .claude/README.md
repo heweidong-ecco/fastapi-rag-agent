@@ -9,7 +9,7 @@
 
 ---
 
-## 一 · 本仓挂的门（**2 道**）
+## 一 · 本仓挂的门（**3 道** —— 提交前 1 + 编辑后 2）
 
 ### ① 提交前的门 —— `.claude/hooks/pre-commit-gates.py`
 
@@ -41,6 +41,41 @@
 
 > ⛔ **它不阻止** —— `PostToolUse` 拦不住已经发生的编辑，而且写代码时会频繁触发。
 > 📌 **这是有意的分工**：**能机械判的（新增）⇒ 硬拦；判不了的（要不要更新）⇒ 提醒。**
+
+### ①·6 · 🆕 改**路由文件**之后的提醒 —— `.claude/hooks/route-auth-remind.py`
+
+**触发**：`PostToolUse` 匹配 `Edit|Write|NotebookEdit`，**且**改的是
+`api/main.py` / `api_v1.py` / `api_v1_rag.py` / `api_v1_agent.py`（**脚本自己判路径**）。
+**做**：跑 `scripts/check_route_auth.py --baseline` ⇒ **只报「比基线【变多】」**：
+
+```
+🔴 路由鉴权检查：**新引入了没有鉴权依赖的路由**
+❌ 比基线【多了 1 条】—— 新引入了没鉴权的路由：
+     + /api/v1/debug/cache_stats
+⇒ 要么给它加 `Depends(get_current_user_hybrid)`（或 require_admin），
+   要么确认它确实该公开 —— 后者请同时把它加进 `main.PUBLIC_PATHS`。
+```
+
+> ### 为什么要有它（**这是本仓一条教训的落地**）
+> 核 `api_v1.py` 时**手工扫"哪些路由没鉴权"，第一版扫出 0 条** ——
+> 因为 `FastAPI 0.141` 起 `include_router` 的结果被包成 `_IncludedRouter`。
+>
+> 🔴 **那个坑【仓里早就写着】**（`api/test_public_paths.py:17-20`）——
+> **知识在，但挂在一个谁都不会去读的地方**（一个测试文件的 docstring 里），**我当天踩了两次**。
+>
+> ⇒ **不是再写一条规矩**（那天规矩写了三条、犯了五次），
+> 是**把它挪到"一定会撞上"的位置** —— **改路由文件 ⇒ 自动跑一次检查**。
+> 📄 复盘：`docs/复盘/2026-09-30-判据在手边却没查.md` · 规矩：`docs/规范/开发规范.md` **§1.5**
+
+⚠️ **性能取舍（实测）**：
+· 改**非**路由文件 ⇒ **0.05s**，静默退出
+· 改**路由**文件 ⇒ **约 9–13s**（要 import `main` 拿真实路由表）
+⇒ ⛔ **所以它【先判路径】** —— 不然每次编辑都付 10 秒。
+📌 另外那条 91s→9s 的提速，靠的是**在 import 前关掉遥测**（`GRADIO_ANALYTICS_ENABLED` 等），
+   根因与 `api/conftest.py:20` 记的**是同一个**。
+
+> ⛔ **它不阻止**（`PostToolUse` 拦不住已发生的编辑）—— 价值是**把话说到眼前**。
+> 📌 与 ①·5 的分工一致：**能机械判的 ⇒ 硬拦；判不了的 ⇒ 提醒。**
 
 ### ② 用户级的 4 道门（**不在本仓，但会影响你**）
 
@@ -89,12 +124,16 @@
 ├── README.md                     ← 本文件：门的一览
 ├── settings.json                 ← 注册 hook（⛔ 不要 gitignore 它）
 ├── hooks/
-│   └── pre-commit-gates.py       ← 提交前三道门
-└── commands/
+│   ├── pre-commit-gates.py       ← 提交前四道门（凭据/链接/孤儿/模块spec）
+│   ├── spec-remind.py            ← 改 api/*.py 后提醒更新 spec（①·5）
+│   └── route-auth-remind.py      ← 🆕 改路由文件后查「有没有没鉴权的」（①·6）
 └── commands/
     ├── handoff.md                ← `/handoff` 斜杠命令（休息前做记录）
     └── specs.md                  ← `/specs` 斜杠命令（模块对账）
 ```
+
+**配套脚本**（不在 `.claude/` 里，在 `scripts/`）：
+`check_route_auth.py`（无鉴权路由清单 + 基线比对）· `route-auth-baseline.txt`（基线，**10 条已知的债**）
 
 > 🔴 **`.claude/` 必须入库**（本仓实测：**没有被 `.gitignore` 挡**）。
 > 理由：hook 脚本要靠它分发；`.gitignore` 掉 ⇒ **克隆的人没有门**。
@@ -134,4 +173,9 @@ scripts/check_secrets.sh            ← 能改
 
 ## 变更记录
 
+- **2026-09-30** 加第 ③ 道门（**①·6 `route-auth-remind.py`** + `scripts/check_route_auth.py` + 基线）。
+  起因：核 `api_v1.py` 时**手工扫无鉴权路由，第一版扫出 0 条**（踩了 `_IncludedRouter`）——
+  **而那个坑仓里早写着**（`api/test_public_paths.py:17-20`），**当天踩了两次**。
+  ⇒ **把知识从"没人读的 docstring"挪到"一定会撞上的 hook"。**
+  📄 `docs/规范/开发规范.md` **§1.5** · `docs/复盘/2026-09-30-判据在手边却没查.md`
 - 2026-09-29 建立（业务方裁「甲」；hook 从 1 道扩到 3 道）。

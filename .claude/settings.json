@@ -23,6 +23,12 @@
             "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/spec-remind.py\"",
             "timeout": 10,
             "statusMessage": "模块 spec 提醒"
+          },
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/route-auth-remind.py\"",
+            "timeout": 60,
+            "statusMessage": "路由鉴权提醒（改了 api_v1*/main.py 才跑）"
           }
         ]
       }
