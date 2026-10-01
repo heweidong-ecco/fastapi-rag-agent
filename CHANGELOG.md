@@ -135,6 +135,27 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- 🔴 **`scripts/check_secrets.sh` 在「没有 `.env`」这条路径上，把判据本身打没了**（2026-10-01 · 顺带修）。
+
+  两处 `echo "…"` 的**双引号里用了 ASCII 反引号**（`:207` 与 `:256`）：
+
+  ```bash
+  echo "   ⇒ 【不得当作通过】(判据是 `通过 ⇐ 执行 ∧ ¬命中`;本节点未执行 ⇒ 不成立)"
+  ```
+
+  shell 把反引号当**命令替换** ⇒ 真去执行那段话 ⇒ 打出 `通过: command not found`，
+  并且**消息里那一段被换成空**：`⇒ 【不得当作通过】(判据是 ;本节点未执行 ⇒ 不成立)`。
+
+  🔴 **两条都藏在「没有 `.env`」这条错误路径里**（`:207` 正式告警 · `:256` 部分覆盖降级）
+  —— **没人走过，所以没人发现**。
+  📌 正是本仓复盘第 6 条那个形状：**命令里写中文，用「」不用 ASCII 引号。**
+
+  ✅ 改用「」并就地加注释。**判据（可打印 · 隔离目录里跑 · ⛔ 不碰真 `.env`）**：
+  * `:207` 修前 ⇒ `line 207: 通过: command not found` ＋ `(判据是 ;本节点未执行 ⇒ 不成立)`
+  * `:207` 修后 ⇒ `(判据是「通过 ⇐ 执行 ∧ ¬命中」;本节点未执行 ⇒ 不成立)` —— 文字完整、无报错
+  * `:256` 同型：`SECRETS_GATE_ALLOW_NO_ENV=1` 那条路，**修前 / 修后各跑一次**
+  * 全仓扫 ``grep -rn 'echo ".*`' scripts/ .claude/hooks/`` ⇒ **只剩 `list_endpoints.sh:25` 一条注释**
+
 - 🔴 **删掉一条【我自己发明的】守卫测试 + 更正一句流传了很久的错注释**（2026-10-01 · 修 CI 红）。
 
   **触发**：`8a5672b` 推上去后 **CI 红** —— 红的是 **`api/test_token_config.py::test_default_pricing_is_not_lower_than_models_in_use`**，
