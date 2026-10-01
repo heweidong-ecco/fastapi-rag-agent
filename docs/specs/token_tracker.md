@@ -964,7 +964,8 @@ pytest api/ -m "not integration and not needs_db" -q # 15 failed / 158 passed / 
 **离线测试从头到尾【没有执行】那条 SQL**（只 `AST` 取字面量）。
 ⇒ 表名/列名/语法错，**CI 永远绿**。这是 `Task 3` 计划里没堵上的一个口子。
 
-**本机 PG 没起**（`nc -z localhost 5432` 不通；`docker ps` 空）⇒ `needs_db` 那类跑不了。
+**当时本机 PG 没起**（`nc -z localhost 5432` 不通；`docker ps` 空）⇒ `needs_db` 那类跑不了。
+（✅ **2026-10-01 当天已补跑** —— 结果见本节末。）
 ⇒ 改用 **stdlib `sqlite3`**：把**从函数里 AST 取出的那条真 SQL 字符串**（⛔ 不是我重打的）
 配上 `api/schema.sql` 里那三列的真实 DDL 执行一遍（这条 SQL 无 PG 专有构造）：
 
@@ -981,6 +982,37 @@ sqlite> CURRENT_DATE = 2026-10-01
 ⛔ **没证明**：PostgreSQL 下的行为（方言/类型/时区）· 真库上的列名是否 100% 一致
 （列名是对着 `api/schema.sql` 与 `api/db.py:109` 的建表语句核的，**不是**对着真库核的）。
 ⇒ **补洞口的是 `api/test_global_daily_budget.py`**（`needs_db`）—— 本机起 PG 后跑它。
+
+#### ✅ 2026-10-01 已补跑（那 7 条 `needs_db` 真过了一遍）
+
+前置：当天 Docker 的 Linux VM 卡死（`dockerAPI: stopped`，`/ping` 一直超时）⇒ 杀掉**重启前遗留的
+僵尸 `com.docker.backend`** 后重拉才恢复；`postgres-rag` 起来并 `healthy`。
+
+```bash
+POSTGRES_DB=rag_test POSTGRES_HOST=localhost POSTGRES_PORT=5432 \
+  ./venv/bin/python -m pytest api/test_session_budget.py api/test_global_daily_budget.py -m needs_db
+# ⇒ 7 passed
+```
+
+> ⚠️ `POSTGRES_HOST` / `POSTGRES_DB` **必须显式覆盖**：`.env` 里 `POSTGRES_HOST=postgres`
+> 是 **compose 网络内的服务名**，在宿主上解析不了。`api/config.py` 的 `load_dotenv()` 没传
+> `override=True` ⇒ 默认 `override=False` ⇒ **导出的环境变量会赢**（这是本命令能生效的前提）。
+
+🔴 **库名隔离对账**（本仓有前科：R2 冒烟忘带库名，`record_usage` 往**真库**写了 4 行 ——
+`docs/复盘/2026-09-17-只读冒烟其实会写库.md`）：
+
+| 库 | 跑前 | 跑后 |
+|---|---:|---:|
+| `rag_db`（真库） | 513 | **513** ← 一行没动 |
+| `rag_test`（隔离） | 148 | **155**（+7） |
+
+⇒ `B10` 的那条 SQL **已在真 PostgreSQL 下执行过**（不再只靠 sqlite 近似）。
+⚠️ 本次补跑**只覆盖「能跑通 + 跨用户求和为真」**，不构成别的结论 ——
+PG 方言/时区下的**边界**行为、生产数据量下的表现，**都没验**。
+
+⛔ 且 `api/test_global_daily_budget.py` **不进 CI**（CI 无 postgres service）——
+所以 `B10` 的核心判据（SQL 里没有 `user_name`）**依然只在离线那份里**，
+别因为「7 条绿了」就以为离线那份可以省。
 
 ### 变异验证（**4 条守卫逐条证明会红**，跑完即还原、sha256 一致）
 
