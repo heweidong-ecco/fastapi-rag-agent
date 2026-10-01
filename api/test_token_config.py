@@ -45,21 +45,24 @@ def test_embedding_model_still_priced():
     assert "text-embedding-v2" in token_config.MODEL_PRICING
 
 
-def test_default_pricing_is_not_lower_than_models_in_use():
-    """对**在用**的模型，兜底价不许低报（`token_tracker.py:54` 的既有约定：取偏保守那组）。
+def test_all_registered_prices_are_positive():
+    """登记的单价不许是 0 或负数 —— 那会**静默把花费记成 0**。
 
-    ⚠️ 只对**在用**模型要求 —— ⛔ 不是"对表里所有模型"。
-       实测：`qwen-plus`（0.008/0.016）**本来就高于兜底价**（0.003/0.006），
-       "兜底 >= 全部登记模型"这条规则**在原代码里就不成立**。别把它当成规矩。
-    📌 这条真正要防的是：**某人给在用的模型配了个比兜底价还高的价** ——
-       那之后，一个未登记模型（如新换的供应商）会按更低的兜底价记账 ⇒ **静默低报**。
+    ⚠️ **本条替代了原先的 `test_default_pricing_is_not_lower_than_models_in_use`**（2026-10-01 删）。
+       那条断言「兜底价 >= 在用模型价」，**在 CI 上直接红**：
+       CI 没有 `.env` ⇒ `config.LLM_MODEL_CHAT` 落到**代码里的默认值 `qwen-plus`**
+       （`config.py:55`）⇒ 0.008/0.016 **本来就高于**兜底 0.003/0.006 ⇒ `assert 0.003 >= 0.008` 失败。
+    🔴 **根因不是"CI 配置特殊"，是那条不变量本身不成立** ——
+       兜底价是给**未登记**模型的猜测值，**与"在用模型贵不贵"没有推导关系**；
+       而在用模型**只要登记了就永远不走兜底** ⇒ 那条断言**给不出任何保护**，
+       却会随部署选哪个模型而时红时绿。**这是"我发明了一条规矩"的第二次**（第一次见 commit `8a5672b`）。
+    📌 **真正防"静默低报"的是上面那条**（在用模型必须登记），⛔ 不是这个兜底价。
     """
-    from config import LLM_MODEL_FAST, LLM_MODEL_CHAT
+    for name, p in token_config.MODEL_PRICING.items():
+        assert p["prompt"] > 0, f"{name} 的 prompt 价 <= 0 ⇒ 花费会被静默记成 0"
+        assert p["completion"] >= 0, f"{name} 的 completion 价为负"
     d = token_config.DEFAULT_MODEL_PRICING
-    for name in (LLM_MODEL_FAST, LLM_MODEL_CHAT):
-        p = token_config.MODEL_PRICING[name]
-        assert d["prompt"] >= p["prompt"], f"{name} 的 prompt 价比兜底还高 ⇒ 兜底会低报"
-        assert d["completion"] >= p["completion"], f"{name} 的 completion 价比兜底还高 ⇒ 兜底会低报"
+    assert d["prompt"] > 0 and d["completion"] > 0, "兜底价必须为正，否则未登记模型的花费记成 0"
 
 
 # ==================== S6 · 限流参数也收进来 ====================

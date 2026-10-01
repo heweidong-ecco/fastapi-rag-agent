@@ -91,6 +91,41 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- 🔴 **删掉一条【我自己发明的】守卫测试 + 更正一句流传了很久的错注释**（2026-10-01 · 修 CI 红）。
+
+  **触发**：`8a5672b` 推上去后 **CI 红** —— 红的是 **`api/test_token_config.py::test_default_pricing_is_not_lower_than_models_in_use`**，
+  `AssertionError: qwen-plus 的 prompt 价比兜底还高 ⇒ 兜底会低报` · `assert 0.003 >= 0.008`。
+
+  🔴 **根因不是"CI 环境特殊"，是那条断言本身不成立**：
+  它断言「**兜底价 >= 在用模型价**」，而 **CI 没有 `.env`** ⇒ `config.LLM_MODEL_CHAT` 落到
+  **代码里的默认值 `qwen-plus`**（`api/config.py:55`）⇒ 0.008/0.016 **本来就高于**兜底 0.003/0.006。
+  ⚠️ **一个合法配置就能把它证伪 ⇒ 它根本不是一条规律。**
+  更关键：**在用模型只要登记了就永远走不到兜底** ⇒ 那条断言**给不出任何保护**，
+  却会**随部署选哪个模型而时红时绿**。
+
+  **⚠️ 那句错注释的来源**：`token_tracker.py`（原 `:54`）写着
+  「未登记模型的兜底单价 —— 取偏保守的一组（**不低报**花费）」。
+  它是 **qwen-turbo 年代**的说法（0.003/0.006 恰好等于 qwen-turbo 的价），
+  **对 `qwen-plus` 明确是低报** ⇒ 实际落地的 `api/token_config.py` 已把这句改掉，
+  写明「**兜底价不是任何意义上的上界**」。
+
+  **改法**：
+  * ⛔ **删** `test_default_pricing_is_not_lower_than_models_in_use`
+  * ✅ **加** `test_all_registered_prices_are_positive` —— 登记价不许 <= 0
+    （0 的价会**静默把花费记成 0**，这才是真正会无声出错的一类）
+  * 📌 **真正防"静默低报"的那条一直在**：`test_models_actually_in_use_have_explicit_pricing`
+    （**在用**模型必须登记 —— 登记了就走自己的价，永远走不到兜底）
+
+  **判据（可打印）**：
+  * **复现 CI 的红**：`LLM_MODEL_FAST=qwen-turbo LLM_MODEL_CHAT=qwen-plus venv/bin/python -c "…"`
+    ⇒ `assert 0.003 >= 0.008` **失败**（与 CI 日志逐字一致）
+  * **CI 仿真下转绿**：同环境跑 `pytest api/test_token_config.py -q` ⇒ **10 passed**
+  * **新测试能变红**（红→绿实证）：把 `text-embedding-v2` 的价临时改成 `0` ⇒
+    `assert p["prompt"] > 0` **立刻红**；还原 ⇒ 绿
+
+  📌 **这是同一天【第二次】"我发明了一条规律"**（第一次见 `8a5672b` 的 commit message）——
+  两次都栽在同一处：**把代码里的一句注释当成了已验证的事实**。
+
 - 🔴 **4 处错误文案【说反了】+ 错误响应现在带恢复时间**（2026-10-01 · `B12` · **①a Task 1**）。
 
   **最严重的一处**：全局限流触发时返回 **429**，`error` 字段却写着 **`"Internal server error"`**

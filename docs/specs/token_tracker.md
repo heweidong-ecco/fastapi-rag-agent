@@ -427,10 +427,17 @@ MAX_SINGLE_CALL_COST = _float("MAX_SINGLE_CALL_COST", 0.5)
 MAX_THREAD_COST = _float("MAX_THREAD_COST", 5.0)
 ```
 
+> 🔴 **2026-10-01 更正（实施后回写）**：上面那段是**计划草稿**，其中
+> `# 未登记模型的兜底单价 —— 取偏保守的一组（不低报花费）` **这句是错的** ——
+> 0.003/0.006 只对**比 qwen-turbo 便宜**的模型保守，**对 `qwen-plus`（0.008/0.016）是低报**。
+> 实际落地的 `api/token_config.py` **已把这句改掉**（含"兜底价不是上界"的说明）。
+> 📄 为什么值得单记一笔：我**先信了这句旧注释**，又**把它写成测试** ⇒ **CI 直接红**。
+> 见 `docs/specs/token_config.md` 的 ⚠️ 表 + `api/test_token_config.py`。
+
 - [ ] **Step 4: 跑测试，确认通过**
 
 ```bash
-python -m pytest api/test_token_config.py -q     # → 3 passed
+python -m pytest api/test_token_config.py -q     # 计划时估计 3 条；实际落地 10 条（含后加的守卫）
 ```
 
 - [ ] **Step 5: 写 `docs/specs/token_config.md`**

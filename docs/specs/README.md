@@ -72,7 +72,7 @@
 | `api/search_tools.py` | 129 | 🔴 **缺** | ❓ 未知 |
 | `api/simple_tools.py` | 36 | 🔴 **缺** | ❓ 未知 |
 | `api/simple_tools_impl.py` | 30 | 🔴 **缺** | ❓ 未知 |
-| `api/token_config.py` | 82 | ✅ [`specs/token_config.md`](./token_config.md) | 🟢 **新建（2026-10-01 · B7）** —— 额度类常量的**唯一落点**，**只集中，不改行为**<br>⚠️ **常量已就位，但【尚未接线】** —— 17 个 `ChatOpenAI` 构造点还没读 `MAX_TOKENS_*`（排 `①b` Task 1） |
+| `api/token_config.py` | 89 | ✅ [`specs/token_config.md`](./token_config.md) | 🟢 **新建（2026-10-01 · B7）** —— 额度类常量的**唯一落点**，**只集中，不改行为**<br>⚠️ **常量已就位，但【尚未接线】** —— 17 个 `ChatOpenAI` 构造点还没读 `MAX_TOKENS_*`（排 `①b` Task 1） |
 | `api/token_tracker.py` | 744 | ✅ [`specs/token_tracker.md`](./token_tracker.md) | 🟡 **可用，但它是【三套额度口径】的其中一套** —— 见下 ⚠️<br>🟢 **①a 已落地（2026-10-01）**：额度常量已收口到 `api/token_config.py`（本文件**只剩同名别名**）· 本文件下方 **实施计划 ①a** 已执行完<br>⬜ **①b 未开工**（B8 会话级 / B10 全局日级 / B11 熔断 / 决策一落地） |
 | `api/tool_cache.py` | 96 | 🔴 **缺** | ❓ 未知 |
 | `api/tool_health.py` | 105 | 🔴 **缺** | ❓ 未知 |
