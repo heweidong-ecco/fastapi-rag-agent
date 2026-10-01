@@ -4,6 +4,7 @@ API v1 路由集中定义
 """
 import json
 import time
+import uuid
 from typing import Literal
 from fastapi import APIRouter, Depends, Path, Query
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -13,6 +14,11 @@ from config import ACCESS_TOKEN_EXPIRE_MINUTES
 # ⇒ 放文件头不会破坏本文件「导入期不拉 langchain」的既有做法。
 from token_config import MAX_TOKENS_ANSWER
 from exceptions import ErrorCode, AppException
+# B8 接线（①b Task 2）：会话级 token 上限。
+# ⚠️ `token_tracker` 模块级只 import `os/json/threading` 等标准库 + `token_config`
+#    （`db` / `langchain` 都是**函数内**惰性导入）⇒ 放文件头**不破坏**本文件
+#    「导入期不拉 langchain」的既有做法（与上面 `MAX_TOKENS_ANSWER` 同一条理由）。
+from token_tracker import check_session_token_budget
 from schemas import (
     QuestionRequest,
     DocumentInsert,
@@ -576,6 +582,7 @@ def get_llm_stream():
 @router.post("/rag/stream_search")
 async def stream_search(
     req: QuestionRequest,
+    thread_id: str = "default",       # ⚠️ B8 补：本端点原先**没有** thread_id
     user_name: str = Depends(get_current_user_hybrid),
 ):
     """流式RAG问答接口（融合优化版）（支持引用溯源和历史补偿）。
@@ -587,6 +594,12 @@ async def stream_search(
     # 0. 若前端未主动传历史，则从 Redis 加载该用户最近5轮对话
     if not req.conversation_history:
         req.conversation_history = get_chat_history(user_name)
+
+    # B8 · 会话级 token 上限（`DEC-041`）—— 触顶直接拒绝。
+    # ⚠️ 放在**取历史之后、检索之前**：这是本端点**第一处真花钱**的位置之前。
+    ok, why = check_session_token_budget(user_name, thread_id)
+    if not ok:
+        raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
     # 1. 检索（与普通接口相同）
     # 1. 向量检索（这部分不是流式的，一次性查完）
     # 构建当前输入的这条的历史对话，真停止按钮的调用（使它支持历史补偿）
@@ -778,12 +791,33 @@ def get_agent_executor():
 @router.websocket("/ws/agent")
 async def agent_websocket(websocket: WebSocket):
     await websocket.accept()
+
+    # B8 · 会话级 token 上限（`DEC-041`）—— 本条的 key 是**每个连接**：
+    # ⚠️ 本条 WS **整条没有鉴权**（`DEC-041` 遗留·1），没有用户身份 ⇒ `user_name` 只能是 `"unknown"`。
+    #    ⇒ 会话 key 在这里**退化成"每连接"**：一个连接 = 一个会话，
+    #      与服务端「连接即会话」的直觉一致（客户端断了重连就是新会话）。
+    #    ⚠️ 正因为如此，本链的额度**是按连接算的，不是按人** —— 换连接 = 换桶。
+    #       ⛔ 这不是"漏洞"，是**没有身份就谈不上按人计**；根因（WS 无鉴权）记在 DEC-041 遗留里。
+    ws_session_id = f"ws-{uuid.uuid4().hex}"
+    ws_user_name = "unknown"
+
     try:
         while True:
             data = await websocket.receive_text()
             request = json.loads(data)
             user_message = request.get("message", "")
-            
+
+            # B8：触顶直接拒绝 —— 用与本文件 `except` 分支**同一套帧格式**（`type` + `content`），
+            # 因为 WS 没有 HTTP 状态码可抛（HTTP 端点那边才是 `AppException`）。
+            ok, why = check_session_token_budget(ws_user_name, ws_session_id)
+            if not ok:
+                await websocket.send_text(json.dumps({
+                    "type": "error",
+                    "content": why
+                }))
+                await websocket.send_text(json.dumps({"type": "done"}))
+                continue
+
             # 通知前端开始处理
             await websocket.send_text(json.dumps({
                 "type": "thinking",

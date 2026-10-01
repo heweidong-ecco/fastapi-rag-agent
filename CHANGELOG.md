@@ -54,6 +54,53 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- 🟢 **`B8` 会话级 token 上限【能拦了】**（2026-10-01 · **①b Task 2**）。
+
+  **为什么**：`R1.2` 会话级限额此前**只有常量**（`SESSION_TOKEN_LIMIT = 50000`）——
+  **没有计数、没有拦截点** ⇒ 与 `B7` 之前同一个病：**常量存在 ≠ 上限存在**。
+
+  **数据源：`token_usage_logs` 表，⛔ 不是 `_thread_summary` 内存。**
+  ⚠️ 这一点**推翻了源文档 `后端补齐清单` `B8` 的「落点」栏**（它写「`_thread_summary` 可直接扩展」）——
+  内存字典**进程一重启就归零**，而会话上限恰恰要**扛住重启**。⇒ 全文见 `DEC-041`。
+
+  **三处与源文档/初版的偏差**（全部记在 `docs/decisions/DEC-041-B8会话上限的窗口与接线范围.md`）：
+
+  | # | 源文档 / 初版 | 最终 | 为什么 |
+  |---|---|---|---|
+  | 1 | 窗口未定 | **会话 × 今日**（SQL 带 `created_at >= CURRENT_DATE`） | 跨天不清零的桶会**被永久占满**，再也发不出请求 |
+  | 2 | key = `thread_id` | **key = `user_name` + `thread_id`** | `thread_id` **默认值是 `"default"`** ⇒ 单用它是**公共桶**，别人能蹭你的额度 |
+  | 3 | 范围「全部对话链」（11 条） | **只接 7 条真调 LLM 的** | 实测另外 4 条**不调 LLM** ⇒ 接上去会让**没花钱的接口占额度** |
+
+  **接线（7 条）**：`api_v1_agent.py` 的 `langgraph_chat` · `advanced_agent_chat` · `agent_plan_execute` ·
+  `memory_chat` · `mcp_agent_chat`；`api_v1_rag.py` 的 `stream_search` · `agent_websocket`。
+  **【故意不接】（4 条）**：`ask_question` · `jwt_ask_question` · `async_ask_question` · `parallel_ask_question`
+  —— 它们**不调 LLM**（两条只 `SELECT documents`，两条是 mock）。
+  ⚠️ 这条**有双向守卫**：`api/test_session_budget_wiring.py` 既查**该接的接了**，也查**不该接的没接**。
+
+  **两处顺带补的**：`agent_plan_execute` 与 `stream_search` **原先没有 `thread_id`** ⇒ 本次补上参数。
+
+  **接口**：`token_tracker.get_session_token_usage(user_name, thread_id)`（`user_name` **必填、无默认值**）·
+  `check_session_token_budget(user_name, thread_id, estimated_tokens=0)`。
+  ⛔ 旧的 `get_thread_token_usage` **已改名并删除** —— 留旧名 = 两种用法并存。
+  ⚠️ **DB 出错时 fail-open**（放行 + 打印），**与 `api/deps.py` 的 fail-closed 相反，是有意的**：
+  额度是**成本控制**，不是安全边界，不能因为 PG 抖一下就把服务打死。
+
+  **证据（可打印）**：
+
+  ```bash
+  pytest api/test_session_budget_offline.py -q   # 11 passed —— CI 跑（无 marker）
+  pytest api/test_session_budget_wiring.py -q    # 8 passed  —— 双向接线守卫
+  pytest api/test_session_budget.py -q           # 4 passed  —— needs_db，本机 PG 5433
+  ```
+
+  全量回归 **15 failed / 138 passed / 3 skipped** —— 15 条**全是** `redis.ConnectionError`
+  （本机没起 Redis），**与改动前基线同集合** ⇒ 无回归。
+
+  **变异验证（证明守卫真会红，不是摆设）**：
+  SQL 去掉 `user_name` 过滤 ⇒ `test_session_query_is_scoped_by_user_name` 红 ·
+  `user_name` 加默认值 ⇒ `test_user_name_is_required` 红 ·
+  删掉 `memory_chat` 的检查 ⇒ 接线守卫红。**三处改动均已还原、sha256 核对一致。**
+
 - 🟢 **`B7` 接线：单次 token 上限【真的生效了】**（2026-10-01 · **①b Task 1**）。
 
   **为什么这条是本轮的关键**：上一条（常量收口）只把 `MAX_TOKENS_*` **建出来** ——

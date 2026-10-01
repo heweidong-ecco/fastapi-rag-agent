@@ -715,7 +715,83 @@ def get_thread_cost(thread_id: str) -> float:
     except Exception as e:
         print(f"[Budget] 查询线程花费失败: {e}")
         return 0.0
-    
+
+
+# ==================== B8 · 会话级 token 上限（①b Task 2） ====================
+# 口径与接线范围见 `docs/decisions/DEC-041-B8会话上限的窗口与接线范围.md`。
+#
+# ⚠️ **本维度已经有一个上限了** —— 上面的 `MAX_THREAD_COST`（元/线程）。
+#    两者的**窗口不同**：那个**不带日期**（全程），本节的**按日**（DEC-041 裁定）——
+#    「同一 `thread_id`、两种窗口」是**已知且有意**的，别"顺手统一"掉；
+#    归并由 `DEC-040` 的 ①b·Task 6 处理。
+
+def get_session_token_usage(user_name: str, thread_id: str) -> float:
+    """某用户某会话【今日】累计 token —— **查表**，⛔ 不读内存。
+
+    ⚠️ **为什么不复用 `_thread_summary`**：那是**进程内存**（`record_usage` 里累加），
+       **重启即清零** ⇒ 拿它当上限等于「**重启一下就能绕开限额**」。
+       权威数据源只能是 `token_usage_logs`（`get_daily_token_usage` 也是这么做的）。
+
+    ⚠️ **窗口 = 会话 × 今日**（`DEC-041` 决策一）——
+       与仓里其余所有 token 预算（用户**日**预算）**同一口径**。
+       ⛔ 删掉 `CURRENT_DATE` 就是**换方案**（备选一·乙「纯会话累计」），那条会让会话桶
+       **被永久封死**且用户**无自救手段** ⇒ 要改先改 DEC。
+
+    ⚠️ **key = `user_name` + `thread_id`**（`DEC-041` 决策二）——⛔ **`user_name` 不给默认值**。
+       现有 4 个 Agent 端点的 `thread_id` **默认值是 `"default"`**；只按 `thread_id` 分桶的话，
+       所有没显式传它的调用者会**共用同一个桶** ⇒ 谁先烧完 50000，**其他默认用户一起撞 429**。
+       ⇒ 漏传 `user_name` 的调用点应当**立刻报错**（`TypeError`），⛔ 不是静默落进 `unknown`。
+
+    ⚠️ **空 key 归一到 `"unknown"`** —— 与 `record_usage` 的默认值一致。
+       ⇒ 记账桶与判定桶**始终一致**；若不归一，记账进 `unknown`、判定查 `''`
+       ⇒ **判定永远看不到用量**（静默放行）。
+    """
+    user_name = user_name or "unknown"
+    thread_id = thread_id or "unknown"
+    from db import get_db
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT COALESCE(SUM(total_tokens), 0)
+                       FROM token_usage_logs
+                       WHERE user_name = %s
+                         AND thread_id = %s
+                         AND created_at >= CURRENT_DATE""",
+                    (user_name, thread_id)
+                )
+                return cur.fetchone()[0]
+    except Exception as e:
+        print(f"[Token] 查询会话用量失败: {e}")
+        # ⚠️ **fail-open**（返回 0 = 没超）—— 与 `get_daily_token_usage` 的取向一致。
+        #    理由：配额是**成本控制**，不是**安全边界**；DB 抖动时把服务全停掉代价更大。
+        #    📌 与 `api/deps.py` 的鉴权**故意相反**（那里 fail-closed，因为**那是**安全边界）——
+        #       ⛔ 别"统一"掉。
+        return 0.0
+
+
+def check_session_token_budget(user_name: str, thread_id: str,
+                               estimated_tokens: int = 0) -> tuple[bool, str]:
+    """会话级预算判定。返回 `(是否放行, 原因)`。
+
+    **不含** `record_intercept` —— 拦截记录由调用方负责（各调用方要带上自己的 tool_name），
+    与 `check_token_budget_detail` 同一条约定。
+
+    触顶动作 = **直接拒绝**（`B11` 要素②，业务方已裁）⇒ 调用方抛
+    `AppException(ErrorCode.QUOTA_EXCEEDED, why)`。
+    """
+    from token_config import SESSION_TOKEN_LIMIT
+    used = get_session_token_usage(user_name, thread_id)
+    remaining = SESSION_TOKEN_LIMIT - used
+    if remaining <= 0:
+        return False, (f"本会话预算已用完（已使用 {used:.0f} tokens，"
+                       f"会话上限 {SESSION_TOKEN_LIMIT:.0f} tokens）")
+    if estimated_tokens > 0 and estimated_tokens > remaining:
+        return False, (f"预估消耗 {estimated_tokens:.0f} tokens 超过本会话剩余 "
+                       f"{remaining:.0f} tokens")
+    return True, f"会话预算充足（剩余 {remaining:.0f} tokens）"
+
+
 # ==================== 预算通知 ====================
 
 BUDGET_WARNING_THRESHOLD = 0.8  # 80% 阈值

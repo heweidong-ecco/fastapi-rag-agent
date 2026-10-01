@@ -644,7 +644,7 @@ git commit -m "refactor(配额): 决策一落地 —— 次数配额降级，统
 
 ---
 
-# 🔵 实施计划 ①b · **限额与熔断**（2026-09-30 立 · **执行中** —— Task 0 ✅ / Task 1 ✅ / Task 2 起待做）
+# 🔵 实施计划 ①b · **限额与熔断**（2026-09-30 立 · **执行中** —— Task 0 ✅ / Task 1 ✅ / Task 2 ✅ / Task 3 起待做）
 
 > **来源**：`后端补齐清单-待裁-20260929.md` 的 **B8 · B10 · B11 · B13 · 决策一（实现）**；
 > 以及 `LLM模型路由与额度策略-待裁-20260930.md` 的 **L2**（十几个 model 顺带）。
@@ -818,146 +818,80 @@ git commit -m "feat(额度): B7 接线 —— 15 个 ChatOpenAI 构造点带上�
 
 ---
 
-## Task 2 · **B8** · 会话级 token 上限
+## Task 2 · **B8** · 会话级 token 上限 · ✅ **2026-10-01 做完**
+
+> 🔴 **落地时更正计划里三处**（**口径**，全部由业务方 2026-10-01 裁定：
+> **窗口** / **key** / **范围**）—— 见 `docs/decisions/DEC-041-B8会话上限的窗口与接线范围.md`：
+>
+> 1. **窗口 = 会话 × 今日**（带 `CURRENT_DATE`）。计划原样是对的，**但那是"没写理由的选择"**；
+>    定它的真正理由是：与仓里**其余所有 token 预算**（用户日预算）同口径，
+>    ⛔ 而不是"顺手复制 `get_daily_token_usage`"。
+> 2. 🔴 **key 从「只 `thread_id`」改成「`user_name` + `thread_id`」** ——
+>    计划**只想到 `thread_id`**。核实端点时发现 4 个 Agent 端点的 `thread_id` **默认值是 `"default"`**
+>    ⇒ 只按 `thread_id` 分桶，**所有没显式传它的调用者共用一个桶**，谁先烧完 50000
+>    **其他默认用户一起撞 429**（软共享状态 → 硬拒绝）。
+>    ⇒ 连带 **接口改名**：`get_thread_token_usage` → **`get_session_token_usage`**
+>    （key 变两段了，沿用旧名**表述不实**），且 `user_name` **必填、不给默认值**
+>    （给了默认值 ⇒ 漏传的调用点静默落进同一个桶，**决策二白定**）。
+> 3. 🔴 **范围：计划写「两处主链」，实做【7 条】** —— 来源文档 B8 要求「**覆盖全部对话链**」。
+>    ⚠️ **但比来源文档又少 4 条** —— 逐条核实后发现 **`/rag/ask` · `/rag/jwt_ask` ·
+>    `/rag/async_ask` · `/rag/parallel_ask` 根本不调 LLM**（前两条只 `SELECT documents`，
+>    后两条是 `asyncio.sleep(2)` 的 mock）⇒ **接上去是错的**（让不花钱的接口占额度甚至被拦）。
+>
+> 📌 **教训与 Task 1 那条同族**：**计划里的清单同样是"作者当时的理解"，不是事实。**
+>    Task 1 是**少数**了（漏 `evaluate_with_ragas.py`），本条是**多数**了（多列 4 条）
+>    —— 两个方向都会错，⇒ **清单必须逐条对着代码核**。
 
 **Files:**
-- Modify: `api/token_tracker.py`（加两个函数）
-- Test: `api/test_session_budget.py`（新建，标 `needs_db`）
+- Modify: `api/token_tracker.py`（新增 2 个函数）· `api/api_v1_agent.py`（5 处接线 + 1 个新参数）·
+  `api/api_v1_rag.py`（2 处接线 + 1 个新参数 + 1 个 WS 会话 id）
+- Create: `api/test_session_budget_offline.py`（**无 marker ⇒ 进 CI**）·
+  `api/test_session_budget.py`（`needs_db`）· `api/test_session_budget_wiring.py`（**接线守卫**）
 
-**Interfaces:**
-- Produces: `get_thread_token_usage(thread_id: str) -> float`
-- Produces: `check_session_token_budget(thread_id: str, estimated_tokens: int = 0) -> tuple[bool, str]`
+**Interfaces（⚠️ 与计划原名不同 —— 见上方更正 ②）：**
+- Produces: `get_session_token_usage(user_name: str, thread_id: str) -> float`
+- Produces: `check_session_token_budget(user_name: str, thread_id: str, estimated_tokens: int = 0) -> tuple[bool, str]`
 
-> ### 🔴 一个**必须避开**的陷阱（设计理由）
+> ### 🔴 那个**必须避开**的陷阱（设计理由）—— 计划写对了，保留
 >
 > `record_usage` 里已经在内存里按 thread 累加了（`_thread_summary`）。
 > **⛔ 但绝不能拿它当上限的数据源** —— 它是**进程内存**，
 > **重启即清零** ⇒ 想绕开上限，**重启一下就行**。
 >
-> ⇒ **权威数据源只能是 `token_usage_logs` 表**（`get_daily_token_usage` 就是这么做的，见 `:191`）。
+> ⇒ **权威数据源只能是 `token_usage_logs` 表**（`get_daily_token_usage` 就是这么做的）。
 > ⚠️ 这也意味着**每次检查要查一次库** —— 这正是 Task 4 的熔断器要解决的（触顶后别再查）。
-
-- [ ] **Step 1: 写失败测试**
-
-```python
-# api/test_session_budget.py
-"""会话级 token 上限（B8）。
-
-⚠️ 标 `needs_db` —— 它必须真读 `token_usage_logs`。
-   ⛔ 不许改成"喂内存汇总"来免掉数据库：那样测的就不是权威数据源了，
-      而"重启绕开上限"这个 bug 恰恰会因此测不出来。
-"""
-import pytest
-
-pytestmark = pytest.mark.needs_db
-
-
-def test_session_usage_is_read_from_db_not_memory(monkeypatch):
-    """🔴 核心判据：**把内存汇总塞满，也不影响判定结果**。
-
-    内存里伪造一堆用量、DB 里什么都不写 ⇒ 判定必须说"没超"。
-    ⛔ 若哪天有人把数据源改回 `_thread_summary`，本条立刻红。
-    """
-    import token_tracker
-    with token_tracker._lock:
-        token_tracker._thread_summary["t-mem-only"]["total_tokens"] = 10 ** 9
-    assert token_tracker.get_thread_token_usage("t-mem-only") == 0
-
-
-def test_session_budget_rejects_over_limit():
-    """真写库、真超限 ⇒ 必须拒。"""
-    import token_tracker
-    from token_config import SESSION_TOKEN_LIMIT
-    token_tracker.record_usage(
-        model="qwen-turbo", prompt_tokens=SESSION_TOKEN_LIMIT, completion_tokens=0,
-        purpose="test", user_name="admin", thread_id="t-over",
-    )
-    ok, why = token_tracker.check_session_token_budget("t-over")
-    assert ok is False and "会话" in why
-```
-
-> ⚠️ `test_session_usage_is_read_from_db_not_memory` **不需要 DB**，但同文件里有一条需要 ⇒
-> 整个文件标 `needs_db` 会被 CI 排除 ⇒ **那条也就不在 CI 跑了**。
-> ✅ **做法**：把它拆到两个文件 —— 内存隔离那条进**不带 marker** 的文件（CI 跑），
-> 真写库那条留在 `needs_db` 文件。**⛔ 别为了省事让核心判据掉出 CI。**
-
-- [ ] **Step 2: 跑，确认失败**
-
-```bash
-python -m pytest api/test_session_budget.py -q          # → AttributeError: get_thread_token_usage
-```
-
-- [ ] **Step 3: 实现（`api/token_tracker.py`）**
-
-```python
-def get_thread_token_usage(thread_id: str) -> float:
-    """本会话【今日】累计 token —— **查库**，⛔ 不读内存。
-
-    ⚠️ 为什么不复用 `_thread_summary`：那是**进程内存**（`record_usage` 里累加），
-       **重启即清零** ⇒ 拿它当上限等于"重启就能绕开"。权威数据源是 `token_usage_logs`。
-    """
-    from db import get_db
-    try:
-        with get_db() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """SELECT COALESCE(SUM(total_tokens), 0) FROM token_usage_logs
-                       WHERE thread_id = %s AND created_at >= CURRENT_DATE""",
-                    (thread_id,),
-                )
-                return cur.fetchone()[0]
-    except Exception as e:
-        print(f"[Token] 查询会话用量失败: {e}")
-        return 0.0          # ⚠️ 失败时**放行**（0 = 没超）—— 见下方"失败开还是关"
-```
-
-> ### ⚠️ 一个要**明确写下来**的取舍：查库失败时，放行还是拒绝？
 >
-> 这里选了 **放行（fail-open）** —— 与本文件既有的 `get_daily_token_usage` 一致。
-> **理由**：配额是**成本控制**，不是**安全边界**；DB 抖动时把服务全停掉，
-> 代价比"多花点 token"大。
-> ⛔ **但它必须被写下来** —— 否则下一个人看到"失败返回 0"会以为是 bug。
-> 📌 **与 `api/deps.py` 的鉴权不同**：那里是 **fail-closed**（`verify_api_key` 失败即拒）——
-> **因为那是安全边界。** 两者**故意不同**，别"统一"掉。
+> ⚠️ **来源文档 B8 的「落点」栏与此相反**（它写「`_thread_summary` **可直接扩展**」）——
+> **那一句已被 `DEC-041` 显式推翻**，以 DEC 为准。
 
-- [ ] **Step 4: 加判定函数**
-
-```python
-def check_session_token_budget(thread_id: str,
-                               estimated_tokens: int = 0) -> tuple[bool, str]:
-    """会话级上限判定。返回 (是否放行, 原因)。**不写拦截记录**（由调用方决定带什么上下文）。"""
-    from token_config import SESSION_TOKEN_LIMIT
-    used = get_thread_token_usage(thread_id)
-    remaining = SESSION_TOKEN_LIMIT - used
-    if remaining <= 0:
-        return False, (f"本会话预算已用完（已使用 {used:.0f} tokens，"
-                       f"会话上限 {SESSION_TOKEN_LIMIT:.0f} tokens）")
-    if estimated_tokens > 0 and estimated_tokens > remaining:
-        return False, (f"预估消耗 {estimated_tokens:.0f} tokens 超过本会话剩余 "
-                       f"{remaining:.0f} tokens")
-    return True, f"会话预算充足（剩余 {remaining:.0f} tokens）"
-```
-
-- [ ] **Step 5: 接线**（两处主链）
-
-在**答案生成 / Agent 对话**入口调用它（落点参照 `check_budget` 现有的用法：
-`api_v1_agent.py:423-433` 的 `AppException(ErrorCode.QUOTA_EXCEEDED)`）。
-**触顶动作已裁 = 直接拒绝**（`B11` 要素②）：
-
-```python
-ok, why = check_session_token_budget(thread_id)
-if not ok:
-    raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
-```
-
-- [ ] **Step 6: 跑 + 提交**
+### 判据（可打印）
 
 ```bash
-python -m pytest api/ -m "not integration and not needs_db" -q
-python -m pytest api/test_session_budget.py -q -m needs_db          # 本机有库时
-git add api/token_tracker.py api/test_session_budget.py api/test_session_budget_offline.py
-git commit -m "feat(额度): B8 会话级 token 上限 —— 数据源是表，不是内存（重启绕不开）"
+venv/bin/python -m pytest api/test_session_budget_offline.py -q     # 11 passed
+venv/bin/python -m pytest api/test_session_budget_wiring.py -q      # 8 passed
+venv/bin/python -m pytest api/ -m "not integration and not needs_db" -q
+#   ⇒ 15 failed / 138 passed / 3 skipped
+#      接线前是 15 failed / 127 passed / 3 skipped ⇒ +11 = 本次新增的离线判据
+#      `15 failed` 与接线前 FAILED 清单同为「本地无 Redis」，**逐条同类 ⇒ 无回归**
 ```
+
+**做过红→绿实证的守卫**（⛔ 不是"写完就绿"）：
+
+| 守卫 | 怎么验出红 |
+|---|---|
+| `test_session_query_is_scoped_by_user_name` | 把 SQL 的 `WHERE user_name = %s` 改掉 ⇒ **红** |
+| `test_user_name_is_required` | 给 `user_name` 加默认值 `"unknown"` ⇒ **红** |
+| `test_endpoint_calls_session_budget[memory_chat]` | 摘掉 `memory_chat` 里的判定调用 ⇒ **红** |
+
+**对象级核**（⛔ 不是只看源码）：`import main` 后读 `app.openapi()` ——
+6 个 HTTP 端点的 query 参数里都有 `thread_id`（含**新补的** `/agent/plan_execute` ·
+`/rag/stream_search`）。
+
+### 并入 `🅗 S9`
+
+接线的同时把「**同一维度、两种窗口**」写进 `DEC-041` 备选方案·一 与本节：
+`MAX_THREAD_COST`（元/线程，**无日期**）vs 会话 token 上限（**按日**）——
+⚠️ **它是【已知且有意】的**，归并留给 `DEC-040` 的 `①b` Task 6。⛔ 别当成 bug 顺手"统一"。
 
 ---
 

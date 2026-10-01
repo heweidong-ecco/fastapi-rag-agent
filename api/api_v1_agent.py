@@ -29,6 +29,7 @@ from token_tracker import (
     check_budget_before_call, estimate_tool_cost,
     TOOL_ESTIMATED_COST, PURPOSE_ESTIMATED_COST,
     get_intercept_count, record_cost,
+    check_session_token_budget,       # B8（①b Task 2）：会话级上限
 )
 # 记录工具 开始追踪 结束追踪
 from tool_visualizer import start_trace, finish_trace, get_trace, get_all_traces
@@ -94,6 +95,11 @@ async def langgraph_chat(
     ⚠️ 本图带人工审批节点。若返回 `status="pending_approval"`，说明**工具还没执行**，
     要用返回的 `pending_tool_calls` 走 `/agent/approve`（带同一个 `thread_id`）继续。
     """
+    # B8 · 会话级 token 上限（`DEC-041`）—— 触顶动作 = **直接拒绝**（`B11` 要素② 已裁）
+    ok, why = check_session_token_budget(user_name, thread_id)
+    if not ok:
+        raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
+
     result = agent_graph.invoke(
         {"messages": [HumanMessage(content=question)]},
         config={"configurable": {"thread_id": thread_id}}
@@ -160,6 +166,11 @@ async def advanced_agent_chat(
     user_name: str = Depends(get_current_user_hybrid),
 ):
     """使用多分支路由的高级 Agent 进行对话"""
+    # B8 · 会话级 token 上限（`DEC-041`）
+    ok, why = check_session_token_budget(user_name, thread_id)
+    if not ok:
+        raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
+
     result = advanced_agent.invoke(
         {
             "messages": [HumanMessage(content=question)],
@@ -183,9 +194,15 @@ async def advanced_agent_chat(
 @router.post("/agent/plan_execute")
 async def agent_plan_execute(
     goal: str,
+    thread_id: str = "default",       # ⚠️ B8 补：本端点原先**没有** thread_id
     user_name: str = Depends(get_current_user_hybrid),
 ):
     """完整的 Plan-and-Execute 流程"""
+    # B8 · 会话级 token 上限（`DEC-041`）—— 触顶直接拒绝
+    ok, why = check_session_token_budget(user_name, thread_id)
+    if not ok:
+        raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
+
     # 1. 规划：将用户目标分解为步骤清单
     # ⚠️ 2026-09-20 修：此处原是一个**字符串字面量**（`"""任务规划接口：…"""`）——
     #    函数在上一行**已经有 docstring** ⇒ 它是**空操作**；
@@ -231,6 +248,11 @@ async def memory_chat(
     user_name: str = Depends(get_current_user_hybrid),
 ):
     """带持久化记忆的 Agent 对话接口"""
+    # B8 · 会话级 token 上限（`DEC-041`）
+    ok, why = check_session_token_budget(user_name, thread_id)
+    if not ok:
+        raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
+
     config = {"configurable": {"thread_id": thread_id}}
     result = checkpointer_agent.invoke(
         {"messages": [HumanMessage(content=question)]},
@@ -464,6 +486,13 @@ async def mcp_agent_chat(
     """
     # 记录工具 开始追踪
     start_trace(thread_id, question)
+
+    # B8 · 会话级 token 上限（`DEC-041`）
+    # ⚠️ 放在 `start_trace` **之后**：超限被拒时，追踪里仍留得下这次尝试的痕迹。
+    #    本端点原有的 `check_budget` 依赖判的是【用户**日**预算】，与会话级是**两个东西**，并存。
+    ok, why = check_session_token_budget(user_name, thread_id)
+    if not ok:
+        raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
 
     result = await mcp_agent.ainvoke(
         {
