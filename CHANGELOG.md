@@ -8,6 +8,50 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- 🟢 **`scripts/ci-local.sh` —— 在本机复现 CI 那套环境**（2026-10-01）。
+
+  **为什么**：`8a5672b` 推上去 **CI 红、本地却绿**。查出根因**不是"CI 玄学"，是本地和 CI 是两套环境**：
+
+  | 轴 | 本机 | CI |
+  |---|---|---|
+  | **`.env`** | **有**（`LLM_MODEL_CHAT=deepseek-v4-flash`） | **⚠️ 没有** ⇒ 落回 `api/config.py:55` 的**代码默认值** `qwen-plus` |
+  | **Redis** | 默认**没有** | `redis:7` service 容器 |
+  | 依赖安装 | 本机 venv | 干净 ubuntu + `requirements.txt` |
+
+  ⇒ 一条测试断言「**兜底单价 ≥ 在用模型单价**」**在两种合法部署下答案相反**
+  （`assert 0.003 >= 0.008`），而**本地与基线的差集比对永远抓不到它**
+  —— **它在本机是绿的，压根不在"新增失败"里**。
+
+  **做法**：起 redis + **`rsync` 掉 `.env`** + **整块照抄 `ci.yml` 的 `run` 并 `bash -e` 执行**
+  （GitHub 执行 `run:` 就是这个方式）⇒ 连"改了 `ci.yml` 忘了同步本脚本"都不会发生。
+
+  ⛔ **不复现两条轴**：依赖安装（用你现有 venv）与 OS（macOS ≠ ubuntu）
+  —— **脚本运行时会自己打横幅声明"这次没复现什么"**，⛔ 别默认它等于 CI。
+
+  **判据（可打印）**：
+  * **数字对得上** ⇒ 跑出来 `139 passed, 3 skipped, 11 deselected`，**与 CI 日志逐字相同**
+  * **自证 `.env` 不在场** ⇒ 横幅打印 `LLM_MODEL_FAST = qwen-turbo`
+    （而本机 `.env` 里写的是 `deepseek-v4-flash`）
+  * ⭐ **红→绿实证** ⇒ 造一条依赖 `.env` 的探针：**直接跑 `1 passed`，走本脚本 `1 failed`**
+    （`AssertionError: 期望读到 deepseek-v4-flash，实际 qwen-plus`）
+    ⇒ **10-01 那条 CI 红的同型，现在在本地就被抓住了**
+
+- 🟢 **CI 打印"本次实际生效的配置"**（2026-10-01 · `.github/workflows/ci.yml` 的 `offline-tests`）。
+
+  那次红的定位**全靠反推**（要读到 `api/config.py:55` 才知道"CI 没有 `.env`"）。
+  ⇒ 现在同一个步骤里先打印 `LLM_MODEL_FAST/CHAT` · `.env` 在不在 · redis 通不通。
+  ⚠️ **打印与 pytest 共用同一个 `env:` 块** —— 所以打印出来的**就是 pytest 用的那套**。
+
+  **同时更正一处错话**（`docs/说明/测试.md` §五 → 新的 §5.1/§5.2）：
+  原文写「**反向不存在 —— CI 跑的是本地命令的子集**」—— **只对了一半**：
+  * **选哪些测试** ⇒ ✅ 是子集（CI 少跑 11 条）
+  * **跑在什么环境里** ⇒ 🔴 **不是** —— 同一批测试跑在**另一套环境**里
+
+  ⇒ **那句话读起来就是"本地绿 ⇒ CI 绿"的许可证。** 2026-10-01 正是栽在这一句上。
+  📄 该节现含三条轴对照表 + `ci-local.sh` 用法与判据。
+
 ### Changed
 
 - 🟢 **额度常量收口到 `api/token_config.py` 一处**（2026-10-01 · `B7` · **①a Task 2**）。

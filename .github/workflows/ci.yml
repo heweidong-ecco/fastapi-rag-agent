@@ -103,4 +103,23 @@ jobs:
           POSTGRES_PASSWORD: ci-dummy-not-a-real-key
           JWT_SECRET_KEY: ci-dummy-not-a-real-key
           LOGIN_PASSWORD: ci-dummy-not-a-real-key
-        run: pytest api/ -m "not integration and not needs_db" -v
+        run: |
+          # ⭐ 先打印【本次实际生效的配置】。
+          #   2026-10-01 那次 CI 红（`assert 0.003 >= 0.008`），我是靠反推
+          #   `api/config.py:55` 才知道「CI 没有 .env ⇒ 落到代码默认值 qwen-plus」。
+          #   ⇒ 把它打到日志里，下次一眼看得出"这次是在哪套配置下红的"。
+          # ⚠️ 本块与下面的 pytest **共用同一个 env:** —— 打印的就是 pytest 用的那套。
+          python - <<'PY'
+          import os, socket, sys
+          sys.path.insert(0, "api")
+          import config
+          print(f"[ci-config] LLM_MODEL_FAST = {config.LLM_MODEL_FAST}")
+          print(f"[ci-config] LLM_MODEL_CHAT = {config.LLM_MODEL_CHAT}")
+          print(f"[ci-config] .env 存在吗    = {os.path.exists('.env')}")
+          try:
+              socket.create_connection(("127.0.0.1", 6379), 2).close()
+              print("[ci-config] redis 6379     = 通")
+          except OSError as e:
+              print(f"[ci-config] redis 6379     = 不通 ({e})")
+          PY
+          pytest api/ -m "not integration and not needs_db" -v
