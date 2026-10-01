@@ -59,7 +59,7 @@ bash scripts/list_endpoints.sh          # 默认 http://127.0.0.1:8000
 | 硬门 D · 人工接管 | 🟡 | 地基在（`api/agent_checkpointer.py` + `interrupt_before=["approval"]`）；⚠️ **触发条件 = 任意 tool_calls**，且**无「待接管队列」端点** |
 | 认证（API Key + JWT · 三级角色） | ✅ | `api/deps.py` · `api/auth.py` · `api/permission.py` ⚠️ 角色**按名字硬编码** |
 | 限流（频率） | 🟡 | `api/rate_limiter.py` —— ⚠️ **所有匿名共用一个桶**，且 `X-API-Key` 分支**不验签** |
-| 限额 · 四层 | ❌ | **缺 2 层半**：单次 `max_tokens` 只设在 `query_rewriter`；**无单会话上限**；**无全局日级** |
+| 限额 · 四层 | 🟡 | **2 层能拦 · 1 层有函数没接线 · 1 层没有**（2026-10-01）：<br>✅ `R1.1` 单次上限（常量收口 + **15 处接线**）· ✅ `R1.2` 会话级（`B8`，接在 **7 条对话链**上）<br>🟡 `R1.4` 全局日级（`B10` —— **有 `check_global_daily_budget()`，⛔ 但零调用点** ⇒ 不生效）· ⬜ `R1.3` 用户日级（**没有**）<br>⚠️ **另有一层是漏的**：`quota_limiter.py` 对**匿名请求完全绕过**（与上面四层不是同一件事）<br>📌 **逐层详表见下方「R1.1–R1.4 四层限额」行** |
 | 熔断 | ❌ | **完全没有**（全仓 `circuit`/`breaker` 0 命中） |
 | 成本 / token 可见 | ✅ | `api/token_tracker.py`（9 个汇总函数）· Gradio 看板挂在 `/dashboard` |
 | Agent（4 套实现） | ✅ | `agent_graph.py` · `agent_graph_advanced.py` · `agent_graph_advanced_learning.py` · `plan_execute.py` |
@@ -137,7 +137,12 @@ bash scripts/list_endpoints.sh          # 默认 http://127.0.0.1:8000
 > 2. **我发明了一条不成立的不变量**：初稿写「兜底价 ≥ 所有已登记模型」，但 `qwen-plus`(0.008/0.016) **本来就高于**兜底价(0.003/0.006)
 >    ⇒ **这条规则在原代码里从未成立** ⇒ 收窄为「兜底价 ≥ **在用**模型的价格」（从 `config` 读 `LLM_MODEL_FAST`/`LLM_MODEL_CHAT`）。
 > 3. **"读取配置"的测试初稿只比值** —— 值相等**分不清**「真读了」和「碰巧相等」⇒ 改成**子进程 + 环境变量覆盖**，再**回退代码验它真会变红**。
->
+> 4. **一次判据误用**（⛔ 不是代码错）：`docker start` 挂住时，我拿 **`docker ps` 秒回**当作「守护进程正常」的证据
+>    ⇒ 去查磁盘 / 内存 / 卷 / 端口，**全在错方向**。真相：`docker ps` **读的是后端缓存**
+>    （日志原文 `cache << GET /containers/json`），**根本不碰 VM** —— VM 里 dockerd 早停了（`"dockerAPI":"stopped"`）。
+>    ⇒ 修法 = 杀掉**重启前遗留的僵尸 `com.docker.backend`** 再重拉。
+>    📄 复盘 ⇒ `docs/复盘/2026-10-01-docker-ps会撒谎.md`（**同族第三条**，前两条：`结果为空就断言不存在` · `拿动作成功当结果正确`）
+
 > ⚠️ **`①a` 有意【不改行为】的边界**（⛔ 别误读成"限额已经能用了"）：
 > * ✅ **B7 接线【已做完】**（`①b` Task 1，见下方 ①b 段）。
 > * ✅ **会话级上限【已能拦】**（`①b` Task 2 · `B8`，2026-10-01）—— 接在 **7 条真调 LLM 的对话链**上。
