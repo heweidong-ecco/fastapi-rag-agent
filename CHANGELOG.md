@@ -123,6 +123,39 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- 🔴 **提交钩子把「本次没有 .py 改动」说成了「git 读不到 staged」**（2026-10-01 · `.claude/hooks/pre-commit-gates.py`）。
+
+  **现象**：staged 只有 `.yml / .md / .sh`（**没有 `.py`**）时，钩子会打
+  `模块spec门 ⚠️ 跳过（git 读不到 staged）` —— **而 git 明明读得到**。
+
+  **根因（分支顺序）**：原写法
+  ```python
+  spec_bad = None
+  if not is_doc_only(repo):
+      spec_bad = new_modules_without_spec(repo)
+  ```
+  `is_doc_only` 为真 ⇒ `spec_bad` **保持 `None`** ⇒ 落进 `elif spec_bad is None` 那条 ⇒ 打出「读不到 staged」。
+  而真正想说「`⏭ 本次无 .py 改动`」的那句**永远走不到** ——
+  因为 `spec_bad` 非空时必然 `not is_doc_only` ⇒ `is_doc_only(repo)` 恒 `False` ⇒ **死代码**。
+
+  **判据（可复现，⛔ 不用猜）**：建个空仓只 `git add` 一个 `doc.md`，跑同一个钩子
+  ⇒ 打 `模块spec门 ⚠️ 跳过（git 读不到 staged）`，而 `git diff --cached --name-only` 明明列出了它。
+
+  **改法**：先判 `doc_only`，`None` 那条**只留给 git 真失败**（`subprocess` 异常 / `rc≠0`）：
+  | 状态 | 含义 | 打印 |
+  |---|---|---|
+  | `doc_only` | 这道门**不适用**（本次没碰 `.py`） | `⏭ 本次无 .py 改动` |
+  | `list`（含空） | git 读到了，结果就是它 | `✅` / 🔴 拦 |
+  | `None` | git **真失败** | `⚠️ 跳过（git 读不到 staged）` |
+
+  ⚠️ **为什么值得修**：它把「正常」说成「故障」—— 是「**拿动作成功当结果正确**」那一族的**镜像版**。
+  下一个人看到这句会去查 git、查 staged，**白花时间**。
+
+  判据（三个方向都验过）：
+  * 只 stage `.md` ⇒ `模块spec门 ⏭ 本次无 .py 改动`（**原来是假提示**）
+  * 新增 `api/foo.py` 无 spec ⇒ 仍 `🔴 未通过 · 已阻止本次 commit`（**没改宽**）
+  * 真仓 staged 是 `.py` ⇒ `凭据门 ✅ ｜ 链接检查 ✅ ｜ 孤儿检查 ✅ ｜ 模块spec门 ✅`
+
 - 🔴 **删掉一条【我自己发明的】守卫测试 + 更正一句流传了很久的错注释**（2026-10-01 · 修 CI 红）。
 
   **触发**：`8a5672b` 推上去后 **CI 红** —— 红的是 **`api/test_token_config.py::test_default_pricing_is_not_lower_than_models_in_use`**，
