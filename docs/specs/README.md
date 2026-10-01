@@ -28,14 +28,14 @@
 
 | 模块 | 行数 | spec | 自报状态 |
 |---|---:|---|---|
-| `api/agent_checkpointer.py` | 123 | ✅ [`specs/agent_checkpointer.md`](./agent_checkpointer.md) | 🟡 **地基在，但零测试 · 且有一处忽略配置** |
-| `api/agent_graph.py` | 151 | ✅ [`specs/agent_graph.md`](./agent_graph.md) | ⚰️ **遗留 / 未经裁决** —— **6 套 Agent 实现之一** |
-| `api/agent_graph_advanced.py` | 407 | ✅ [`specs/agent_graph_advanced.md`](./agent_graph_advanced.md) | 🟡 **可用，且是生产链** —— 但 🔴 **有两处实锤缺陷**（见下）<br>🔵 **改造中**：`B7` 要动它的 `llm`（`:39`，现在**没有 `max_tokens`**） |
-| `api/agent_graph_advanced_learning.py` | 397 | 🔴 **缺** | ❓ 未知 |
+| `api/agent_checkpointer.py` | 125 | ✅ [`specs/agent_checkpointer.md`](./agent_checkpointer.md) | 🟡 **地基在，但零测试 · 且有一处忽略配置**<br>✅ 2026-10-01：`llm`（`:21`）接上 `MAX_TOKENS_AGENT`（`B7`） |
+| `api/agent_graph.py` | 153 | ✅ [`specs/agent_graph.md`](./agent_graph.md) | ⚰️ **遗留 / 未经裁决** —— **6 套 Agent 实现之一**<br>✅ 2026-10-01：`llm`（`:21`）接上 `MAX_TOKENS_AGENT`（`B7`） |
+| `api/agent_graph_advanced.py` | 421 | ✅ [`specs/agent_graph_advanced.md`](./agent_graph_advanced.md) | 🟡 **可用，且是生产链** —— 但 🔴 **有两处实锤缺陷**（见下）<br>✅ **2026-10-01 改完**：`B7` + `S12` 都已落在它的 `llm`（`:50`）上 —— 见「✅ 做了什么」末条 |
+| `api/agent_graph_advanced_learning.py` | 400 | 🔴 **缺** | ❓ 未知 |
 | `api/answer_with_citations.py` | 58 | ✅ [`specs/answer_with_citations.md`](./answer_with_citations.md) | 🟡 **后端可用 · 但【默认不启用】—— 且零测试** |
 | `api/api_v1.py` | 313 | ✅ [`specs/api_v1.md`](./api_v1.md) | 🔴 **可用，但 11 条路由里【只有 1 条】带鉴权依赖** —— 其余任何人可调（含会花钱的和会泄露信息的）<br>⚠️ **本 spec 推翻了先前对 `B9` 的一个判断**（见 ⚠️②） |
 | `api/api_v1_agent.py` | 744 | ✅ [`specs/api_v1_agent.md`](./api_v1_agent.md) | 🟡 **可用，但 28 个路由【全都非流式】** —— `StreamingResponse` / `text/event-stream` / `yield` **全为 0**<br>🔵 **改造中**：本文件下方有 **实施计划 ②**（人工接管）与 **③**（流式与取消） |
-| `api/api_v1_rag.py` | 900 | ✅ [`specs/api_v1_rag.md`](./api_v1_rag.md) | 🟡 **部分可用** —— 有 3 条是"模拟类测试" |
+| `api/api_v1_rag.py` | 905 | ✅ [`specs/api_v1_rag.md`](./api_v1_rag.md) | 🟡 **部分可用** —— 有 3 条是"模拟类测试"<br>✅ 2026-10-01：两处 `ChatOpenAI`（`:566` 流式答案 · `:730` WS agent）接上 `MAX_TOKENS_ANSWER`（`B7`） |
 | `api/auth.py` | 108 | 🔴 **缺** | ❓ 未知 |
 | `api/bm25_index.py` | 66 | 🔴 **缺** | ❓ 未知 |
 | `api/browser_tools.py` | 84 | 🔴 **缺** | ❓ 未知 |
@@ -51,7 +51,7 @@
 | `api/document_parser.py` | 242 | 🔴 **缺** | ❓ 未知 |
 | `api/document_preprocessor.py` | 221 | 🔴 **缺** | ❓ 未知 |
 | `api/embedding_client.py` | 48 | ✅ [`specs/embedding_client.md`](./embedding_client.md) | 🟡 **可用，但有一处【启动崩溃】隐患**（`ROADMAP` 待办 **T1**） |
-| `api/evaluate_with_ragas.py` | 296 | 🔴 **缺** | ❓ 未知 |
+| `api/evaluate_with_ragas.py` | 306 | 🔴 **缺** | ❓ 未知 |
 | `api/exceptions.py` | 70 | 🔴 **缺** | ❓ 未知 |
 | `api/hybrid_search.py` | 139 | ✅ [`specs/hybrid_search.md`](./hybrid_search.md) | 🟡 **可用，但它在全仓是【第二份 RRF 实现】** |
 | `api/jwt_handler.py` | 74 | 🔴 **缺** | ❓ 未知 |
@@ -62,17 +62,17 @@
 | `api/memory_store.py` | 72 | 🔴 **缺** | ❓ 未知 |
 | `api/metrics.py` | 36 | 🔴 **缺** | ❓ 未知 |
 | `api/permission.py` | 35 | 🔴 **缺** | ❓ 未知 |
-| `api/plan_execute.py` | 593 | ✅ [`specs/plan_execute.md`](./plan_execute.md) | 🟡 **可用** —— 规划 + 逐步**真调用工具**；有超时、有总预算、有重规划、有降级<br>🔴 **但查出 1 处真缺陷 + 5 处"看代码会误判"**（见下） |
+| `api/plan_execute.py` | 597 | ✅ [`specs/plan_execute.md`](./plan_execute.md) | 🟡 **可用** —— 规划 + 逐步**真调用工具**；有超时、有总预算、有重规划、有降级<br>🔴 **但查出 1 处真缺陷 + 5 处"看代码会误判"**（见下）<br>✅ 2026-10-01：三个 `_llm`（`:93` / `:251` / `:461`）接上 `MAX_TOKENS_AGENT`（`B7`） |
 | `api/query_rewriter.py` | 159 | 🔴 **缺** | ❓ 未知 |
 | `api/quota_limiter.py` | 81 | ✅ [`specs/quota_limiter.md`](./quota_limiter.md) | 🟡 **可用，但匿名请求完全绕过它** |
-| `api/rag_pipeline.py` | 247 | 🔴 **缺** | ❓ 未知 |
+| `api/rag_pipeline.py` | 249 | 🔴 **缺** | ❓ 未知 |
 | `api/rate_limiter.py` | 140 | ✅ [`specs/rate_limiter.md`](./rate_limiter.md) | 🟡 **可用** —— 基于 Redis 的令牌桶，**全局 + 用户两层**<br>🔴 **但它有 3 个"看代码看不出来"的性质**（见下 ⚠️ 节）—— 其中 2 条是本 spec 新查出来的 |
 | `api/reranker.py` | 59 | ✅ [`specs/reranker.md`](./reranker.md) | 🟡 **仅开发机可用** |
 | `api/schemas.py` | 104 | 🔴 **缺** | ❓ 未知 |
 | `api/search_tools.py` | 129 | 🔴 **缺** | ❓ 未知 |
 | `api/simple_tools.py` | 36 | 🔴 **缺** | ❓ 未知 |
 | `api/simple_tools_impl.py` | 30 | 🔴 **缺** | ❓ 未知 |
-| `api/token_config.py` | 89 | ✅ [`specs/token_config.md`](./token_config.md) | 🟢 **新建（2026-10-01 · B7）** —— 额度类常量的**唯一落点**，**只集中，不改行为**<br>⚠️ **常量已就位，但【尚未接线】** —— 17 个 `ChatOpenAI` 构造点还没读 `MAX_TOKENS_*`（排 `①b` Task 1） |
+| `api/token_config.py` | 89 | ✅ [`specs/token_config.md`](./token_config.md) | 🟢 **新建（2026-10-01 · B7）** —— 额度类常量的**唯一落点**<br>✅ **`MAX_TOKENS_*` 已接线**（2026-10-01 · `①b` Task 1，15 处构造点）<br>⚠️ 其余常量（`SESSION_*` / `GLOBAL_DAILY_*`）**仍只有值、没有判定函数**（B8/B10） |
 | `api/token_tracker.py` | 744 | ✅ [`specs/token_tracker.md`](./token_tracker.md) | 🟡 **可用，但它是【三套额度口径】的其中一套** —— 见下 ⚠️<br>🟢 **①a 已落地（2026-10-01）**：额度常量已收口到 `api/token_config.py`（本文件**只剩同名别名**）· 本文件下方 **实施计划 ①a** 已执行完<br>⬜ **①b 未开工**（B8 会话级 / B10 全局日级 / B11 熔断 / 决策一落地） |
 | `api/tool_cache.py` | 96 | 🔴 **缺** | ❓ 未知 |
 | `api/tool_health.py` | 105 | 🔴 **缺** | ❓ 未知 |

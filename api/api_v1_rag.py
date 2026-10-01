@@ -9,6 +9,9 @@ from fastapi import APIRouter, Depends, Path, Query
 from fastapi.responses import StreamingResponse, JSONResponse
 
 from config import ACCESS_TOKEN_EXPIRE_MINUTES
+# B7 接线：答案生成的单次上限（2000）。⚠️ `token_config` 只 import `os`，**不带 langchain**
+# ⇒ 放文件头不会破坏本文件「导入期不拉 langchain」的既有做法。
+from token_config import MAX_TOKENS_ANSWER
 from exceptions import ErrorCode, AppException
 from schemas import (
     QuestionRequest,
@@ -565,7 +568,8 @@ def get_llm_stream():
             api_key=LLM_API_KEY,
             base_url=LLM_BASE_URL,
             temperature=0.3,
-            streaming=True  # 关键：开启流式模式
+            streaming=True,  # 关键：开启流式模式
+            max_tokens=MAX_TOKENS_ANSWER,   # B7：流式答案，给足 2000
         )
     return _llm_stream
 
@@ -728,6 +732,7 @@ def get_agent_executor():
             api_key=LLM_API_KEY,
             base_url=LLM_BASE_URL,
             temperature=0,
+            max_tokens=MAX_TOKENS_ANSWER,   # B7：WS agent 的对外答案，给足 2000
         )
         #二 定义工具
         @tool

@@ -54,6 +54,37 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- 🟢 **`B7` 接线：单次 token 上限【真的生效了】**（2026-10-01 · **①b Task 1**）。
+
+  **为什么这条是本轮的关键**：上一条（常量收口）只把 `MAX_TOKENS_*` **建出来** ——
+  **没有任何构造点读它** ⇒ **常量对了、没接上 = 单次上限根本不存在**。本次把它接上。
+
+  **改动**：`api/` 下**全部 15 处** `ChatOpenAI(...)` 都带上 `max_tokens`，**按角色分类**：
+
+  | 类 | 接哪个 | 落点 |
+  |---|---|---|
+  | **答案生成** | `MAX_TOKENS_ANSWER`（**2000**） | `api_v1_rag.py:566`（流式答案）· `:730`（WS agent）· `rag_pipeline.py:49`（`answer_llm`）· `evaluate_with_ragas.py:50` |
+  | **中间步骤** | `MAX_TOKENS_AGENT`（**1024**） | `agent_checkpointer.py:21` · `agent_graph.py:21` · `agent_graph_advanced.py:50` · `agent_graph_advanced_learning.py:21/87/88/89/223` · `plan_execute.py:93/251/461` |
+
+  **并入 `S12`**：`agent_graph_advanced.py` 的 `llm` 补 `timeout=60`（新常量 `AGENT_LLM_TIMEOUT`）+ `max_retries=1`
+  —— 同型问题 `plan_execute.py:70-76` 早就修过，**这里漏了**。
+
+  ⚠️ **为什么是两个值不是一个**：答案被截断是**用户可见的质量事故**；中间步骤被截断只是多跑一轮。
+  ⇒ 守卫测试**同时钉"有没有"和"接对没有"**（只钉前者的话，全接成 1024 也能过）。
+
+  判据（可打印）：
+  * `venv/bin/python -m pytest api/test_max_tokens_wiring.py -q` ⇒ **3 passed**（新建）
+  * `venv/bin/python -m pytest api/ -m "not integration and not needs_db" -q` ⇒ **15 failed / 127 passed / 3 skipped**
+    （`15 failed` 与接线前的 `FAILED` 清单 `diff` **逐条相同**；`+3` 就是新测试 ⇒ **无回归**）
+  * 对象级（⛔ 不是只看源码）：`RAGPipeline().answer_llm.max_tokens` ⇒ `2000`；
+    `plan_execute.planner_llm.max_tokens` ⇒ `1024`；`agent_graph_advanced.llm` ⇒ `timeout=60.0, max_retries=1`
+
+  🔴 **顺带更正计划里两处错**（原写「**17 个**构造点」，实测 **15**）：
+  ① 计划那张 Files 清单逐条数只有 **14** —— 连它自己都对不上 17；② **`evaluate_with_ragas.py` 计划里一次没提**，
+  已补（它是离线评测脚本，**不跑就没人发现它没有上限**）。
+  ⇒ **权威清单改为 `api/test_max_tokens_wiring.py` 的 `EXPECTED_MAX_TOKENS`**（漏一个就红），⛔ 不再是那张表。
+
+  📄 `docs/specs/token_tracker.md`（`①b` Task 1）· `docs/specs/token_config.md` · `docs/specs/agent_graph_advanced.md`
 - 🟢 **CI 的依赖安装不再拉 torch —— 与 Docker 同一套裁法**（2026-10-01 · 业务方指令）。
 
   **为什么**：业务方指出「**不要给 GitHub 的 CI 的 requirements 拉 torch**」。
@@ -97,8 +128,8 @@ All notable changes to this project will be documented in this file.
     `100/150`、`3/20` **写死在 `:129/:132`** ⇒ 改从 `token_config` 取。⛔ **默认值逐字相同，行为不变**。
     📌 判定"真读了"的测试**不能只比值**（两边都写 100.0 时分不出来）⇒ 用**环境变量改值 + 另起进程**证。
 
-  **⚠️ 只集中，不做热加载** —— `ChatOpenAI(max_tokens=…)` 是 **import 时求值**（17 个构造点全是），
-  改值本来就要重启。**⬜ 接线（把常量真的接到那 17 个点）在 `①b · Task 1`**，本次没做。
+  **⚠️ 只集中，不做热加载** —— `ChatOpenAI(max_tokens=…)` 是 **import 时求值**（构造点全是），
+  改值本来就要重启。⬜ **接线当时没做** ⇒ **已由下方「`B7` 接线」那条补上（同日）**。
 
   📄 `docs/decisions/DEC-040`（`决策一` 的口径裁定）· `docs/specs/token_config.md`（新 spec）·
   `docs/specs/token_tracker.md`（①a/①b 实施计划全文）
@@ -162,6 +193,38 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- 🔴 **提交钩子把「本次没有 .py 改动」说成了「git 读不到 staged」**（2026-10-01 · `.claude/hooks/pre-commit-gates.py`）。
+
+  **现象**：staged 只有 `.yml / .md / .sh`（**没有 `.py`**）时，钩子会打
+  `模块spec门 ⚠️ 跳过（git 读不到 staged）` —— **而 git 明明读得到**。
+
+  **根因（分支顺序）**：原写法
+  ```python
+  spec_bad = None
+  if not is_doc_only(repo):
+      spec_bad = new_modules_without_spec(repo)
+  ```
+  `is_doc_only` 为真 ⇒ `spec_bad` **保持 `None`** ⇒ 落进 `elif spec_bad is None` 那条 ⇒ 打出「读不到 staged」。
+  而真正想说「`⏭ 本次无 .py 改动`」的那句**永远走不到** ——
+  因为 `spec_bad` 非空时必然 `not is_doc_only` ⇒ `is_doc_only(repo)` 恒 `False` ⇒ **死代码**。
+
+  **判据（可复现，⛔ 不用猜）**：建个空仓只 `git add` 一个 `doc.md`，跑同一个钩子
+  ⇒ 打 `模块spec门 ⚠️ 跳过（git 读不到 staged）`，而 `git diff --cached --name-only` 明明列出了它。
+
+  **改法**：先判 `doc_only`，`None` 那条**只留给 git 真失败**（`subprocess` 异常 / `rc≠0`）：
+  | 状态 | 含义 | 打印 |
+  |---|---|---|
+  | `doc_only` | 这道门**不适用**（本次没碰 `.py`） | `⏭ 本次无 .py 改动` |
+  | `list`（含空） | git 读到了，结果就是它 | `✅` / 🔴 拦 |
+  | `None` | git **真失败** | `⚠️ 跳过（git 读不到 staged）` |
+
+  ⚠️ **为什么值得修**：它把「正常」说成「故障」—— 是「**拿动作成功当结果正确**」那一族的**镜像版**。
+  下一个人看到这句会去查 git、查 staged，**白花时间**。
+
+  判据（三个方向都验过）：
+  * 只 stage `.md` ⇒ `模块spec门 ⏭ 本次无 .py 改动`（**原来是假提示**）
+  * 新增 `api/foo.py` 无 spec ⇒ 仍 `🔴 未通过 · 已阻止本次 commit`（**没改宽**）
+  * 真仓 staged 是 `.py` ⇒ `凭据门 ✅ ｜ 链接检查 ✅ ｜ 孤儿检查 ✅ ｜ 模块spec门 ✅`
 - 🔴 **文档链接门被 worktree 副本打红，把【全仓任何 commit】拦死**（2026-10-01 · `scripts/check_doc_links.sh`）。
 
   **病症**：`git worktree add` 出来的 worktree **住在 `.claude/worktrees/<名字>/`**，

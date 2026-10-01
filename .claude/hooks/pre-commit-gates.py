@@ -137,9 +137,24 @@ def main() -> int:
             failed.append((name, r))
 
     # ── 第 ④ 道门：新增模块必须有 spec（**硬拦**，业务方 2026-09-29 裁定）──
-    spec_bad = None
-    if not is_doc_only(repo):
-        spec_bad = new_modules_without_spec(repo)
+    # ⚠️ 三种状态**必须分清**。2026-10-01 修：原先写法把「本次没有 .py 改动」
+    #    说成了「git 读不到 staged」（**假提示** —— 原样是：
+    #      spec_bad = None
+    #      if not is_doc_only(repo): spec_bad = new_modules_without_spec(repo)
+    #    `is_doc_only` 为真 ⇒ `spec_bad` 保持 None ⇒ 落进下面「读不到 staged」那条；
+    #    而真正想说「⏭ 本次无 .py 改动」的那句**永远走不到**（死代码）——
+    #    因为 `spec_bad` 非空时必然 `not is_doc_only` ⇒ `is_doc_only(repo)` 恒 False）。
+    #    ⇒ 后果：下一个人看到「git 读不到 staged」会去查 git / 查 staged，**白花时间**。
+    #    ⇒ 这是「拿动作成功当结果正确」的**镜像版**：**把正常说成故障**。
+    # 判据（可复现）：单独 `git add` 一个 .md 后跑本钩子，原先打
+    #   `模块spec门 ⚠️ 跳过（git 读不到 staged）`，而 `git diff --cached --name-only`
+    #   明明列出了那个文件 ⇒ **git 没坏**。
+    # 现在三种状态各归各：
+    #   doc_only      ⇒ 这道门**不适用**（本次没碰 .py）      → ⏭
+    #   list（含空）  ⇒ git 读到了，结果就是它                → ✅ / 🔴 拦
+    #   None          ⇒ git **真失败**（异常 / rc≠0）         → ⚠️ 跳过
+    doc_only = is_doc_only(repo)
+    spec_bad = None if doc_only else new_modules_without_spec(repo)
 
     # ── 有门没过 ⇒ 阻止 ──
     if failed or spec_bad:
@@ -169,13 +184,15 @@ def main() -> int:
         return 2
 
     # ── 全过（或跳过）⇒ 放行 ──
+    # ⚠️ 顺序要紧：**先判 `doc_only`** —— 否则「本次无 .py 改动」永远被
+    #    「读不到 staged」抢先（原 bug）。`None` 那条**只留给 git 真失败**。
     parts = [f"{n} ✅" for n in passed]
-    if spec_bad == []:
+    if doc_only:
+        parts.append("模块spec门 ⏭ 本次无 .py 改动")
+    elif spec_bad == []:
         parts.append("模块spec门 ✅")
     elif spec_bad is None:
         parts.append("模块spec门 ⚠️ 跳过（git 读不到 staged）")
-    elif is_doc_only(repo):
-        parts.append("模块spec门 ⏭ 本次无 .py 改动")
     if skipped:
         parts.append("⚠️ 跳过：" + " · ".join(skipped))
     print(f"🔒 提交前四道门：{' ｜ '.join(parts) or '（无门可跑）'}", file=sys.stderr)

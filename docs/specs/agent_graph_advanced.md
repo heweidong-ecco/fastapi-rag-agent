@@ -2,10 +2,10 @@
 
 | 项 | 内容 |
 |---|---|
-| **状态** | 🟡 **可用，且是生产链** —— 但 🔴 **有两处实锤缺陷**（见下）<br>🔵 **改造中**：`B7` 要动它的 `llm`（`:39`，现在**没有 `max_tokens`**） |
+| **状态** | 🟡 **可用，且是生产链** —— 但 🔴 **有两处实锤缺陷**（见下）<br>✅ **2026-10-01 改完**：`B7` + `S12` 都已落在它的 `llm`（`:50`）上 —— 见「✅ 做了什么」末条 |
 | **对外提供** | `build_mcp_agent()`（返回编译好的图，`:288`）· `mcp_session()` · `get_mcp_tools()` · `call_mcp_tool_with_cache()` |
 | **谁在用** | `api_v1_agent.py:450` 的 `POST /agent/mcp_chat`（**三代 Agent**） |
-| **规模** | 407 行 |
+| **规模** | 421 行（`wc -l api/agent_graph_advanced.py`）—— 2026-10-01 因 `B7`+`S12` 的注释与参数 +14 行 |
 
 ## ✅ 做了什么
 
@@ -44,7 +44,7 @@
 | `docs/specs/token_tracker.md` | `PRICING` / `check_multilevel_budget` / `get_thread_cost` 的本尊 · **计划 ①a 的 Task 2 要扩 `PRICING`** |
 | `docs/specs/plan_execute.md` | ⚠️ **同一个"漏传 / 写死"家族的对照**（那边超时都显式设了） |
 | `docs/specs/pending_approvals.md`（待建） | 三代图**没有审批中断**（与 `/agent/langgraph_chat` 不同） |
-| `后端补齐清单` **B7** | `llm`（`:39`）要接 `MAX_TOKENS_AGENT` |
+| `后端补齐清单` **B7** | ✅ **已接（2026-10-01）** —— 原 `:39` 的 `llm` 现于 `:50` 接 `MAX_TOKENS_AGENT`（1024） |
 | `后端补齐清单` **B13** | ⚠️ **R4「成本可见」就建立在本条 ⚠️② 之上** ⇒ **不修单价，看板上的钱就是错的** |
 | `docs/decisions/DEC-017` | MCP transport 的选型（HTTP/SSE 那条路） |
 
@@ -54,5 +54,5 @@
 > |---|---|---|---|
 > | **1** | 🔴 **修 3 处 `model="qwen-turbo"` 硬编码** | ✅ **已修（2026-10-01）** | `agent_graph_advanced.py:316` · `:364` · `agent_checkpointer.py:58`<br>⇒ 改成 `getattr(…, "model_name", None) or getattr(…, "model", "unknown")`（**照抄 `plan_execute.py:154`**） |
 > | **2** | 🔴 **`PRICING` 表补 `deepseek` 条目** | ✅ **已补（2026-10-01）** | 落在 `token_config.py` 的 `MODEL_PRICING` ⇒ **`deepseek-v4-flash`: 0.001 / 0.002 元/千 token**<br>（官方人民币口径「输入 1 元 / 输出 2 元 每百万」；**业务方选定此口径**。⚠️ 不区分缓存命中 ⇒ 偏高估，理由写在 `token_config.py` 内） |
-> | **3** | ⚠️ **`llm` 补 `timeout` / `max_retries`** | ✅ **补** | 照 `plan_execute.py:70-76` 那三个常量的**做法**（`timeout=` + `max_retries=1`）<br>⬜ **具体秒数待定** —— 这是**多轮对话**，比 `plan_execute` 的单步长 ⇒ **别直接抄 30/20/15** |
+> | **3** | ⚠️ **`llm` 补 `timeout` / `max_retries`**（🅗 `S12`） | ✅ **已补（2026-10-01）** | 照 `plan_execute.py:70-76` 那三个常量的**做法**（`timeout=` + `max_retries=1`）<br>✅ **秒数已定：`AGENT_LLM_TIMEOUT = 60`**（`agent_graph_advanced.py` 内，就这一处用）<br>**为什么是 60**：这是**多轮工具对话**（`:345` 每次 invoke 一轮，带 MCP 工具 schema），**不抄 `plan_execute` 的单步 30/20/15** ⇒ 取 planner 的两倍（① 输出上限 1024 比那份 JSON 长；② 工具 schema 更大 ⇒ 首 token 更慢）。<br>📌 **60 是实施者的判断，⛔ 不是业务裁定** —— 要改就改这一个数。 |
 > | **4** | ⚠️ **软拦截 → 硬拦截** | ✅ **要变成硬拦截** | 现在 `:244-251` 是塞 `ToolMessage` 文本、**HTTP 200** ⇒ 改成**抛 `AppException(QUOTA_EXCEEDED)`**<br>⚠️ **注意层次**：本文件在**图节点里**（不是路由层）⇒ 抛出的异常要能被**端点层**接住并转成 `AppException`（参照 `api_v1_agent.py:209` 接 `BudgetExceededError` 的写法）<br>⚠️ **改硬拦截会改变 `/agent/mcp_chat` 的响应形状** ⇒ 测试要一起改 |

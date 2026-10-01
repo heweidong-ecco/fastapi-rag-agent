@@ -634,8 +634,8 @@ git commit -m "refactor(配额): 决策一落地 —— 次数配额降级，统
 > ### 📌 ①b 的**开工顺序**（写在这里，免得到时又想反）
 >
 > ```
-> B7 的接线（把 token_config 接到 17 个构造点）
->   → B8  会话级上限
+> B7 的接线（把 token_config 接到 15 个构造点）   ← ✅ 2026-10-01 做完
+>   → B8  会话级上限                              ← ⭐ 下一步
 >   → B10 全局日级总额        ← 到这一步，token 那套【才真正能拦住东西】
 >   → B11 熔断（按 key 断路器 + 要素④ 恢复实测 Redis TTL）+ L2 顺带
 >   → 决策一落地（撤次数配额）  ← ⭐【最后】
@@ -644,7 +644,7 @@ git commit -m "refactor(配额): 决策一落地 —— 次数配额降级，统
 
 ---
 
-# 🔵 实施计划 ①b · **限额与熔断**（2026-09-30 立 · 待执行 ← ⭐ **下一步**）
+# 🔵 实施计划 ①b · **限额与熔断**（2026-09-30 立 · **执行中** —— Task 0 ✅ / Task 1 ✅ / Task 2 起待做）
 
 > **来源**：`后端补齐清单-待裁-20260929.md` 的 **B8 · B10 · B11 · B13 · 决策一（实现）**；
 > 以及 `LLM模型路由与额度策略-待裁-20260930.md` 的 **L2**（十几个 model 顺带）。
@@ -655,30 +655,48 @@ git commit -m "refactor(配额): 决策一落地 —— 次数配额降级，统
 然后把旧的「请求次数」配额**最后**降级掉。
 
 **架构**：**新增一层「查询 + 判定」**，全部**查库**（`token_usage_logs`），⛔ **不复用 `_thread_summary`**（理由见 Task 2）。
-熔断做成**按 key 的通用断路器**（Redis 标记 + TTL 到次日）—— 这一套同时覆盖
+熔断做成**按 key 的通用断路器**（Redis 标记 + **TTL 分两种**：额度耗尽=永久 / 临时故障=数小时，见 Task 0 `L3`）—— 这一套同时覆盖
 **全局额度触顶**（动作=拒绝）与 **L2 的「某个模型免费额度耗尽」**（动作=换模型）。
 
 ---
 
-## Task 0 · **前置决策：`L3` / `L4` / `L5`**（⛔ 不裁就别开工）
+## Task 0 · **前置决策：`L3` / `L4` / `L5`** —— ✅ **2026-10-01 全部已裁**
 
 > 这三条在 `LLM模型路由与额度策略-待裁-20260930.md` §七 标着「**等 `B11` 开工时再答**」。
-> **现在就是那个时候。** 它们是**业务判断**，我不替你定。
+> **业务方 2026-10-01 裁完** —— 权威记录在 **`docs/待办总表.md` §一·附 的 L 表**（本表只留摘要）。
 
-| # | 问题 | 备选 | 影响哪个 Task |
+| # | 问题（原备选） | ✅ **裁定** | 影响哪个 Task |
 |---|---|---|---|
-| **L3** | 熔断 key 的 **TTL 设多久** | 到次日 0 点（**我推荐**，与"预算按天"天然对齐）/ 固定 N 小时 / 永久（人工解封） | Task 4 |
-| **L4** | **降级要不要对用户可见** | 响应里带标记（**我推荐**）/ 静默 / 拒绝服务 | Task 5（L2 换模型时） |
-| **L5** | **降级链按什么排序** | 人工指定顺序（**我推荐**，十几 model 能力差异大，自动轮转不可控）/ 按剩余额度 / 按角色内轮转 | Task 5 |
+| **L3** | 熔断 key 的 **TTL 设多久** | 🔴 **分两种 key、两种 TTL**（**不是**原推荐的"到次日 0 点"）：<br>① `AllocationQuota.FreeTierOnly`（免费额度耗尽）⇒ **永久**，人工解封；<br>② 其余（限流 / 临时故障）⇒ **数小时**。<br>⚠️ **我原推荐的"到次日 0 点"已被证伪**（见下方更正块） | Task 4 |
+| **L4** | **降级要不要对用户可见** | ✅ **响应里带标记**（与我推荐一致） | Task 5（L2 换模型时） |
+| **L5** | **降级链按什么排序** | ✅ **人工指定顺序**（与我推荐一致） | Task 5 |
+
+> 🔴 **2026-10-01 更正（本表自己那句推荐是错的）**：原写「到次日 0 点（**我推荐**，与"预算按天"天然对齐）」。
+> **前提就不成立**：源文档 §三 部件 5 明写**免费额度是一次性的（90 天有效期），不是每天重置**
+> ⇒ 「预算按天」这个类比**用错了对象** ⇒ 按它设 TTL，**到期自动放出来会立刻再撞一次 429**
+> （额度根本没恢复）。**"天然对齐"是对齐了一个不存在的天然。**
+> 📌 与 `①a` 那条 CI 红**同型**：**我拿一个自己觉得顺的类比，当成了事实**。
 
 > ⚠️ **注意 L4 / L5 的对象不是"额度触顶"** —— 触顶已裁「**直接拒绝、不降级**」（`B11` 要素②）。
 > 它们的对象是 **`L2`：某个模型的免费额度耗尽 ⇒ 换下一个模型**。
 
-- [ ] **Step 1**：把这三条的裁定**写进 `docs/待办总表.md` §一·附**的 L 表，然后才开始 Task 1。
+- [x] **Step 1**：把这三条的裁定**写进 `docs/待办总表.md` §一·附**的 L 表 —— ✅ **2026-10-01 做完**。
 
 ---
 
-## Task 1 · **B7 接线** · 让 17 个构造点用上 `token_config.MAX_TOKENS_*`
+## Task 1 · **B7 接线** · ✅ **2026-10-01 做完** —— 让【15】个构造点用上 `token_config.MAX_TOKENS_*`
+
+> 🔴 **2026-10-01 落盘时更正两处【我自己写错的计划】**（原写「17 个」）：
+> 1. ⚠️ **「17」是我没数就写下的数。** 实测（AST 扫 `api/*.py` 的 `ChatOpenAI(`）= **15 处**。
+>    计划里那张 Files 清单逐条数出来是 **14** —— 连清单本身也对不上 17。
+>    ⇒ **本 Task 的权威清单不是这张表，是 `api/test_max_tokens_wiring.py` 的
+>    `EXPECTED_MAX_TOKENS`**（它**同时**是守卫：漏一个就红）。
+> 2. 🔴 **`evaluate_with_ragas.py:44` 计划里【一次都没提】** —— 它也是个 `ChatOpenAI` 构造点，
+>    而且**恰恰是"漏掉会看不出来"的那类**（离线评测脚本，不跑就没人发现它没有上限）。
+>    ⇒ 已补：接 `MAX_TOKENS_ANSWER`（它 `:127` 生成被评答案、`:272` 又当 RAGAS judge，
+>    **两处都是长输出**；给 1024 可能**截断 judge 输出 ⇒ 评分静默失真**）。
+> 📌 **教训与 `①a` 那条 CI 红同族**：**计划里的数字同样是"作者当时的理解"，不是事实。**
+>    ⇒ 计划交给守卫测试去核，⛔ 别交给"我记得写的是 17"。
 
 > ⚠️ **2026-09-30 追加：本 Task 顺带并入 1 条**（`待办总表` 🅗 的 **`S12`**）
 >
@@ -738,14 +756,21 @@ def test_no_chat_openai_without_max_tokens():
     )
 ```
 
-- [ ] **Step 2: 跑，确认失败**
+- [x] **Step 2: 跑，确认失败** —— ✅ 2026-10-01，**列出 15 处**（原计划写"17 处"，实测 15）
 
 ```bash
 python -m pytest api/test_max_tokens_wiring.py -q
 ```
-预期：FAIL，并**列出**那 17 处（**这条失败信息本身就是待办清单**）。
+预期：FAIL，并**列出**那 15 处（**这条失败信息本身就是待办清单**）。
+📌 **实测**：`2 failed, 1 passed` —— 两条红各列一遍那 15 行（含计划漏掉的 `evaluate_with_ragas.py:44`）。
 
-- [ ] **Step 3: 逐处接上**
+> ⚠️ **本 Task 的 Step 1 最终落地**是 **3 条测试**（计划只写了 1 条）—— 多出来的两条见
+> `api/test_max_tokens_wiring.py` 顶部：
+> * `test_each_site_uses_the_agreed_budget` —— 钉**分类**（只钉"有没有"的话，全接成 1024 也能过，
+>   而那会把**答案截断**；这正对应本 Task 顶部那条 ⚠️「一致性陷阱」）
+> * `test_the_two_budgets_are_distinct_and_answer_is_larger`
+
+- [x] **Step 3: 逐处接上** —— ✅ 2026-10-01，**15 处全接完**
 
 模式（以 `api/agent_checkpointer.py:20` 为例）：
 
@@ -763,21 +788,32 @@ llm = ChatOpenAI(
 
 | 构造点 | 接哪个 |
 |---|---|
-| `api_v1_rag.py:563`（流式答案）· `:726`（WS agent）· `rag_pipeline.py:48`（`answer_llm`） | **`MAX_TOKENS_ANSWER`** |
-| `agent_graph.py:20` · `agent_checkpointer.py:20` · `agent_graph_advanced.py:39` · `agent_graph_advanced_learning.py:20/85/86/87/221` · `plan_execute.py:92/249/458` | **`MAX_TOKENS_AGENT`** |
+| `api_v1_rag.py:566`（流式答案）· `:730`（WS agent）· `rag_pipeline.py:49`（`answer_llm`）· **`evaluate_with_ragas.py:50`**（计划里**漏了**，2026-10-01 补） | **`MAX_TOKENS_ANSWER`** |
+| `agent_checkpointer.py:21` · `agent_graph.py:21` · `agent_graph_advanced.py:50` · `agent_graph_advanced_learning.py:21/87/88/89/223` · `plan_execute.py:93/251/461` | **`MAX_TOKENS_AGENT`** |
 
-- [ ] **Step 4: 跑测试，确认通过**
+> ⚠️ **行号是 2026-10-01 接线【之后】的**（接线本身让每处 +1~2 行）。
+> ⛔ **别拿这张表当清单用** —— 权威清单是 `api/test_max_tokens_wiring.py` 的 `EXPECTED_MAX_TOKENS`。
+
+- [x] **Step 4: 跑测试，确认通过** —— ✅ **2026-10-01**
 
 ```bash
-python -m pytest api/test_max_tokens_wiring.py -q                       # → passed
-python -m pytest api/ -m "not integration and not needs_db" -q           # → 全绿
+python -m pytest api/test_max_tokens_wiring.py -q         # → 3 passed
+python -m pytest api/ -m "not integration and not needs_db" -q   # → 15 failed / 127 passed（红的仍是 Redis/MCP）
 ```
 
-- [ ] **Step 5: 提交**
+> 📌 **实测记录**（⚠️ 本机无 Redis ⇒ 那 15 条红是**本机固有问题**，CI 上绿）：
+> * **接线前**（在 `HEAD=a257de3` 的独立 worktree 上实测）：`15 failed / 124 passed / 3 skipped`
+> * **接线后**：`15 failed / 127 passed / 3 skipped` ⇒ **+3 正好是新测试 3 条**
+> * **两份 `FAILED` 清单 `diff` 逐条相同** ⇒ 无回归
+
+- [x] **Step 5: 提交** —— ⏸ **待业务方发话**（业务方 2026-10-01：「不要频繁提交 commit」）
+  ⚠️ 且**门这一层就过不去**：`.claude/worktrees/ci-local-env`（**业务方正在用的 worktree，⛔ 别动**）
+  让**文档链接门变红** ⇒ `commit` 被 `.claude/hooks/pre-commit-gates.py` 拦下。
+  📌 **不是本 Task 的改动有问题** —— 红线全落在那个 worktree 的副本里。详见 `ROADMAP.md` ①b 段的「一处副作用」。
 
 ```bash
 git add api/*.py api/test_max_tokens_wiring.py
-git commit -m "feat(额度): B7 接线 —— 17 个 ChatOpenAI 构造点带上单次上限（2000/1024）"
+git commit -m "feat(额度): B7 接线 —— 15 个 ChatOpenAI 构造点带上单次上限（2000/1024）+ S12"
 ```
 
 ---
