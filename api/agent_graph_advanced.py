@@ -313,7 +313,10 @@ def build_mcp_agent():
         if hasattr(response, "usage_metadata"):
             usage = response.usage_metadata
             record_usage(
-                model="qwen-turbo",
+                # ⚠️ 2026-10-01 修（🅗 S4）：原写死 `"qwen-turbo"`，而 `.env` 里实际是 DeepSeek
+                #    ⇒ `token_usage_logs.cost` 按**错的单价**记 ⇒ 连带 `MAX_THREAD_COST`（元）也判错。
+                #    改从对象取（照抄 `plan_execute.py:154` 的写法）。
+                model=getattr(llm, "model_name", None) or getattr(llm, "model", "unknown"),
                 prompt_tokens=usage.get("input_tokens", 0),
                 completion_tokens=usage.get("output_tokens", 0),
                 purpose="answer_generation",
@@ -361,7 +364,11 @@ def build_mcp_agent():
                 tool_args = response.tool_calls[0]["args"]
             
             record_usage(
-                model="qwen-turbo",
+                # ⚠️ 2026-10-01 修（🅗 S4）：同上 —— 别再写死模型名。
+                #    记**实际被调用的那个对象**（`:345` 调的是 `llm_with_tools`）。
+                #    实测 `llm.bind_tools(...)` 后 `.model_name` 仍是 `deepseek-v4-flash`。
+                model=getattr(llm_with_tools, "model_name", None)
+                or getattr(llm_with_tools, "model", "unknown"),
                 prompt_tokens=usage.get("input_tokens", 0),
                 completion_tokens=usage.get("output_tokens", 0),
                 purpose="agent_decision",

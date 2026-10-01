@@ -203,7 +203,7 @@ bash scripts/check_secrets.sh        # 凭据门：命中即 exit 1（扫 staged
 
 > ⚠️ **口径**：它**只扫 staged 的新增行** —— 没 `git add` 就跑，会打印「staged 区为空」然后 exit 0，
 > **那不是"通过"，是"没扫"**。
-> 另外 `--all` 模式在干净仓库上**本来就会红**（`deploy.md` / `api/schemas.py` 里有**占位符**命中 `sk-`/JWT 模式）
+> 另外 `--all` 模式在干净仓库上**本来就会红**（`docs/说明/部署.md` / `api/schemas.py` 里有**占位符**命中 `sk-`/JWT 模式）
 > —— 那是**既存的占位符**，不是泄漏；但**不要把它当成"门坏了"**。
 
 ---

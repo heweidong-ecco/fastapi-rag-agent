@@ -111,6 +111,51 @@ PUBLIC_PATHS = frozenset({
 })
 
 
+# ==================== 限流身份解析（2026-09-30 抽出，便于单测） ====================
+def resolve_rate_limit_identity(x_api_key: str | None, auth_header: str | None) -> str:
+    """从请求头算出**限流用**的用户身份（桶名）。
+
+    ⚠️ **抽出来的目的只有一个**：让这段逻辑**能被单测**。
+    中间件本体要连 Redis（`rate_limiter.py` 模块级就建 `redis.Redis`），
+    行为测试会退化成"环境依赖型通过" —— 同 `api/test_public_paths.py` 的取舍。
+
+    ⚠️ **本函数只管"限流分桶"，⛔ 不是鉴权** —— 鉴权在 `api/deps.py`，它会真查库。
+    """
+    if x_api_key:
+        # 🔴 2026-09-30 修（B9-b）：原先这里是 `f"user:{x_api_key[:8]}"` ——
+        #    只取**前 8 个字符**，**不查库、不验签** ⇒ 编一个串就拿到一个**全新的桶**，
+        #    换着串发 = **无限刷新限流配额**。实测：与本文件 :211 的 `QuotaMiddleware`
+        #    （那条**验了**）**不一致** —— 同一个文件里两条中间件两种做法。
+        #
+        # ⚠️ 验不过时**降级到匿名桶，⛔ 不是拒绝** —— 因为**匿名还开着**，
+        #    客户端本来就可以不带 key。拒绝会把匿名入口一起关掉，那是**另一个决定**（B9 仍挂着）。
+        from auth import verify_api_key
+        verified = verify_api_key(x_api_key)
+        if verified:
+            return f"user:{verified}"
+    if auth_header and auth_header.startswith("Bearer "):
+        from jwt_handler import verify_access_token
+        jwt_user = verify_access_token(auth_header[7:])
+        if jwt_user:
+            return f"user:{jwt_user}"
+    return "anonymous"
+
+
+def _rate_limited_payload(retry_after: int = 60) -> dict:
+    """全局限流触发时的响应体（抽成纯函数 ⇒ 可单测，不必真打 Redis）。
+
+    ⚠️ 2026-10-01 修：此处原写 `"error": "Internal server error"` ——
+       状态码是 429、文案却说"内部错误" ⇒ 调用方会以为**系统坏了**，
+       而实际是**自己发太快**。这正是 `通用方法 §7.1` R3.3 要防的。
+    """
+    return {
+        "error": f"请求过于频繁，请在 {retry_after} 秒后重试",
+        "code": ErrorCode.RATE_LIMITED.value,
+        "status_code": 429,
+        "retry_after": retry_after,
+    }
+
+
 # 新增  在调用 is_allowed 之前获取限流信息，并在请求成功或失败时都设置对应的响应头。
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """限流中间件：对所有受保护接口生效"""
@@ -122,32 +167,17 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # ----- 第一层：全局限流（所有请求共享） -----
         if not global_limiter.is_allowed("global"):
             # 全局过载，直接拒绝，不暴露内部用户信息
-            response = JSONResponse(
-                status_code=429,
-                content={
-                    "error": "Internal server error",
-                    "code": ErrorCode.RATE_LIMITED.value,
-                    "status_code": 429
-                }
-            )
+            response = JSONResponse(status_code=429, content=_rate_limited_payload())
+            response.headers["Retry-After"] = "60"
             # 可选：加上全局的限流头，但一般不需要暴露细节
             return response
-        
+
         # ----- 第二层：用户级限流 -----
         # 从请求头获取用户标识：优先 X-API-Key，其次 Bearer JWT（避免所有 JWT 用户共用 anonymous 桶）
-        x_api_key = request.headers.get("X-API-Key")
-        user_name = None
-        if x_api_key:
-            user_name = f"user:{x_api_key[:8]}"
-        else:
-            auth_header = request.headers.get("Authorization")
-            if auth_header and auth_header.startswith("Bearer "):
-                from jwt_handler import verify_access_token
-                jwt_user = verify_access_token(auth_header[7:])
-                if jwt_user:
-                    user_name = f"user:{jwt_user}"
-        if not user_name:
-            user_name = "anonymous"
+        user_name = resolve_rate_limit_identity(
+            request.headers.get("X-API-Key"),
+            request.headers.get("Authorization"),
+        )
 
         # 获取用户限流信息（用于响应头）
         # 获取当前限流信息（无论是否被拒绝，都需要构造头部）
@@ -324,14 +354,22 @@ app.add_middleware(TextNormalizationMiddleware)
 # ==================== 全局异常处理器 ====================
 @app.exception_handler(AppException)
 async def app_exception_handler(request: Request, exc: AppException):
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={
-            "error": exc.message,
-            "code": exc.error_code.value,
-            "status_code": exc.status_code
-        }
-    )
+    """统一错误响应。
+
+    ⚠️ `retry_after`（B12）**只在挂了的异常上出现** —— 没挂时**整个字段不写**，
+       因为 `retry_after: 0` 会被客户端读成「立刻可重试」，与「不知道多久」是两回事。
+    """
+    content = {
+        "error": exc.message,
+        "code": exc.error_code.value,
+        "status_code": exc.status_code
+    }
+    headers = {}
+    retry_after = getattr(exc, "retry_after", None)
+    if retry_after is not None:
+        content["retry_after"] = retry_after
+        headers["Retry-After"] = str(retry_after)
+    return JSONResponse(status_code=exc.status_code, content=content, headers=headers)
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
@@ -436,7 +474,9 @@ async def health_check():
         return JSONResponse(
             status_code=503,
             content={
-            "error": "Internal server error",
+            # ⚠️ 2026-10-01 修（B12）：原写 "Internal server error" ——
+            #    503 是「暂时别把流量给我」，500 才是「我坏了」。报错口径要分清。
+            "error": "服务尚未就绪，请稍后重试",
             "code": ErrorCode.SERVICE_UNAVAILABLE.value,
             "status_code": 503}
         )
@@ -457,7 +497,9 @@ async def readiness_check():
         return JSONResponse(
             status_code=503,
             content={
-            "error": "Internal server error",
+            # ⚠️ 2026-10-01 修（B12）：原写 "Internal server error" ——
+            #    503 是「暂时别把流量给我」，500 才是「我坏了」。报错口径要分清。
+            "error": "服务尚未就绪，请稍后重试",
             "code": ErrorCode.SERVICE_UNAVAILABLE.value,
             "status_code": 503}
         )
@@ -472,7 +514,9 @@ async def readiness_check():
         return JSONResponse(
             status_code=503,
             content={
-            "error": "Internal server error",
+            # ⚠️ 2026-10-01 修（B12）：原写 "Internal server error" ——
+            #    503 是「暂时别把流量给我」，500 才是「我坏了」。报错口径要分清。
+            "error": "服务尚未就绪，请稍后重试",
             "code": ErrorCode.SERVICE_UNAVAILABLE.value,
             "status_code": 503}
         )

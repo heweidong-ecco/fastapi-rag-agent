@@ -1,0 +1,37 @@
+{
+  "$comment": "本仓【项目级】Claude Code 配置（会入库、团队共享）。用户级配置在 ~/.claude/settings.json。本仓的门一览见 .claude/README.md。",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/pre-commit-gates.py\"",
+            "timeout": 180,
+            "statusMessage": "提交前四道门（凭据 / 链接 / 孤儿 / 模块spec）"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/spec-remind.py\"",
+            "timeout": 10,
+            "statusMessage": "模块 spec 提醒"
+          },
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/route-auth-remind.py\"",
+            "timeout": 60,
+            "statusMessage": "路由鉴权提醒（改了 api_v1*/main.py 才跑）"
+          }
+        ]
+      }
+    ]
+  }
+}

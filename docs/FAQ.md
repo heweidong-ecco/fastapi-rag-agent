@@ -243,7 +243,7 @@ curl http://localhost:8000/api/v1/agent/tool_health -H "Authorization: Bearer <t
 - **MCP 注册表**在 `api/mcp_server.py:24` 的 `TOOLS`（**当前 6 项**）。
 - **LLM 工具表**在 `api/agent_graph_advanced_learning.py:47-51`（**当前 7 项**）。
 - ⚠️ **两张表不一致时，LLM 看得见、却调不到**，且**不报错、不 500**，只回一句「未找到工具」。
-  🔴 **本仓当前就有这一处**：`fetch_webpage_html` 在 LLM 表里，**不在** MCP `TOOLS` 里 ⇒ 待修（见 `docs/待办登记-2026-09-20-全仓审计与方向更正.md` §一·C）。
+  🔴 **本仓当前就有这一处**：`fetch_webpage_html` 在 LLM 表里，**不在** MCP `TOOLS` 里 ⇒ 待修（见 `fastapi-rag-agent-TODO待办/归档/待办登记-2026-09-20-全仓审计与方向更正.md` §一·C）。
 - 不健康的工具（`unhealthy`）会被移出可用列表 —— 这是**设计行为**，不是 bug。
 
 ### A2：Agent 的回答不准确或编造信息？

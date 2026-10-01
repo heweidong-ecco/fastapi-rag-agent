@@ -55,7 +55,10 @@ def agent_decide(state: AgentState):
     # 统计 Token
     if hasattr(response, "usage"):
         record_usage(
-            model="qwen-turbo",
+            # ⚠️ 2026-10-01 修（🅗 S4）：原写死 `"qwen-turbo"`，而本文件的 `llm` 用的是
+            #    `LLM_MODEL_FAST`（= DeepSeek）⇒ 金额按**错的单价**记。
+            #    改从对象取（照抄 `plan_execute.py:154`）。
+            model=getattr(llm, "model_name", None) or getattr(llm, "model", "unknown"),
             prompt_tokens=response.usage.prompt_tokens,
             completion_tokens=response.usage.completion_tokens,
             purpose="query_rewrite",

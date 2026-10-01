@@ -13,145 +13,130 @@
 > **主线换了**：不是"收拾仓库 / 清遗留"，是 **把它变成一个【能分享的链接】（上公网）**。
 > 路线已拍板：**路线 C = 域名 + Cloudflare 隧道**。
 >
-> 📄 **先读两份工作文档**（业务方 2026-09-24 引入）：
-> * **`fastapi-rag-agent-TODO待办/施工单-本项目.md`** —— 命令级、可直接照做（阶段 ②–⑧）
-> * **`fastapi-rag-agent-TODO待办/现状与差距.md`** —— 现状实测 + 四硬门差距
+> ## 🔴 **先读 `ROADMAP.md`**（**2026-09-29 起：它是唯一权威**）
+>
+> 状态 / 进度 / 功能现状 / 接口怎么查 / 待办总账 —— **全部收敛到那一份**。
+> 📍 **不知道某件事该去哪份文档？看 [`docs/文档地图.md`](docs/文档地图.md)** —— 四层体系的索引。
+> （📌 之前有 **6 份文档各自声称写了"当前状态"**，已汇总；其余见 `fastapi-rag-agent-TODO待办/归档/README.md`。）
+>
+> ### ⭐ **三个直接入口（⛔ 别多绕一跳 —— 2026-09-30 提到顶部）**
+>
+> | 要什么 | 直接去 |
+> |---|---|
+> | **还没做完的全清单** | ⭐ **`docs/待办总表.md`**（**唯一权威**；`ROADMAP` 只留摘要 + 指针） |
+> | **这个模块做到哪 / 看代码会误判什么** | ⭐ **`docs/specs/`**（一个模块一份，**16 份**）· 对账跑 **`/specs`** |
+> | **某件事该去哪份文档** | `docs/文档地图.md` |
+>
+> ⚠️ **为什么要单列这一格**：那两处在本文档**第 195/200 行**（正文后半），
+> 而**新会话常常只读顶部就动手** ⇒ **顶部不点出来，就等于要绕两跳**。
+> 📌 同源本仓立场：**「门挂在别处，就等于没有门」。**
+>
+> 📄 **两份配套工作文档**：
+> * **`fastapi-rag-agent-TODO待办/施工单-本项目.md`** —— 命令级、可直接照做（阶段 ④–⑧ ；**进度留痕表已移入 `ROADMAP.md`**）
+> * ⚠️ **`fastapi-rag-agent-TODO待办/现状与差距.md` 已【归档】** ⇒
+>   现为 **`fastapi-rag-agent-TODO待办/归档/现状与差距.md`**（其 §3.1「根因 = torch」**已被 `DEC-034` 推翻**）
 >
 > 📌 **`docs/重构计划-2026-09-15.md` 已成【档案】，不是待办**（它下面那段仍保留，供查历史）。
+> 🔴 **2026-09-29 补充**：该文件**已移入** `fastapi-rag-agent-TODO待办/归档/重构计划-2026-09-15.md`，
+> 且它**标题里那句「当前最高优先级」已失效**（归档头里写明了）。
 
 ## 🔴 两条【高等级约束】—— 业务方 2026-09-24 裁定（全文见 **`docs/decisions/DEC-033`**）
 
 ### 🅰️ **Docker 由本仓独占使用**
 
-> 业务方原话：「现在 Docker 一直都只有我们在使用，其他的项目的 docker **我都不会开**，
-> 基本上是开发阶段已经完成，不会使用到 docker 了。」
+> 业务方原话：「现在 Docker 一直都只有我们在使用，其他的项目的 docker **我都不会开**。」
 
-⇒ **不需要容器名 / 端口 / 数据卷的隔离** ——
-**`施工单 §2.2` 的 B2 路径（`docker-compose.override.yml` + `-p rag-demo`）作废，走 B1（原目录直接 build+up）。**
+⇒ **不需要容器名 / 端口 / 数据卷的隔离**（`施工单 §2.2` 的 B2 路径作废，走 B1：原目录直接 build+up）。
 
-⚠️ **没有解除的两条**（别读成"可以随便 up"）：
-1. 🔴 **有评测在跑时仍不许 `docker compose up`** —— `rag-api-eval` 曾被 `agent-eval-gate` 使用。
-   **判据**：`docker ps --format '{{.Names}}' | grep eval` **为空即安全**。
-2. ⚠️ **独占 ≠ 内存变多** —— 本机 **8 GB**，Docker Desktop 只分到 **3.84 GB**。
-   ⇒ `施工单 §4.2 档 1（fast 模式、不装重排序）` 那条判断**不变**。
+⚠️ **没解除的两条**（别读成"可以随便 up"）：
+1. 🔴 **有评测在跑时仍不许 `docker compose up`** —— **判据**：
+   `docker ps --format '{{.Names}}' | grep eval` **为空即安全**
+2. ⚠️ **独占 ≠ 内存变多** —— 本机 8 GB / Docker 只分到 **3.84 GB** ⇒ `施工单 §4.2 档 1` 判断**不变**
 
-### 🅱️ **后端先行 —— 先把后端全部完成并跑通，再进前端**
+### 🅱️ **后端先行 —— 先把后端做完，再进前端**
 
 > 业务方原话：「分阶段做，**先把后端全部完成和跑通，再进入前端开发阶段**。」
 
-⇒ **把 `施工单 ③` 里的【后端部分】抽出来先做完，再做页面。** 调整后的顺序：
-
 ```
-✅ ② 本机验证跑通
-🔵 后端全部完成        ← 本约束插入的阶段（原混在 ③ 里）
-     硬门 A 的 Agent 端流式 · 硬门 C 的【服务端 cancel 传播】 ·
-     硬门 D 的触发条件与续跑 · R1–R4 限额/熔断/结构化错误 · §8.2 eval 接入
-⬜ 前端开发            ← 4 个页面 + 硬门 B 界面 + 停止按钮 + 接管队列 + R3.2 熔断提示卡片
-⬜ ④ 测内存定机器 → ⑤ 买域名 → ⑥ 上云 → ⑦ 开隧道 → ⑧ 保护/自验/发链接
+✅ ② 本机跑通   →   🔵 后端全部完成【当前】   →   ⬜ 前端   →   ⬜ ④–⑧ 上云
 ```
 
-📌 **一条理由**（`施工单 §3.3` 自己标的）：硬门 C 标着「**最容易假完成**」，
-**而它的难点全在后端**（"必须让上游模型的 HTTP 流也终止"）⇒ **先做后端 = 先啃最硬的骨头。**
+📌 **理由**（`施工单 §3.3` 自标）：硬门 C 标着「**最容易假完成**」，**而它的难点全在后端**。
+⛔ **受此约束【挂起】的一件事**：`permission.get_user_role()` 接 DB —— 落点是 **R1.3**，等做 R1.3 时一并想。
+📄 **完整裁定 + 备选 + 反悔成本** ⇒ `docs/decisions/DEC-033-上公网路线的两条前置约束.md`（🅱️）
 
-⛔ **受此约束而【挂起】的一件事**：`permission.get_user_role()` 接 DB ——
-它的真正落点是 **R1.3（限额必须对匿名生效）**，**属后端阶段**，等做 R1.3 时一并想
-（`DEC-001` 已裁过它的更大版本，方案 A 被否）。
+> 📄 **2026-09-15 的《重构计划》已是【档案】，不是待办** ⇒ `fastapi-rag-agent-TODO待办/归档/重构计划-2026-09-15.md`。
+> 🔴 **2026-09-29 更正**：这里原文写「**开工前先读它**」「其余 M5 **让位于它**」—— **两句都已失效**。
+> ⚠️ **这正是 `docs/复盘/2026-09-19-交接锚点第一屏失真.md` 记的那个病。** **现在开工前该读的是 `ROADMAP.md`。**
 
----
+## 推送节奏（跨项目纪律）
 
-> ## 🔴 以下为【档案】（2026-09-15 时期）：`docs/重构计划-2026-09-15.md`
->
-> **开工前先读它。** 其余 M5 裁决工作**让位于它**。
->
-> 它含一条**前提级更正**（与本文档下文若干处描述冲突，以它为准）：
->
-> - 本机**能跑测试**（曾误判为"做不了运行期验证"）。但**不要借用** `ai-learning/venv` —— 它的 `fastapi 0.115.11` 与 `starlette 1.6.0` **不配对**，任何 `APIRouter(...)` 都建不起来
-> - 正确做法：**在本仓自建隔离 venv** → `python3.10 -m venv venv && venv/bin/pip install -r api/requirements.txt`
-> - 🔴 **2026-09-20 更新**：原文走的是 `api/requirements-test.txt`（剔重版，不含 torch 系）——
->   业务方裁决「**不用双 requirements.txt，这样会混**」⇒ **该文件已删，统一用 `api/requirements.txt`**。
->   代价：本机会拉 torch 系（GB 级）。⚠️ 若只想跑**离线测试**，本仓 `api/reranker.py:14` 是真懒加载、
->   **不碰 torch也能跑**（只有 `mode=accurate/full` 与 `rerank_search` 才需要）—— 但**依赖清单只有一份**，不要另建
-> - ⇒ **"切模块"不是测试的前置条件**
-> - 执行顺序：**基线 → 修 bug → 归档 → 切模块 → M6**
->
-> 另两处登记：`ROADMAP.md`「当前指针」最上方 · `docs/重构计划-2026-09-15.md` 正文
+> 📄 **完整版在 `~/.claude/CLAUDE.md` 的「推送节奏」节**（含三条代价 + 配套判据 + 2026-09-21 那次 4 轮断连的经过）。
+> ⚠️ **本仓也存一份**是因为用户级**不入库**、克隆者看不到。**核心段落逐字一致，改要两处一起改。**
 
-## 推送节奏(跨项目纪律)
+- 🔴 **2026-09-30 改版：小批多次**（原「**本地 commit 随便攒；攒到一个可验证单元再推**」**已作废**）
+  —— **按段推，别攒成一大批**。
+  **为什么改**：**GitHub 的自动风控对「批处理」形态敏感**（2026-09-24 账号被封 5 天，事件记录候选②）。
+  ⚠️ **代价（知道再选）**：**推送次数变多** ⇒ 遇上「抖动」更费事（每次失败都要按下面 1–3 次重试）。
+  📄 **决策全文（备选 / 评估 / 反悔成本）⇒ `docs/decisions/DEC-039-推送节奏改为小批多次.md`**
+- ✅ **「一个可验证单元」这条**没变 —— 但**它约束的是"做完没做完"，不是"多久推一次"**。
+- ⚠️ **别把这条延伸成"提交也要碎"** —— **推送分次 ≠ 提交分次**。
+  🔴 **❌ 一件事没处理完，不 commit。**
+  **判据：「我这条 commit 发出去，接手人会不会以为这件事结束了？」—— 会 ⇒ 还不到时候。**
+  📌 **2026-09-30【同一天栽了两次】**：① 一份文档 commit 一次 ⇒「一个文档没必要一个 commit」；
+  ② **刚记下 ① 这条**，又在 B1–B14 没裁完时 commit ⇒「不是还没处理完吗，等下一起 commit」。
+  ⇒ ⚠️ **"处理完"由【业务方要的那件事】界定，不是由"我手上告一段落"界定。**
+- ⚠️ **本地 = 不 durable** ⇒ **当天结束前至少推一次**
+- 🔴 **挂了先分清「抖动」还是「拦截」—— 处置相反**：
+  **抖动**（`Recv failure`）⇒ 重试 1–3 次，⛔ 别去调 CA ·
+  **拦截**（**整个主机不可达**）⇒ ⛔ 别再重试，**换 SSH**
+  判据：`curl -sS -o /dev/null -w '%{http_code}' --max-time 8 https://github.com` → **`000`** 且 `api.github.com` **200**
+- ⚠️ **`git fetch` 失败时**，`git merge --ff-only` 报的「**Already up to date**」**是假的**
+  （本地 ref 没更新）⇒ **读文件内容核对**
+- 📌 **本仓补充**：`gh` 走 `api.github.com`，**git 挂了它可能还通** ⇒ 用
+  **`gh pr view <n> --json state,mergeCommit` 回查**（本仓有「**合并已成功却报错**」的前科）
 
-> 📌 **2026-09-21 由业务方给定原文，**本仓与用户级 `~/.claude/CLAUDE.md` 各存一份**。
-> **为什么本仓也要有**：用户级那份**不入库**，**克隆者 / 换机器看不到** —— 而本仓是 PUBLIC 仓。
-> ⚠️ **两处的【核心段落逐字一致】；本仓版本额外多两段** ——
-> 「📌 本节的来源」与文末的「本仓实测补充」。**那两段是本仓特有的，用户级那份没有。**
-> ⇒ **同步规则**：改**核心段落**要两处一起改；**本仓特有的两段只在改本仓时动**
-> （本仓在"两处真相"上吃过亏，所以这里把边界写清楚）。
-> 📌 **本节的来源**：2026-09-21 一整个会话里 `git push` / `git fetch` **断了 4 轮**，
-> 而 `gh api` / `gh pr create` **全程能通** —— 业务方据此写下了这条纪律。
+## 🔴 「判据」纪律 —— **十条**
 
-- **本地 commit 随便攒**;**推送以「一个可验证单元」为界** —— 一个 PR 的活儿做完再推,
-  **不是**每个 commit 都推。
-- **为什么**:GitHub 连接不稳定,**频繁推送会断开**。实测会出现「`gh` 能建 PR、
-  `git push` 推不上去」的假象 —— 那是**传输抖动**,不是权限/store/证书问题。
-  **做法:重试 1–3 次即可,⛔ 不要去调 CA。**
+> **一条根因**：**拿「动作成功」当「结果正确」**。这一族在本仓**栽过多次**
+> （PR #48 · #51 · 两次 heredoc · **2026-09-29 又 4 次**）⇒ **不是"下次注意"能解决的，要换个判据。**
 
-### ⚠️  三条代价(别读成"可以不推")
-1. **本地 = 不 durable** —— 机器丢/目录被重构成别样,工作就没了。**给"未推送"设上限:当天结束前至少推一次。**
-2. **主干有分支保护** ⇒ 最终仍要走 PR;攒批省的是**推送 + PR 创建**的次数。
-3. 一次失败**损失更多** —— 但 git 推送**按 ref 原子**,失败**不会写坏的中间态** ⇒ 重推即可。
-
-### 两个配套判据(同族,别重犯)
-- `git fetch` 失败时,`git merge --ff-only origin/main` 会报 **「Already up to date」—— 那是假的**
-  (本地 `origin/main` ref 根本没更新)。**判据:读文件内容核对,别信那句提示。**
-- 推送前**先 fetch**;fetch 失败**要重试**(本机实测失败过 2 次,重试第 1 次即通)。
-
-> 📌 **本仓实测补充（2026-09-21）**：`git fetch` 挂掉时，**本地 `origin/main` ref 停在旧 commit** ⇒
-> `git log origin/main` / `git checkout main` 的提示**都是基于旧 ref 的，会骗人**。
-> **两条可用的替代判据**：
-> ① `gh api repos/heweidong-ecco/fastapi-rag-agent/commits/main` —— **两条路是独立的，实测 git 挂了 gh 还能通**；
-> ② `git rev-list --left-right --count main...origin/main` —— 但**它读的也是本地 ref**，所以只在 fetch 成功后才可信。
-> ⇒ **最稳的做法：`gh pr view <n> --json state,mergeCommit` 回查**，别信 `gh pr merge` 的退出码
-> （本仓有「**合并已成功却报错**」的前科）。
-
-## 🔴 「判据」纪律 —— 六条（2026-09-21 起 · 出自复盘）
-
-> **出处**：**`docs/复盘/2026-09-21-拿动作成功当结果正确.md`**（含三条错的完整经过与判据）。
-> **为什么单独成一节**：那三条错的**根因是同一条** —— **拿「动作成功」当「结果正确」的判据**，
-> 而**三条全都躲过了当时的自查**（脚本打印「替换了 10 处」/ 我"把内容写进去了" / `git commit` 退出码 0）。
-> 📌 **这一族在本仓已栽过多次**（PR #48 · PR #51 · 两次 heredoc）⇒ **不是"下次注意"能解决的，
-> 要的是"换个判据"** —— 所以写成这里。
-
-### 一条根因：三种错判据 / 三种对判据
-
-| 我用的判据（**错的**） | 应该用的判据 |
+| ❌ 错的判据 | ✅ 对的判据 |
 |---|---|
-| 「脚本说**替换了 10 处**」 | **按位置核**：`grep -n` 逐处看**改的是哪一行** |
-| 「我**把内容写进去了**」 | **跑一次语法检查**（`compileall` / 直接跑那个脚本） |
+| 「脚本说**替换了 10 处**」 | **按位置核**：`grep -n` 看**改的是哪一行** |
+| 「我**把内容写进去了**」 | **跑一次**（`compileall` / 直接跑那个脚本） |
 | 「`git commit`**退出码 0**」 | **`git status` + `git show --stat HEAD`** 看**实际装了什么** |
 
-### 六条（下次直接照做）
+**六条**（`docs/复盘/2026-09-21-拿动作成功当结果正确.md`）：
+1. ⭐ **改完必须"看结果"，不能只看"动作返回"**（= `verification-before-completion`）
+2. ⭐ **批量替换后按【位置】核** —— ⛔ 别只数"替换了几处"（**注释里也有同样的串**）
+3. ⭐ **写了代码 / 脚本，先跑一次再说话**
+4. ⭐ **`git stash`/`pop` 会丢索引** ⇒ 提交前**必须**重看 `git status`（**第 1 列有字母 = 已暂存**）
+5. ⭐ **PR 合并后核「内容真在主干上」** —— ⛔ 别只信 `gh pr view --json state`
+6. **heredoc / 命令里写中文：用「」『』，不用 ASCII 引号**；或**写成临时文件再跑**
 
-1. ⭐ **改完必须"看结果"，不能只看"动作返回"**。
-   —— 与 `verification-before-completion` 的「**evidence before assertions always**」是同一条。
-   ⚠️ **本仓实测：那张 A 级必用表里列着它，而被违反的正是它** ⇒ **「列在表里」≠「会执行」**。
-2. ⭐ **批量替换之后，按【位置】核一遍**（`grep -n` 看命中在哪几行）——
-   ⛔ **别只数"替换了几处"**。**注释里也会出现同样的串**（PR #48 就是这么漏的：
-   `replace(..., 1)` 命中了 `:283` 的注释，真正的调用点 `:472` 原样没变）。
-3. ⭐ **写了代码 / 脚本，先跑一次再说话** —— 哪怕只是一行 `compileall`。
-4. ⭐ **`git stash` / `pop` 会丢索引** ⇒ **提交前【必须】重看 `git status`**，
-   确认每行是**暂存态**（`M `，第 1 列有字母）而不是**未暂存**（` M`，第 2 列）。
-   （PR #51 就是这么丢的：`add -A` 之后 `stash pop` 把索引全撤了 ⇒ 5 个文件只提交了 1 个，
-   **而 `git commit` 退出码仍然是 0**。）
-5. ⭐ **PR 合并之后，核「内容真的在主干上」** —— `git show origin/main:<文件> | grep -c <特征串>`，
-   ⛔ **不要只信 `gh pr view --json state`**（那只说明"**合并动作**完成了"，不说明内容进去了）。
-6. **在 heredoc / 命令参数里写中文句子时**：**一律用「」『』，不用 ASCII 引号**；
-   或者**写成临时文件再跑**（不拼字符串）。⚠️ **本仓实测犯过 3 次**，
-   每次都是**字符串被提前截断** ⇒ **整段脚本没跑**，而人已经在心里当成"写好了"。
+**又加四条**（`docs/复盘/2026-09-29-用我做过了当别人找得到.md`）——
+**根因：「完成」的判据不是「我做了」，是「别人来验，会不会发现不对」**：
+7. ⭐ **接手人视角验**（写了锚点 ⇒ 从锚点走一遍；拆了文件 ⇒ **逐主题**搜还在不在）
+8. ⭐ **建了入口就问「谁指向它」**（**没引用 = 孤岛**）
+9. ⭐ **改口径立刻全仓搜那个词**（"生产级"/"真中断"这类 —— ⚠️ **我当天立了当天违反**）
+10. ⭐ **批量改完，逐条能验**（**答不出可打印的检查 = 还没做完**）
 
-### 📌 触发面（**别读成"只在收尾时用"**）
+> ⭐ **最有效的一条**：**把结论写成「可打印的命令」** —— **写不出命令的，就是还没核过。**
+> 📄 **全文 + 判据** ⇒ `docs/规范/开发规范.md` §3.1/§3.2 · `docs/复盘/`（这两份）
+> 📌 **触发面**：**任何批量编辑之后** · **任何"我写进去了"之后** · **任何 `git` 写操作之后**。
+> ⛔ **别读成"只在收尾时用"** —— 复盘里那几条**全发生在改代码 / 写脚本的过程中**。
 
-复盘里那三条**全都发生在【改代码 / 写脚本的过程中】**，而**不在显而易见的"提交/收尾"时刻**。
-⇒ **触发时机**：**任何批量编辑之后** · **任何"我写进去了"之后** · **任何 `git` 写操作之后**。
+## ⚡ 用户级 skills · 必用表（**目录共 20 个 · 本表已定级 14 个**）
 
-## ⚡ superpowers skills · 必用表（用户级 · 14 个）
+> 🔴 **2026-09-29 更正**：原标题写「用户级 · **14 个**」—— **目录里实际是 20 个**
+> （`ls -d ~/.claude/skills/*/` 实测，**全部是真实目录、无 symlink**）。
+> **本表列的 14 个只是其中一部分**，且**不全是 superpowers 的**
+> （`agent-system-creator` / `gate-review` / `new-project-launch` / `留痕-checks` 是**自建**的）。
+>
+> ⬜ **表外还有 6 个，本表【未定级】**：
+> `agent-system-creator` · `gate-review` · `grilling` · `new-project-launch` · `skill-creator` · `留痕-checks`
+> （⚠️ **`留痕-checks` 虽未进表，但在下面被单独讨论** —— 它有本仓适配裁决，见 §冲突与例外）
 
 > **用户指令（2026-09-17）**：「使用用户级中 superpowers 的 skills……**如果命中必须用**，
 > 先写好，过程中我再动态调整。」
@@ -202,184 +187,41 @@
 
 ### 冲突与例外 —— **必须说出来，不许静默跳过**
 
-1. **同场景命中多个** → 按上表**从上到下**依次执行。
-   （例："修 bug" = `systematic-debugging` → `test-driven-development` → `verification-before-completion`）
-2. **skill 与项目 `CLAUDE.md` / `ROADMAP.md` 冲突** → **以项目规矩为准**，并**写明冲突点**。
-3. **skill 的判据在本仓对不上**（引用路径本仓没有）→ ⛔ **不许含糊通过**。
-   有替代判据 → 标 `⬜ 待适配` 并**写明替代判据**；**没有 → 标 `⛔ 无法执行`，不当作通过**。
-   规则见 `docs/规则草稿-规则必须绑定路径.md`。
+1. **同场景命中多个** ⇒ 按上表**从上到下**依次执行
+2. **与项目 `CLAUDE.md` / `ROADMAP.md` 冲突** ⇒ **以项目规矩为准**，并**写明冲突点**
+3. **判据在本仓对不上** ⇒ ⛔ **不许含糊通过**：有替代判据 ⇒ 标 `⬜ 待适配`；**没有 ⇒ 标 `⛔ 无法执行`**
 
-> ⚠️ **已知不适配（2026-09-17 实测）**：`留痕-checks` 的 check 7 引用
-> `contracts/tools-mcp` · `总纲.md` · `eval/README.md` · `eval/阈值.md` —— 这些路径**存在，
-> 但相对另一个仓库** `agent-eval-gate`（**不是本仓**；本仓无 `eval/`，`ci.yml` 也无 eval 门）。
-> **本仓 prompt 内联在 `.py` 里**，故它的**路径式**触发在本仓**永不命中**。
+> 📄 **已知不适配 + 本仓适配裁决**（`留痕-checks` 查 8 项、本仓只 5 项适用）
+> ⇒ `ROADMAP.md`「PR 纪律」段 · `docs/规则草稿-规则必须绑定路径.md`
 
-> 📌 **`/留痕-checks` 本仓适配（2026-09-17 业务方裁决）**：该 skill 查 8 项，本仓**只有 5 项适用**。
-> **仍要调 skill，但只报那 5 项**，其余 3 项一行带过。
-> **#7 用双判据（文件清单 + 内容兜底）**，且清单**可重生成**（第一版手写清单被当场证伪，只覆盖约 40%）。
-> **细则与清单见 `ROADMAP.md` 的「PR 纪律」段** —— 此处不复制，避免两处真相。
+## 📍 项目是什么 / 怎么用 / 架构长什么样 —— **都在别处**
 
-## 项目概述
+> 🔴 **2026-09-29 拆出**：这里原先有 **~250 行**（概述 / 常用命令 / 架构说明）。**删了** ——
+> 官方原文：「**代码里能推出来的 ⇒ 不放**」；官方要的是 **`architecture rules`（架构【规则】）**，
+> **不是架构【说明】**（`docs/规范/文档体系-外部依据.md` §1.4）。⚠️ **内容没丢，是搬家**：
 
-基于 FastAPI、PostgreSQL+pgvector 和 Redis 构建的生产级 RAG（检索增强生成）+ Agent API 服务。使用阿里云百炼 DashScope 提供 Embedding（`text-embedding-v2`）和 LLM（`qwen-turbo`、`qwen-plus`），本地加载 BGE-Reranker-v2-m3 Cross-Encoder 模型进行重排序。
+| 找… | 去哪 |
+|---|---|
+| 项目是什么 / 技术栈 | **`README.md`** |
+| **架构**（模块 / 请求流 / 数据流 / 依赖） | **`docs/原理/架构.md`** ← 是**超集**，且核过代码 |
+| ⭐ **这个模块做到哪 / 看代码会误判什么** | **`docs/specs/`**（一个模块一份）· 对账跑 `/specs` |
+| 常用命令（起停 / 测试 / 迁移） | **`CONTRIBUTING.md`** |
+| 目标 vs 实测 | **`ROADMAP.md`** 功能现状表 · `docs/契约/版本与兼容.md` |
+| 2026-08 的 24 条修复记录 | **`docs/历史/修复记录-2026-08.md`** |
+| 接口 / 环境变量 / 表结构 | **`docs/契约/`** |
+| **还没做完的（全清单）** | ⭐ **`docs/待办总表.md`**（`ROADMAP` 只留摘要 + 指针） |
+| **不知道去哪找** | ⭐ **`docs/文档地图.md`** |
 
-## 常用命令
+> ⚠️ **但有一条留在这里**（它不是"描述"，是"规矩"）：
+> **「目标」不许写成「指标」。** 本仓有前科：`README` 的性能表（P99 < 800ms）**没标"这是目标"**。
+> ⇒ **引用任何性能数字前，先说明它是目标还是实测。**
 
-```bash
-# 完整生产环境启动（API + Postgres + Redis + Prometheus + Grafana）
-docker compose up -d
+## 🔴 做完一个模块 ⇒ **更新它的 spec**
 
-# 本地开发：DB/Redis 用 Docker 启动，API 本地热重载运行
-bash dev.sh
-# 或手动执行：
-cd api && uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+> **判据**：**你动了 `api/` 下的模块并做完了某件事 ⇒ `docs/specs/` 下与它同名的那份要跟上。**
+> * **新增模块** ⇒ **必须同时建 spec** —— ⛔ **`pre-commit-gates.py` 会【硬拦】**
+> * **改已有模块** ⇒ 更新它（**hook 只提醒，不拦**）
+> * ⭐ **最该写的是「⚠️ 看代码会误判的地方」那一节** —— **前两节读代码也能推出来，只有这节推不出来**
+>
+> 📄 **模板 + 范例 + 为什么** ⇒ `docs/specs/README.md` · 随时对账打 **`/specs`**
 
-# 运行全部测试（需要依赖已安装 + Postgres/Redis 已启动）
-cd api && pytest -v
-
-# 运行单个测试文件
-cd api && pytest test_auth.py -v
-
-# 数据库迁移（在 api/ 目录下执行，注意 env.py 会用 config 里的连接串覆盖 alembic.ini）
-cd api && alembic upgrade head
-cd api && alembic revision --autogenerate -m "描述信息"
-
-# 性能压测
-locust -f locustfile_hybrid.py
-```
-
-## 架构
-
-### 入口与中间件链
-
-`api/main.py` 创建 FastAPI 应用，并按以下顺序挂载中间件：
-
-1. **HTTP 日志 + Prometheus 指标** — 每个请求生成唯一 `request_id`（ContextVar 实现，线程安全），记录 method/path/status/duration，通过 `metrics.py` 采集指标
-2. **RateLimitMiddleware（限流）** — 两层令牌桶：全局（100次/秒，容量150）→ 用户级（3次/秒，容量20）。使用 Redis Lua 脚本保证原子性。跳过 `/`、`/docs`、`/openapi.json`、`/auth/login`、`/auth/refresh`、`/admin/create_user` 等公开路径
-3. **QuotaMiddleware（配额）** — 按角色限制每日调用次数（免费用户：100次/天，付费用户：10000次/天，管理员：不限）。通过 X-API-Key 请求头或 Bearer JWT 识别用户身份
-4. **TextNormalizationMiddleware（文本规范化）** — 自动将请求体中的全角字符转为半角，跳过 URL、Token 等非自然语言字段
-
-> ⚠️ **中间件异常处理要点**：FastAPI 的 `@app.exception_handler(AppException)` 只捕获路由层抛出的异常。**在中间件 dispatch 中抛出的 `AppException` 不会被该处理器捕获**，会落到通用 `Exception` 处理器返回 500。因此中间件拒绝请求时必须直接返回 `JSONResponse`（限流/配额中间件均如此实现）。
-
-### 路由结构
-
-三个路由模块均挂载在 `/api/v1` 前缀下：
-
-| 文件 | 职责 |
-|------|------|
-| `api/api_v1.py` | 公开接口（`/`）、认证（`/auth/login`、`/auth/refresh`）、管理员创建用户、调试接口（查看缓存状态、限流配额、Embedding 性能对比） |
-| `api/api_v1_rag.py` | 文档管理（`/rag/insert`、`/rag/insert_batch`、`/rag/upload_document`）、检索（`/rag/pg_search`、`/rag/hybrid_search`、`/rag/rerank_search`、`/rag/rewrite_search`、`/rag/search`）、流式生成（`/rag/stream_search`，SSE 实现带真中断）、带引用的答案生成、WebSocket Agent（`/api/v1/ws/agent`、`/api/v1/ws/test`）、文档清理规则 |
-| `api/api_v1_agent.py` | LangGraph Agent 对话（`/agent/langgraph_chat`）、人工审批节点（`/agent/approve`）、多分支路由高级 Agent（`/agent/advanced_chat`）、Plan-Execute 模式、长期记忆（Mem0）、浏览器工具（Playwright）、Python 代码执行器、MCP Client 对话（`/agent/mcp_chat`）、MCP 工具列表、工具健康检查、Token 预算追踪与成本看板数据、执行轨迹可视化 |
-
-### RAG 检索管线（`api/rag_pipeline.py`）
-
-`RAGPipeline` 类支持三种检索模式，由可独立开关的环节组合而成：
-
-- **fast（快速）**：仅向量检索（pgvector 余弦相似度）
-- **accurate（精确）**：查询改写 → 混合检索（向量 + BM25）→ RRF 融合 → Cross-Encoder 重排序
-- **full（完整）**：查询扩展 → 改写 → 混合检索 → RRF 融合 → 重排序 → LLM 生成答案
-
-管线中的关键模块：
-- `query_rewriter.py` — 基于 LLM 的查询扩展（生成多个变体）和上下文感知改写（指代消解、口语转书面语）。结果缓存在 Redis（1小时 TTL）
-- `hybrid_search.py` — 使用 RRF（Reciprocal Rank Fusion，k=60）算法融合稠密向量检索和稀疏 BM25 关键词检索两路结果
-- `reranker.py` — 懒加载 `BAAI/bge-reranker-v2-m3` CrossEncoder 模型，对候选文档进行精细排序
-- `answer_with_citations.py` — 生成带 `[1]` 行内引用标记的 LLM 答案，支持溯源到原始文档块
-
-### Agent 系统（LangGraph）
-
-**三个 Agent 实现，注意区分：**
-
-| 文件 | 路由接口 | 特点 |
-|------|---------|------|
-| `agent_graph.py` | `/agent/langgraph_chat` | 基础 Agent：LLM 决策节点 → 工具执行循环（DuckDuckGo 搜索、计算器、日期）。带人工审批节点（`interrupt_before=["approval"]`），配合 `/agent/approve` 接口 |
-| `agent_graph_advanced.py` | `/agent/mcp_chat` | **MCP Client 版**高级 Agent：通过 MCP 协议动态调用工具（会话池管理，避免并发阻塞）、Mem0 长期记忆注入、多级 Token 预算检查（单次/单线程/每日）、工具调用缓存。全局实例 `mcp_agent` |
-| `agent_graph_advanced_learning.py` | `/agent/advanced_chat` | **意图分类路由版**高级 Agent：supervisor 分类器（SEARCH/CALCULATOR/DATE/TRANSLATE/REACT）→ 专用子图（搜索部门/计算器部门/日期部门/翻译部门/ReAct 部门）。注意：此文件原名 `agent_graph_advanced_learning1.0.0.py`，含点号无法作为模块导入，已重命名 |
-
-Agent 配套基础设施：
-- `agent_checkpointer.py` — 基于 MemorySaver（默认）/ SqliteSaver（`AGENT_CHECKPOINT_BACKEND=sqlite`）的检查点持久化，保证对话连续性
-- `plan_execute.py` — Plan-and-Execute 模式，适用于复杂多步任务（含动态重规划、质量检查）
-- `memory_store.py` — Mem0 集成（本地 qdrant 模式），提供长期用户记忆
-- `browser_tools.py` — 基于 Playwright 的网页抓取和截图
-- `code_executor.py` — 沙箱化 Python 代码执行（白名单内置函数/模块 + 时间/输出限制）
-- `mcp_server.py` / `mcp_tool_factory.py` — MCP（模型上下文协议）Server，用工厂函数自动从 `@tool` 函数注册工具定义与处理器
-- `tool_health.py` — 通过 MCP 动态探测工具健康状态，自动降级
-- `tool_visualizer.py` — 记录 Agent 工具调用轨迹（`/agent/trace/{thread_id}`）
-- `token_tracker.py` — Token 用量/成本追踪、预算控制、月度报告（所有查询走数据库）
-
-### 数据层
-
-- **PostgreSQL + pgvector**：存储文档及其向量（1536维）。表结构在应用启动时通过 `db.py:create_table()` 自动创建。使用 psycopg2 `ThreadedConnectionPool` 连接池（默认最小2，最大30连接，`.env` 中 `DB_MIN_CONN`/`DB_MAX_CONN` 可调）
-- **`get_db()` 上下文管理器**：始终从连接池获取连接，成功时 `commit()`，异常时 `rollback()`，最终 `putconn()` 归还。禁止直接创建原始连接（历史上曾出现重复定义 `get_db()` 覆盖连接池版本的 bug，已修复）
-- **Redis**：承担三种职责 —（1）Embedding 缓存（MD5 键名，24小时 TTL，`emb:*` 前缀），（2）用户对话历史（24小时 TTL，保留最近5轮），（3）限流/配额计数器（Lua 脚本保证原子操作）
-- **Alembic**：数据库迁移工具，配置在 `api/alembic/`。`env.py` 会用 `config.py` 中的连接串**覆盖** `alembic.ini` 里硬编码的 `sqlalchemy.url`，无需手动改 ini
-
-### 认证与授权
-
-双认证体系（`deps.py`）：
-- **X-API-Key 请求头**：API Key 的 SHA256 哈希值存储在 `api_keys` 表中，含过期时间。通过 `auth.py:verify_api_key()` 验证
-- **JWT Bearer Token**：短期令牌（access token，15分钟有效）+ 长期令牌（refresh token，7天有效）。使用 HS256 算法，密钥为 `JWT_SECRET_KEY`
-- **混合认证**（`get_current_user_hybrid`）：优先尝试 API Key，无则回退到 JWT。注意 `HTTPBearer` 使用 `auto_error=False`——若为默认的 `True`，缺少 Authorization 头时会在依赖解析阶段直接抛 403，导致纯 API Key 认证全部失效
-- **角色体系**（`permission.py`）：三级权限——`free`（免费，100次/天）、`premium`（付费，10000次/天）、`admin`（管理员，不限）。当前角色映射硬编码在 `get_user_role()` 中
-
-### 配置管理
-
-`api/config.py` 集中管理所有环境变量。敏感配置项（`DASHSCOPE_API_KEY`、`POSTGRES_PASSWORD`、`JWT_SECRET_KEY`）不设默认值——启动时 `validate_config()` 检测到缺失会拒绝启动。
-
-**主机地址约定**：`.env` 中 `POSTGRES_HOST`/`REDIS_HOST` 填 **Docker 服务名**（`postgres`/`redis`）；本地开发时 `config.py` 会根据 `IS_DOCKER` 标志（`DOCKER_ENV` 环境变量）自动覆盖为 `localhost`。所有需要 Redis 连接的模块都应从 `config.py` 导入 `REDIS_HOST`/`REDIS_PORT`（不要直接用 `os.getenv` 读取，否则本地/Docker 切换会不一致）。
-
-### 可观测性
-
-- **日志**（`logger_config.py`）：Loguru 三通道输出——彩色控制台（DEBUG 级别）、按日滚动的文件日志（INFO 级别，保留30天）、错误日志单独存储（ERROR 级别，保留90天）。每条日志通过 `logger.bind(request_id=...)` 携带请求ID
-- **指标**（`metrics.py`）：Prometheus 计数器/直方图/仪表盘，暴露在 `GET /metrics`
-- **健康检查**：`/health`（检测数据库 + Redis 连通性）、`/ready`（Kubernetes 就绪探针，启动后10秒才开始响应就绪）
-- **Token 追踪**（`token_tracker.py`）：按用户/用途/会话维度追踪 Token 用量和成本，持久化到数据库。预算消耗达 80% 时发出预警
-- **成本看板**（`cost_dashboard.py`）：Gradio 可视化面板，挂载在 `/dashboard`
-
-### 关键开发模式
-
-- **错误处理**：所有业务错误统一使用 `AppException(ErrorCode, message)` 抛出。`ErrorCode` 枚举值与 HTTP 状态码的映射保存在 `ERROR_CODE_TO_HTTP_STATUS`。全局异常处理器同时捕获 `AppException` 和未处理的 `Exception`。⚠️ 中间件中不要抛 `AppException`（见上），直接返回 `JSONResponse`
-- **数据库访问**：始终使用 `get_db()` 上下文管理器——自动从连接池获取连接，成功时提交，异常时回滚，最终归还连接。禁止直接创建原始连接
-- **缓存策略**：Embedding 调用统一走 `embedding_client.get_embedding()`，内部先查 Redis 缓存再调 API。启动时 `warmup_cache()` 预热10个热点查询的 Embedding。查询改写结果同样在 Redis 中缓存
-- **SSE 流式输出**：答案可通过 Server-Sent Events 流式返回，支持真中断（停止按钮会将已生成的部分内容保存为对话历史，避免 Token 浪费）
-- **文档处理管道**：`document_preprocessor.py`（文本规范化）→ `document_parser.py`（解析 PDF/Word/Markdown/HTML）→ `chunker.py`（按文档类型选择分块策略）→ `embedding_client.py`（向量化）→ 入库
-- **模型命名约定**：DashScope 模型名必须用 `qwen-turbo` / `qwen-plus` / `text-embedding-v2`。**不要使用 `qwen3.7-plus`**（DashScope 不存在该模型，调用会报错；历史代码中的误写已全部修正）
-
-## 本次复审修复记录（2026-08-17）
-
-以下为全面复审时发现并修复的问题，涉及**启动崩溃 / 运行崩溃 / 认证失效 / 数据丢失**：
-
-1. **`api_v1_agent.py` 导入崩溃**：`from agent_graph_advanced import build_advanced_agent` 指向不存在的函数（该函数在 learning 文件中）。已将 `agent_graph_advanced_learning1.0.0.py` 重命名为 `agent_graph_advanced_learning.py`（原名含点号无法导入），并修正导入。同时清理了该文件内大量重复的 import 语句
-2. **`agent_checkpointer.py` 空图编译**：`build_checkpointer_agent()` 只写了"添加节点和边的代码保持不变"注释，实际没加节点/边，编译空图在导入时报错。已补全 agent→tools→agent 的完整接线
-3. **`token_tracker.py` NameError**：`record_usage()` 在构造 `TokenUsage` 时使用尚未赋值的 `cost`（`cost=cost`），每次调用必崩。已把成本计算移到构造之前
-4. **`hybrid_search.py` 元组解包崩溃**：`reciprocal_rank_fusion` 按 3 元组解包 `(content, source, similarity)`，但 `db.search_similar` 实际返回 4 列 `(id, content, source, similarity)`，必抛 `ValueError`。已改为 4 元组并补 `id` 字段
-5. **`tool_health.py` 启动崩溃**：在 async 的 `startup_event` 中调用 `asyncio.run()` 会抛 `RuntimeError`。已把 `update_tool_health`/`run_health_check` 改为 async，并同步更新 `main.py`、`api_v1_agent.py` 中的调用点为 `await`
-6. **`deps.py` 认证失效**：`HTTPBearer()` 默认 `auto_error=True`，缺少 Authorization 头时纯 API Key 请求在依赖解析阶段被 403 拦截。已改为 `auto_error=False`，并为 `get_current_user_jwt` 补 None 分支
-7. **`db.py` 数据丢失**：`get_db()` 被重复定义，后定义的简单连接版本覆盖了连接池版本，导致写入不提交（CLAUDE.md 描述的连接池/自动提交实际失效）。已删除重复定义，保留连接池版，并修正 `DB_CONFIG` 的硬编码 `user`
-8. **错误模型名 `qwen3.7-plus`**：出现在 `agent_graph_advanced.py`、`agent_graph_advanced_learning.py`、`search_tools.py`、`api_v1_rag.py`（流式 + WebSocket）、`plan_execute.py`，全部改为 `qwen-plus`
-9. **`agent_graph_advanced.py` 轨迹误报**：工具调用成功后仍记录"未找到工具"错误轨迹。已改为成功状态
-10. **`api_v1_rag.py` SQL 参数颠倒**：`/rag/ask` 中 `WHERE requested_by = %s LIMIT %s` 传参为 `(req.top_k, user_name)`，LIMIT 收到用户名必报错。已交换为 `(user_name, req.top_k)`
-11. **`api_v1_rag.py` WebSocket Agent 调用错误**：`create_tool_calling_agent` 的输入键应为 `input`、输出键为 `output`，原代码用 `messages` 导致 KeyError。已改为 `agent_executor.ainvoke({"input": ...})` 并读取 `result["output"]`
-12. **`main.py` 限流返回 500**：中间件中 `raise AppException` 不会被 `@app.exception_handler(AppException)` 捕获，限流时返回 500 而非 429。已改为直接返回 429 `JSONResponse`；同时将 `/auth/login`、`/auth/refresh` 加入限流跳过名单（与配额中间件一致）
-13. **`rag_pipeline.py` 失效过滤**：`SIMILARITY_THRESHOLD=0.7` 对 RRF 分数不成立（RRF 分数约 1/(k+rank)，k=60 时远小于 0.7），导致过滤逻辑形同虚设/误导。已改为仅重排序启用时按 `rerank_score >= 0` 过滤
-14. **依赖缺失**：`requirements.txt` 缺少 `gradio`（`main.py` 挂载面板必需）、`sqlalchemy`（`db.py` 元数据定义必需）、`numpy`、`datasets`，已补充
-15. **Redis 主机不一致**：`query_rewriter.py`、`agent_graph_advanced.py` 直接用 `os.getenv("REDIS_HOST", "redis")` 读取，本地开发会连错地址。已改为从 `config.py` 导入；`.env`/`.env.example` 的 `POSTGRES_HOST`/`REDIS_HOST` 统一改为 Docker 服务名
-16. **`.gitignore` 补充**：新增 `.pytest_cache/`、`.mem0/`、`screenshots/`、`*.db`（运行期产物不入库）
-
-### 实时环境测试补充修复（2026-08-17，在 venv + Docker 实机验证时发现）
-
-17. **`code_executor.py` @tool docstring 位置错误**：`execute_python` 的 docstring 写在可执行代码之后（不再是 `__doc__`），langchain `@tool` 装饰器运行时报 `ValueError: Function must have a docstring`。已移到函数第一行
-18. **`document_preprocessor.py` 正则损坏**：`remove_noise_markers` 中硬编码正则 `r'!\\[...'`（raw string 双重转义）导致 `re.error: unbalanced parenthesis`，文档上传（`process()`）必崩。已改为单层转义
-19. **`memory_store.py` 适配 mem0>=2.0**：mem0 2.x 的 `Memory.__init__` 不再接受 dict 配置，改用 `Memory.from_config(dict)`
-20. **`reranker.py` 真·懒加载**：原代码在模块顶层 `from sentence_transformers import CrossEncoder`，违背"懒加载"承诺，导致缺少该依赖时应用整体无法启动。已移入 `get_reranker()` 内部延迟导入
-21. **限流/配额中间件豁免健康检查**：`/health`、`/ready`、`/metrics` 此前会被计入限流/配额，K8s/Docker 健康探针可能收到 429 被误判为不健康。已加入两个中间件的跳过名单
-22. **限流按 JWT 用户分桶**：`RateLimitMiddleware` 之前只按 X-API-Key 分桶，JWT 用户全部挤在 `anonymous` 桶（3次/秒共享）。已支持从 Bearer Token 解析用户名，每用户独立桶
-23. **`test_plan_constraints.py` 加 `@pytest.mark.skip`**：该文件是手动实验脚本（需必填参数），现标记 skip，`pytest` 套件干净通过
-24. **`logger_config.py` 日志 KeyError**：日志格式引用 `{extra[request_id]}`，但未绑定 `request_id` 的日志（如启动日志）格式化时报 `KeyError`。已用 `logger.configure(extra={"request_id": "no-id"})` 提供默认值
-
-### 已知遗留问题 / 环境注意
-
-- **DashScope LLM 免费额度**：本机测试时 embedding API（`text-embedding-v2`）正常，但 **chat 模型（qwen-turbo/qwen-plus）免费额度已耗尽**，调用 LLM 的功能（答案生成、查询改写、Agent 对话）会返回 `403 Free quota exhausted`。这是账户配额问题，不是代码 bug——充值或开启付费后即可恢复
-- **venv 环境**：测试专用 venv（在本仓库之外）中已将 `transformers` 降级为 4.44.2、`numpy` 降级为 1.26.4，以兼容 torch 2.2.2（重排序/CrossEncoder 依赖）。该 venv 还有 gradio/starlette、langchain-chroma/langchain-core 的版本冲突警告，属既有问题，不影响本应用运行
-- **重排序模型**：`BAAI/bge-reranker-v2-m3` 约 2.3GB，首次调用 `rerank_search` 或 `accurate` 管线时自动下载（懒加载），需要网络
-- ~~`api/logger_config.py` 第 44 行之后有一段约 70 行的 SLS 远程日志参考文档以 `'''...'''` 字符串形式内嵌~~ ⚠️ **2026-09-20 实测更正：这条不存在** —— `logger_config.py` **只有 45 行**，且 `SLS` 在该文件里出现 **0 次**。**不要去找那段 SLS**。
-- `agent_graph_advanced.py`、`mcp_server.py` 等文件内有多处 `'''...'''` 注释掉的旧实现，属学习保留内容，不影响运行

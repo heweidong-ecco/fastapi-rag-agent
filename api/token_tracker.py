@@ -45,18 +45,20 @@ _purpose_summary: Dict[str, Dict] = defaultdict(lambda: {"total_tokens": 0, "tot
 _thread_summary: Dict[str, Dict] = defaultdict(lambda: {"total_tokens": 0, "total_cost": 0.0, "calls": 0})
 
 # ==================== 模型计费单价（元/1000 tokens） ====================
-PRICING = {
-    "qwen-turbo": {"prompt": 0.003, "completion": 0.006},
-    "qwen-plus": {"prompt": 0.008, "completion": 0.016},
-    "text-embedding-v2": {"prompt": 0.0005, "completion": 0},
-}
-
-# 未在 PRICING 中的模型的**兜底单价**（元 / 1000 tokens）。
-# ⚠️ 2026-09-16 统一：此前 `record_usage` 与 `record_cost` **各写一份兜底值**
-#    （0.001/0.002 vs 0.003/0.006）—— 对未登记的模型，`token_usage_logs.cost` 与
-#    `cost_records.total_cost` 会算出**两个不同金额**，两张表从此对不上账。
-#    取**偏保守**的那组（不低报花费）。当前 PRICING 已覆盖全部在用模型，故这是**防御性**修复。
-_DEFAULT_PRICING = {"prompt": 0.003, "completion": 0.006}
+# ⚠️ 2026-10-01 搬家（B7）：**常量已移到 `api/token_config.py`**（额度类常量的唯一落点）。
+#    这里保留 `PRICING` / `_DEFAULT_PRICING` 两个**同名别名** ⇒ 现有调用方与测试无需改动。
+#    ⛔ 行为不变：值逐字相同。
+#    📄 为什么搬：额度常量原先散在 4 个文件 6 处，单位还混着 —— 见 `token_config.py` 顶部。
+#
+#    2026-09-16 的既有约定（**随常量一起搬到 token_config**）：
+#    兜底单价与 `record_cost` **共用一份**，别再各写一份 —— 否则对未登记模型，
+#    `token_usage_logs.cost` 与 `cost_records.total_cost` 会算出**两个不同金额**，两张表对不上账。
+from token_config import (                                    # noqa: E402
+    MODEL_PRICING as PRICING,
+    DEFAULT_MODEL_PRICING as _DEFAULT_PRICING,
+    ROLE_DAILY_TOKEN as ROLE_TOKEN_BUDGET,
+    DEFAULT_DAILY_TOKEN_BUDGET,
+)
 
 # ==================== 预算控制相关常量 ====================
 # ⚠️ 2026-09-20 删（§三·C2）：此处原有 `DEFAULT_DAILY_TOKEN_BUDGET` 与 `ROLE_TOKEN_BUDGET`
@@ -280,14 +282,13 @@ def get_recent_usage(limit: int = 20):
 # 达到上限后自动拒绝调用或切换为本地小模型。这与第12天的配额检查机制类似，
 # 只是维度从“请求次数”变成了“Token 消耗”。
 # 默认每日Token预算（可通过环境变量覆盖）
-DEFAULT_DAILY_TOKEN_BUDGET = int(os.getenv("DEFAULT_DAILY_TOKEN_BUDGET", "100000"))
-
-# 不同角色的预算（与第12天的权限分级对应）
-ROLE_TOKEN_BUDGET = {
-    "free": 10000,        # 免费用户：每天1万token
-    "premium": 100000,    # 付费用户：每天10万token
-    "admin": float("inf"), # 管理员：无限
-}
+# ⚠️ 2026-10-01 搬家（B7）：本行与下面的 `ROLE_TOKEN_BUDGET` 都已移到 `api/token_config.py`，
+#    在文件顶部 import 进来。两个名字保持不变 ⇒ 调用方无需改动。
+#
+#    顺带按 `DEC-040`（决策一）去掉了 `"admin": float("inf")` ——
+#    业务方裁「admin 也要同样上限」⇒ 现在是**有限值**（= premium = 100000/天）。
+#    ⚠️ 但"全局日级"是**另一个东西**（B10，在 ①b）—— per-user 检查永远看不到
+#    「大家加起来超了」，别拿这条替代它。
 
 def get_user_token_budget(user_name: str) -> float:
     """
@@ -642,11 +643,10 @@ def get_intercept_count(user_name: str = None) -> dict:
     
 # ==================== 多级预算配置 ====================
 
-# 单次调用最大花费（元）
-MAX_SINGLE_CALL_COST = float(os.getenv("MAX_SINGLE_CALL_COST", "0.5"))
-
-# 单线程最大花费（元）
-MAX_THREAD_COST = float(os.getenv("MAX_THREAD_COST", "5.0"))
+# 单次调用最大花费（元）· 单线程最大花费（元）
+# ⚠️ 2026-10-01 搬家（B7）：两个常量已移到 `api/token_config.py`，此处从那里取（文件顶部已 import）。
+#    ⛔ 行为不变（默认仍 0.5 / 5.0）。
+from token_config import MAX_SINGLE_CALL_COST, MAX_THREAD_COST       # noqa: E402,F811
 
 def check_multilevel_budget(
     user_name: str,
