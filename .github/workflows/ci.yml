@@ -82,13 +82,30 @@ jobs:
         # 业务方裁决：「**不用双 requirements.txt，这样会混**」⇒ 删掉那份，CI 装**同一份**。
         # 安全性已核：实测 `-test` 是 `requirements.txt` 的**真子集**
         #   （含版本约束在内比对整行 ⇒ 只在 `-test` 里的行 = 空），切过去**不丢任何包**。
-        # 代价：会多拉 sentence-transformers / transformers / torch 等重包 ⇒ **CI 时间变长**。
-        #   📊 **实测（2026-09-20）**：
-        #      · 首次（pip 缓存冷 —— cache key 刚从 requirements-test.txt 换成 requirements.txt）  **3m35s**
-        #      · 第二次（缓存热）                                                                    **2m50s**  ← **以这个为准**
-        #      · 此前用 `requirements-test.txt` 时（近 5 次）                                          **1m12s – 1m27s**
-        #   ⇒ **稳态约 2m50s，是原来的 ~2.1 倍。** 缓存省掉的是**下载**，省不掉**安装**。
-        run: pip install -r api/requirements.txt
+        # 🔴 2026-10-01 改：**装的时候按 `DEC-034 §🅱️` 那套裁法过滤**
+        #   （业务方指令：「不要给 GitHub 的 CI 的 requirements 拉 torch」）。
+        #   `api/requirements.txt:59` 的 sentence-transformers 在 pip 眼里会连带拉
+        #   **torch 554.6 MB** —— 而它只是 `reranker.get_reranker()` 的懒加载依赖，
+        #   **离线用例一条都不碰它**（判据见下，是实测的不是读代码的）。
+        #   ⚠️ 与 `api/Dockerfile:73` 是**同一套正则**（同一件事的两个落点）⇒ ⛔ 改一处要两处一起改。
+        #   ⛔ **不动 `requirements.txt` 本身** —— 仓里仍只有一份清单（DEC-019 不破）。
+        #
+        #   📊 **改前的实测（2026-09-20）**：稳态 **2m50s**（缓存热）/ 3m35s（缓存冷）；
+        #      更早用 `requirements-test.txt` 时是 **1m12s – 1m27s** ⇒ 多出来那一分多钟基本就是这批重包。
+        #      ⚠️ 改后的实测数见本条 commit —— **别拿上面这两个旧数当现状**。
+        #
+        #   ✅ **判据（2026-10-01 实测，不是读代码）**：同一棵树 / 同一套 env / **无 .env** / 临时 redis，
+        #      用导入拦截器把这 5 个包变成 ImportError，前后各跑一遍：
+        #        对照组 `139 passed, 3 skipped, 11 deselected`
+        #        实验组 `139 passed, 3 skipped, 11 deselected`   ← **逐字相同，零 ImportError**
+        run: |
+          FILTER='^(sentence-transformers|transformers|locust|ragas|datasets)'
+          grep -vE "$FILTER" api/requirements.txt > /tmp/req-light.txt
+          echo "--- 被裁掉的（应 5 行）---"
+          grep -cE "$FILTER" api/requirements.txt || echo "(0 —— ⚠️ 与预期 5 不符：先看 requirements.txt 是不是改名了)"
+          echo "--- 剩余行数 ---"
+          wc -l < /tmp/req-light.txt
+          pip install -r /tmp/req-light.txt
 
       - name: 跑离线测试
         env:

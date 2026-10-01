@@ -54,6 +54,33 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- 🟢 **CI 的依赖安装不再拉 torch —— 与 Docker 同一套裁法**（2026-10-01 · 业务方指令）。
+
+  **为什么**：业务方指出「**不要给 GitHub 的 CI 的 requirements 拉 torch**」。
+  查证结论：**不是"又出来了"** —— `DEC-034 §🅱️`（2026-09-29）**只治了 Docker**（`api/Dockerfile:73`），
+  **CI 这条线从来没裁过**：`.github/workflows/ci.yml` 一直是**裸的**
+  `pip install -r api/requirements.txt` ⇒ `api/requirements.txt:59` 的 `sentence-transformers`
+  连带拉 **torch 554.6 MB**。
+
+  **做法**：把 `api/Dockerfile:73` 那行
+  `grep -vE '^(sentence-transformers|transformers|locust|ragas|datasets)'` 原样搬到 CI 的安装步骤
+  ⇒ **实测裁掉 5 行**（`locust`:54 · `sentence-transformers`:59 · `transformers`:61 · `ragas`:63 · `datasets`:100），
+  **100 → 95 行**；剩下唯一的 "torch" 是 `requirements.txt:58` 的**注释**（pip 不看注释）。
+  ⛔ **不动 `requirements.txt` 本身** —— 仓里仍只有一份清单（`DEC-019` 不破）。
+  ⚠️ **同一套正则在两个落点**（`api/Dockerfile:73` · `.github/workflows/ci.yml`）⇒ 改一处要两处一起改。
+
+  **判据（2026-10-01 实测，不是读代码）**：同一棵树 / 同一套 env / **无 `.env`** / 临时 redis，
+  用**导入拦截器**把这 5 个包变成 `ImportError`，前后各跑一遍离线全套：
+
+  | | 结果 |
+  |---|---|
+  | 对照组（不拦截） | `139 passed, 3 skipped, 11 deselected` |
+  | 实验组（拦截这 5 个） | `139 passed, 3 skipped, 11 deselected` |
+
+  ⇒ **逐字相同、零 `ImportError`** ⇒ 离线用例确实不碰这 5 个包。
+  ⚠️ **代价（已知并接受，与 Docker 那边同一条）**：CI 里**跑不了** RAGAS 评估 / 压测
+  —— 而这两件事本来就跑在有完整依赖的开发机上。
+
 - 🟢 **额度常量收口到 `api/token_config.py` 一处**（2026-10-01 · `B7` · **①a Task 2**）。
 
   **为什么**：额度类常量原先**散在 4 个文件 6 处**，**单位还混着** ——
