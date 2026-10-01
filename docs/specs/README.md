@@ -72,8 +72,8 @@
 | `api/search_tools.py` | 129 | 🔴 **缺** | ❓ 未知 |
 | `api/simple_tools.py` | 36 | 🔴 **缺** | ❓ 未知 |
 | `api/simple_tools_impl.py` | 30 | 🔴 **缺** | ❓ 未知 |
-| `api/token_config.py` | 89 | ✅ [`specs/token_config.md`](./token_config.md) | 🟢 **新建（2026-10-01 · B7）** —— 额度类常量的**唯一落点**<br>✅ **`MAX_TOKENS_*` 已接线**（2026-10-01 · `①b` Task 1，15 处构造点）<br>⚠️ 其余常量（`SESSION_*` / `GLOBAL_DAILY_*`）**仍只有值、没有判定函数**（B8/B10） |
-| `api/token_tracker.py` | 744 | ✅ [`specs/token_tracker.md`](./token_tracker.md) | 🟡 **可用，但它是【三套额度口径】的其中一套** —— 见下 ⚠️<br>🟢 **①a 已落地（2026-10-01）**：额度常量已收口到 `api/token_config.py`（本文件**只剩同名别名**）· 本文件下方 **实施计划 ①a** 已执行完<br>⬜ **①b 未开工**（B8 会话级 / B10 全局日级 / B11 熔断 / 决策一落地） |
+| `api/token_config.py` | 89 | ✅ [`specs/token_config.md`](./token_config.md) | 🟢 **新建（2026-10-01 · B7）** —— 额度类常量的**唯一落点**<br>✅ **`MAX_TOKENS_*` 已接线**（2026-10-01 · `①b` Task 1，15 处构造点）· ✅ **`SESSION_TOKEN_LIMIT` 已接线**（Task 2 · `B8`）<br>🟡 **`GLOBAL_DAILY_TOKEN_LIMIT` 有判定函数、⛔ 无调用点**（Task 3 · `B10`）⇒ **改它暂不改变任何行为** |
+| `api/token_tracker.py` | 888 | ✅ [`specs/token_tracker.md`](./token_tracker.md) | 🟡 **可用，但它是【三套额度口径】的其中一套** —— 见下 ⚠️<br>🟢 **①a 已落地（2026-10-01）**：额度常量已收口到 `api/token_config.py`（本文件**只剩同名别名**）· 本文件下方 **实施计划 ①a** 已执行完<br>🔵 **①b 进行中**：Task 0/1/2 ✅ · **Task 3 ✅（`B10` 全局日级 —— ⚠️ 只有函数、零调用点）** · ⬜ Task 4 起（`B11` 熔断 / 决策一落地） |
 | `api/tool_cache.py` | 96 | 🔴 **缺** | ❓ 未知 |
 | `api/tool_health.py` | 105 | 🔴 **缺** | ❓ 未知 |
 | `api/tool_visualizer.py` | 129 | 🔴 **缺** | ❓ 未知 |

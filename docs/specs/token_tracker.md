@@ -2,10 +2,10 @@
 
 | 项 | 内容 |
 |---|---|
-| **状态** | 🟡 **可用，但它是【三套额度口径】的其中一套** —— 见下 ⚠️<br>🟢 **①a 已落地（2026-10-01）**：额度常量已收口到 `api/token_config.py`（本文件**只剩同名别名**）· 本文件下方 **实施计划 ①a** 已执行完<br>⬜ **①b 未开工**（B8 会话级 / B10 全局日级 / B11 熔断 / 决策一落地） |
+| **状态** | 🟡 **可用，但它是【三套额度口径】的其中一套** —— 见下 ⚠️<br>🟢 **①a 已落地（2026-10-01）**：额度常量已收口到 `api/token_config.py`（本文件**只剩同名别名**）· 本文件下方 **实施计划 ①a** 已执行完<br>🔵 **①b 进行中（2026-10-01）**：Task 0 ✅ / Task 1 ✅（B7 接线）/ **Task 2 ✅（B8 会话级 · 已接 7 条链，真能拦）** / **Task 3 ✅（B10 全局日级 · ⚠️ 只有函数，未接线）** / ⬜ **Task 4 起待做（B11 熔断）**<br>⚠️ **两者的完成度【不一样】，别一起读**：`B8` 有调用点 ⇒ **改行为**；`B10` **没有调用点** ⇒ **不产生任何行为变化**，接线在 `B11` |
 | **对外提供** | `record_usage()` · `record_cost()` · `check_multilevel_budget()` · `check_token_budget_detail()` · `get_token_budget_info()` · 9 个汇总函数 |
 | **谁在用** | `permission`（取角色）· `agent_graph_advanced.py:239`（唯一调多级预算的地方）· `cost_dashboard.py` · 各 `api_v1_*.py` |
-| **规模** | 744 行 |
+| **规模** | 888 行 |
 
 ## ✅ 做了什么
 
@@ -21,8 +21,11 @@
 
 - 🔴 **额度常量散在 4 个文件 6 处**（本文件的 `ROLE_TOKEN_BUDGET` / `MAX_THREAD_COST` / `MAX_SINGLE_CALL_COST` / `PRICING`、`permission.ROLE_QUOTA`、`plan_execute.PLAN_TOTAL_BUDGET_SECONDS`）
 - ✅ ~~🔴 **`"admin": float("inf")`**~~ ⇒ **2026-10-01 已去**（`DEC-040`）：现在是有限值 = `premium` = 100000/天。<br>⚠️ **但"全局日级"仍是另一个东西**（B10，在 `①b`）—— per-user 检查**永远看不到「大家加起来超了」**
-- 🔴 **没有「会话级」上限**（`_thread_summary` 内存里按 thread 汇总了，但**没有上限判定**）
-- 🔴 **没有「全局日级」**（所有方法第一参都是 `user_name`，**无跨用户记账键**）
+- ✅ ~~🔴 **没有「会话级」上限**~~ ⇒ **2026-10-01 有了**（`B8` · `①b` Task 2）：
+  `get_session_token_usage` / `check_session_token_budget`，**接在 7 条真调 LLM 的对话链上**（`DEC-041`）。
+  ⚠️ **数据源是 `token_usage_logs` 表，⛔ 不是 `_thread_summary`** —— 内存**重启即清零**，拿它当上限等于"重启就能绕开"
+- 🟡 **「全局日级」** ⇒ **2026-10-01 建了函数**（`B10` · `①b` Task 3）：`get_global_daily_token_usage` / `check_global_daily_budget`。
+  🔴 **但⛔ 没有任何调用点** ⇒ **本条不产生任何行为变化**，接线在 `B11`（`①b` Task 4）
 - ⬜ **零测试覆盖**（`docs/说明/测试.md` §六 **#8**）
 - ⬜ **R2.2 恢复条件未核** —— `EXPIRE 86400` 是首次 INCR 时设的（滚动），**没人实测过 TTL**
 
@@ -35,6 +38,9 @@
 | ⚠️ **「两个单位混着 ⇒ 是 bug」** | 🟢 **不是** —— 第一二级（元）与第三级（token）**量纲本来就不同**，代码注释 `:665` 明说「**别统一掉**」 |
 | ⚠️ **「`ROLE_TOKEN_BUDGET` 就是最终日限额」** | ⚠️ **只对 `_invoke_llm` 那条链**。**挂多级预算的只有 `/agent/mcp_chat` 一条**（`check_multilevel_budget` 全仓唯一调用点在 `agent_graph_advanced.py:239`）⇒ **其他链全无预算** |
 | ⚠️ **「本文件定义着 `PRICING` / `ROLE_TOKEN_BUDGET` / `MAX_*_COST`」** | 🔴 **2026-10-01 起【只是别名】** —— 真值在 `api/token_config.py`，本文件**顶部 import 进来**（`PRICING is token_config.MODEL_PRICING` → `True`）。⇒ **改价改额度请去 `token_config.py`**，改这里没用（会被 import 覆盖） |
+| 🔴 **「`check_global_daily_budget` 存在 ⇒ 全站额度在管着」** | ⛔ **不是** —— **它没有任何调用点**（2026-10-01 · Task 3 只出函数）。<br>**判据（可打印）**：`grep -rn "check_global_daily_budget" api/ --include="*.py"` ⇒ 只应命中**定义处 + 测试**；命中不到任何 `api_v1_*.py` = **它还没生效**。<br>⚠️ 接线在 `B11`（Task 4）。📌 这是「**常量/函数建好没接上**」那个陷阱的**第三次**（前两次：`B7` 前、`B8` 前） |
+| 🔴 **「`get_global_daily_token_usage` 与 `get_daily_token_usage` 差不多」** | 差的正是**全部**：前者 SQL **⛔ 不许有 `user_name`**（全站），后者**必须有**（单用户）。<br>⚠️ 抄后者改前者时**漏删** `WHERE user_name` ⇒ 函数名还叫「全局」、**返回值正常、只是偏小**、**没有任何报错** ⇒ 本仓**永远不会有全局额度**。<br>⇒ 已用 **AST 静态守卫**钉死（`api/test_global_daily_budget_offline.py` 的**配对**测试：一边必须有、一边必须没有） |
+| ⚠️ **「`GLOBAL_DAILY_TOKEN_LIMIT` = 1,000,000 是个随手写的默认值」** | 🟡 **2026-10-01 起它变成了【裁定值】**（`DEC-042`）—— 业务方在源文档 B10 那个空上填的。⚠️ 但**它仍不在环境变量契约里**（`.env.example` / `docs/契约/环境变量.md` 都无此项），想不改代码调它**得先补契约** |
 
 ## 关联
 
@@ -644,7 +650,7 @@ git commit -m "refactor(配额): 决策一落地 —— 次数配额降级，统
 
 ---
 
-# 🔵 实施计划 ①b · **限额与熔断**（2026-09-30 立 · **执行中** —— Task 0 ✅ / Task 1 ✅ / Task 2 起待做）
+# 🔵 实施计划 ①b · **限额与熔断**（2026-09-30 立 · **执行中** —— Task 0 ✅ / Task 1 ✅ / Task 2 ✅ / Task 3 ✅ / **Task 4 起待做**）
 
 > **来源**：`后端补齐清单-待裁-20260929.md` 的 **B8 · B10 · B11 · B13 · 决策一（实现）**；
 > 以及 `LLM模型路由与额度策略-待裁-20260930.md` 的 **L2**（十几个 model 顺带）。
@@ -818,150 +824,84 @@ git commit -m "feat(额度): B7 接线 —— 15 个 ChatOpenAI 构造点带上�
 
 ---
 
-## Task 2 · **B8** · 会话级 token 上限
+## Task 2 · **B8** · 会话级 token 上限 · ✅ **2026-10-01 做完**
+
+> 🔴 **落地时更正计划里三处**（**口径**，全部由业务方 2026-10-01 裁定：
+> **窗口** / **key** / **范围**）—— 见 `docs/decisions/DEC-041-B8会话上限的窗口与接线范围.md`：
+>
+> 1. **窗口 = 会话 × 今日**（带 `CURRENT_DATE`）。计划原样是对的，**但那是"没写理由的选择"**；
+>    定它的真正理由是：与仓里**其余所有 token 预算**（用户日预算）同口径，
+>    ⛔ 而不是"顺手复制 `get_daily_token_usage`"。
+> 2. 🔴 **key 从「只 `thread_id`」改成「`user_name` + `thread_id`」** ——
+>    计划**只想到 `thread_id`**。核实端点时发现 4 个 Agent 端点的 `thread_id` **默认值是 `"default"`**
+>    ⇒ 只按 `thread_id` 分桶，**所有没显式传它的调用者共用一个桶**，谁先烧完 50000
+>    **其他默认用户一起撞 429**（软共享状态 → 硬拒绝）。
+>    ⇒ 连带 **接口改名**：`get_thread_token_usage` → **`get_session_token_usage`**
+>    （key 变两段了，沿用旧名**表述不实**），且 `user_name` **必填、不给默认值**
+>    （给了默认值 ⇒ 漏传的调用点静默落进同一个桶，**决策二白定**）。
+> 3. 🔴 **范围：计划写「两处主链」，实做【7 条】** —— 来源文档 B8 要求「**覆盖全部对话链**」。
+>    ⚠️ **但比来源文档又少 4 条** —— 逐条核实后发现 **`/rag/ask` · `/rag/jwt_ask` ·
+>    `/rag/async_ask` · `/rag/parallel_ask` 根本不调 LLM**（前两条只 `SELECT documents`，
+>    后两条是 `asyncio.sleep(2)` 的 mock）⇒ **接上去是错的**（让不花钱的接口占额度甚至被拦）。
+>
+> 📌 **教训与 Task 1 那条同族**：**计划里的清单同样是"作者当时的理解"，不是事实。**
+>    Task 1 是**少数**了（漏 `evaluate_with_ragas.py`），本条是**多数**了（多列 4 条）
+>    —— 两个方向都会错，⇒ **清单必须逐条对着代码核**。
 
 **Files:**
-- Modify: `api/token_tracker.py`（加两个函数）
-- Test: `api/test_session_budget.py`（新建，标 `needs_db`）
+- Modify: `api/token_tracker.py`（新增 2 个函数）· `api/api_v1_agent.py`（5 处接线 + 1 个新参数）·
+  `api/api_v1_rag.py`（2 处接线 + 1 个新参数 + 1 个 WS 会话 id）
+- Create: `api/test_session_budget_offline.py`（**无 marker ⇒ 进 CI**）·
+  `api/test_session_budget.py`（`needs_db`）· `api/test_session_budget_wiring.py`（**接线守卫**）
 
-**Interfaces:**
-- Produces: `get_thread_token_usage(thread_id: str) -> float`
-- Produces: `check_session_token_budget(thread_id: str, estimated_tokens: int = 0) -> tuple[bool, str]`
+**Interfaces（⚠️ 与计划原名不同 —— 见上方更正 ②）：**
+- Produces: `get_session_token_usage(user_name: str, thread_id: str) -> float`
+- Produces: `check_session_token_budget(user_name: str, thread_id: str, estimated_tokens: int = 0) -> tuple[bool, str]`
 
-> ### 🔴 一个**必须避开**的陷阱（设计理由）
+> ### 🔴 那个**必须避开**的陷阱（设计理由）—— 计划写对了，保留
 >
 > `record_usage` 里已经在内存里按 thread 累加了（`_thread_summary`）。
 > **⛔ 但绝不能拿它当上限的数据源** —— 它是**进程内存**，
 > **重启即清零** ⇒ 想绕开上限，**重启一下就行**。
 >
-> ⇒ **权威数据源只能是 `token_usage_logs` 表**（`get_daily_token_usage` 就是这么做的，见 `:191`）。
+> ⇒ **权威数据源只能是 `token_usage_logs` 表**（`get_daily_token_usage` 就是这么做的）。
 > ⚠️ 这也意味着**每次检查要查一次库** —— 这正是 Task 4 的熔断器要解决的（触顶后别再查）。
-
-- [ ] **Step 1: 写失败测试**
-
-```python
-# api/test_session_budget.py
-"""会话级 token 上限（B8）。
-
-⚠️ 标 `needs_db` —— 它必须真读 `token_usage_logs`。
-   ⛔ 不许改成"喂内存汇总"来免掉数据库：那样测的就不是权威数据源了，
-      而"重启绕开上限"这个 bug 恰恰会因此测不出来。
-"""
-import pytest
-
-pytestmark = pytest.mark.needs_db
-
-
-def test_session_usage_is_read_from_db_not_memory(monkeypatch):
-    """🔴 核心判据：**把内存汇总塞满，也不影响判定结果**。
-
-    内存里伪造一堆用量、DB 里什么都不写 ⇒ 判定必须说"没超"。
-    ⛔ 若哪天有人把数据源改回 `_thread_summary`，本条立刻红。
-    """
-    import token_tracker
-    with token_tracker._lock:
-        token_tracker._thread_summary["t-mem-only"]["total_tokens"] = 10 ** 9
-    assert token_tracker.get_thread_token_usage("t-mem-only") == 0
-
-
-def test_session_budget_rejects_over_limit():
-    """真写库、真超限 ⇒ 必须拒。"""
-    import token_tracker
-    from token_config import SESSION_TOKEN_LIMIT
-    token_tracker.record_usage(
-        model="qwen-turbo", prompt_tokens=SESSION_TOKEN_LIMIT, completion_tokens=0,
-        purpose="test", user_name="admin", thread_id="t-over",
-    )
-    ok, why = token_tracker.check_session_token_budget("t-over")
-    assert ok is False and "会话" in why
-```
-
-> ⚠️ `test_session_usage_is_read_from_db_not_memory` **不需要 DB**，但同文件里有一条需要 ⇒
-> 整个文件标 `needs_db` 会被 CI 排除 ⇒ **那条也就不在 CI 跑了**。
-> ✅ **做法**：把它拆到两个文件 —— 内存隔离那条进**不带 marker** 的文件（CI 跑），
-> 真写库那条留在 `needs_db` 文件。**⛔ 别为了省事让核心判据掉出 CI。**
-
-- [ ] **Step 2: 跑，确认失败**
-
-```bash
-python -m pytest api/test_session_budget.py -q          # → AttributeError: get_thread_token_usage
-```
-
-- [ ] **Step 3: 实现（`api/token_tracker.py`）**
-
-```python
-def get_thread_token_usage(thread_id: str) -> float:
-    """本会话【今日】累计 token —— **查库**，⛔ 不读内存。
-
-    ⚠️ 为什么不复用 `_thread_summary`：那是**进程内存**（`record_usage` 里累加），
-       **重启即清零** ⇒ 拿它当上限等于"重启就能绕开"。权威数据源是 `token_usage_logs`。
-    """
-    from db import get_db
-    try:
-        with get_db() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """SELECT COALESCE(SUM(total_tokens), 0) FROM token_usage_logs
-                       WHERE thread_id = %s AND created_at >= CURRENT_DATE""",
-                    (thread_id,),
-                )
-                return cur.fetchone()[0]
-    except Exception as e:
-        print(f"[Token] 查询会话用量失败: {e}")
-        return 0.0          # ⚠️ 失败时**放行**（0 = 没超）—— 见下方"失败开还是关"
-```
-
-> ### ⚠️ 一个要**明确写下来**的取舍：查库失败时，放行还是拒绝？
 >
-> 这里选了 **放行（fail-open）** —— 与本文件既有的 `get_daily_token_usage` 一致。
-> **理由**：配额是**成本控制**，不是**安全边界**；DB 抖动时把服务全停掉，
-> 代价比"多花点 token"大。
-> ⛔ **但它必须被写下来** —— 否则下一个人看到"失败返回 0"会以为是 bug。
-> 📌 **与 `api/deps.py` 的鉴权不同**：那里是 **fail-closed**（`verify_api_key` 失败即拒）——
-> **因为那是安全边界。** 两者**故意不同**，别"统一"掉。
+> ⚠️ **来源文档 B8 的「落点」栏与此相反**（它写「`_thread_summary` **可直接扩展**」）——
+> **那一句已被 `DEC-041` 显式推翻**，以 DEC 为准。
 
-- [ ] **Step 4: 加判定函数**
-
-```python
-def check_session_token_budget(thread_id: str,
-                               estimated_tokens: int = 0) -> tuple[bool, str]:
-    """会话级上限判定。返回 (是否放行, 原因)。**不写拦截记录**（由调用方决定带什么上下文）。"""
-    from token_config import SESSION_TOKEN_LIMIT
-    used = get_thread_token_usage(thread_id)
-    remaining = SESSION_TOKEN_LIMIT - used
-    if remaining <= 0:
-        return False, (f"本会话预算已用完（已使用 {used:.0f} tokens，"
-                       f"会话上限 {SESSION_TOKEN_LIMIT:.0f} tokens）")
-    if estimated_tokens > 0 and estimated_tokens > remaining:
-        return False, (f"预估消耗 {estimated_tokens:.0f} tokens 超过本会话剩余 "
-                       f"{remaining:.0f} tokens")
-    return True, f"会话预算充足（剩余 {remaining:.0f} tokens）"
-```
-
-- [ ] **Step 5: 接线**（两处主链）
-
-在**答案生成 / Agent 对话**入口调用它（落点参照 `check_budget` 现有的用法：
-`api_v1_agent.py:423-433` 的 `AppException(ErrorCode.QUOTA_EXCEEDED)`）。
-**触顶动作已裁 = 直接拒绝**（`B11` 要素②）：
-
-```python
-ok, why = check_session_token_budget(thread_id)
-if not ok:
-    raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
-```
-
-- [ ] **Step 6: 跑 + 提交**
+### 判据（可打印）
 
 ```bash
-python -m pytest api/ -m "not integration and not needs_db" -q
-python -m pytest api/test_session_budget.py -q -m needs_db          # 本机有库时
-git add api/token_tracker.py api/test_session_budget.py api/test_session_budget_offline.py
-git commit -m "feat(额度): B8 会话级 token 上限 —— 数据源是表，不是内存（重启绕不开）"
+venv/bin/python -m pytest api/test_session_budget_offline.py -q     # 11 passed
+venv/bin/python -m pytest api/test_session_budget_wiring.py -q      # 8 passed
+venv/bin/python -m pytest api/ -m "not integration and not needs_db" -q
+#   ⇒ 15 failed / 138 passed / 3 skipped
+#      接线前是 15 failed / 127 passed / 3 skipped ⇒ +11 = 本次新增的离线判据
+#      `15 failed` 与接线前 FAILED 清单同为「本地无 Redis」，**逐条同类 ⇒ 无回归**
 ```
+
+**做过红→绿实证的守卫**（⛔ 不是"写完就绿"）：
+
+| 守卫 | 怎么验出红 |
+|---|---|
+| `test_session_query_is_scoped_by_user_name` | 把 SQL 的 `WHERE user_name = %s` 改掉 ⇒ **红** |
+| `test_user_name_is_required` | 给 `user_name` 加默认值 `"unknown"` ⇒ **红** |
+| `test_endpoint_calls_session_budget[memory_chat]` | 摘掉 `memory_chat` 里的判定调用 ⇒ **红** |
+
+**对象级核**（⛔ 不是只看源码）：`import main` 后读 `app.openapi()` ——
+6 个 HTTP 端点的 query 参数里都有 `thread_id`（含**新补的** `/agent/plan_execute` ·
+`/rag/stream_search`）。
+
+### 并入 `🅗 S9`
+
+接线的同时把「**同一维度、两种窗口**」写进 `DEC-041` 备选方案·一 与本节：
+`MAX_THREAD_COST`（元/线程，**无日期**）vs 会话 token 上限（**按日**）——
+⚠️ **它是【已知且有意】的**，归并留给 `DEC-040` 的 `①b` Task 6。⛔ 别当成 bug 顺手"统一"。
 
 ---
 
-## Task 3 · **B10** · 全局日级 token 总额
+## Task 3 · **B10** · 全局日级 token 总额 · ✅ **2026-10-01 做完**
 
 **Files:**
 - Modify: `api/token_tracker.py`
@@ -971,61 +911,117 @@ git commit -m "feat(额度): B8 会话级 token 上限 —— 数据源是表，
 - Produces: `get_global_daily_token_usage() -> float`
 - Produces: `check_global_daily_budget(estimated_tokens: int = 0) -> tuple[bool, str]`
 
-- [ ] **Step 1: 写失败测试（离线可跑的那半）**
+### ✅ 做完了什么
 
-```python
-def test_global_usage_query_has_no_user_filter():
-    """🔴 核心判据：SQL 里**不许**有 `user_name =`。
+| 项 | 落点 |
+|---|---|
+| `get_global_daily_token_usage()` | `api/token_tracker.py` —— `SUM(total_tokens) WHERE created_at >= CURRENT_DATE`，**⛔ 无 `user_name`** |
+| `check_global_daily_budget(estimated_tokens=0)` | 同上；阈值取 `token_config.GLOBAL_DAILY_TOKEN_LIMIT` |
+| 阈值 | **`1_000_000` /天** —— 值没变，但**从"没人读的默认值"变成了裁定值** |
+| 测试 | `api/test_global_daily_budget_offline.py` —— **12 passed**（无 marker ⇒ 进 CI） |
+| 决策 | `docs/decisions/DEC-042-B10全局日级阈值与fail-open.md` |
 
-    ⚠️ 为什么要测这个而不是测数值：`admin` 的日上限现在也是有限值，
-       但**全局额度是另一个东西** —— 漏掉 `user_name` 过滤才叫"全局"。
-       一旦有人把 `get_daily_token_usage` 的 SQL 复制过来忘了删 `WHERE user_name`，
-       本仓库就**永远不会有全局额度**，而且**看起来一切正常**。
-    """
-    import inspect, token_tracker
-    src = inspect.getsource(token_tracker.get_global_daily_token_usage)
-    assert "user_name" not in src.split('"""')[-1], (
-        "全局日级的 SQL 里出现了 user_name —— 那它就退化成"单用户"了"
-    )
+### 🔴 三处与计划原样不同的地方（都已落地）
+
+1. **阈值是【业务方裁定】过的，不是默认值**。
+   源文档 B10 的「✍️ 裁」栏原文是「**⚠️ 附一问（仍待答）：具体阈值 ______（业务判断，我不替你定）**」。
+   ⇒ 业务方 2026-10-01 裁定 = **`1,000,000` /天**（≈ ¥1–2/天 · = 10 个 premium 满额）。
+   ⚠️ 选它的**另一个理由**：5,000,000 太松 ⇒ 熔断**永远触发不了** ⇒ **验收时无法证明它成立**。
+2. **`estimated_tokens` 从「收下不用」改成「真的参与判定」**。
+   计划样例的签名有它，**函数体里却没用** —— 「签名看着对、行为是死的」。
+   ⇒ 已补上，并加 `test_estimated_tokens_can_trip_it` 钉住（变异验证：删掉那三行 ⇒ 红）。
+3. **守卫改用 AST，不用计划里那段 `inspect.getsource(...).split('"""')[-1]`**。
+   理由与 `B8` 同：**注释/docstring 里也有 `user_name` 这些词**，
+   按"源码里有没有这个词"判会把**注释**当成 **SQL**（`docs/规范/开发规范.md` §3.1）。
+   ⇒ 统一用 `ast.walk` 取 `cur.execute(...)` 的**字面量**。
+
+### ⚠️ 本任务【不接线】——「全绿」≠「全局限额生效」
+
+`check_global_daily_budget` **没有任何调用点**。接线在 **`Task 4`（`B11`）**：
+断路器 + `api/main.py` 放行路径。
+
+> 🔴 **这是同一个陷阱的第三次**：
+> · `B7` 之前 —— 常量建好了，**没接上** ⇒ 单次上限不存在；
+> · `B8` 之前 —— 有 `SESSION_TOKEN_LIMIT`，**没有判定函数**；
+> · **`B10` 现在** —— 有判定函数，**没有调用点**。
+> ⇒ 📌 **判据**：`grep -rn "check_global_daily_budget" api/ --include="*.py"` 只应命中
+> **定义处 + 测试**；**命中不了任何 `api_v1_*.py` = 它还没生效**。
+
+### 证据（可打印）
+
+```bash
+pytest api/test_global_daily_budget_offline.py -q    # 12 passed
+pytest api/ -m "not integration and not needs_db" -q # 15 failed / 158 passed / 3 skipped
 ```
 
-- [ ] **Step 2: 跑，确认失败**（`AttributeError`）
+全量里 15 条失败**全是** `redis.ConnectionError`（本机没起 Redis），与改动前同集合。
+📌 **条数对账**（别只看"通过数涨了"）：无 `B8`/`B10` 三个文件时收集 **145** 条
+⇒ `+11 +8`（B8 两份）⇒ 164 ⇒ `+12`（本任务）⇒ **176** = 实跑 `158 + 15 + 3`。
+（⚠️ 另有一份 `api/test_global_daily_budget.py` 带 `needs_db` ⇒ **被 CI 命令 deselect**，不计入 176。）
 
-- [ ] **Step 3: 实现**
+### 🔴 那条 SQL **真的被执行过** —— 但这一步有个坑，记下来
 
-```python
-def get_global_daily_token_usage() -> float:
-    """今日【所有用户合计】的 token —— **不带 user_name 过滤**。
+**离线测试从头到尾【没有执行】那条 SQL**（只 `AST` 取字面量）。
+⇒ 表名/列名/语法错，**CI 永远绿**。这是 `Task 3` 计划里没堵上的一个口子。
 
-    ⚠️ **必须包含 admin**：`admin` 的**个人**日上限已是有限值（`DEC-040`），
-       但"全局额度"是**另一个东西** —— per-user 检查永远看不到"大家加起来超了"。
-    """
-    from db import get_db
-    try:
-        with get_db() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """SELECT COALESCE(SUM(total_tokens), 0) FROM token_usage_logs
-                       WHERE created_at >= CURRENT_DATE"""
-                )
-                return cur.fetchone()[0]
-    except Exception as e:
-        print(f"[Token] 查询全局当日用量失败: {e}")
-        return 0.0          # 同样 fail-open，理由见 Task 2 那条取舍
+**当时本机 PG 没起**（`nc -z localhost 5432` 不通；`docker ps` 空）⇒ `needs_db` 那类跑不了。
+（✅ **2026-10-01 当天已补跑** —— 结果见本节末。）
+⇒ 改用 **stdlib `sqlite3`**：把**从函数里 AST 取出的那条真 SQL 字符串**（⛔ 不是我重打的）
+配上 `api/schema.sql` 里那三列的真实 DDL 执行一遍（这条 SQL 无 PG 专有构造）：
+
+```bash
+# 一次性验证（未提交成测试 —— sqlite ≠ postgres，提交它会造成"验过了"的错觉）
+sqlite> CURRENT_DATE = 2026-10-01
+【全站】今日         = 12000   ← 1000(alice) + 2000(bob) + 4000(alice) + 5000(admin)
+【对照·单用户】alice = 5000
+【对照·单用户】bob   = 2000
 ```
 
-- [ ] **Step 4: 加判定函数 + 跑 + 提交**
+✅ **证明了**：SQL 真的可解析可执行 · **跨用户求和**（含 `admin`）· **日期窗口真的在生效**
+（昨天那条 9999 **没被算进今日**）。
+⛔ **没证明**：PostgreSQL 下的行为（方言/类型/时区）· 真库上的列名是否 100% 一致
+（列名是对着 `api/schema.sql` 与 `api/db.py:109` 的建表语句核的，**不是**对着真库核的）。
+⇒ **补洞口的是 `api/test_global_daily_budget.py`**（`needs_db`）—— 本机起 PG 后跑它。
 
-```python
-def check_global_daily_budget(estimated_tokens: int = 0) -> tuple[bool, str]:
-    from token_config import GLOBAL_DAILY_TOKEN_LIMIT
-    used = get_global_daily_token_usage()
-    remaining = GLOBAL_DAILY_TOKEN_LIMIT - used
-    if remaining <= 0:
-        return False, (f"今日全站额度已用完（已使用 {used:.0f} / "
-                       f"上限 {GLOBAL_DAILY_TOKEN_LIMIT:.0f} tokens），请明日再试")
-    return True, f"全站预算充足（剩余 {remaining:.0f} tokens）"
+#### ✅ 2026-10-01 已补跑（那 7 条 `needs_db` 真过了一遍）
+
+前置：当天 Docker 的 Linux VM 卡死（`dockerAPI: stopped`，`/ping` 一直超时）⇒ 杀掉**重启前遗留的
+僵尸 `com.docker.backend`** 后重拉才恢复；`postgres-rag` 起来并 `healthy`。
+
+```bash
+POSTGRES_DB=rag_test POSTGRES_HOST=localhost POSTGRES_PORT=5432 \
+  ./venv/bin/python -m pytest api/test_session_budget.py api/test_global_daily_budget.py -m needs_db
+# ⇒ 7 passed
 ```
+
+> ⚠️ `POSTGRES_HOST` / `POSTGRES_DB` **必须显式覆盖**：`.env` 里 `POSTGRES_HOST=postgres`
+> 是 **compose 网络内的服务名**，在宿主上解析不了。`api/config.py` 的 `load_dotenv()` 没传
+> `override=True` ⇒ 默认 `override=False` ⇒ **导出的环境变量会赢**（这是本命令能生效的前提）。
+
+🔴 **库名隔离对账**（本仓有前科：R2 冒烟忘带库名，`record_usage` 往**真库**写了 4 行 ——
+`docs/复盘/2026-09-17-只读冒烟其实会写库.md`）：
+
+| 库 | 跑前 | 跑后 |
+|---|---:|---:|
+| `rag_db`（真库） | 513 | **513** ← 一行没动 |
+| `rag_test`（隔离） | 148 | **155**（+7） |
+
+⇒ `B10` 的那条 SQL **已在真 PostgreSQL 下执行过**（不再只靠 sqlite 近似）。
+⚠️ 本次补跑**只覆盖「能跑通 + 跨用户求和为真」**，不构成别的结论 ——
+PG 方言/时区下的**边界**行为、生产数据量下的表现，**都没验**。
+
+⛔ 且 `api/test_global_daily_budget.py` **不进 CI**（CI 无 postgres service）——
+所以 `B10` 的核心判据（SQL 里没有 `user_name`）**依然只在离线那份里**，
+别因为「7 条绿了」就以为离线那份可以省。
+
+### 变异验证（**4 条守卫逐条证明会红**，跑完即还原、sha256 一致）
+
+| 变异 | 变红的测试 |
+|---|---|
+| 全局 SQL 加回 `WHERE user_name = %s` | `test_global_query_has_no_user_filter` · `test_the_two_daily_queries_are_actually_different` |
+| 全局 SQL 去掉 `CURRENT_DATE` | `test_global_query_is_today_only` |
+| 阈值写死在函数里（不取 `token_config`） | `test_limit_comes_from_token_config` |
+| 删掉 `estimated_tokens` 的判定 | `test_estimated_tokens_can_trip_it` |
 
 ---
 
