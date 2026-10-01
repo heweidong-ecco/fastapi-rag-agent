@@ -11,6 +11,7 @@ from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 from langchain_openai import ChatOpenAI
 from config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL_FAST
+from token_config import MAX_TOKENS_AGENT   # B7 接线：中间步骤的单次上限（1024）
 from langchain_community.tools import DuckDuckGoSearchRun
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
@@ -21,7 +22,8 @@ llm = ChatOpenAI(
     model=LLM_MODEL_FAST,
     api_key=LLM_API_KEY,
     base_url=LLM_BASE_URL,
-    temperature=0
+    temperature=0,
+    max_tokens=MAX_TOKENS_AGENT,   # B7
 )
 
 # ==================== 定义工具 ====================

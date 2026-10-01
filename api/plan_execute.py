@@ -27,6 +27,7 @@ import time
 from typing import List, Dict
 from langchain_openai import ChatOpenAI
 from config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL_CHAT
+from token_config import MAX_TOKENS_AGENT   # B7 接线：三个中间步骤 LLM 的单次上限（1024）
 from langchain_core.messages import HumanMessage, SystemMessage
 
 # ⚠️ 2026-09-21（§十四 · ③-b）：接上**预算与记账**。
@@ -94,6 +95,7 @@ planner_llm = ChatOpenAI(
     api_key=LLM_API_KEY,
     base_url=LLM_BASE_URL,
     temperature=0,  # 规划需要确定性，不能有随机性
+    max_tokens=MAX_TOKENS_AGENT,      # B7：输出的是一份 JSON 计划
     timeout=PLANNER_LLM_TIMEOUT,
     max_retries=LLM_MAX_RETRIES,
 )
@@ -251,6 +253,7 @@ executor_llm = ChatOpenAI(
     api_key=LLM_API_KEY,
     base_url=LLM_BASE_URL,
     temperature=0.1,
+    max_tokens=MAX_TOKENS_AGENT,      # B7：每步的参数值，一句话或一段代码
     timeout=EXECUTOR_LLM_TIMEOUT,      # 🔴 2026-09-21：见上方共用说明
     max_retries=LLM_MAX_RETRIES,
 )
@@ -465,6 +468,7 @@ quality_checker_llm = ChatOpenAI(
     api_key=LLM_API_KEY,
     base_url=LLM_BASE_URL,
     temperature=0,  # 评估需要确定性
+    max_tokens=MAX_TOKENS_AGENT,      # B7：只回 PASS / FAIL
     timeout=QUALITY_LLM_TIMEOUT,      # 🔴 2026-09-21：见上方共用说明
     max_retries=LLM_MAX_RETRIES,
 )

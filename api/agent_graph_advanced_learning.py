@@ -11,6 +11,7 @@ from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 from langchain_openai import ChatOpenAI
 from config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL_CHAT
+from token_config import MAX_TOKENS_AGENT   # B7 接线：中间步骤的单次上限（1024）
 from search_tools import web_search
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage,SystemMessage
@@ -21,7 +22,8 @@ llm = ChatOpenAI(
     model=LLM_MODEL_CHAT,
     api_key=LLM_API_KEY,
     base_url=LLM_BASE_URL,
-    temperature=0
+    temperature=0,
+    max_tokens=MAX_TOKENS_AGENT,   # B7
 )
 
 # ==================== 定义工具 ====================
@@ -82,9 +84,9 @@ llm_with_tools = llm.bind_tools(tools)
 
 
 # 为每个工具创建模型实例（用于子图）
-llm_search = ChatOpenAI(model=LLM_MODEL_CHAT, api_key=LLM_API_KEY, base_url=LLM_BASE_URL, temperature=0)
-llm_calc = ChatOpenAI(model=LLM_MODEL_CHAT, api_key=LLM_API_KEY, base_url=LLM_BASE_URL, temperature=0)
-llm_date = ChatOpenAI(model=LLM_MODEL_CHAT, api_key=LLM_API_KEY, base_url=LLM_BASE_URL, temperature=0)
+llm_search = ChatOpenAI(model=LLM_MODEL_CHAT, api_key=LLM_API_KEY, base_url=LLM_BASE_URL, temperature=0, max_tokens=MAX_TOKENS_AGENT)   # B7
+llm_calc = ChatOpenAI(model=LLM_MODEL_CHAT, api_key=LLM_API_KEY, base_url=LLM_BASE_URL, temperature=0, max_tokens=MAX_TOKENS_AGENT)     # B7
+llm_date = ChatOpenAI(model=LLM_MODEL_CHAT, api_key=LLM_API_KEY, base_url=LLM_BASE_URL, temperature=0, max_tokens=MAX_TOKENS_AGENT)     # B7
 
 # ==================== 定义全局 State ====================
 class AgentState(TypedDict):
@@ -222,7 +224,8 @@ def create_react_subgraph():
         model=LLM_MODEL_CHAT,
         api_key=LLM_API_KEY,
         base_url=LLM_BASE_URL,
-        temperature=0
+        temperature=0,
+        max_tokens=MAX_TOKENS_AGENT,   # B7
     )
     llm_react_with_tools = llm_react.bind_tools(tools)
 

@@ -21,6 +21,12 @@ from langchain_core.output_parsers import StrOutputParser
 
 load_dotenv()
 
+# ⚠️ **必须在 `load_dotenv()` 之后导入**：`token_config` 是在 **import 时**读 env 的
+#    （见其模块 docstring「不做热加载」）。放在 `load_dotenv()` 之前 ⇒ `.env` 里的
+#    `TOKEN_MAX_*` 会被**静默忽略**、用了代码默认值。本仓目前两者相等（没有这条 env），
+#    所以现在**看不出来** —— 正因为看不出来才要写死在正确的一侧。
+from token_config import MAX_TOKENS_ANSWER   # noqa: E402  # B7 接线：答案/评判类，2000
+
 # ==================== 配置 ====================
 # ⚠️ 凭据一律从环境变量读（`load_dotenv()` 已在上方调用，会向上找到仓根 `.env`）。
 #    此前这里是硬编码的默认口令，且该字面量在 `.secret-denylist` 黑名单里、本仓是 PUBLIC，
@@ -46,6 +52,10 @@ eval_llm = ChatOpenAI(
     api_key=os.getenv("LLM_API_KEY"),
     base_url=os.getenv("LLM_BASE_URL"),
     temperature=0,
+    # B7：本脚本 :127 生成"被评的答案"、:272 又当 RAGAS judge —— **两处都是长输出**，
+    # ⇒ 给答案档（2000）。⚠️ 给 1024 的话 judge 输出可能**被截断 ⇒ 评分静默失真**，
+    #    那比没有上限更坏（错数据看不出来）。
+    max_tokens=MAX_TOKENS_ANSWER,
 )
 
 # ⚠️ **embedding 保持 DashScope**（业务方 2026-09-21 明确）——

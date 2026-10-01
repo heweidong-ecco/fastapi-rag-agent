@@ -2,7 +2,7 @@
 
 | 项 | 内容 |
 |---|---|
-| **状态** | ⚰️ **遗留 / 未经裁决** —— **6 套 Agent 实现之一** |
+| **状态** | ⚰️ **遗留 / 未经裁决** —— **6 套 Agent 实现之一**<br>✅ 2026-10-01：`llm`（`:21`）接上 `MAX_TOKENS_AGENT`（`B7`） |
 | **对外提供** | 路由 `/agent/langgraph_chat` · `/agent/approve` |
 | **谁在用** | `api_v1_agent.py:12`（`from agent_graph import agent_graph`） |
 

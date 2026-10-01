@@ -12,6 +12,7 @@ from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 from langchain_openai import ChatOpenAI
 from config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL_CHAT
+from token_config import MAX_TOKENS_AGENT   # B7 接线：中间步骤的单次上限（1024）
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage,SystemMessage
 from datetime import datetime
@@ -36,11 +37,24 @@ class AgentState(TypedDict):
     thread_id: str          # 新增：当前会话的 thread_id
 
 # ==================== 初始化模型 ====================
+# 🔴 2026-10-01 补（🅗 `S12`）：本处原先**没有 `timeout` / `max_retries`** ——
+#    同型问题 `plan_execute.py:70-76` 早就修过，**这里漏了**。
+#    ⇒ **没 timeout = 上游挂了就一起挂着**；而 SDK 默认 `max_retries=2`
+#      ⇒ 一次失败**静默重试 2 次、烧 3 倍额度**，可这条链上本来就带 token 预算检查。
+# ⚠️ **秒数【不抄】 `plan_execute` 的 30/20/15**：那三处是**单步**（planner / executor / 质检各一次），
+#    这里是**多轮工具对话**（`:345` 每次 invoke 一轮，且带 MCP 工具 schema）。
+#    ⇒ 取 planner 的两倍 = **60s**：① 输出上限 1024，比 planner 那份 JSON 长；
+#      ② 工具 schema 更大 ⇒ 首 token 更慢。
+#    📌 **这个 60 是我的判断，不是业务裁定** —— 要改就改这一个数（就这一处用）。
+AGENT_LLM_TIMEOUT = 60
 llm = ChatOpenAI(
     model=LLM_MODEL_CHAT,
     api_key=LLM_API_KEY,
     base_url=LLM_BASE_URL,
-    temperature=0
+    temperature=0,
+    max_tokens=MAX_TOKENS_AGENT,     # B7：单次上限 1024
+    timeout=AGENT_LLM_TIMEOUT,       # S12
+    max_retries=1,                   # S12：⛔ 不用 SDK 默认的 2（会烧 3 倍额度）
 )
 # ==================== 导入 长期记忆Mem0 模块 ====================
 from memory_store import search_user_memory

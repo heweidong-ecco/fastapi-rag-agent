@@ -12,6 +12,7 @@ from db import search_similar_async, bm25_search_async
 from collections import defaultdict
 from langchain_openai import ChatOpenAI
 from config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL_FAST
+from token_config import MAX_TOKENS_ANSWER   # B7 接线：答案生成的单次上限（2000）
 import os
 
 import asyncio
@@ -49,7 +50,8 @@ class RAGPipeline:
             model=LLM_MODEL_FAST,
             api_key=LLM_API_KEY,
             base_url=LLM_BASE_URL,
-            temperature=0
+            temperature=0,
+            max_tokens=MAX_TOKENS_ANSWER,   # B7：答案生成，给足 2000
         )
 
     # ⚠️ 2026-09-20 删（§三·B8）：此处原有类属性 `preprocessor = DocumentPreprocessor()` ——

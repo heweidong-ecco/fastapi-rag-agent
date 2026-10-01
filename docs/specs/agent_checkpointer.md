@@ -2,7 +2,7 @@
 
 | 项 | 内容 |
 |---|---|
-| **状态** | 🟡 **地基在，但零测试 · 且有一处忽略配置** |
+| **状态** | 🟡 **地基在，但零测试 · 且有一处忽略配置**<br>✅ 2026-10-01：`llm`（`:21`）接上 `MAX_TOKENS_AGENT`（`B7`） |
 | **对外提供** | `build_checkpointer_agent()` · `checkpointer_agent` |
 | **谁在用** | `api_v1_agent.py:17` → 路由 **`/agent/memory_chat`** |
 
