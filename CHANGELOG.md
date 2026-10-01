@@ -8,6 +8,50 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- 🟢 **`scripts/ci-local.sh` —— 在本机复现 CI 那套环境**（2026-10-01）。
+
+  **为什么**：`8a5672b` 推上去 **CI 红、本地却绿**。查出根因**不是"CI 玄学"，是本地和 CI 是两套环境**：
+
+  | 轴 | 本机 | CI |
+  |---|---|---|
+  | **`.env`** | **有**（`LLM_MODEL_CHAT=deepseek-v4-flash`） | **⚠️ 没有** ⇒ 落回 `api/config.py:55` 的**代码默认值** `qwen-plus` |
+  | **Redis** | 默认**没有** | `redis:7` service 容器 |
+  | 依赖安装 | 本机 venv | 干净 ubuntu + `requirements.txt` |
+
+  ⇒ 一条测试断言「**兜底单价 ≥ 在用模型单价**」**在两种合法部署下答案相反**
+  （`assert 0.003 >= 0.008`），而**本地与基线的差集比对永远抓不到它**
+  —— **它在本机是绿的，压根不在"新增失败"里**。
+
+  **做法**：起 redis + **`rsync` 掉 `.env`** + **整块照抄 `ci.yml` 的 `run` 并 `bash -e` 执行**
+  （GitHub 执行 `run:` 就是这个方式）⇒ 连"改了 `ci.yml` 忘了同步本脚本"都不会发生。
+
+  ⛔ **不复现两条轴**：依赖安装（用你现有 venv）与 OS（macOS ≠ ubuntu）
+  —— **脚本运行时会自己打横幅声明"这次没复现什么"**，⛔ 别默认它等于 CI。
+
+  **判据（可打印）**：
+  * **数字对得上** ⇒ 跑出来 `139 passed, 3 skipped, 11 deselected`，**与 CI 日志逐字相同**
+  * **自证 `.env` 不在场** ⇒ 横幅打印 `LLM_MODEL_FAST = qwen-turbo`
+    （而本机 `.env` 里写的是 `deepseek-v4-flash`）
+  * ⭐ **红→绿实证** ⇒ 造一条依赖 `.env` 的探针：**直接跑 `1 passed`，走本脚本 `1 failed`**
+    （`AssertionError: 期望读到 deepseek-v4-flash，实际 qwen-plus`）
+    ⇒ **10-01 那条 CI 红的同型，现在在本地就被抓住了**
+
+- 🟢 **CI 打印"本次实际生效的配置"**（2026-10-01 · `.github/workflows/ci.yml` 的 `offline-tests`）。
+
+  那次红的定位**全靠反推**（要读到 `api/config.py:55` 才知道"CI 没有 `.env`"）。
+  ⇒ 现在同一个步骤里先打印 `LLM_MODEL_FAST/CHAT` · `.env` 在不在 · redis 通不通。
+  ⚠️ **打印与 pytest 共用同一个 `env:` 块** —— 所以打印出来的**就是 pytest 用的那套**。
+
+  **同时更正一处错话**（`docs/说明/测试.md` §五 → 新的 §5.1/§5.2）：
+  原文写「**反向不存在 —— CI 跑的是本地命令的子集**」—— **只对了一半**：
+  * **选哪些测试** ⇒ ✅ 是子集（CI 少跑 11 条）
+  * **跑在什么环境里** ⇒ 🔴 **不是** —— 同一批测试跑在**另一套环境**里
+
+  ⇒ **那句话读起来就是"本地绿 ⇒ CI 绿"的许可证。** 2026-10-01 正是栽在这一句上。
+  📄 该节现含三条轴对照表 + `ci-local.sh` 用法与判据。
+
 ### Changed
 
 - 🟢 **`B7` 接线：单次 token 上限【真的生效了】**（2026-10-01 · **①b Task 1**）。
@@ -41,6 +85,32 @@ All notable changes to this project will be documented in this file.
   ⇒ **权威清单改为 `api/test_max_tokens_wiring.py` 的 `EXPECTED_MAX_TOKENS`**（漏一个就红），⛔ 不再是那张表。
 
   📄 `docs/specs/token_tracker.md`（`①b` Task 1）· `docs/specs/token_config.md` · `docs/specs/agent_graph_advanced.md`
+- 🟢 **CI 的依赖安装不再拉 torch —— 与 Docker 同一套裁法**（2026-10-01 · 业务方指令）。
+
+  **为什么**：业务方指出「**不要给 GitHub 的 CI 的 requirements 拉 torch**」。
+  查证结论：**不是"又出来了"** —— `DEC-034 §🅱️`（2026-09-29）**只治了 Docker**（`api/Dockerfile:73`），
+  **CI 这条线从来没裁过**：`.github/workflows/ci.yml` 一直是**裸的**
+  `pip install -r api/requirements.txt` ⇒ `api/requirements.txt:59` 的 `sentence-transformers`
+  连带拉 **torch 554.6 MB**。
+
+  **做法**：把 `api/Dockerfile:73` 那行
+  `grep -vE '^(sentence-transformers|transformers|locust|ragas|datasets)'` 原样搬到 CI 的安装步骤
+  ⇒ **实测裁掉 5 行**（`locust`:54 · `sentence-transformers`:59 · `transformers`:61 · `ragas`:63 · `datasets`:100），
+  **100 → 95 行**；剩下唯一的 "torch" 是 `requirements.txt:58` 的**注释**（pip 不看注释）。
+  ⛔ **不动 `requirements.txt` 本身** —— 仓里仍只有一份清单（`DEC-019` 不破）。
+  ⚠️ **同一套正则在两个落点**（`api/Dockerfile:73` · `.github/workflows/ci.yml`）⇒ 改一处要两处一起改。
+
+  **判据（2026-10-01 实测，不是读代码）**：同一棵树 / 同一套 env / **无 `.env`** / 临时 redis，
+  用**导入拦截器**把这 5 个包变成 `ImportError`，前后各跑一遍离线全套：
+
+  | | 结果 |
+  |---|---|
+  | 对照组（不拦截） | `139 passed, 3 skipped, 11 deselected` |
+  | 实验组（拦截这 5 个） | `139 passed, 3 skipped, 11 deselected` |
+
+  ⇒ **逐字相同、零 `ImportError`** ⇒ 离线用例确实不碰这 5 个包。
+  ⚠️ **代价（已知并接受，与 Docker 那边同一条）**：CI 里**跑不了** RAGAS 评估 / 压测
+  —— 而这两件事本来就跑在有完整依赖的开发机上。
 
 - 🟢 **额度常量收口到 `api/token_config.py` 一处**（2026-10-01 · `B7` · **①a Task 2**）。
 
@@ -155,6 +225,50 @@ All notable changes to this project will be documented in this file.
   * 只 stage `.md` ⇒ `模块spec门 ⏭ 本次无 .py 改动`（**原来是假提示**）
   * 新增 `api/foo.py` 无 spec ⇒ 仍 `🔴 未通过 · 已阻止本次 commit`（**没改宽**）
   * 真仓 staged 是 `.py` ⇒ `凭据门 ✅ ｜ 链接检查 ✅ ｜ 孤儿检查 ✅ ｜ 模块spec门 ✅`
+- 🔴 **文档链接门被 worktree 副本打红，把【全仓任何 commit】拦死**（2026-10-01 · `scripts/check_doc_links.sh`）。
+
+  **病症**：`git worktree add` 出来的 worktree **住在 `.claude/worktrees/<名字>/`**，
+  而它是**整仓的一份副本**（本次实测带 **141 份 `.md`**）。检查器的 `os.walk(REPO)`
+  **只跳 `SKIP_DIRS` 里那几个目录**，**没跳 `.claude`** ⇒ **主检出扫自己时，把这份副本当成了自己的文档**：
+  * 副本里那些**旧路径**被报成 🔴 真断链 —— **实测「扫描 286 份 · 🔴 7 条」，7 条【全部】来自副本**；
+  * ⇒ 门非 0 ⇒ `pre-commit-gates.py` 的钩子 `return 2` ⇒ **拦住全仓任何 commit**。
+
+  ⚠️ **这道门此前从没被触发过** —— worktree 是 2026-10-01 才第一次出现在本仓。
+
+  **做法**：加 `prune()`，按 **路径前缀** `.claude/worktrees/` 剪枝，
+  ⭐ **两处 `os.walk` 共用它**（漏一处就是「半修」—— 副本文件名会灌进 `alive` 索引，
+  **反过来掩盖真问题**，正是本文件原有注释警告的那个失败模式）。
+
+  ⛔ **没有排整个 `.claude/`** —— `.claude/README.md` · `commands/handoff.md` · `commands/specs.md`
+  是**已入库、该继续查**的。⚠️ 也没有往 `SKIP_DIRS` 里塞 `"worktrees"` ——
+  那是**按目录名**匹配，会误伤仓里任何叫 `worktrees` 的真目录。
+
+  **判据（可打印）**：
+  * **夹具 · 同一份语料 · 新旧两版对照** ⇒ 旧版 `扫描 4 份 · 🔴 2` → 新版 `扫描 3 份 · 🔴 1`：
+    少的那份是 `.claude/worktrees/fake/dup.md`（**该跳过**）；
+    留下的那份是 `.claude/README.md`（**该继续报**）⇒ **两个方向都证到，不是"排多了"**。
+  * **真语料** ⇒ 主检出旧版 `扫描 286 份 · 🔴 7`（全在副本里）→ 本仓自己的内容 `扫描 141 份 · 🔴 0`
+
+- 🔴 **`scripts/check_secrets.sh` 在「没有 `.env`」这条路径上，把判据本身打没了**（2026-10-01 · 顺带修）。
+
+  两处 `echo "…"` 的**双引号里用了 ASCII 反引号**（`:207` 与 `:256`）：
+
+  ```bash
+  echo "   ⇒ 【不得当作通过】(判据是 `通过 ⇐ 执行 ∧ ¬命中`;本节点未执行 ⇒ 不成立)"
+  ```
+
+  shell 把反引号当**命令替换** ⇒ 真去执行那段话 ⇒ 打出 `通过: command not found`，
+  并且**消息里那一段被换成空**：`⇒ 【不得当作通过】(判据是 ;本节点未执行 ⇒ 不成立)`。
+
+  🔴 **两条都藏在「没有 `.env`」这条错误路径里**（`:207` 正式告警 · `:256` 部分覆盖降级）
+  —— **没人走过，所以没人发现**。
+  📌 正是本仓复盘第 6 条那个形状：**命令里写中文，用「」不用 ASCII 引号。**
+
+  ✅ 改用「」并就地加注释。**判据（可打印 · 隔离目录里跑 · ⛔ 不碰真 `.env`）**：
+  * `:207` 修前 ⇒ `line 207: 通过: command not found` ＋ `(判据是 ;本节点未执行 ⇒ 不成立)`
+  * `:207` 修后 ⇒ `(判据是「通过 ⇐ 执行 ∧ ¬命中」;本节点未执行 ⇒ 不成立)` —— 文字完整、无报错
+  * `:256` 同型：`SECRETS_GATE_ALLOW_NO_ENV=1` 那条路，**修前 / 修后各跑一次**
+  * 全仓扫 ``grep -rn 'echo ".*`' scripts/ .claude/hooks/`` ⇒ **只剩 `list_endpoints.sh:25` 一条注释**
 
 - 🔴 **删掉一条【我自己发明的】守卫测试 + 更正一句流传了很久的错注释**（2026-10-01 · 修 CI 红）。
 

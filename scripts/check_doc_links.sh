@@ -60,9 +60,37 @@ REPO = os.getcwd()
 # ---------- 1. 收集 .md ----------
 SKIP_DIRS = {".git", "node_modules", "__pycache__", ".pytest_cache", "venv",
              "venv-ragas", ".venv", ".mypy_cache", "htmlcov"}
+
+# 🔴 2026-10-01：**必须再按【路径前缀】排掉 `.claude/worktrees/`**。
+#    worktree(`git worktree add`)是**整仓的一份副本** —— 不排掉的话,主检出扫自己时
+#    会把这 141 份副本当成自己的文档,后果是**两个方向都错**：
+#      · 副本里那些**旧路径**被报成 🔴 真断链（实测 7 条,**全部**来自副本）
+#        ⇒ 门永远非 0 ⇒ `pre-commit-gates.py` 的钩子 `return 2` ⇒ **拦住全仓任何 commit**;
+#      · 副本还会把文件名灌进下面的 `alive` 索引 ⇒ **反过来掩盖真问题**
+#        （正是本文件 :73 那条警告说的失败模式 —— 索引被副本稀释）。
+#    ⚠️ **排的是 `.claude/worktrees/` 这个前缀,⛔ 不是整个 `.claude/`** ——
+#       `.claude/README.md` · `.claude/commands/handoff.md` · `commands/specs.md`
+#       是**已入库、该继续查**的（共 3 份）。⚠️ 也不能往 `SKIP_DIRS` 里塞 `"worktrees"`
+#       —— 那是**按目录名**匹配,会连带排掉仓里任何叫 worktrees 的真目录。
+WORKTREES_DIR = os.path.join(REPO, ".claude", "worktrees")
+
+
+def prune(dirs, root):
+    """给 `os.walk` 用的目录剪枝 —— **两处 walk 必须共用它**（漏一处就是半修）。"""
+    out = []
+    for d in dirs:
+        if d in SKIP_DIRS:
+            continue
+        full = os.path.join(root, d)
+        if full == WORKTREES_DIR or full.startswith(WORKTREES_DIR + os.sep):
+            continue
+        out.append(d)
+    return out
+
+
 docs = []
 for root, dirs, files in os.walk(REPO):
-    dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+    dirs[:] = prune(dirs, root)
     for f in files:
         if f.endswith(".md"):
             docs.append(os.path.join(root, f))
@@ -77,7 +105,7 @@ GENERIC_NAMES = {"README.md", "readme.md", "index.md", "CLAUDE.md", "LICENSE.md"
 archived = {}      # basename -> 归档夹里的路径（🟡）
 alive = {}         # basename -> 仓里任何位置的路径（⚫ 名字提及，非路径）
 for root, dirs, files in os.walk(REPO):
-    dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+    dirs[:] = prune(dirs, root)
     in_archive = os.path.basename(root) in ARCHIVE_DIRNAMES
     for f in files:
         if not f.endswith(".md") or f in GENERIC_NAMES:
