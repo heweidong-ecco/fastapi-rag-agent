@@ -135,6 +135,30 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- 🔴 **文档链接门被 worktree 副本打红，把【全仓任何 commit】拦死**（2026-10-01 · `scripts/check_doc_links.sh`）。
+
+  **病症**：`git worktree add` 出来的 worktree **住在 `.claude/worktrees/<名字>/`**，
+  而它是**整仓的一份副本**（本次实测带 **141 份 `.md`**）。检查器的 `os.walk(REPO)`
+  **只跳 `SKIP_DIRS` 里那几个目录**，**没跳 `.claude`** ⇒ **主检出扫自己时，把这份副本当成了自己的文档**：
+  * 副本里那些**旧路径**被报成 🔴 真断链 —— **实测「扫描 286 份 · 🔴 7 条」，7 条【全部】来自副本**；
+  * ⇒ 门非 0 ⇒ `pre-commit-gates.py` 的钩子 `return 2` ⇒ **拦住全仓任何 commit**。
+
+  ⚠️ **这道门此前从没被触发过** —— worktree 是 2026-10-01 才第一次出现在本仓。
+
+  **做法**：加 `prune()`，按 **路径前缀** `.claude/worktrees/` 剪枝，
+  ⭐ **两处 `os.walk` 共用它**（漏一处就是「半修」—— 副本文件名会灌进 `alive` 索引，
+  **反过来掩盖真问题**，正是本文件原有注释警告的那个失败模式）。
+
+  ⛔ **没有排整个 `.claude/`** —— `.claude/README.md` · `commands/handoff.md` · `commands/specs.md`
+  是**已入库、该继续查**的。⚠️ 也没有往 `SKIP_DIRS` 里塞 `"worktrees"` ——
+  那是**按目录名**匹配，会误伤仓里任何叫 `worktrees` 的真目录。
+
+  **判据（可打印）**：
+  * **夹具 · 同一份语料 · 新旧两版对照** ⇒ 旧版 `扫描 4 份 · 🔴 2` → 新版 `扫描 3 份 · 🔴 1`：
+    少的那份是 `.claude/worktrees/fake/dup.md`（**该跳过**）；
+    留下的那份是 `.claude/README.md`（**该继续报**）⇒ **两个方向都证到，不是"排多了"**。
+  * **真语料** ⇒ 主检出旧版 `扫描 286 份 · 🔴 7`（全在副本里）→ 本仓自己的内容 `扫描 141 份 · 🔴 0`
+
 - 🔴 **`scripts/check_secrets.sh` 在「没有 `.env`」这条路径上，把判据本身打没了**（2026-10-01 · 顺带修）。
 
   两处 `echo "…"` 的**双引号里用了 ASCII 反引号**（`:207` 与 `:256`）：
