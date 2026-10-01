@@ -54,6 +54,68 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- 🟡 **`B10` 全局日级 token 总额【有函数了，⛔ 但还拦不住】**（2026-10-01 · **①b Task 3**）。
+
+  ⚠️ **先读这一句，别被后面的一堆 ✅ 误导**：`check_global_daily_budget()` **没有任何调用点**
+  ⇒ **本次改动【不产生任何行为变化】**。接线在 `B11`（`①b` Task 4）。
+  **判据（可打印）**：`grep -rn "check_global_daily_budget" api/ --include="*.py"`
+  ⇒ **只命中定义处 + 测试**；命中不到任何 `api_v1_*.py` = **它还没生效**。
+
+  📌 **这是同一个陷阱的第三次**：`B7` 之前（常量建好没接上）· `B8` 之前（有常量没判定函数）·
+  **`B10` 现在（有判定函数没调用点）**。⇒ 本条措辞刻意不写"已生效"。
+
+  **做了什么**：`get_global_daily_token_usage()` + `check_global_daily_budget(estimated_tokens=0)`
+  （`api/token_tracker.py`）—— 查 `token_usage_logs`，窗口 `created_at >= CURRENT_DATE`。
+
+  🔴 **「全局」的全部含义 = SQL 里没有 `user_name`。**
+  漏了它就退化成「单用户」，而**返回值正常、只是偏小、没有任何报错** ⇒
+  本仓**永远不会有全局额度**却没人事先发现。
+  ⇒ 拆成**独立函数**（⛔ 不做成 `user_name=None` 参数）+ **AST 配对守卫**
+  （`api/test_global_daily_budget_offline.py`：单用户那条**必须有** `user_name`，全站那条**必须没有**）。
+
+  ✅ **阈值由业务方 2026-10-01 裁定 = `1,000,000` /天**（≈ ¥1–2/天 · = 10 个 `premium` 满额）。
+  ⇒ **关掉了源文档 `B10` 里那个 `______（业务判断，我不替你定）` 的空。**
+  ⚠️ 选它的另一个理由：`5,000,000` 太松 ⇒ **熔断永远触发不了** ⇒ **验收时无法证明它成立**。
+  📄 备选 / 评估 / 反悔成本 ⇒ `docs/decisions/DEC-042-B10全局日级阈值与fail-open.md`
+
+  ⚠️ **fail-open 是有意的**（查库失败 ⇒ 返回 `0.0` ⇒ 放行），**且本维度比 `B8` 更要紧**：
+  额度是**成本控制**、不是安全边界，但**全局 fail-closed = 一次 DB 抖动全站 429**。
+  ⛔ 与 `api/deps.py` 鉴权的 fail-closed **方向相反是有意的**，别「顺手统一」。
+
+  **一处与计划样例的偏离**：计划签名收了 `estimated_tokens` 却**在函数体里没用**
+  （「签名看着对、行为是死的」）⇒ 已让它**真的参与判定**，并加测试钉住。
+
+  **证据（可打印）**：
+
+  ```bash
+  pytest api/test_global_daily_budget_offline.py -q     # 12 passed（无 marker ⇒ 进 CI）
+  pytest api/ -m "not integration and not needs_db" -q  # 15 failed / 158 passed / 3 skipped
+  ```
+
+  15 条失败**全是** `redis.ConnectionError`（本机没起 Redis），与改动前同集合。
+  📌 **条数对账**（⛔ 别只看"通过数涨了"）：无 `B8`/`B10` 三文件时收集 **145** 条
+  ⇒ `+11 +8`（B8）⇒ 164 ⇒ `+12`（本任务）⇒ **176** = 实跑 `158 + 15 + 3`。
+
+  🔴 **那条 SQL 真执行过**（这是离线测试**盖不住**的一层）：
+  离线测试只 `AST` 取字符串 ⇒ **表名/列名/语法错它一律发现不了**。
+  本机 PG 没起（`nc -z localhost 5432` 不通），改用 **stdlib `sqlite3`** 跑
+  —— **字符串是从函数里 AST 取的，⛔ 不是我重打的**：
+  全站今日 = **12000**（1000 alice + 2000 bob + 4000 alice + 5000 admin）·
+  对照单用户 alice = 5000 · bob = 2000 ⇒ **跨用户求和为真**，且**昨天那条 9999 没被算进今日**。
+  ⛔ **没证明** PG 下的行为；补这个口子的是新增的 `api/test_global_daily_budget.py`（`needs_db`，本机起 PG 后跑）。
+
+  **变异验证（证明 4 条守卫真会红）**：
+
+  | 变异 | 变红的测试 |
+  |---|---|
+  | 全局 SQL 加回 `WHERE user_name = %s` | `test_global_query_has_no_user_filter` · `test_the_two_daily_queries_are_actually_different` |
+  | 全局 SQL 去掉 `CURRENT_DATE` | `test_global_query_is_today_only` |
+  | 阈值写死在函数里 | `test_limit_comes_from_token_config` |
+  | 删掉 `estimated_tokens` 的判定 | `test_estimated_tokens_can_trip_it` |
+
+  **四处原样不变**（`①b` Task 3 只加函数，⛔ 不动既有行为）：`get_daily_token_usage` ·
+  `get_session_token_usage` · 7 个 `B8` 调用点 · `token_config.GLOBAL_DAILY_TOKEN_LIMIT` 的**值**。
+
 - 🟢 **`B8` 会话级 token 上限【能拦了】**（2026-10-01 · **①b Task 2**）。
 
   **为什么**：`R1.2` 会话级限额此前**只有常量**（`SESSION_TOKEN_LIMIT = 50000`）——

@@ -792,6 +792,75 @@ def check_session_token_budget(user_name: str, thread_id: str,
     return True, f"会话预算充足（剩余 {remaining:.0f} tokens）"
 
 
+# ==================== B10 · 全局日级 token 总额（①b Task 3） ====================
+
+def get_global_daily_token_usage() -> float:
+    """今日【全站所有用户合计】的 token —— **不带任何 `user_name` 过滤**。
+
+    ## 为什么它必须是个【独立函数】，而不是给 `get_daily_token_usage` 加个开关
+
+    「全局」的全部含义就是**没有 `WHERE user_name`**。做成参数（`user_name=None`）
+    的话，**漏传**就会静默退化成"某个用户"，且返回值和报错**都正常** ——
+    和 `B8` 那个「`thread_id` 默认值是 `"default"`」是**同一类**故障：
+    它不会红，只会**偏小**。⇒ 拆成两个函数，让 `test_global_daily_budget_offline.py`
+    能**静态**钉住「这条 SQL 里不许有 `user_name`」。
+
+    ⚠️ **为什么单独要这一层**：`admin` 的个人日上限现在也是有限值（`DEC-040`），
+       **但那是另一个东西** —— **per-user 检查永远看不到「大家加起来超了」**。
+
+    ⚠️ **含 admin、含所有角色** —— 按 `SUM(所有行)` 算，⛔ **不是**"按角色上限求和"。
+       （`后端补齐清单` `B11` 我方建议④：否则 admin 一个人能吃完全局额度而熔断不响。）
+
+    `Task 4`（`B11`）未接之前，本函数**没有调用点** —— ⛔ **别读成"全局限额已生效"**。
+    """
+    from db import get_db
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT COALESCE(SUM(total_tokens), 0)
+                       FROM token_usage_logs
+                       WHERE created_at >= CURRENT_DATE"""
+                )
+                return cur.fetchone()[0]
+    except Exception as e:
+        print(f"[Token] 查询全局当日用量失败: {e}")
+        # fail-open：与 B8 同一取舍，但**代价更大**（这里是"全站"）——
+        # 见 check_global_daily_budget 的说明。
+        return 0.0
+
+
+def check_global_daily_budget(estimated_tokens: int = 0) -> tuple[bool, str]:
+    """全站日级预算判定。返回 `(是否放行, 原因)`。
+
+    与 `check_session_token_budget` / `check_token_budget_detail` **同构**：
+    **不含** `record_intercept`（拦截记录由调用方负责，它才知道自己的 tool_name）。
+
+    ## 🔴 fail-open，**这是有意的** —— 并且这里比 `B8` 更要紧
+
+    `get_global_daily_token_usage` 查库失败 ⇒ 返回 0.0 ⇒ 本函数**放行**。
+    额度是**成本控制**，**不是安全边界** ⇒ PG 抖一下不该把服务打死。
+    ⚠️ 但"全站"这个维度让 fail-closed 的代价**远大于**会话级：
+       fail-closed 的话，**一次 DB 抖动 = 所有人的请求全 429**。
+    📌 与 `api/deps.py` 的鉴权（fail-closed）**方向相反是有意的**，别"顺手统一"。
+
+    触顶动作 = **直接拒绝**（`B11` 要素②，业务方 2026-09-30 已裁）
+    ⇒ 调用方抛 `AppException(ErrorCode.QUOTA_EXCEEDED, why)`。
+
+    ⚠️ **本函数目前【没有调用点】** —— 接线是 `Task 4`（`B11`）。
+    """
+    from token_config import GLOBAL_DAILY_TOKEN_LIMIT
+    used = get_global_daily_token_usage()
+    remaining = GLOBAL_DAILY_TOKEN_LIMIT - used
+    if remaining <= 0:
+        return False, (f"今日全站额度已用完（已使用 {used:.0f} / "
+                       f"上限 {GLOBAL_DAILY_TOKEN_LIMIT:.0f} tokens），请明日再试")
+    if estimated_tokens > 0 and estimated_tokens > remaining:
+        return False, (f"预估消耗 {estimated_tokens:.0f} tokens 超过全站今日剩余 "
+                       f"{remaining:.0f} tokens")
+    return True, f"全站预算充足（剩余 {remaining:.0f} tokens）"
+
+
 # ==================== 预算通知 ====================
 
 BUDGET_WARNING_THRESHOLD = 0.8  # 80% 阈值
