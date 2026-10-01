@@ -125,8 +125,16 @@ class TokenBucketLimiter:
 
 # 新增 实现“全局 + 用户”两层令牌桶防护
 
-# 全局限流器：每秒100次，桶容量150（允许一定突发）
-global_limiter = TokenBucketLimiter(rate=100.0, capacity=150)
+# ⚠️ 2026-10-01 改（🅗 S6）：参数从**本文件写死**改为从 `token_config` 取 ——
+#    它们与额度类常量同型（都是"写死的策略参数"）⇒ 收口到一处，便于统一看/统一调。
+#    ⛔ 行为不变：默认值与原来逐字相同（100/150 · 3/20）。
+from token_config import (
+    GLOBAL_LIMIT_RATE, GLOBAL_LIMIT_CAPACITY,
+    USER_LIMIT_RATE, USER_LIMIT_CAPACITY,
+)
 
-# 用户级限流器：每秒3次，桶容量20
-user_limiter = TokenBucketLimiter(rate=3.0, capacity=20)
+# 全局限流器：每秒 GLOBAL_LIMIT_RATE 次，桶容量 GLOBAL_LIMIT_CAPACITY（允许一定突发）
+global_limiter = TokenBucketLimiter(rate=GLOBAL_LIMIT_RATE, capacity=GLOBAL_LIMIT_CAPACITY)
+
+# 用户级限流器：每秒 USER_LIMIT_RATE 次，桶容量 USER_LIMIT_CAPACITY
+user_limiter = TokenBucketLimiter(rate=USER_LIMIT_RATE, capacity=USER_LIMIT_CAPACITY)

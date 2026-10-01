@@ -2,10 +2,10 @@
 
 | 项 | 内容 |
 |---|---|
-| **状态** | 🟡 **可用，但它是【三套额度口径】的其中一套** —— 见下 ⚠️<br>🔵 **改造中**：本文件下方有 **实施计划 ①a**（把散在 4 个文件的额度常量收口） |
+| **状态** | 🟡 **可用，但它是【三套额度口径】的其中一套** —— 见下 ⚠️<br>🟢 **①a 已落地（2026-10-01）**：额度常量已收口到 `api/token_config.py`（本文件**只剩同名别名**）· 本文件下方 **实施计划 ①a** 已执行完<br>⬜ **①b 未开工**（B8 会话级 / B10 全局日级 / B11 熔断 / 决策一落地） |
 | **对外提供** | `record_usage()` · `record_cost()` · `check_multilevel_budget()` · `check_token_budget_detail()` · `get_token_budget_info()` · 9 个汇总函数 |
 | **谁在用** | `permission`（取角色）· `agent_graph_advanced.py:239`（唯一调多级预算的地方）· `cost_dashboard.py` · 各 `api_v1_*.py` |
-| **规模** | 743 行 |
+| **规模** | 744 行 |
 
 ## ✅ 做了什么
 
@@ -20,7 +20,7 @@
 ## 🟡 做到哪 / 缺什么
 
 - 🔴 **额度常量散在 4 个文件 6 处**（本文件的 `ROLE_TOKEN_BUDGET` / `MAX_THREAD_COST` / `MAX_SINGLE_CALL_COST` / `PRICING`、`permission.ROLE_QUOTA`、`plan_execute.PLAN_TOTAL_BUDGET_SECONDS`）
-- 🔴 **`"admin": float("inf")`**（`:290`）⇒ **admin 永不触顶** ⇒ 全局日级必须独立于角色统计
+- ✅ ~~🔴 **`"admin": float("inf")`**~~ ⇒ **2026-10-01 已去**（`DEC-040`）：现在是有限值 = `premium` = 100000/天。<br>⚠️ **但"全局日级"仍是另一个东西**（B10，在 `①b`）—— per-user 检查**永远看不到「大家加起来超了」**
 - 🔴 **没有「会话级」上限**（`_thread_summary` 内存里按 thread 汇总了，但**没有上限判定**）
 - 🔴 **没有「全局日级」**（所有方法第一参都是 `user_name`，**无跨用户记账键**）
 - ⬜ **零测试覆盖**（`docs/说明/测试.md` §六 **#8**）
@@ -34,15 +34,17 @@
 | 🔴 **「这个文件管所有配额」** | ⛔ **不是** —— 另有 `permission.ROLE_QUOTA`（**请求次数**）与 `quota_limiter.py`（**每日次数**）。**三套口径并存**，`DEC-029` 实测**差 35 倍** |
 | ⚠️ **「两个单位混着 ⇒ 是 bug」** | 🟢 **不是** —— 第一二级（元）与第三级（token）**量纲本来就不同**，代码注释 `:665` 明说「**别统一掉**」 |
 | ⚠️ **「`ROLE_TOKEN_BUDGET` 就是最终日限额」** | ⚠️ **只对 `_invoke_llm` 那条链**。**挂多级预算的只有 `/agent/mcp_chat` 一条**（`check_multilevel_budget` 全仓唯一调用点在 `agent_graph_advanced.py:239`）⇒ **其他链全无预算** |
+| ⚠️ **「本文件定义着 `PRICING` / `ROLE_TOKEN_BUDGET` / `MAX_*_COST`」** | 🔴 **2026-10-01 起【只是别名】** —— 真值在 `api/token_config.py`，本文件**顶部 import 进来**（`PRICING is token_config.MODEL_PRICING` → `True`）。⇒ **改价改额度请去 `token_config.py`**，改这里没用（会被 import 覆盖） |
 
 ## 关联
 
-`docs/specs/quota_limiter.md`（**次数**那套）· `docs/specs/permission.md`（⏳ 待建）·
-`DEC-029`（两套口径）· `后端补齐清单` **B7/B8/B10/B11/B13**
+`docs/specs/token_config.md`（**常量的真身**）· `docs/specs/quota_limiter.md`（**次数**那套）·
+`docs/specs/permission.md`（⏳ 待建）·
+`DEC-029`（两套口径，**已由 `DEC-040` 收口**）· `后端补齐清单` **B7/B8/B10/B11/B13**
 
 ---
 
-# 🔵 实施计划 ①a · **额度收口**（2026-09-30 立 · 待执行）
+# ✅ 实施计划 ①a · **额度收口**（2026-09-30 立 · **2026-10-01 已执行完**）
 
 > **来源**：`后端补齐清单-待裁-20260929.md` 的 **B12 · B7 · 决策一**（**业务方已逐条裁定**）。
 > **范围**：只做**两件【不改行为】的事** + 一条决策记录。
@@ -117,7 +119,7 @@
 在 `docs/decisions/DEC-029-两套配额口径不一致.md` 末尾加：
 
 ```markdown
-> ✅ **2026-09-30 收口**：本决策的「乙/丙 未做」状态**已由 `DEC-040`（统一到 token 一套）终结** ——
+> ✅ **2026-10-01 收口**：本决策的「乙/丙 未做」状态**已由 `DEC-040`（统一到 token 一套）终结** ——
 > 见 `docs/decisions/DEC-040-额度统一到token一套.md`。
 ```
 
@@ -245,7 +247,7 @@ python -m pytest api/test_error_contract.py -q
 def _rate_limited_payload(retry_after: int = 60) -> dict:
     """全局限流触发时的响应体（抽成纯函数 ⇒ 可单测，不必真打 Redis）。
 
-    ⚠️ 2026-09-30 修：此处原写 `"error": "Internal server error"` ——
+    ⚠️ 2026-10-01 修：此处原写 `"error": "Internal server error"` ——
        状态码是 429、文案却说"内部错误" ⇒ 调用方会以为**系统坏了**，
        而实际是**自己发太快**。这正是 `通用方法 §7.1` R3.3 要防的。
     """
@@ -307,7 +309,7 @@ git commit -m "fix(错误契约): B12 —— 429/503 文案不再说'内部错�
 
 ## Task 2 · **B7** · 新建 `api/token_config.py`，把额度常量收口
 
-> ### ⚠️ **2026-09-30 追加：本 Task 顺带并入 3 条**（`/specs` 核账挖出的 · 见 `待办总表` 🅗 的 `S4`–`S6`）
+> ### ⚠️ **2026-09-30 追加 / 10-01 已做：本 Task 顺带并入 3 条**（`/specs` 核账挖出的 · 见 `待办总表` 🅗 的 `S4`–`S6`）
 >
 > ⛔ **不另开轮次** —— 它们都落在**同一个新文件**上，分批做等于**改两遍 `token_config.py`**。
 >
@@ -363,7 +365,7 @@ python -m pytest api/test_token_config.py -q     # → ModuleNotFoundError: toke
 - [ ] **Step 3: 建 `api/token_config.py`**
 
 ```python
-"""额度配置的【唯一落点】（B7 · 2026-09-30 立）。
+"""额度配置的【唯一落点】（B7 · 2026-10-01 落盘）。
 
 为什么建这个文件：在此之前，额度类常量**散在 4 个文件 6 处**，且**单位混着**：
   · `permission.ROLE_QUOTA`（**次数**）
@@ -406,7 +408,7 @@ GLOBAL_DAILY_TOKEN_LIMIT = _int("GLOBAL_DAILY_TOKEN_LIMIT", 1_000_000)  # B10
 ROLE_DAILY_TOKEN = {
     "free": _int("DAILY_TOKEN_FREE", 10_000),
     "premium": _int("DAILY_TOKEN_PREMIUM", 100_000),
-    # ✅ 2026-09-30 裁：admin = premium，⛔ 不再是 float("inf")
+    # ✅ 2026-09-30 裁（实施 2026-10-01）：admin = premium，⛔ 不再是 float("inf")
     "admin": _int("DAILY_TOKEN_ADMIN", 100_000),
 }
 
@@ -635,7 +637,7 @@ git commit -m "refactor(配额): 决策一落地 —— 次数配额降级，统
 
 ---
 
-# 🔵 实施计划 ①b · **限额与熔断**（2026-09-30 立 · 待执行）
+# 🔵 实施计划 ①b · **限额与熔断**（2026-09-30 立 · 待执行 ← ⭐ **下一步**）
 
 > **来源**：`后端补齐清单-待裁-20260929.md` 的 **B8 · B10 · B11 · B13 · 决策一（实现）**；
 > 以及 `LLM模型路由与额度策略-待裁-20260930.md` 的 **L2**（十几个 model 顺带）。

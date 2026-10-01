@@ -5,7 +5,7 @@
 | **状态** | 🟡 **可用，且是生产链** —— 但 🔴 **有两处实锤缺陷**（见下）<br>🔵 **改造中**：`B7` 要动它的 `llm`（`:39`，现在**没有 `max_tokens`**） |
 | **对外提供** | `build_mcp_agent()`（返回编译好的图，`:288`）· `mcp_session()` · `get_mcp_tools()` · `call_mcp_tool_with_cache()` |
 | **谁在用** | `api_v1_agent.py:450` 的 `POST /agent/mcp_chat`（**三代 Agent**） |
-| **规模** | 400 行 |
+| **规模** | 407 行 |
 
 ## ✅ 做了什么
 
@@ -30,11 +30,11 @@
 | 看代码会以为 | 实际 |
 |---|---|
 | 🔴 **① 这是"进阶示例"** | ⛔ **它是生产实现** —— 模块 docstring 第 2 行写着「LangGraph **进阶示例**」，<br>但它就是 **`POST /agent/mcp_chat`（三代 Agent）的图本体**。<br>📌 **`agent_graph.py` 的 docstring 反而老老实实**。名字与自述**都不可信**，**看谁 import 它**。 |
-| 🔴 **② 记账记的是实际模型** | ⛔ **不是 —— `model=` 写死成 `"qwen-turbo"`**（`:316` `:364`），而 `.env` 里实际是 `deepseek-v4-flash`。<br>**完整影响链**（已逐环核实）：<br>`record_usage(model="qwen-turbo")` ⇒ `PRICING.get("qwen-turbo")` = 0.003/0.006<br>⇒ 写进 `token_usage_logs.cost` 的是**按 qwen-turbo 单价算的钱**<br>⇒ `get_thread_cost()`（`:702`）`SELECT SUM(cost) … WHERE thread_id=%s`<br>⇒ **`check_multilevel_budget` 第二级 `MAX_THREAD_COST`（单位【元】）拿它比**<br>⇒ 🔴 **连"单次/单线程花费上限"这个拦截都是拿错的数在判。**<br>📌 ⚠️ **`PRICING` 表里【根本没有 `deepseek` 条目】**（实测）⇒ 这条路永远走不到正确的价。<br>✅ **对照**：`plan_execute.py:154` 用的是 `getattr(llm, "model_name", …)`（**从对象取，对的**）；`embedding_client.py:32` 也对。<br>⇒ **同一个仓里两种写法，一个对一个错** —— 错的 3 处是 `agent_graph_advanced.py:316/364` + **`agent_checkpointer.py:58`**。<br>🔴 **token 数是对的**（`usage.input_tokens` 是真的）⇒ **错的只有【钱】那一维**。 |
+| ✅ **② 记账记的是实际模型** | **2026-10-01 已修**（`🅗 S4`+`S5`）。原状：`model=` **写死成 `"qwen-turbo"`**（`:316` `:364`），而 `.env` 里实际是 `deepseek-v4-flash`。<br>**当时的完整影响链**：`record_usage(model="qwen-turbo")` ⇒ `PRICING["qwen-turbo"]` = 0.003/0.006<br>⇒ 写进 `token_usage_logs.cost` 的是**按 qwen-turbo 单价算的钱** ⇒ `get_thread_cost()`（`:702`）<br>⇒ **`check_multilevel_budget` 第二级 `MAX_THREAD_COST`（单位【元】）拿它比** ⇒ 🔴 **连拦截都是拿错的数在判**。<br>✅ **现状**：改成 `getattr(…, "model_name", …)`（`plan_execute.py:154` 的写法，**从对象取**），且 `MODEL_PRICING` **已补 `deepseek-v4-flash`**。<br>📌 **一处细节**（`agent_graph_advanced.py:366`）：记的是 **`llm_with_tools`**（`:345` 实际调用的那个），不是模块级的 `llm` —— 实测 `llm.bind_tools(...)` 后 `.model_name` 仍是 `deepseek-v4-flash`。<br>⚠️ **仍是近似**：单价**不区分缓存命中** ⇒ 偏高估（偏保守）。 |
 | 🔴 **③ 超预算会被拒** | ⛔ **不会 —— 是【软拦截】**（`:244-251`）：超预算时**塞一条 `ToolMessage` 文本提示**，<br>**HTTP 仍是 200**，只有 **LLM 自己能看到**那句"⚠️ 预算拦截" ⇒ **调用方在响应里看不出"被拒了"**。<br>📌 唯一的**硬拒绝**是该端点上的依赖 `check_budget`（`api_v1_agent.py:423-433`，抛 `AppException(QUOTA_EXCEEDED)`）——<br>⚠️ **但它判的是【用户每日 token 预算】，不是这一条**。<br>⇒ **"预算拦住了"这句话，在这个文件里只对 LLM 成立。** |
 | ⚠️ **④ `should_continue` 跟 `agent_graph.py` 里那个是一回事** | ⛔ **不是** —— 本文件的是一个**内嵌在 `build_mcp_agent()` 里的局部函数**（`:377`），<br>返回值是 **`"tools"` / `"chat"`**；而 `agent_graph.py:95` 那个返回 **`"approval"` / `"tools"` / `END`**。<br>**同名、不同语义、不同作用域。** ⚠️ 搜 `should_continue` 会同时命中两个。 |
 | ⚠️ **⑤ 「MCP 会话是池化的」** | ⛔ **池化已移除**（2026-09-20）—— 但文件里**同时留着"曾经的方案是全局单例"那段叙述**（`:76-78`）<br>和"会话池已移除"的说明（`:83-105`）。**读开头那几行容易读成当前实现。**<br>✅ 现状：**谁调用，谁在自己 task 内开关**（`:117` `mcp_session`）。 |
-| ⚠️ **⑥ `model="qwen-turbo"` 是"用了便宜的模型"** | ⛔ **那只是记账时的标签，不影响真调用** —— 真模型是 `llm`（`:39`，取 `LLM_MODEL_CHAT`）。<br>⇒ **改那个字符串不会让服务换模型，只会改【单价口径】**。 |
+| ⚠️ **⑥ 记账的 `model=` 是"用了那个模型"** | ⛔ **那只是记账时的标签，不影响真调用** —— 真模型是 `llm`（`:39`，取 `LLM_MODEL_CHAT`）。<br>⇒ **换标签不会让服务换模型，只会改【单价口径】**。✅ 2026-10-01 起标签已从对象取（见 ⚠️②）。 |
 
 ## 关联
 
@@ -52,7 +52,7 @@
 >
 > | # | 事 | 裁定 | 落点 / 注意 |
 > |---|---|---|---|
-> | **1** | 🔴 **修 3 处 `model="qwen-turbo"` 硬编码** | ✅ **修** | `agent_graph_advanced.py:316` · `:364` · **`agent_checkpointer.py:58`**<br>⇒ 改成 **`getattr(llm, "model_name", None) or getattr(llm, "model", "unknown")`**（**照抄 `plan_execute.py:154`**，别自己写） |
-> | **2** | 🔴 **`PRICING` 表补 `deepseek` 条目** | ✅ **补** | 落点：`token_config.py` 的 `MODEL_PRICING`（**①a 的 Task 2 会建它** ⇒ 并进那一批）<br>⚠️ **必须与 #1 同批** —— 只修 #1 不补价 ⇒ 落到 `_DEFAULT_PRICING` 兜底价 ⇒ **比"明确配一个"更糟**（看不出来是兜底）<br>⬜ **具体单价待填**（`deepseek-v4-flash` 的实际价） |
+> | **1** | 🔴 **修 3 处 `model="qwen-turbo"` 硬编码** | ✅ **已修（2026-10-01）** | `agent_graph_advanced.py:316` · `:364` · `agent_checkpointer.py:58`<br>⇒ 改成 `getattr(…, "model_name", None) or getattr(…, "model", "unknown")`（**照抄 `plan_execute.py:154`**） |
+> | **2** | 🔴 **`PRICING` 表补 `deepseek` 条目** | ✅ **已补（2026-10-01）** | 落在 `token_config.py` 的 `MODEL_PRICING` ⇒ **`deepseek-v4-flash`: 0.001 / 0.002 元/千 token**<br>（官方人民币口径「输入 1 元 / 输出 2 元 每百万」；**业务方选定此口径**。⚠️ 不区分缓存命中 ⇒ 偏高估，理由写在 `token_config.py` 内） |
 > | **3** | ⚠️ **`llm` 补 `timeout` / `max_retries`** | ✅ **补** | 照 `plan_execute.py:70-76` 那三个常量的**做法**（`timeout=` + `max_retries=1`）<br>⬜ **具体秒数待定** —— 这是**多轮对话**，比 `plan_execute` 的单步长 ⇒ **别直接抄 30/20/15** |
 > | **4** | ⚠️ **软拦截 → 硬拦截** | ✅ **要变成硬拦截** | 现在 `:244-251` 是塞 `ToolMessage` 文本、**HTTP 200** ⇒ 改成**抛 `AppException(QUOTA_EXCEEDED)`**<br>⚠️ **注意层次**：本文件在**图节点里**（不是路由层）⇒ 抛出的异常要能被**端点层**接住并转成 `AppException`（参照 `api_v1_agent.py:209` 接 `BudgetExceededError` 的写法）<br>⚠️ **改硬拦截会改变 `/agent/mcp_chat` 的响应形状** ⇒ 测试要一起改 |

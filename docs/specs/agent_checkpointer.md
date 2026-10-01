@@ -16,11 +16,11 @@
 
 - 🔴 **零测试覆盖**（`docs/说明/测试.md` §六 **#3**）
 - 🔴 **`backend=="redis"` 分支忽略 `REDIS_URL`**（见下）
-- 🔴 **`record_usage(model="qwen-turbo")` 与实际调用的模型不符**（`:58`）—— 成本记账口径不准
-  **✅ 2026-09-30 业务方裁「修」** ⇒ 改成 `getattr(llm, "model_name", None) or getattr(llm, "model", "unknown")`
-  （**照抄 `plan_execute.py:154`**）。⚠️ **必须与"`PRICING` 补 deepseek 条目"同批** ——
-  只改这里不补价 ⇒ 落到 `_DEFAULT_PRICING` **兜底价**，**比明确配一个更糟**（看不出来是兜底）。
-  📄 另两处在 `docs/specs/agent_graph_advanced.md` ⚠️②（`:316` `:364`）—— **三处一起改**。
+- ✅ ~~🔴 **`record_usage(model="qwen-turbo")` 与实际调用的模型不符**（`:58`）~~
+  **2026-10-01 已修**（`🅗 S4` + `S5`）⇒ 改成 `getattr(llm, "model_name", None) or getattr(llm, "model", "unknown")`
+  （**照抄 `plan_execute.py:154`**）。✅ **同批已给 `MODEL_PRICING` 补上 `deepseek-v4-flash`** ——
+  只改这里不补价会落到兜底价（**看不出来是兜底**）。
+  📄 另两处在 `docs/specs/agent_graph_advanced.md` ⚠️②（`:316` `:364`）—— **三处已一起改**。
 - ⚠️ **它也是 6 套 Agent 之一** —— 哪套是产品版本**【未裁】**（M5）
 
 ## ⚠️ 看代码会误判的地方 ⭐
@@ -29,7 +29,7 @@
 |---|---|
 | 「支持 Redis 后端」 | 🔴 **`:108-112` 把 `redis_url` 注释掉了，直接回落 `MemorySaver()`** ⇒ **写 `redis` 也拿不到 Redis 持久化**（进程重启即丢） |
 | 「有检查点 ⇒ 对话能跨重启」 | 🔴 **默认 `memory` 是【内存态】** ⇒ **重启即丢**；只有显式设 `AGENT_CHECKPOINT_BACKEND=sqlite` 才落盘 |
-| 「成本记账是准的」 | 🟡 **Token 口径准，金额不准** —— `record_usage` 传的模型名与实际不符，且 `token_tracker.PRICING` **没有 DeepSeek 条目** |
+| 「成本记账是准的」 | 🟡 **Token 口径准，金额【2026-10-01 起也准了】** —— 模型名已改为从对象取，且 `MODEL_PRICING` 已补 DeepSeek 条目（`🅗 S4`+`S5`）<br>⚠️ **但仍是"近似"** —— 单价**不区分缓存命中**（拿不到命中/未命中拆分）⇒ 按未命中价记 ⇒ **偏高估** |
 
 ## 关联
 

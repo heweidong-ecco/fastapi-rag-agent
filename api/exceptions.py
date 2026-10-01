@@ -60,7 +60,11 @@ ERROR_CODE_TO_HTTP_STATUS = {
 # ==================== 统一业务异常类 ====================
 class AppException(Exception):
     """自定义业务异常，附带错误码，由全局异常处理器统一捕获"""
-    def __init__(self, error_code: ErrorCode, message: str = None):
+    def __init__(self, error_code: ErrorCode, message: str = None,
+                 retry_after: int = None):
         self.error_code = error_code
         self.message = message or error_code.value  # 未提供消息则使用错误码名称
         self.status_code = ERROR_CODE_TO_HTTP_STATUS.get(error_code, 500)
+        # 客户端还要等多少秒才能重试。只在【限流/配额】这类可恢复的错误上给；
+        # 其他错误留 None ⇒ 处理器不会写这个字段（避免"等 0 秒"被误读成"立刻可试"）。
+        self.retry_after = retry_after

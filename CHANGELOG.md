@@ -10,6 +10,39 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- 🟢 **额度常量收口到 `api/token_config.py` 一处**（2026-10-01 · `B7` · **①a Task 2**）。
+
+  **为什么**：额度类常量原先**散在 4 个文件 6 处**，**单位还混着** ——
+  `permission.ROLE_QUOTA`（次数）· `token_tracker.ROLE_TOKEN_BUDGET`（token）·
+  `MAX_THREAD_COST` / `MAX_SINGLE_CALL_COST`（**元**）· `plan_execute.PLAN_TOTAL_BUDGET_SECONDS`（**秒**）。
+  ⇒ 这正是 `DEC-029`「两套口径差 35 倍」的**物理原因**。
+
+  ⛔ **本改动不改外部行为** —— 是搬家。判据（可打印）：
+  `token_tracker.PRICING is token_config.MODEL_PRICING` → `True`（**是同一对象，不是抄一份**）。
+
+  **同时并入 3 条**（`/specs` 核账挖出的 `🅗 S4`–`S6`，**不另开轮次** —— 它们都落在同一个新文件上）：
+  * `S4` + `S5`（**钱算错** + 补 DeepSeek 单价）⇒ 见下方 `### Fixed` 那条
+  * `S6` **限流参数也收进来** ⇒ `rate_limiter.py` 的两个 `TokenBucketLimiter` 原先把
+    `100/150`、`3/20` **写死在 `:129/:132`** ⇒ 改从 `token_config` 取。⛔ **默认值逐字相同，行为不变**。
+    📌 判定"真读了"的测试**不能只比值**（两边都写 100.0 时分不出来）⇒ 用**环境变量改值 + 另起进程**证。
+
+  **⚠️ 只集中，不做热加载** —— `ChatOpenAI(max_tokens=…)` 是 **import 时求值**（17 个构造点全是），
+  改值本来就要重启。**⬜ 接线（把常量真的接到那 17 个点）在 `①b · Task 1`**，本次没做。
+
+  📄 `docs/decisions/DEC-040`（`决策一` 的口径裁定）· `docs/specs/token_config.md`（新 spec）·
+  `docs/specs/token_tracker.md`（①a/①b 实施计划全文）
+
+- 🟢 **决策一裁定：额度统一到 token 一套**（2026-09-30 · `DEC-040`）。
+  业务方原话：「**甲 · 统一到 token 一套**」⇒ 次数配额**降级为「接口权重」**（**不删** ——
+  `QuotaMiddleware` 还挂在它上面）。
+
+  🔴 **但实现【不在本次】** ⇒ 排在 `①b` 的**最后一步**。**顺序陷阱**：
+  先撤次数、后接 token ⇒ **中间出现一段"谁都不拦"的窗口**，而**没人会立刻发现**。
+  📌 同型前科：`docs/复盘/2026-09-20-同源的两个输入不能互相作证.md`。
+
+  ✅ 本次只做了 `DEC-040` **里面【不动行为】的那一半**：`ROLE_DAILY_TOKEN["admin"]`
+  **不再是 `float("inf")`** ⇒ = `premium` = 100000/天（业务方 2026-09-30 裁）。
+
 - 🟢 **状态文档收敛到 `ROADMAP.md` 一份**（2026-09-29）。**业务方裁定，全文见 `docs/decisions/DEC-035`。**
 
   **背景**：业务方原话「**记录在多个地方，没有汇总**……整体项目进度，接口，功能，描述，
@@ -57,6 +90,49 @@ All notable changes to this project will be documented in this file.
   **移入 = 源处删除 + 留指针**（516 → 480 行）。
 
 ### Fixed
+
+- 🔴 **4 处错误文案【说反了】+ 错误响应现在带恢复时间**（2026-10-01 · `B12` · **①a Task 1**）。
+
+  **最严重的一处**：全局限流触发时返回 **429**，`error` 字段却写着 **`"Internal server error"`**
+  （`api/main.py` 限流中间件）⇒ **调用方会以为系统坏了，而实际是自己发太快**。
+  这正是 `通用方法 §7.1` R3.3 要防的：「❌ 熔断时静默/白屏/500 → 对方以为你的系统坏了」。
+
+  | # | 落点 | 原 | 改 |
+  |---|---|---|---|
+  | 1 | 限流中间件（全局限流，429） | `"Internal server error"` | `"请求过于频繁，请在 60 秒后重试"` |
+  | 2–4 | `/health` · `/ready` ×2（**503**） | `"Internal server error"` | `"服务尚未就绪，请稍后重试"` |
+  | — | **全局 500 处理器** | `"Internal server error"` | ⛔ **不动** —— 它**真的是**内部错误 |
+
+  **新增**：`AppException(error_code, message, retry_after=None)` ——
+  响应体多一个**可选** `retry_after`（秒）+ 响应头 `Retry-After`。
+  ⚠️ **没挂时不写这个字段**（不是写 0）—— `retry_after: 0` 会被读成"立刻可重试"。
+
+  **验证**：`api/test_error_contract.py`（**5 条**，TDD）·
+  ⭐ **守卫测试做过"红→绿"实证**：把 503 文案改回旧串 ⇒ 那条立刻红（命令见 PR 描述）·
+  全量 `pytest`：新失败 **0**（见下方「⚠️ 本地 15 条红」）。
+
+- 🔴 **3 处 `record_usage` 把模型名写死成 `"qwen-turbo"`** ⇒ **钱算错**（2026-10-01 · `🅗 S4` + `S5`）。
+
+  **完整影响链**（`/specs` 核账时逐环核出）：
+  `model="qwen-turbo"` ⇒ `PRICING["qwen-turbo"]` = 0.003/0.006 ⇒ 写进 `token_usage_logs.cost`
+  的是**按 qwen-turbo 单价算的钱** ⇒ `get_thread_cost()` ⇒ **`MAX_THREAD_COST`（单位【元】）拿它比**
+  ⇒ 🔴 **连"单线程花费上限"这个拦截都是拿错的数在判**。
+  ⚠️ **只有【钱】那一维错** —— token 数是真实的（`usage_metadata` 是真的）。
+  ⚠️ **而且 `PRICING` 表里【根本没有 DeepSeek 条目】** ⇒ 这条路**永远走不到正确的价**。
+
+  **修法**：照抄 `plan_execute.py:154` 的写法（**从对象取**）——
+  `getattr(llm, "model_name", None) or getattr(llm, "model", "unknown")`。
+  3 处落点：`agent_graph_advanced.py` ×2（其中一处记的是**实际被调用的** `llm_with_tools`）·
+  `agent_checkpointer.py` ×1。
+
+  **⭐ 必须同批做的那半（`S5`）**：给 `MODEL_PRICING` 补 `deepseek-v4-flash` 条目。
+  ⛔ **只修 `S4` 不补价 ⇒ 落到兜底价，比"明确配一个"更糟**（从表上看不出是兜底）。
+  📌 单价 = **0.001 / 0.002 元/千 token**（官方人民币口径「输入 1 元 / 输出 2 元 每百万」，
+  **业务方 2026-10-01 选定此口径**；来源与"不区分缓存命中、故偏高估"的说明写在 `token_config.py` 内）。
+
+  **验证**：`api/test_token_config.py::test_record_usage_never_hardcodes_a_model_name`
+  （**AST 扫全仓**，⛔ 不是 grep —— 注释里也有同样的串）·
+  `::test_models_actually_in_use_have_explicit_pricing`（从 `config` 取模型名，换 `.env` 时跟着走）。
 
 - 🔴 **限流中间件【不验签】—— 编一个 `X-API-Key` 就能拿一个独立限流桶**（2026-09-30 · `B9-b`）。
 

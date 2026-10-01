@@ -141,6 +141,21 @@ def resolve_rate_limit_identity(x_api_key: str | None, auth_header: str | None) 
     return "anonymous"
 
 
+def _rate_limited_payload(retry_after: int = 60) -> dict:
+    """全局限流触发时的响应体（抽成纯函数 ⇒ 可单测，不必真打 Redis）。
+
+    ⚠️ 2026-10-01 修：此处原写 `"error": "Internal server error"` ——
+       状态码是 429、文案却说"内部错误" ⇒ 调用方会以为**系统坏了**，
+       而实际是**自己发太快**。这正是 `通用方法 §7.1` R3.3 要防的。
+    """
+    return {
+        "error": f"请求过于频繁，请在 {retry_after} 秒后重试",
+        "code": ErrorCode.RATE_LIMITED.value,
+        "status_code": 429,
+        "retry_after": retry_after,
+    }
+
+
 # 新增  在调用 is_allowed 之前获取限流信息，并在请求成功或失败时都设置对应的响应头。
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """限流中间件：对所有受保护接口生效"""
@@ -152,14 +167,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # ----- 第一层：全局限流（所有请求共享） -----
         if not global_limiter.is_allowed("global"):
             # 全局过载，直接拒绝，不暴露内部用户信息
-            response = JSONResponse(
-                status_code=429,
-                content={
-                    "error": "Internal server error",
-                    "code": ErrorCode.RATE_LIMITED.value,
-                    "status_code": 429
-                }
-            )
+            response = JSONResponse(status_code=429, content=_rate_limited_payload())
+            response.headers["Retry-After"] = "60"
             # 可选：加上全局的限流头，但一般不需要暴露细节
             return response
 
@@ -345,14 +354,22 @@ app.add_middleware(TextNormalizationMiddleware)
 # ==================== 全局异常处理器 ====================
 @app.exception_handler(AppException)
 async def app_exception_handler(request: Request, exc: AppException):
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={
-            "error": exc.message,
-            "code": exc.error_code.value,
-            "status_code": exc.status_code
-        }
-    )
+    """统一错误响应。
+
+    ⚠️ `retry_after`（B12）**只在挂了的异常上出现** —— 没挂时**整个字段不写**，
+       因为 `retry_after: 0` 会被客户端读成「立刻可重试」，与「不知道多久」是两回事。
+    """
+    content = {
+        "error": exc.message,
+        "code": exc.error_code.value,
+        "status_code": exc.status_code
+    }
+    headers = {}
+    retry_after = getattr(exc, "retry_after", None)
+    if retry_after is not None:
+        content["retry_after"] = retry_after
+        headers["Retry-After"] = str(retry_after)
+    return JSONResponse(status_code=exc.status_code, content=content, headers=headers)
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
@@ -457,7 +474,9 @@ async def health_check():
         return JSONResponse(
             status_code=503,
             content={
-            "error": "Internal server error",
+            # ⚠️ 2026-10-01 修（B12）：原写 "Internal server error" ——
+            #    503 是「暂时别把流量给我」，500 才是「我坏了」。报错口径要分清。
+            "error": "服务尚未就绪，请稍后重试",
             "code": ErrorCode.SERVICE_UNAVAILABLE.value,
             "status_code": 503}
         )
@@ -478,7 +497,9 @@ async def readiness_check():
         return JSONResponse(
             status_code=503,
             content={
-            "error": "Internal server error",
+            # ⚠️ 2026-10-01 修（B12）：原写 "Internal server error" ——
+            #    503 是「暂时别把流量给我」，500 才是「我坏了」。报错口径要分清。
+            "error": "服务尚未就绪，请稍后重试",
             "code": ErrorCode.SERVICE_UNAVAILABLE.value,
             "status_code": 503}
         )
@@ -493,7 +514,9 @@ async def readiness_check():
         return JSONResponse(
             status_code=503,
             content={
-            "error": "Internal server error",
+            # ⚠️ 2026-10-01 修（B12）：原写 "Internal server error" ——
+            #    503 是「暂时别把流量给我」，500 才是「我坏了」。报错口径要分清。
+            "error": "服务尚未就绪，请稍后重试",
             "code": ErrorCode.SERVICE_UNAVAILABLE.value,
             "status_code": 503}
         )

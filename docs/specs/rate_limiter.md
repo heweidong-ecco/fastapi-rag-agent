@@ -5,7 +5,7 @@
 | **状态** | 🟡 **可用** —— 基于 Redis 的令牌桶，**全局 + 用户两层**<br>🔴 **但它有 3 个"看代码看不出来"的性质**（见下 ⚠️ 节）—— 其中 2 条是本 spec 新查出来的 |
 | **对外提供** | `TokenBucketLimiter`（`is_allowed` / `get_remaining` / `get_limit_info`）· 两个模块级实例 `global_limiter` · `user_limiter` |
 | **谁在用** | `main.py:21` 的 `RateLimitMiddleware`（**唯一的生产消费者**）· `api_v1.py:31` 的 `/debug/*` 查询端点 |
-| **规模** | 132 行 |
+| **规模** | 140 行 |
 
 ## ✅ 做了什么
 
@@ -21,8 +21,10 @@
 - 🔴 **Redis 不通 ⇒ 非公开路径【全站 500】** —— 没有 `except RedisError`（见 ⚠️③）
 - 🔴 **零单测** —— `docs/说明/测试.md:185` 自述「**前者间接**、后者零覆盖」；
   它只被 `test_rag_search.py` 的 L1/L2 **间接**依赖（那两条**必须真连 Redis**）
-- ⚠️ **限流参数写死在代码里**（`:129/132`），⛔ 不是 env ⇒ 与 `B7`「额度常量集中」**同型**，
-  但 **B7 只收 token 类，没收这两个**（`SENSITIVE_TOOLS` 也没有）
+- ✅ ~~⚠️ **限流参数写死在代码里**（`:129/132`），⛔ 不是 env~~ ⇒ **2026-10-01 已收口**（`🅗 S6`）：
+  两个 `TokenBucketLimiter` 的 `rate`/`capacity` 改从 **`api/token_config.py`** 取
+  （`GLOBAL_LIMIT_RATE` / `GLOBAL_LIMIT_CAPACITY` / `USER_LIMIT_RATE` / `USER_LIMIT_CAPACITY`）。
+  ⚠️ **默认值逐字相同 ⇒ 行为不变**；📌 它**不是热加载**（`token_config` 只读 env，改值仍要重启）
 - ⚠️ **死导入**：`Request` / `HTTPException` / `os`（`:3-4`）**全都没用到**
 
 ## ⚠️ 看代码会误判的地方 ⭐
