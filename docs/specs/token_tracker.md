@@ -1036,61 +1036,84 @@ PG 方言/时区下的**边界**行为、生产数据量下的表现，**都没�
 
 ## Task 4 · **B11** · 熔断（按 key 的通用断路器）
 
-**Files:**
-- Create: `api/breaker.py` + `docs/specs/breaker.md`（⛔ 新建模块**必须**同时建 spec，否则 `pre-commit-gates.py` 硬拦）
-- Create: `api/test_breaker.py`（无 marker）
-- Modify: `api/token_tracker.py`（触顶时开断路器）· `api/main.py`（放行前先问断路器）
+> ### 🔴 **本节是【原始计划】—— 它写的形状早被 `DEC-043` 推翻，⛔ 别照着它读**
+>
+> **2026-10-02 已做完**（`B11` 状态以 `docs/待办总表.md` 为准：**已完成**），
+> 但**落地的那套和这一节描述的【不是同一套】**：
+>
+> | | 本节（原计划） | ✅ 实际落地 |
+> |---|---|---|
+> | 接口 | `is_open()` / `trip()` / `seconds_until_reset()` | **`circuit(key, estimated_tokens)` / `global_key()`** |
+> | 存储 | **Redis**（`SETEX`） | **PG**（`token_usage_logs` 的日级 SQL）—— ⛔ 不碰 Redis |
+> | 恢复 | **TTL 到期** | **跨天自然重置**（`WHERE created_at >= CURRENT_DATE` 自己翻页）—— 🔴 **没有 TTL 可核** |
+> | 接线 | `main.py` 中间件里放行前先问 | **8 个端点函数**各自问一次 |
+>
+> ⇒ **实际形状** ⇒ `docs/specs/breaker.md`（含 **7 条「看代码会误判的地方」**）·
+> **设计裁定（四选一，含备选与反悔成本）** ⇒ `docs/decisions/DEC-043-断路器设计的三个选择.md`。
+>
+> 🔴 **为什么加这段横幅**：本节下面那 5 个 `- [ ]` **不是「没做」**，是**按旧形状写的**。
+> 接手人照原文会得出两个错结论 —— **「Task 4 没做」+「设计是 Redis 那套」**。
+> 📌 同型前科：本仓 `docs/复盘/2026-09-19-交接锚点第一屏失真.md`。
 
-**Interfaces:**
+**Files:**（⬇️ **原计划**的落点 —— ⛔ 与实际的差异见右栏）
+
+- Create: `api/breaker.py` + `docs/specs/breaker.md`（⛔ 新建模块**必须**同时建 spec，否则 `pre-commit-gates.py` 硬拦）⇒ ✅ **都建了**
+- Create: `api/test_breaker.py`（无 marker）⇒ ✅ 建了（**外加** `api/test_breaker_wiring.py` —— **双向接线守卫**）
+- Modify: `api/token_tracker.py`（触顶时开断路器）· `api/main.py`（放行前先问断路器）
+  ⇒ 🔴 **两个都没改**：判定函数本来就在 `token_tracker.py` 里；接线在 **8 个端点**、**不在中间件**。
+
+**Interfaces:**（⬇️ **原计划**的接口 —— ⛔ **这三个都没实现**）
+
 - Produces: `is_open(key: str) -> bool` · `trip(key: str, ttl_seconds: int) -> None` · `seconds_until_reset(key: str) -> int`
-- key 形如 `global:2026-09-30`（B11）/ `model:qwen-turbo:2026-09-30`（`L2`）
+- key 形如 `global:2026-09-30`（B11）/ `model:qwen-turbo:2026-09-30`（`L2`）⇒ ✅ **只有这一条对**，且 `Task 5` 直接靠它
 
 > ### 为什么是「按 key」而不是写死"全局额度"
 > 这就是 `L2`「十几个 model 顺带」的**具体形态**：**同一个函数换一个 key 前缀**。
+> ✅ **这一句仍然成立**，**是 `Task 5` 的直接依据**（见下）。
 > ⛔ 不为 `L2` 先建任何东西。
 
-- [ ] **Step 1: 写失败测试**（mock Redis，⛔ 不连真 Redis）
+- ⛔ **Step 1（旧形状）：写失败测试（mock Redis，⛔ 不连真 Redis）** —— **没按这个做**。
+  ✅ 实际是 `api/test_breaker.py` **9 条**，**里面没有一行 mock Redis**（因为**不用 Redis**）；
+  另有 **`api/test_breaker_wiring.py` 9 条**专钉接线（旧计划里没有这一层）。
 
-```python
-def test_trip_then_is_open_then_expires(monkeypatch):
-    """开 → 判 → 到期恢复。⚠️ 用假 Redis，不连真服务。"""
-    import breaker
-    fake = {}
-    monkeypatch.setattr(breaker, "_setex", lambda k, ttl, v: fake.__setitem__(k, (ttl, v)))
-    monkeypatch.setattr(breaker, "_exists", lambda k: k in fake)
-    monkeypatch.setattr(breaker, "_ttl", lambda k: fake.get(k, (0, None))[0])
+  <details><summary>旧计划里那段（⛔ 已作废，留档）</summary>
 
-    assert breaker.is_open("global:2026-09-30") is False
-    breaker.trip("global:2026-09-30", ttl_seconds=3600)
-    assert breaker.is_open("global:2026-09-30") is True
-    assert breaker.seconds_until_reset("global:2026-09-30") == 3600
+  ```python
+  def test_trip_then_is_open_then_expires(monkeypatch):
+      """开 → 判 → 到期恢复。⚠️ 用假 Redis，不连真服务。"""
+      import breaker
+      fake = {}
+      monkeypatch.setattr(breaker, "_setex", lambda k, ttl, v: fake.__setitem__(k, (ttl, v)))
+      monkeypatch.setattr(breaker, "_exists", lambda k: k in fake)
+      monkeypatch.setattr(breaker, "_ttl", lambda k: fake.get(k, (0, None))[0])
 
+      assert breaker.is_open("global:2026-09-30") is False
+      breaker.trip("global:2026-09-30", ttl_seconds=3600)
+      assert breaker.is_open("global:2026-09-30") is True
+      assert breaker.seconds_until_reset("global:2026-09-30") == 3600
+  ```
 
-def test_breaker_keys_are_daily():
-    """🔴 key 必须带日期 —— 那才让"跨天自然恢复"成立（B11 要素④）。"""
-    import breaker
-    k = breaker.daily_key("global")
-    import datetime
-    assert datetime.date.today().isoformat() in k
-```
+  </details>
 
-- [ ] **Step 2: 跑 → 失败 → Step 3: 实现 `api/breaker.py`**（用 `rate_limiter.py` 同一个 `redis.Redis` 连接方式；`trip` 用 `SETEX`）
+- ⛔ **Step 2–3（旧形状）：先跑失败 → 再实现 `api/breaker.py`（用 `rate_limiter.py` 同一个 `redis.Redis` 连接方式；`trip` 用 `SETEX`）**
+  —— ✅ **文件建了**，但**形状不是这个**：实际 `api/breaker.py` 是**PG 分派器**，**不建 Redis 连接**、**没有 `SETEX`**。
+  📌 TDD 的「先看着它失败」这一步**仍然做了** —— 只是对象换了（见 `CHANGELOG.md` 那条「判据纪律的一处自我更正」）。
 
-- [ ] **Step 4: 接线**（`token_tracker` 触顶 ⇒ `trip`；`main.py` 中间件先 `is_open` ⇒ 直接抛 `AppException(QUOTA_EXCEEDED, retry_after=…)`）
+- ⛔ **Step 4（旧形状）：接线（`token_tracker` 触顶 ⇒ `trip`；`main.py` 中间件先 `is_open` ⇒ 抛 `AppException`）**
+  —— ✅ **接上了，但位置不同**：接在 **8 个端点函数**里（**不是中间件**），
+  `token_tracker.py` / `main.py` **两个都没改**。
+  **判据（可打印）**：`grep -rn "circuit(global_key())" api/ --include="*.py" | grep -v test_` ⇒ **8 行**。
 
-- [ ] **Step 5: ⭐ 要素④ 的【实测】**（**这是 B11 唯一需要新实测的一条**）
+- ⛔ **Step 5（旧形状）：⭐ 要素④ 的【实测】—— 开一个 5 秒断路器，证明 TTL 到点会恢复**
+  —— 🔴 **没有 TTL 可核**：日级用量在 **PG**（`token_usage_logs`），恢复靠 SQL 自己翻页，
+  **整个机制里没有「到期释放」这回事**。⇒ 详见 `docs/specs/breaker.md` §⚠️ 第 1 条。
+  ✅ 替代的实测：`test_yesterdays_usage_does_not_count`（塞一条**昨天**的记录，断言它不进今日合计）。
+  ⚠️ **它顺带要求核掉的 `quota_limiter` 那条** —— **2026-10-02 已补核**，见 `docs/specs/quota_limiter.md`
+  （那条是**另一套机制**：`quota_limiter.py` 确实用 Redis + `EXPIRE 86400`）。
 
-```bash
-# 开一个 5 秒的断路器，等它自己消失 —— 证明"到点真的会恢复"
-docker compose exec redis-rag redis-cli --eval /dev/stdin <<'LUA'
-redis.call('SETEX', KEYS[1], ARGV[1], '1')
-return redis.call('TTL', KEYS[1])
-LUA
-```
-⇒ 记下 `TTL` 与到点后 `EXISTS` 的结果，**写进 `docs/specs/breaker.md`**。
-⚠️ `quota_limiter.md` 里那条「`EXPIRE 86400` 从未实测过 TTL」**一并核掉**（同一件事）。
-
-- [ ] **Step 6: 跑 + 建 spec + 提交**
+- ✅ **Step 6：跑了 + 建了 spec + 已提交**（`docs/specs/breaker.md` ·
+  落主干的那条 commit 是 **`0f9a67a`**，PR **#65**）
+  ⚠️ **⛔ 别引用 PR 之前的分支哈希** —— 本仓走 squash 合并，**分支上那些 sha 在主干上根本不存在**。
 
 ---
 
