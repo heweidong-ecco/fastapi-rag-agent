@@ -54,6 +54,47 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- 🟡 **`ci-local.sh` 的 Redis 那条路【在本机一次都没走过】—— 改成复用 `redis-rag`**（2026-10-02 · 业务方裁定）。
+
+  **病症（实测，不是读代码）**：脚本里写着
+  `docker run -d --rm --name raci-ci-local-redis -p 6379:6379 redis:7-alpine`，
+  可它前面那道判断是 `nc -z 127.0.0.1 6379` —— 而 **`6379` 长期被项目自己的 `redis-rag` 占着**
+  （`127.0.0.1:6379->6379/tcp`，`docker-compose.yml:76`）。
+  ⇒ 判断**永远为真** ⇒ 永远走"复用"分支 ⇒ **`raci-ci-local-redis` 从来没被创建过**，
+  那段 `docker run` + `docker rm -f` 是**死代码**。
+  ⚠️ 而 `ci.yml:114` 把 `REDIS_PORT` **钉死成 `"6379"`** ⇒ 也不能简单挪个端口，那会破掉
+  脚本的设计原则（**env 全部从 `ci.yml` 读，不自己加**）。
+
+  **业务方 2026-10-02 裁定：「就认 `redis-rag`」** —— 把它当作本机那个 CI redis，**按名字管理**：
+  * 在跑 ⇒ 复用（⛔ 不新建、不抢 `6379`）
+  * 停了 ⇒ `docker start redis-rag`
+  * **⛔ 永不删除**（`--rm` 与 `docker rm -f` 都删掉了）
+  * 镜像以 `ci.yml` 的 **`services.redis.image`** 为准（**新读的一处**，此前是脚本里硬写的常量
+    `redis:7-alpine`）；**不一致只提示，⛔ 不擅自重建长期容器**
+  * 容器不存在时 ⇒ **不替用户建**，只打印 `docker compose up -d redis` 并附上
+    「**只 up redis，别顺手 up postgres**」的警告，然后 `exit 2`
+
+  🔴 **同时新增一条诚实披露**：`redis-rag` 是**长期容器**，里头可能留着上一轮的 key；
+  而 CI 的 service 容器**每次都是全新空的** ⇒ **这一层不等价**，现在会打在横幅里
+  （此前横幅写的是「✅ 已对齐: Redis（service 容器）」，**那句是虚的**）。
+
+  **证据（三条分支真跑过，⛔ 不是读代码）**：
+
+  ```bash
+  bash scripts/ci-local.sh                      # 6379 被 redis-rag 占着 ⇒ 复用，191 passed / 3 skipped / 19 deselected
+  docker stop redis-rag && bash scripts/ci-local.sh --no-syntax
+                                                # ⇒ 「→ 拉起「redis-rag」…」+ 跑通 + **跑完它还在**（Up, healthy）
+  docker stop redis-rag && CI_LOCAL_REDIS_CONTAINER=raci-nope-xyz bash scripts/ci-local.sh --no-syntax
+                                                # ⇒ 「容器「raci-nope-xyz」不存在，本脚本【不会替你新建】」 exit 2
+  ```
+  ⚠️ `CI_LOCAL_REDIS_CONTAINER` 是**为测试加的口子** —— 有了它才能验"不存在"那条分支，
+  **不必去停真的 `redis-rag`**（与既有的 `CI_LOCAL_PYTHON` 同一路数）。
+
+  🔴 **顺带承认一件事**：**`B11` 熔断那条（`①b Task 4`）我说了"证据齐全"，但【没有跑这个脚本】** ——
+  那次跑的是**裸 `pytest`**，`.env` **在场**，正是这个脚本存在的那个轴**没被复现**。
+  这次补跑了，两处数字**逐字相同**（`191 / 3 / 19`）⇒ 本次差异**恰好**不在那条轴上；
+  但那是**这次验出来的结论**，不是当时可以默认的。已记入 `docs/说明/测试.md` §5.2。
+
 - 🔴 **`B11` 全站日级熔断【接上了 —— 这一次真的会拦】**（2026-10-02 · **①b Task 4**）。
 
   🔴 **这是本阶段第一条【用户可感知】的行为变化**：全站当日合计 token 超过 **`1,000,000`** 时，
