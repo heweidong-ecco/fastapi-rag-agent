@@ -54,6 +54,39 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- 🔴 **LLM 端点固定为 DeepSeek** —— `config.py` 的默认值与 key 兜底**一起去百炼**（2026-10-02 · 业务方：「现在不用百炼的了…llm 就用 env 的 deepseek api」）。
+
+  **`.env` 早就切了**（`DEC-017`）⇒ **运行时零改动**。改的是**代码侧两处还停在百炼的东西**：
+
+  | # | 改动 | 为什么 |
+  |---|---|---|
+  | ① | `api/config.py:53-55` 默认值：`dashscope` + `qwen-turbo`/`qwen-plus` → `https://api.deepseek.com` + `deepseek-v4-flash` ×2 | CI **没有 `.env`** ⇒ **实际跑的就是它**（`ci.yml` 那个"打印生效配置"步骤印过 `qwen-turbo`）⇒ **代码与运行时说的不是一回事** |
+  | ② | `api/config.py:52` **删掉** `or DASHSCOPE_API_KEY`；`LLM_API_KEY` 并入 `validate_config()`（🔴 必填） | 🔴 旧写法会把 **embedding 的 key** 拿去请求 **DeepSeek 端点** —— 两个 provider 不同端点、不同 key ⇒ **不报配置错，只在运行时 401** |
+
+  **判据（可打印）**：
+  ```bash
+  grep -n 'or DASHSCOPE_API_KEY' api/config.py    # ⇒ 空
+  grep -n 'deepseek-v4-flash' api/config.py       # ⇒ :54 与 :55 各一处
+  bash scripts/ci-local.sh                        # ⇒ 204 passed / 3 skipped / 19 deselected（退出码 0）
+  ```
+
+  **同步改到位的文档**：`docs/契约/环境变量.md` §4 · `.env.example` · `docs/原理/架构.md` §五 ·
+  `docs/说明/测试.md` §5.1 · `docs/给Agent的测试与调试指南.md` · `docs/待办总表.md` `L6` · `ROADMAP.md`。
+
+  ⚠️ **三处连带影响（都写进 `DEC-045` 了，⛔ 别只看代码改动）**：
+
+  * 🔴 **`ci-local.sh` 的「自证 `.env` 不在场」那条旁证失效** —— 它原来靠**值不同**来证明：
+    本机 `.env` 是 `deepseek-*`、而副本里印 `qwen-turbo` ⇒ 说明走的是**代码默认值**。
+    **默认值同值之后，两边再也分不出**。判据已改成**直接看 `.env` 在不在**
+    （脚本第 4 步本来就有 `[ ! -e "${TMP}/.env" ]` 的硬断言）。
+    📌 **教训：判据不能依赖「两个东西恰好不同」—— 那个不同会被一次无关的修改消掉，
+    而消掉之后判据不报错，只会静默变成永远通过。**
+  * ⚠️ **`L6`（百炼控制台开「用完即停」）【不作废】** —— 业务方说的"不用百炼"指的是 **LLM**，
+    **embedding 仍在百炼**（`text-embedding-v2`）⇒ 那把 key **照样会悄悄转付费**。
+    作废的只是后半句（"Key 勾选了要用的 **LLM** 模型"）。
+  * ⚠️ **默认值与 `.env` 同值，消掉了「同一键两种默认值」那一类 CI 红**（`docs/说明/测试.md` §5.1）。
+    ⛔ **但那根轴本身没消失** —— `.env` 里还有 DB / Redis / 凭据，CI 依旧不读 `.env`。
+
 - 🔴 **`①b` Task 5（`L2`）—— 15 个 LLM 构造点收进 `make_llm()` 一处；⛔ 自动兜底【推迟】**（2026-10-02 · 业务方裁「按甲走」）。
 
   **起因**：Task 5 的原标题是「**某个模型的免费额度耗尽 ⇒ 换下一个**」。动手前核出它其实是**两件事**，
@@ -63,7 +96,12 @@ All notable changes to this project will be documented in this file.
   **做了什么（形态 `甲`）**：新建 `api/llm_factory.py` 的 **`make_llm(model_role, token_role)`**，
   15 处改走它。两个轴**互相独立**（**模型轴** `fast`/`chat` × **长度轴** `answer`/`agent`）——
   ⚠️ **4 种组合现网都存在** ⇒ 合成一个参数会**悄悄截断某一类**。
-  ✅ **零行为变化**：角色按**改动前的取值原样固化**（钉在 `api/test_max_tokens_wiring.py::EXPECTED_ROLES`）。
+  ✅ **角色零行为变化**：按**改动前的取值原样固化**（钉在 `api/test_max_tokens_wiring.py::EXPECTED_ROLES`）。
+
+  🔴 **但「零行为变化」这句【当天就被 CI 证伪了一次】—— 记下来**（详见本条目末尾「补修」）：
+  收口时把 `model` / `api_key` / `base_url` 改成自己读 env，**把 `config.py:51-55` 的默认值丢了**
+  ⇒ 本地有 `.env` 看不出来，**CI 没有 `.env` ⇒ 直接崩**。
+  ⇒ 📌 **"角色都对"不等于"值都对"** —— 这两件事得分开验。
 
   ⛔ **没做：自动兜底** —— **不是忘了，是评估后推迟**。🔴 **关键实证（这条是本轮的重心）**：
 
@@ -102,8 +140,46 @@ All notable changes to this project will be documented in this file.
   python -m pytest api/test_max_tokens_wiring.py -q                        # ⇒ 2 passed
 
   # ③ 全量
-  python -m pytest api/ -m "not integration and not needs_db" -q           # ⇒ 203 passed / 3 skipped / 19 deselected
+  python -m pytest api/ -m "not integration and not needs_db" -q           # ⇒ 204 passed / 3 skipped / 19 deselected
   ```
+
+  ### 🔴 补修（同日 · CI `#67` 红了之后）
+
+  **病症（CI 实测，⛔ 不是推的）**：`离线测试` job 挂，`exit code 4`，
+  **一条测试都没跑到**（挂在 `conftest.py` 的 `from main import app`）：
+
+  ```
+  [ci-config] LLM_MODEL_FAST = qwen-turbo     ← config 的默认值在这里生效
+  [ci-config] .env 存在吗    = False          ← CI 没有 .env
+  api/llm_factory.py: return ChatOpenAI(
+  E  pydantic ValidationError: model  Input should be a valid string, input_value=None
+  ```
+
+  **根因**：本模块**自己读 env**（`os.getenv("LLM_" + key) or None`），
+  ⛔ **把 `config.py:51-55` 那份默认值绕过去了** —— 那本来就是这几个值的唯一来源。
+  改之前那 15 处是 `from config import LLM_MODEL_*`，**默认值一直在**；是我收口时弄丢的。
+
+  **改法**：`_resolve(attr)` = **先看 env，回落 `config`** ——
+  ① 先看 env ⇒ 仍是**调用时**读（测试改得动）② 回落 `config` ⇒ **默认值只有一处**，
+  ⛔ 不在这里再抄一遍（抄了就是新的「同一件事两个落点」，正是本次要消灭的东西）。
+
+  **修法验过（⛔ 本地全绿不算 —— 这次恰恰是本地绿）：先把 CI 的条件在本地造出来**
+  （把 `.env` 挪开 + 补 CI 那几个 dummy 变量，`trap` 保证还原）：
+
+  ```bash
+  mv .env .env.ci-sim
+  env -u LLM_MODEL_FAST -u LLM_MODEL_CHAT -u LLM_BASE_URL \
+      LLM_API_KEY=ci-dummy POSTGRES_PASSWORD=ci-dummy JWT_SECRET_KEY=ci-dummy \
+      LOGIN_PASSWORD=ci-dummy DASHSCOPE_API_KEY=ci-dummy \
+      python -m pytest api/ -m "not integration and not needs_db" -q
+  # ⇒ 204 passed / 3 skipped / 19 deselected   （且 `from main import app` 不再崩）
+  mv .env.ci-sim .env
+  ```
+
+  🔴 **回归钉（先红后绿）**：`api/test_llm_factory.py::test_falls_back_to_config_when_env_is_absent`
+  —— 本地**先复现了与 CI 一字不差的 `ValidationError`**，再修到绿。
+  📌 **教训**：`本地全绿` 与 `CI 绿` 之间隔着一个**环境差集**（有无 `.env`）；
+  凡是"本地过、CI 挂"，先把那个差集**在本地造出来**再改。
 
 - 🟡 **`ci-local.sh` 的 Redis 那条路【在本机一次都没走过】—— 改成复用 `redis-rag`**（2026-10-02 · 业务方裁定）。
 

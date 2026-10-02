@@ -58,8 +58,8 @@ cd api && ENABLE_DASHBOARD=false ../venv/bin/uvicorn main:app --host 127.0.0.1 -
 > ⇒ **撞名硬失败**，或**把容器重建到 `fastapi-rag-agent_app-net`**。
 > **已有容器 ⇒ `docker start`；全新机器才 `compose up`。**
 
-**必须填的【四项】（`api/config.py:58-74` 的 `validate_config` 是 fail-closed，缺一项即拒绝启动）**：
-`DASHSCOPE_API_KEY` · **`POSTGRES_PASSWORD`** · `JWT_SECRET_KEY` · `LOGIN_PASSWORD`
+**必须填的【五项】（`api/config.py:58-79` 的 `validate_config` 是 fail-closed，缺一项即拒绝启动）**：
+`DASHSCOPE_API_KEY` · **`LLM_API_KEY`** · **`POSTGRES_PASSWORD`** · `JWT_SECRET_KEY` · `LOGIN_PASSWORD`
 
 > ⚠️ 2026-09-20 修：此处原写「三个」——**漏了 `POSTGRES_PASSWORD`**（实测代码检查 4 项）。
 > 它由 `.env.example` 提供了占位值，所以容易漏；但**删掉/留空就会起不来**。

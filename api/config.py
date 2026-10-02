@@ -46,13 +46,13 @@ LOGIN_PASSWORD = os.getenv("LOGIN_PASSWORD")
 # 不设 = 该账号不存在 —— fail-closed，不留任何默认口令。
 TEST_USER_PASSWORD = os.getenv("TEST_USER_PASSWORD")
 
-# ==================== 生成/对话 LLM 可配置(默认阿里云百炼;切任意 OpenAI 兼容端点请填 LLM_* 三键) ====================
+# ==================== 生成/对话 LLM —— 端点 = DeepSeek（2026-10-02 业务方裁定：不再用百炼） ====================
 # embedding 固定走 DASHSCOPE(text-embedding-v2);本段只管 生成/对话 模型。
-# 切 DeepSeek 官方示例 → LLM_BASE_URL=https://api.deepseek.com · LLM_API_KEY=<sk-…> · LLM_MODEL_FAST/LLM_MODEL_CHAT=<其模型名>
-LLM_API_KEY    = os.getenv("LLM_API_KEY") or DASHSCOPE_API_KEY
-LLM_BASE_URL   = os.getenv("LLM_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
-LLM_MODEL_FAST = os.getenv("LLM_MODEL_FAST", "qwen-turbo")
-LLM_MODEL_CHAT = os.getenv("LLM_MODEL_CHAT", "qwen-plus")
+# 🔴 默认值已改 DeepSeek;`LLM_API_KEY` **不再回落 `DASHSCOPE_API_KEY`**(旧写法会把 embedding 的 key 拿去请求 DeepSeek 端点 —— 静默错配)。见 `DEC-045`。
+LLM_API_KEY    = os.getenv("LLM_API_KEY")
+LLM_BASE_URL   = os.getenv("LLM_BASE_URL", "https://api.deepseek.com")
+LLM_MODEL_FAST = os.getenv("LLM_MODEL_FAST", "deepseek-v4-flash")
+LLM_MODEL_CHAT = os.getenv("LLM_MODEL_CHAT", "deepseek-v4-flash")
 
 
 def validate_config():
@@ -60,6 +60,11 @@ def validate_config():
     missing = []
     if not DASHSCOPE_API_KEY:
         missing.append("DASHSCOPE_API_KEY")
+    if not LLM_API_KEY:
+        # 🔴 2026-10-02 加（`DEC-045`）：它**不再有 `DASHSCOPE_API_KEY` 兜底** ⇒ 必须显式给。
+        # ⚠️ 实际上先炸的往往是 **import 期**的 `make_llm()`（`ChatOpenAI(api_key=None)`），
+        #    而不是这里 —— 这条的价值是"政策写下来 + 换导入顺序后仍有人拦"。
+        missing.append("LLM_API_KEY")
     if not POSTGRES_PASSWORD:
         missing.append("POSTGRES_PASSWORD")
     if not JWT_SECRET_KEY:

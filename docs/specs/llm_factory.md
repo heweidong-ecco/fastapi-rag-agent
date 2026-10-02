@@ -39,8 +39,14 @@ make_llm("chat", "agent")          # 两个轴，见下
 ### ✅ 顺带修掉的一个真隐患
 
 `evaluate_with_ragas.py` 原来是 `os.getenv("LLM_MODEL_CHAT", "deepseek-chat")`，
-兜底值和 `config.py:55` 的 `qwen-plus` **不一致** ⇒ **env 一缺失，脚本和应用会静默用上两个不同的模型**。
-现在两边都走 `make_llm()` ⇒ 同一个默认值、同一个来源。
+兜底值和 `config.py:55` **当时的**默认值 `qwen-plus` **不一致** ⇒ **env 一缺失，
+脚本和应用会静默用上两个不同的模型**。
+现在两边都走 `make_llm()` ⇒ **默认值只剩 `config.py:53-55` 一处**。
+
+🔴 **2026-10-02 追加（同一天 · 任务之外但同源）**：`config.py:53-55` 的默认值
+**也从百炼 qwen 改成了 DeepSeek**（`DEC-045` ⇒ LLM 只用 DeepSeek）。
+⚠️ **副作用**：默认值与 `.env` 现在**同值** ⇒ `scripts/ci-local.sh` 那条
+「靠模型名不同来自证 `.env` 不在场」的旁证**失效**（判据已改成看 `.env` 在不在）。
 
 ## 🟡 做到哪 / 缺什么
 
@@ -78,6 +84,8 @@ make_llm("chat", "agent")          # 两个轴，见下
 | **打错角色名会静默跑** | ⛔ **不会** —— 两个轴都在**工厂里**校验，未知取值直接 `ValueError`（`test_unknown_roles_raise`） |
 | ⚠️ **门禁只钉"走没走工厂"** | **不止** —— 还钉**两个轴的角色**：全传 `("chat","agent")` 会被红。<br>⇒ 顺手改角色 = **改行为 + 改账单**，那**不属于** Task 5（收口）的范围 |
 | ⚠️ **`query_rewriter.py` 也该改走它** | ⛔ **不适用** —— 它用的是**裸 `openai.OpenAI(`**（不是 `ChatOpenAI`），<br>上限是 `MAX_TOKENS_REWRITE_VARIANTS` / `_INTENT`，**另有其表**。<br>`embedding_client.py` 走 `OpenAIEmbeddings` —— **没有 `max_tokens` 这个概念**。 |
+
+| 🔴 **env 没设 `LLM_*` 时会拿到 `None`** | ⛔ **不会** —— `_resolve()` 是**先看 env、回落 `config.py:51-55`**。<br>⚠️ **这条是血的**：2026-10-02 收口时写成 `os.getenv("LLM_"+key) or None`，**把 config 的默认值绕过去了** ⇒ CI 无 `.env` ⇒ `model=None` ⇒ `ChatOpenAI` 抛 `ValidationError` ⇒ **`import api_v1_rag` 就崩，一条测试都没跑到**（PR `#67` 红）。<br>📌 **本地全绿发现不了** —— 本机有 `.env`。守卫：`api/test_llm_factory.py::test_falls_back_to_config_when_env_is_absent`。<br>⚠️ ⛔ **别退回自己读 env + 自己写默认值**：那就是新的「同一件事两个落点」。 |
 
 ## 关联
 
