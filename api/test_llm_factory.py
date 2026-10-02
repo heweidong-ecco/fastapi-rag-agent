@@ -30,6 +30,36 @@ def factory(monkeypatch):
     return importlib.reload(importlib.import_module("llm_factory"))
 
 
+# ==================== 🔴 env 缺失时必须回落到 config ====================
+
+def test_falls_back_to_config_when_env_is_absent(monkeypatch):
+    """env 里**没设** `LLM_*` 时，`make_llm` 必须回落到 **`config` 的口径**（⛔ 不是 `None`）。
+
+    **为什么有这一条 —— 2026-10-02 线上 CI 实测，⛔ 不是我推的边界**：
+
+    CI 里**没有 `.env`**（日志原话 `.env 存在吗    = False`），也没设 `LLM_MODEL_*`。
+    当时的实现是 `os.getenv("LLM_" + key) or None` ⇒ **直给 `model=None`**
+    ⇒ `ChatOpenAI(model=None)` 抛 `ValidationError` ⇒ `import api_v1_rag` 就崩，
+    **一条测试都没跑到**（挂在 `conftest.py` 的 `from main import app`），整个 job `exit code 4`。
+
+    ⚠️ **本地为什么没暴露**：本机有 `.env`，那三个值都在。
+    ⇒ 📌 **本地全绿 [不能] 证明 CI 绿** —— 这条就是那个差集的守卫。
+    """
+    import config
+
+    for k in ENV:
+        monkeypatch.delenv(k, raising=False)
+    m = importlib.reload(importlib.import_module("llm_factory"))
+
+    llm = m.make_llm("fast", "agent")
+
+    assert llm.model_name == config.LLM_MODEL_FAST, (
+        "env 缺失时要回落到 `config.LLM_MODEL_FAST` —— "
+        "回落成 None 会让 ChatOpenAI 构造直接抛（CI 就是这么挂的）"
+    )
+    assert llm.openai_api_base == config.LLM_BASE_URL, "env 缺失时要回落到 `config.LLM_BASE_URL`"
+
+
 # ==================== ⭐ 最关键的一条：返回值形状 ====================
 
 def test_returns_bare_chatopenai_with_the_attrs_call_sites_use(factory):

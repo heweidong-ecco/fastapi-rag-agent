@@ -74,14 +74,27 @@
 
 import os
 
-_MODEL_ROLE_TO_KEY = {"fast": "MODEL_FAST", "chat": "MODEL_CHAT"}
+_MODEL_ROLE_TO_KEY = {"fast": "LLM_MODEL_FAST", "chat": "LLM_MODEL_CHAT"}
 _TOKEN_ROLE_TO_CONST = {"answer": "MAX_TOKENS_ANSWER", "agent": "MAX_TOKENS_AGENT"}
 
 
-def _read(key: str):
-    """读环境变量。⚠️ **在【调用时】读**（不是 import 成常量）——
-    这样测试改得动它，也给将来"运行时可切"留了路。"""
-    return os.getenv("LLM_" + key) or None
+def _resolve(attr: str):
+    """取一个 `LLM_*` 值 —— **先看 env，回落 `config`**。两个理由都要留：
+
+    * **先看 env** ⇒ **调用时**读得到（测试改得动它，也给将来"运行时可切"留了路）
+    * **回落 `config`** ⇒ **默认值只有一处**（`config.py:51-55`）。
+      ⛔ **不许在这里再抄一遍默认值**（抄了就是新的「同一件事两个落点」——
+      正是本次收口要消灭的东西）。
+
+    🔴 **别退回 `os.getenv("LLM_" + key) or None`** —— 2026-10-02 CI 实测：
+      CI 里**没有 `.env`**，也没设 `LLM_MODEL_*` ⇒ 回落成 `None` ⇒
+      `ChatOpenAI(model=None)` 抛 `ValidationError` ⇒ **`import api_v1_rag` 就崩**，
+      连 `conftest.py` 都进不去（整个 job `exit code 4`）。
+      守卫测试：`api/test_llm_factory.py::test_falls_back_to_config_when_env_is_absent`
+    """
+    import config
+
+    return os.getenv(attr) or getattr(config, attr)
 
 
 def make_llm(model_role: str, token_role: str, *, temperature: float = 0.0,
@@ -116,9 +129,9 @@ def make_llm(model_role: str, token_role: str, *, temperature: float = 0.0,
     from langchain_openai import ChatOpenAI
 
     return ChatOpenAI(
-        model=_read(_MODEL_ROLE_TO_KEY[model_role]),
-        api_key=_read("API_KEY"),
-        base_url=_read("BASE_URL"),
+        model=_resolve(_MODEL_ROLE_TO_KEY[model_role]),
+        api_key=_resolve("LLM_API_KEY"),
+        base_url=_resolve("LLM_BASE_URL"),
         temperature=temperature,
         max_tokens=getattr(token_config, _TOKEN_ROLE_TO_CONST[token_role]),
         streaming=streaming,
