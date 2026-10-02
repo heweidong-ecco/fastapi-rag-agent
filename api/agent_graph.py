@@ -9,22 +9,15 @@ import operator
 
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
-from langchain_openai import ChatOpenAI
-from config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL_FAST
-from token_config import MAX_TOKENS_AGENT   # B7 接线：中间步骤的单次上限（1024）
+from llm_factory import make_llm   # ①b Task 5：model / api_key / base_url / max_tokens 的唯一落点
 from langchain_community.tools import DuckDuckGoSearchRun
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 from datetime import datetime
 
 # ==================== 初始化模型 ====================
-llm = ChatOpenAI(
-    model=LLM_MODEL_FAST,
-    api_key=LLM_API_KEY,
-    base_url=LLM_BASE_URL,
-    temperature=0,
-    max_tokens=MAX_TOKENS_AGENT,   # B7
-)
+# ⚠️ 角色 = 「模型轴 fast」+「长度轴 agent(1024)」—— 见 `api/llm_factory.py` 的模块 docstring。
+llm = make_llm("fast", "agent")
 
 # ==================== 定义工具 ====================
 @tool

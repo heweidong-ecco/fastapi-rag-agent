@@ -10,9 +10,7 @@ import operator
 
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
-from langchain_openai import ChatOpenAI
-from config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL_CHAT
-from token_config import MAX_TOKENS_AGENT   # B7 接线：中间步骤的单次上限（1024）
+from llm_factory import make_llm   # ①b Task 5：model / api_key / base_url / max_tokens 的唯一落点
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage,SystemMessage
 from datetime import datetime
@@ -47,12 +45,10 @@ class AgentState(TypedDict):
 #      ② 工具 schema 更大 ⇒ 首 token 更慢。
 #    📌 **这个 60 是我的判断，不是业务裁定** —— 要改就改这一个数（就这一处用）。
 AGENT_LLM_TIMEOUT = 60
-llm = ChatOpenAI(
-    model=LLM_MODEL_CHAT,
-    api_key=LLM_API_KEY,
-    base_url=LLM_BASE_URL,
-    temperature=0,
-    max_tokens=MAX_TOKENS_AGENT,     # B7：单次上限 1024
+# ⚠️ 角色 = 「模型轴 chat」+「长度轴 agent(1024)」—— 见 `api/llm_factory.py` 的模块 docstring。
+#    ⚠️ `timeout` / `max_retries` 走 `make_llm` 的 `**extra` 透传（⛔ 本处不再自己写 model/max_tokens）。
+llm = make_llm(
+    "chat", "agent",
     timeout=AGENT_LLM_TIMEOUT,       # S12
     max_retries=1,                   # S12：⛔ 不用 SDK 默认的 2（会烧 3 倍额度）
 )

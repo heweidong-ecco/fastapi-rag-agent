@@ -2,7 +2,7 @@
 
 | 项 | 内容 |
 |---|---|
-| **状态** | ⚰️ **遗留 / 未经裁决** —— **6 套 Agent 实现之一**<br>✅ 2026-10-01：`llm`（`:21`）接上 `MAX_TOKENS_AGENT`（`B7`） |
+| **状态** | ⚰️ **遗留 / 未经裁决** —— **6 套 Agent 实现之一**<br>✅ 2026-10-01：`llm`（`:21`）接上 `MAX_TOKENS_AGENT`（`B7`）<br>✅ 2026-10-02（`①b` Task 5）：该 `llm`（现于 `:20`）**改走 `llm_factory.make_llm("fast", "agent")`**。⚠️ **模型轴是 `fast`**（不是 chat）—— 这是改动前的实际取值，收口时**原样保留** |
 | **对外提供** | 路由 `/agent/langgraph_chat` · `/agent/approve` |
 | **谁在用** | `api_v1_agent.py:12`（`from agent_graph import agent_graph`） |
 

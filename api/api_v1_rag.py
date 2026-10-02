@@ -10,9 +10,10 @@ from fastapi import APIRouter, Depends, Path, Query
 from fastapi.responses import StreamingResponse, JSONResponse
 
 from config import ACCESS_TOKEN_EXPIRE_MINUTES
-# B7 接线：答案生成的单次上限（2000）。⚠️ `token_config` 只 import `os`，**不带 langchain**
-# ⇒ 放文件头不会破坏本文件「导入期不拉 langchain」的既有做法。
-from token_config import MAX_TOKENS_ANSWER
+# ①b Task 5：LLM 的唯一构造落点（`model` / `api_key` / `base_url` / `max_tokens` 都收在那一处）。
+# ⚠️ `llm_factory` 模块级只 import `os`（langchain 是在 `make_llm()` **函数内**才 import）
+# ⇒ 放文件头**不破坏**本文件「导入期不拉 langchain」的既有做法（原 `MAX_TOKENS_ANSWER` 同理）。
+from llm_factory import make_llm
 from exceptions import ErrorCode, AppException
 # B8 接线（①b Task 2）：会话级 token 上限。
 # ⚠️ `token_tracker` 模块级只 import `os/json/threading` 等标准库 + `token_config`
@@ -556,9 +557,9 @@ async def jwt_ask_question(
 
 # ==================== 流式输出（SSE） ====================
 # ⚠️ 2026-09-20 删（D1/pyflakes 报 redefinition）：此处的 `StreamingResponse` 与 `json`
-#    在文件头早已导入过 ⇒ 删这两行。⚠️ 同段的 `from config import ...` 与 `import asyncio`
-#    **不是重复**（文件头没有），**必须留**。
-from config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL_CHAT
+#    在文件头早已导入过 ⇒ 删这两行。⚠️ 同段的 `import asyncio` **不是重复**（文件头没有），**必须留**。
+# ⚠️ 2026-10-02 删（Task 5）：同段的 `from config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL_CHAT`
+#    已**不再被引用** —— 两个构造点都改走 `make_llm()`，那三个值由工厂统一读。
 import asyncio
 
 # ⚠️ 2026-09-17 重构 ⑥ 切开点 5：惰性单例。
@@ -572,14 +573,12 @@ def get_llm_stream():
     """惰性构造流式 LLM（首次调用时才建，之后复用）。"""
     global _llm_stream
     if _llm_stream is None:
-        from langchain_openai import ChatOpenAI  # 惰性导入：放在函数内，导入期不拉 langchain
-        _llm_stream = ChatOpenAI(
-            model=LLM_MODEL_CHAT,
-            api_key=LLM_API_KEY,
-            base_url=LLM_BASE_URL,
+        # ⚠️ 角色 = 「模型轴 chat」+「长度轴 answer(2000)」—— 见 `api/llm_factory.py` 的模块 docstring。
+        #    ⚠️ 惰性仍在：`make_llm()` 自己把 `langchain_openai` 的 import 关在函数内。
+        _llm_stream = make_llm(
+            "chat", "answer",
             temperature=0.3,
             streaming=True,  # 关键：开启流式模式
-            max_tokens=MAX_TOKENS_ANSWER,   # B7：流式答案，给足 2000
         )
     return _llm_stream
 
@@ -742,20 +741,14 @@ def get_agent_executor():
     global _agent_executor
     if _agent_executor is None:
         # ⚠️ 全部放在函数内：导入期不拉 langchain
-        from langchain_openai import ChatOpenAI
         from langchain.agents import create_tool_calling_agent, AgentExecutor
         from langchain_core.prompts import ChatPromptTemplate
         from langchain_community.tools import  DuckDuckGoSearchRun
         from langchain_core.tools import tool
 
         #一 初始化模型
-        llm=ChatOpenAI(
-            model=LLM_MODEL_CHAT,
-            api_key=LLM_API_KEY,
-            base_url=LLM_BASE_URL,
-            temperature=0,
-            max_tokens=MAX_TOKENS_ANSWER,   # B7：WS agent 的对外答案，给足 2000
-        )
+        # ⚠️ 角色 = 「模型轴 chat」+「长度轴 answer(2000)」—— 见 `api/llm_factory.py` 的模块 docstring。
+        llm = make_llm("chat", "answer")
         #二 定义工具
         @tool
         async def search(query: str) -> str:

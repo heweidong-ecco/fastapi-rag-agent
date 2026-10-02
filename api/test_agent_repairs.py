@@ -615,7 +615,7 @@ def test_react_subgraph_sets_final_output(monkeypatch):
        `final_output`**，而端点读的是 `result.get("final_output", "处理完成")`
        ⇒ **走 REACT 意图时永远返回占位串「处理完成」**（其余四个子图都写了）。
 
-    ⚠️ 用**替身 LLM**（替换 `ChatOpenAI`）驱动，不真调模型：
+    ⚠️ 用**替身 LLM**（替换 `make_llm`）驱动，不真调模型：
        模型返回一条**不带 tool_calls** 的消息 ⇒ `should_continue` 直接 END。
     """
     from langchain_core.messages import AIMessage, HumanMessage
@@ -633,7 +633,13 @@ def test_react_subgraph_sets_final_output(monkeypatch):
         def bind_tools(self, tools):
             return _Bound()
 
-    monkeypatch.setattr(L, "ChatOpenAI", _FakeLLM)
+    # 🔴 2026-10-02（①b Task 5）：原来是 `monkeypatch.setattr(L, "ChatOpenAI", _FakeLLM)`。
+    #    该模块已改走 `llm_factory.make_llm()`（`ChatOpenAI` 的 import 被**删掉**了）
+    #    ⇒ 旧写法会 `AttributeError: module has no attribute 'ChatOpenAI'`。
+    #    ⚠️ 这里**必须挡 `L.make_llm`**（模块内的属性引用）——
+    #       挡 `llm_factory.make_llm` **不管用**：模块是 `from llm_factory import make_llm`
+    #       拿到的**独立名字绑定**，改工厂模块不会改到它。
+    monkeypatch.setattr(L, "make_llm", lambda *a, **k: _FakeLLM())
     # ⚠️ **必须同时挡掉记忆注入那条路** —— `agent_decide` 会调
     #    `inject_memories_to_prompt` → `search_user_memory` → **mem0 自己去连
     #    DashScope 做 embedding**。不挡的话这条用例就**依赖真凭据**：

@@ -54,6 +54,57 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- 🔴 **`①b` Task 5（`L2`）—— 15 个 LLM 构造点收进 `make_llm()` 一处；⛔ 自动兜底【推迟】**（2026-10-02 · 业务方裁「按甲走」）。
+
+  **起因**：Task 5 的原标题是「**某个模型的免费额度耗尽 ⇒ 换下一个**」。动手前核出它其实是**两件事**，
+  而且**价值差得很远**：① 全仓 **15 处**各自写 `ChatOpenAI(model=…, api_key=…, base_url=…, max_tokens=…)`
+  —— 三个值**取自同一组配置常量**，却在 15 处各抄一遍；② 计划真正的主题「自动切备用」。
+
+  **做了什么（形态 `甲`）**：新建 `api/llm_factory.py` 的 **`make_llm(model_role, token_role)`**，
+  15 处改走它。两个轴**互相独立**（**模型轴** `fast`/`chat` × **长度轴** `answer`/`agent`）——
+  ⚠️ **4 种组合现网都存在** ⇒ 合成一个参数会**悄悄截断某一类**。
+  ✅ **零行为变化**：角色按**改动前的取值原样固化**（钉在 `api/test_max_tokens_wiring.py::EXPECTED_ROLES`）。
+
+  ⛔ **没做：自动兜底** —— **不是忘了，是评估后推迟**。🔴 **关键实证（这条是本轮的重心）**：
+
+  ```
+  主.with_fallbacks([真的 ChatOpenAI 备用])
+    w.bind_tools(tools)  →  ✅ 能用，且返回的对象仍然带兜底
+    w.model_name         →  🔴 永远返回【主】模型名
+  ```
+
+  ⇒ **包上去不会炸**，**真正的缺陷是静默的** —— **备用模型烧掉的 token 会被那 4 处成本记账记到主模型头上**。
+  ⚠️ **我在这一步判断错过一次并已更正**：先查的是**类**（`RunnableWithFallbacks` 上没有 `bind_tools`），
+  断言「**整个服务起不来**」—— **那是错的**，实例有 `__getattr__` 委托。
+  📌 教训：**`hasattr(类, x)` ≠ `hasattr(实例, x)`**。反证钉在
+  `api/test_llm_factory.py::test_wrapping_would_silently_break_cost_attribution`。
+
+  **顺带修掉一个真隐患**：`evaluate_with_ragas.py` 的 `os.getenv("LLM_MODEL_CHAT", "deepseek-chat")`
+  —— **兜底值与 `config.py:55` 的 `qwen-plus` 不一致** ⇒ **env 一缺失，脚本和应用会静默用上两个不同的模型**。
+
+  **门禁变强了**（这是收口顺带的收益）：`api/test_max_tokens_wiring.py` 从「钉 15 处各自写对」
+  升级成 **「`api/llm_factory.py` 以外，全仓零裸 `ChatOpenAI(`」** + 钉每个调用点的两个轴。
+  🔴 **两条新门禁都做过【阴性验证】**（⛔ 不是空过 —— 每条都亲手弄红过再弄绿）：
+  · **第 1 条**（工厂以外零直连）：临时塞一个写裸 `ChatOpenAI(...)` 的探针文件 ⇒ 它报
+    `这些地方还在直连 ChatOpenAI ⇒ 绕开了唯一的构造落点：_zz_probe_tmp.py:2`（`1 failed, 2 passed`）；探针已删。
+  · **第 2 条**（角色与裁定表一致）：把 `rag_pipeline` 临时改成 `("chat","answer")` ⇒ 它报
+    `rag_pipeline.py:48 用的是 ('chat', 'answer')，裁定表要求 ('fast', 'answer')`；改回即绿（两处均已还原，`git status` 无残留）。
+
+  **落点**：`api/llm_factory.py`（新建）· 15 个调用点 · `api/test_llm_factory.py`（新建 · 12 条）·
+  `docs/specs/llm_factory.md`（新建）· 📄 **决策全文 ⇒ `docs/decisions/DEC-044-Task5只做构造收口不做自动兜底.md`**
+
+  **证据（可打印 · ⚠️ 下面每条都真跑过，输出就是后面注释写的那个）**：
+  ```bash
+  # ① 15 个调用点（⛔ 别用 `grep make_llm(` 数 —— 那会把注释/docstring 里的提及也数进来，实测 25）
+  grep -rnE "(=|\bor\b) *make_llm\(" api/ --include="*.py" | grep -v "^api/test_" | wc -l   # ⇒ 15
+
+  # ② 工厂以外零【构造】调用 —— 用 AST 判，⛔ 不用 grep（这串在注释里也出现）
+  python -m pytest api/test_max_tokens_wiring.py -q                        # ⇒ 2 passed
+
+  # ③ 全量
+  python -m pytest api/ -m "not integration and not needs_db" -q           # ⇒ 203 passed / 3 skipped / 19 deselected
+  ```
+
 - 🟡 **`ci-local.sh` 的 Redis 那条路【在本机一次都没走过】—— 改成复用 `redis-rag`**（2026-10-02 · 业务方裁定）。
 
   **病症（实测，不是读代码）**：脚本里写着
@@ -300,6 +351,7 @@ All notable changes to this project will be documented in this file.
   ① 计划那张 Files 清单逐条数只有 **14** —— 连它自己都对不上 17；② **`evaluate_with_ragas.py` 计划里一次没提**，
   已补（它是离线评测脚本，**不跑就没人发现它没有上限**）。
   ⇒ **权威清单改为 `api/test_max_tokens_wiring.py` 的 `EXPECTED_MAX_TOKENS`**（漏一个就红），⛔ 不再是那张表。
+  🔴 **2026-10-02 补**：Task 5 收口后该常量**改名为 `EXPECTED_ROLES`**（表里多了「模型轴」一列）—— 本行的旧名已不指向任何东西。
 
   📄 `docs/specs/token_tracker.md`（`①b` Task 1）· `docs/specs/token_config.md` · `docs/specs/agent_graph_advanced.md`
 - 🟢 **CI 的依赖安装不再拉 torch —— 与 Docker 同一套裁法**（2026-10-01 · 业务方指令）。

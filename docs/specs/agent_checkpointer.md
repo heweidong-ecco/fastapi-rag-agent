@@ -2,7 +2,7 @@
 
 | 项 | 内容 |
 |---|---|
-| **状态** | 🟡 **地基在，但零测试 · 且有一处忽略配置**<br>✅ 2026-10-01：`llm`（`:21`）接上 `MAX_TOKENS_AGENT`（`B7`） |
+| **状态** | 🟡 **地基在，但零测试 · 且有一处忽略配置**<br>✅ 2026-10-01：`llm`（`:21`）接上 `MAX_TOKENS_AGENT`（`B7`）<br>✅ 2026-10-02（`①b` Task 5）：该 `llm`（现于 `:20`）**改走 `llm_factory.make_llm("fast", "agent")`** —— `model`/`api_key`/`base_url`/`max_tokens` 不再写在本地。⚠️ `:40` 的 `bind_tools` 与 `:56` 的 `model_name`（**记账**）是**返回值必须是裸 `ChatOpenAI`** 的原因之一 |
 | **对外提供** | `build_checkpointer_agent()` · `checkpointer_agent` |
 | **谁在用** | `api_v1_agent.py:17` → 路由 **`/agent/memory_chat`** |
 

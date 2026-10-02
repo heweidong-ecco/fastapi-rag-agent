@@ -25,9 +25,7 @@ import os
 import json
 import time
 from typing import List, Dict
-from langchain_openai import ChatOpenAI
-from config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL_CHAT
-from token_config import MAX_TOKENS_AGENT   # B7 接线：三个中间步骤 LLM 的单次上限（1024）
+from llm_factory import make_llm   # ①b Task 5：model / api_key / base_url / max_tokens 的唯一落点
 from langchain_core.messages import HumanMessage, SystemMessage
 
 # ⚠️ 2026-09-21（§十四 · ③-b）：接上**预算与记账**。
@@ -90,12 +88,10 @@ PLAN_TOTAL_BUDGET_SECONDS = 120
 
 
 # ==================== 初始化规划专用 LLM ====================
-planner_llm = ChatOpenAI(
-    model=LLM_MODEL_CHAT,
-    api_key=LLM_API_KEY,
-    base_url=LLM_BASE_URL,
-    temperature=0,  # 规划需要确定性，不能有随机性
-    max_tokens=MAX_TOKENS_AGENT,      # B7：输出的是一份 JSON 计划
+# ⚠️ 角色 = 「模型轴 chat」+「长度轴 agent(1024)」—— 见 `api/llm_factory.py` 的模块 docstring。
+planner_llm = make_llm(
+    "chat", "agent",
+    temperature=0.0,   # 规划需要确定性，不能有随机性（= 工厂默认值，⚠️ 这里写明是**故意的**）
     timeout=PLANNER_LLM_TIMEOUT,
     max_retries=LLM_MAX_RETRIES,
 )
@@ -248,12 +244,10 @@ __TOOL_LIST__
 
 # ==================== 任务执行器 ====================
 # 执行器专用模型，温度稍高，以便在动态调整时具备一定灵活性
-executor_llm = ChatOpenAI(
-    model=LLM_MODEL_CHAT,
-    api_key=LLM_API_KEY,
-    base_url=LLM_BASE_URL,
+# ⚠️ 角色 = 「模型轴 chat」+「长度轴 agent(1024)」—— `temperature=0.1` 是**本处特有的**逐点调参。
+executor_llm = make_llm(
+    "chat", "agent",
     temperature=0.1,
-    max_tokens=MAX_TOKENS_AGENT,      # B7：每步的参数值，一句话或一段代码
     timeout=EXECUTOR_LLM_TIMEOUT,      # 🔴 2026-09-21：见上方共用说明
     max_retries=LLM_MAX_RETRIES,
 )
@@ -458,17 +452,15 @@ def generate_dynamic_input(step: Dict, context: str, user_goal: str, user_name: 
     return _strip_code_fence(response.content)
 
 # ==================== 质量评估专用 LLM（轻量、快速） ====================
-quality_checker_llm = ChatOpenAI(
+quality_checker_llm = make_llm(
+    # ⚠️ 角色 = 「模型轴 chat」+「长度轴 agent(1024)」—— 见 `api/llm_factory.py` 的模块 docstring。
     # 用最轻量的模型，节省成本和延迟，
     # 推荐使用一个小型、快速的本地模型（比如Qwen3-1.7B），专门做这种简单的通过/不通过判断。
-    # 没有本地部署 ⇒ 用配置里的 chat 模型（`model=` 那一行就是它）
+    # 没有本地部署 ⇒ 用配置里的 chat 模型（`LLM_MODEL_CHAT`，由 `make_llm` 的模型轴决定）
     # ⚠️ 2026-09-20 修：原注释写死「暂时用 qwen3.7-plus」—— 那是**无效模型名**
-    #    （`CLAUDE.md` 已明列），且与下面真正生效的 `model=LLM_MODEL_CHAT` 不符。
-    model=LLM_MODEL_CHAT,
-    api_key=LLM_API_KEY,
-    base_url=LLM_BASE_URL,
-    temperature=0,  # 评估需要确定性
-    max_tokens=MAX_TOKENS_AGENT,      # B7：只回 PASS / FAIL
+    #    （`CLAUDE.md` 已明列），且与真正生效的 `LLM_MODEL_CHAT` 不符。
+    "chat", "agent",
+    temperature=0.0,   # 评估需要确定性（= 工厂默认值，⚠️ 这里写明是**故意的**）
     timeout=QUALITY_LLM_TIMEOUT,      # 🔴 2026-09-21：见上方共用说明
     max_retries=LLM_MAX_RETRIES,
 )

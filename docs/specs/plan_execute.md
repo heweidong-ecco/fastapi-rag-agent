@@ -2,7 +2,7 @@
 
 | 项 | 内容 |
 |---|---|
-| **状态** | 🟡 **可用** —— 规划 + 逐步**真调用工具**；有超时、有总预算、有重规划、有降级<br>🔴 **但查出 1 处真缺陷 + 5 处"看代码会误判"**（见下）<br>✅ 2026-10-01：三个 `_llm`（`:93` / `:251` / `:461`）接上 `MAX_TOKENS_AGENT`（`B7`） |
+| **状态** | 🟡 **可用** —— 规划 + 逐步**真调用工具**；有超时、有总预算、有重规划、有降级<br>🔴 **但查出 1 处真缺陷 + 5 处"看代码会误判"**（见下）<br>✅ 2026-10-01：三个 `_llm`（`:93` / `:251` / `:461`）接上 `MAX_TOKENS_AGENT`（`B7`）<br>✅ 2026-10-02（`①b` Task 5）：三个 `_llm` **改走 `llm_factory.make_llm("chat", "agent")`**（现于 `:92` / `:248` / `:455`）—— `model`/`api_key`/`base_url`/`max_tokens` 不再写在本地。<br>⚠️ **超时/重试没丢**：`timeout` / `max_retries` 走 `make_llm` 的 `**extra` **逐点透传**，**值一字符未变**（30/20/15 + `max_retries=1`）。<br>⚠️ `executor_llm` 的 `temperature=0.1` 是**本文件特有的**逐点调参，仍写在调用点上 |
 | **对外提供** | `plan_task` · `execute_plan` · `execute_plan_with_replan` · `BudgetExceededError` · 三个计算属性常量（`PLANNER_LLM_TIMEOUT` 等） |
 | **谁在用** | `api_v1_agent.py:16` 的 `POST /agent/plan_execute`（**唯一生产入口**）· `api/test_plan_execute_tools.py`（22 条） |
 | **规模** | 597 行（`wc -l`）· ⚠️ **文件内注释极厚**（绝大部分"为什么"已写在里面） |
@@ -44,9 +44,9 @@
 | 文档 | 说明 |
 |---|---|
 | `docs/specs/api_v1_agent.md` | **唯一生产入口** `POST /agent/plan_execute`（含 `asyncio.to_thread` 与 `BudgetExceededError` 的接法） |
-| `docs/specs/token_tracker.md` | `check_budget_before_call` / `record_usage` 的本尊；**计划 ①b 的 B7 要动本文件 3 处 `ChatOpenAI`**（`:92/249/458`） |
+| `docs/specs/token_tracker.md` | `check_budget_before_call` / `record_usage` 的本尊；✅ **`B7` 的 3 处已在 2026-10-01 接完**（原 `:93/251/461`），2026-10-02 起**又收进 `api/llm_factory.py`** |
 | `docs/specs/main.md` | ⚠️ **中间件抛的异常接不住**（`:186` 那条警告）—— 本文件在**路由层**抛，安全 |
-| `后端补齐清单` **B7** | 三个 `ChatOpenAI` 要接 `MAX_TOKENS_AGENT` —— **落点就在本文件** |
+| `后端补齐清单` **B7** | ✅ 三个 `ChatOpenAI` **已接 `MAX_TOKENS_AGENT`**（2026-10-01）· **2026-10-02 起收进 `llm_factory`** |
 | `docs/复盘/2026-09-21-拿动作成功当结果正确.md` | ⚠️ `:311-314` 那次修复的出处；**⚠️① 是同族的漏网** |
 
 > ### ✅ 要不要做 —— **2026-09-30 业务方全部同意（三条都做）**

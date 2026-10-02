@@ -1,0 +1,126 @@
+"""`make_llm()` —— **LLM 客户端的唯一构造落点**（`①b Task 5` · 形态 = `L2` 甲）。
+
+## 为什么要有这个模块
+
+本仓 16 条 LLM 路径**全在 `import` 时**构造客户端，把 `model=` / `api_key=` / `base_url=` 写死
+（15 处 `ChatOpenAI(` + `query_rewriter.py` 一处裸 `OpenAI(`）。⇒ 两个后果：
+
+1. **换 provider**（百炼 ⇄ DeepSeek）要在 15 处各改一遍 —— 明明三个值取自同一组配置常量
+2. **改 `max_tokens`** 要在 15 处各写一遍常量名
+
+`make_llm()` 把这两件事**收到一处**。
+
+## 两个轴（⛔ 别合成一个参数）
+
+| 轴 | 取值 | 决定 |
+|---|---|---|
+| **模型轴** `model_role` | `"fast"` / `"chat"` | 用 `LLM_MODEL_FAST` 还是 `LLM_MODEL_CHAT` |
+| **长度轴** `token_role` | `"answer"` / `"agent"` | 用 `MAX_TOKENS_ANSWER`(2000) 还是 `MAX_TOKENS_AGENT`(1024) |
+
+⚠️ **4 种组合现网都存在**（`api/test_max_tokens_wiring.py` 的分类表）⇒
+合成一个参数会**悄悄截断某一类**。
+
+`temperature` / `streaming` ⛔ **不进常量表** —— 它们是**逐点调参**
+（`plan_execute` 的 executor 要 0.1、`api_v1_rag` 的流式要 0.3），进表反而把意图藏起来。
+
+## 🔴 返回值**必须**是裸 `ChatOpenAI`（⛔ 别包）
+
+**调用点依赖它的这些属性**，实测：
+
+| 属性 | 谁在用 | 处数 |
+|---|---|---|
+| **`bind_tools()`** | `agent_graph.py:42` · `agent_graph_advanced.py:295` · `agent_checkpointer.py:40` · `agent_graph_advanced_learning.py:75`/`:219` | **5** |
+| **`model_name`** | `agent_checkpointer.py:56` · `agent_graph_advanced.py:329`/`:380` · `plan_execute.py:152`（成本记账） | **4** |
+
+⚠️ **2026-10-02 实测 —— 结论与直觉相反，别照直觉改**：
+
+```
+主.with_fallbacks([真的 ChatOpenAI 备用])
+  w.bind_tools(tools)  →  ✅ 能用，且返回的对象**仍然带兜底**
+  w.model_name         →  🔴 永远返回【主】模型名
+```
+
+⇒ **包上去不会炸**（`bind_tools` 没问题），**真正的缺陷是静默的**：
+**备用模型烧掉的 token，会被那 4 处记账记到主模型头上** —— 不报错，只是账错。
+
+⇒ 所以这条约束的**唯一目的是「记账不失真」**。
+`api/test_llm_factory.py::test_*` 把它钉死了；**要改返回值形状，先看那两条测试。**
+
+## ⬜ 没做的事：**自动兜底**（`L2` 的「换下一个」目前是【手动】的）
+
+**现状**：免费额度耗尽 ⇒ **请求直接报错**，直到人工改 `.env` 里的
+`LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL_*` 并**重建容器**
+（⚠️ `docker compose restart` **不重读 `env_file`**，要用 `up -d api`）。
+
+**为什么不做**（**2026-10-02 评估后推迟，不是忘了**）：
+
+| 方案 | 代价 / 卡在哪 |
+|---|---|
+| `主.with_fallbacks([备], exceptions_to_handle=(...))` | 🟡 **能跑**（`bind_tools` 没问题），但 **`model_name` 会静默记错账**（见上一节）⇒ 要额外补一个"谁真的答的"的传递；<br>⚠️ 而且**收益只在额度耗尽那一刻兑现** |
+| 自己写 `BaseChatModel` 包装类 | 🟡 可行，要透传 `bind_tools` / `_generate` / `_stream` / `model_name` |
+| 换 `httpx` transport 在传输层改写请求 | 🟡 可行且调用点零改动，但 sync/async 两套都要写，属"黑魔法"，排障困难 |
+
+⇒ **落点已经收敛到这一处**：将来要做，**只需改本模块 + 处理那 5 个 `bind_tools` 点**，
+**15 个调用点一行都不用再动**。
+
+## ⚠️ 看代码会误判的地方 ⭐
+
+| 看代码会以为 | 实际 |
+|---|---|
+| 换了 model 不用重启 | 🔴 **要重启** —— 调用点**仍在 import 时**构造（本次只收口了"在哪写"，没改成运行时可切） |
+| 这里能"兜底" | ⛔ **不能** —— 返回值是裸 `ChatOpenAI`，没有任何降级/重试逻辑（见上「没做的事」） |
+| 有「主/备 provider」的概念 | 🟡 **没有** —— 只认 `LLM_MODEL_*` + `LLM_API_KEY` + `LLM_BASE_URL` 三个值 |
+"""
+
+import os
+
+_MODEL_ROLE_TO_KEY = {"fast": "MODEL_FAST", "chat": "MODEL_CHAT"}
+_TOKEN_ROLE_TO_CONST = {"answer": "MAX_TOKENS_ANSWER", "agent": "MAX_TOKENS_AGENT"}
+
+
+def _read(key: str):
+    """读环境变量。⚠️ **在【调用时】读**（不是 import 成常量）——
+    这样测试改得动它，也给将来"运行时可切"留了路。"""
+    return os.getenv("LLM_" + key) or None
+
+
+def make_llm(model_role: str, token_role: str, *, temperature: float = 0.0,
+             streaming: bool = False, **extra):
+    """按【模型轴】+【长度轴】造一个 `ChatOpenAI`。
+
+    Args:
+        model_role: `"fast"`（`LLM_MODEL_FAST`）| `"chat"`（`LLM_MODEL_CHAT`）
+        token_role: `"answer"`（`MAX_TOKENS_ANSWER` = 2000）| `"agent"`（`MAX_TOKENS_AGENT` = 1024）
+        temperature: 逐点调参
+        streaming: 流式模式（`api_v1_rag.py` 的 SSE 端点要 True）
+        **extra: **逐点调参的其余项**，原样透传给 `ChatOpenAI` ——
+            现网用到 `timeout=` / `max_retries=`（`agent_graph_advanced.py:52-53`）。
+
+            ⛔ **不许**传 `model` / `api_key` / `base_url` / `max_tokens` ——
+            那四个是**这一层管的**，传了 Python 会报「got multiple values for keyword argument」
+            （这是**故意的**：让"绕过收口"当场失败，而不是静默覆盖）。
+
+    Returns:
+        **裸 `ChatOpenAI`**。⛔ 不许包成别的类型 —— 见模块 docstring 那张「返回值必须」的表。
+    """
+    if model_role not in _MODEL_ROLE_TO_KEY:
+        raise ValueError(f"未知的 model_role={model_role!r}；只认 {sorted(_MODEL_ROLE_TO_KEY)}")
+    if token_role not in _TOKEN_ROLE_TO_CONST:
+        raise ValueError(f"未知的 token_role={token_role!r}；只认 {sorted(_TOKEN_ROLE_TO_CONST)}")
+
+    import token_config
+
+    # ⚠️ `langchain_openai` 在这里才 import（不是模块顶层）——
+    #    否则任何 `import llm_factory` 都会拉 langchain，
+    #    而 `api_v1_rag.py:567` 那条注释记的正是这个教训（导入期白建对象）。
+    from langchain_openai import ChatOpenAI
+
+    return ChatOpenAI(
+        model=_read(_MODEL_ROLE_TO_KEY[model_role]),
+        api_key=_read("API_KEY"),
+        base_url=_read("BASE_URL"),
+        temperature=temperature,
+        max_tokens=getattr(token_config, _TOKEN_ROLE_TO_CONST[token_role]),
+        streaming=streaming,
+        **extra,
+    )

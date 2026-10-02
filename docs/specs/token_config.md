@@ -2,9 +2,9 @@
 
 | 项 | 内容 |
 |---|---|
-| **状态** | 🟢 **新建（2026-10-01 · B7）** —— 额度类常量的**唯一落点**<br>✅ **`MAX_TOKENS_*` 已接线**（2026-10-01 · `①b` Task 1，15 处构造点）<br>✅ **`SESSION_TOKEN_LIMIT` 已有判定函数 + 7 个调用点**（`①b` Task 2 · `B8`）<br>✅ **`GLOBAL_DAILY_TOKEN_LIMIT` 已接线**（2026-10-02 · `①b` Task 4 · `B11`，经 `api/breaker.py` **8 处**）<br>⚠️ **2026-10-01 当天它曾是"有函数、无调用点"—— 那句已作废** |
+| **状态** | 🟢 **新建（2026-10-01 · B7）** —— 额度类常量的**唯一落点**<br>✅ **`MAX_TOKENS_*` 已接线**（2026-10-01 · `①b` Task 1，15 处构造点；**2026-10-02 · Task 5 起收进 `api/llm_factory.py`**）<br>✅ **`SESSION_TOKEN_LIMIT` 已有判定函数 + 7 个调用点**（`①b` Task 2 · `B8`）<br>✅ **`GLOBAL_DAILY_TOKEN_LIMIT` 已接线**（2026-10-02 · `①b` Task 4 · `B11`，经 `api/breaker.py` **8 处**）<br>⚠️ **2026-10-01 当天它曾是"有函数、无调用点"—— 那句已作废** |
 | **对外提供** | `MAX_TOKENS_ANSWER` · `MAX_TOKENS_AGENT` · `MAX_TOKENS_REWRITE_*` · `SESSION_TOKEN_LIMIT` · `GLOBAL_DAILY_TOKEN_LIMIT` · `ROLE_DAILY_TOKEN` · `DEFAULT_DAILY_TOKEN_BUDGET` · `MODEL_PRICING` · `DEFAULT_MODEL_PRICING` · `MAX_SINGLE_CALL_COST` · `MAX_THREAD_COST` · `GLOBAL_LIMIT_*` · `USER_LIMIT_*` |
-| **谁在用** | `token_tracker.py`（别名 `PRICING` / `ROLE_TOKEN_BUDGET` / …）· `rate_limiter.py`（`:129` 起两个既有 `TokenBucketLimiter` 的实例化）<br>✅ **15 处 `ChatOpenAI(max_tokens=…)`**（2026-10-01 接上 —— 清单见 `api/test_max_tokens_wiring.py` 的 `EXPECTED_MAX_TOKENS`）<br>⬜ **尚未接**：B8/B10 的判定函数（`①b`） |
+| **谁在用** | `token_tracker.py`（别名 `PRICING` / `ROLE_TOKEN_BUDGET` / …）· `rate_limiter.py`（现 `:137` / `:140` 两个既有 `TokenBucketLimiter` 的实例化）<br>✅ **`MAX_TOKENS_*` 的 15 个调用点** —— ⚠️ **2026-10-02（Task 5）起，它们不再直接 import 本模块**，而是经 `api/llm_factory.py` 的 `make_llm()` 读。<br>📌 清单见 `api/test_max_tokens_wiring.py` 的 `EXPECTED_ROLES`（旧名 `EXPECTED_MAX_TOKENS`，Task 5 随门禁改写） |
 | **规模** | 89 行（`wc -l api/token_config.py`） |
 
 ## ✅ 做了什么
@@ -20,9 +20,12 @@
 ## 🟡 做到哪 / 缺什么
 
 - ✅ **`MAX_TOKENS_ANSWER` / `MAX_TOKENS_AGENT` 已接线**（2026-10-01 · `①b` Task 1）——
-  **15 处** `ChatOpenAI(...)` 全带上，分类见 `api/test_max_tokens_wiring.py` 的 `EXPECTED_MAX_TOKENS`。
+  **15 处**构造点全带上，分类见 `api/test_max_tokens_wiring.py` 的 `EXPECTED_ROLES`。
   ⚠️ **这就是那句"常量对了、没接上 = 单次上限不存在"的兑现** ——
   接之前，`MAX_TOKENS_*` 只是两个没人读的数字。
+  🔴 **2026-10-02（Task 5）又收了一层**：15 处**不再各写 `ChatOpenAI(max_tokens=…)`**，
+  统一 `make_llm("fast"|"chat", "answer"|"agent")` ⇒ 本模块的读取点**从 15 个降到 1 个**
+  （`api/llm_factory.py`）。⛔ **但"要重启才生效"没变**（见下方 ⚠️ 表）。
 - ✅ **`SESSION_TOKEN_LIMIT` 已接线**（2026-10-01 · `①b` Task 2 · `B8`）——
   `token_tracker.check_session_token_budget` 读它，**接在 7 条真调 LLM 的对话链上**（`DEC-041`）
 - ✅ **`GLOBAL_DAILY_TOKEN_LIMIT` 已接线**（2026-10-02 · `①b` Task 4 · `B11`）——
@@ -39,9 +42,9 @@
 
 | 看代码会以为 | 实际 |
 |---|---|
-| 🔴 **「常量集中了 ⇒ 就动态了 / 能热加载了」** | ⛔ **不是** —— **只集中，不做运行时路由**。`ChatOpenAI(max_tokens=…)` 是 **import 时求值**（17 个构造点全是）⇒ **改了值本来就要重启容器**。这两件事**不是一回事** |
-| 🔴 **「在 `token_config` 里改个值，服务行为立刻变」** | ⛔ **不是** —— 见上（**要重启**）。<br>🟢 **2026-10-01 起的实际状态（逐项，别一起读）**：<br>· `MAX_TOKENS_*` ⇒ **改值 + 重启 ⇒ 生效**（`①b` Task 1，15 处）<br>· `SESSION_TOKEN_LIMIT` ⇒ **改值 + 重启 ⇒ 生效**（`①b` Task 2 · `B8`，已接 7 条链）<br>· ✅ `GLOBAL_DAILY_TOKEN_LIMIT` ⇒ **改值 + 重启 ⇒ 生效**（`①b` Task 4 · `B11` 已接 8 处；2026-10-01 那句"什么都不会发生"**已作废**） |
-| ⚠️ **「`from token_config import …` 放哪一行都行」** | ⛔ **不是** —— 本模块**在 import 时读 env** ⇒ 必须排在 **`load_dotenv()` 之后**。<br>📌 **唯一受影响的是 `evaluate_with_ragas.py`**（它是全仓唯一显式调 `load_dotenv()` 的文件）—— 该文件里已把 import 放在 `load_dotenv()` 之后并写了原因。<br>🔴 **本仓目前两者相等 ⇒ 放错也看不出来**（`.env` 里没有 `TOKEN_MAX_*`）。**正因为看不出来，才写死在正确的一侧。** |
+| 🔴 **「常量集中了 ⇒ 就动态了 / 能热加载了」** | ⛔ **不是** —— **只集中，不做运行时路由**。`MAX_TOKENS_*` 仍是在 **import 时求值**（`make_llm()` 的 15 个调用点全在模块层）⇒ **改了值本来就要重启容器**。这两件事**不是一回事** |
+| 🔴 **「在 `token_config` 里改个值，服务行为立刻变」** | ⛔ **不是** —— 见上（**要重启**）。<br>🟢 **2026-10-01 起的实际状态（逐项，别一起读）**：<br>· `MAX_TOKENS_*` ⇒ **改值 + 重启 ⇒ 生效**（`①b` Task 1，15 处；Task 5 收进 `llm_factory`，**生效条件不变**）<br>· `SESSION_TOKEN_LIMIT` ⇒ **改值 + 重启 ⇒ 生效**（`①b` Task 2 · `B8`，已接 7 条链）<br>· ✅ `GLOBAL_DAILY_TOKEN_LIMIT` ⇒ **改值 + 重启 ⇒ 生效**（`①b` Task 4 · `B11` 已接 8 处；2026-10-01 那句"什么都不会发生"**已作废**） |
+| ⚠️ **「`from token_config import …` 放哪一行都行」** | ⛔ **不是** —— 本模块**在 import 时读 env** ⇒ 必须排在 **`load_dotenv()` 之后**。<br>📌 **唯一受影响的是 `evaluate_with_ragas.py`**（它是全仓唯一显式调 `load_dotenv()` 的文件）。<br>🔴 **2026-10-02（Task 5）这条约束【换了落点但没消失】**：该文件已不再 `from token_config import …`，<br>改为 `make_llm()` —— 而 `llm_factory` **只在 `make_llm()` 函数内**才 `import token_config`，<br>⇒ 现在管的是**调用 `make_llm(...)` 的时机**（该调用点在 `load_dotenv()` 之后 ✅）。<br>🔴 **本仓目前两者相等 ⇒ 放错也看不出来**（`.env` 里没有 `TOKEN_MAX_*`）。**正因为看不出来，才写死在正确的一侧。** |
 | ⚠️ **「`MODEL_PRICING` 里的 `deepseek` 价就是账单价」** | 🟡 **是近似** —— 本表**不区分缓存命中**（拿不到命中/未命中的拆分）⇒ 按**未命中**价记 ⇒ **偏高估**（偏保守）。来源见文件内注释 |
 | 🔴 **「兜底价是个上界 / 它不会低报花费」** | ⛔ **不是，而且旧注释就是这么写错的**。原注释写「取偏保守的一组（**不低报**花费）」——**那是 qwen-turbo 年代的说法**（0.003/0.006 恰好等于 qwen-turbo 的价）。实测：**`qwen-plus`（0.008/0.016）本来就高于兜底**。<br>⇒ **兜底价不是任何意义上的上界**；**⛔ 别拿它当规矩**。<br>📌 **真正防"静默低报"的是「在用模型必须登记」**（登记了就走自己的价，**永远走不到兜底**）。<br>🔴 **本行是两个坑的合体**：① 我先把那句旧注释当成了规矩；② 又把它写成测试 ⇒ **CI 直接红**（CI 无 `.env` ⇒ `config.py:55` 默认 `qwen-plus`）⇒ 已删该测试，见 `api/test_token_config.py` 顶部 docstring |
 | ⚠️ **「`ROLE_DAILY_TOKEN` 的键是枚举」** | ⛔ **是字符串**（`"free"`/`"premium"`/`"admin"`）。能对上是因为 `permission.UserRole` 继承 `str` ⇒ ⚠️ **改 `UserRole` 的值就会静默错配**（`.get(role, 默认值)` 不报错，直接吃默认值） |

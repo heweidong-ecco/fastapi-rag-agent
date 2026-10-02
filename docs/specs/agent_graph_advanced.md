@@ -2,7 +2,7 @@
 
 | 项 | 内容 |
 |---|---|
-| **状态** | 🟡 **可用，且是生产链** —— 但 🔴 **有两处实锤缺陷**（见下）<br>✅ **2026-10-01 改完**：`B7` + `S12` 都已落在它的 `llm`（`:50`）上 —— 见「✅ 做了什么」末条 |
+| **状态** | 🟡 **可用，且是生产链** —— 但 🔴 **有两处实锤缺陷**（见下）<br>✅ **2026-10-01 改完**：`B7` + `S12` 都已落在它的 `llm`（`:50`）上 —— 见「✅ 做了什么」末条<br>✅ **2026-10-02（`①b` Task 5）**：该 `llm` **改走 `llm_factory.make_llm("chat", "agent")`** —— `model`/`api_key`/`base_url`/`max_tokens` 不再写在本地。<br>⚠️ **`timeout` / `max_retries` 没丢**：它们走 `make_llm` 的 `**extra` **逐点透传**（这是本仓第一处用到 `**extra` 的地方）。<br>⚠️ **`llm.bind_tools(...)` 照旧能用**（那句在 `get_llm_with_mcp_tools()` 里，现于 `:295`；`llm_with_tools` 是 `:354` 拿到它的）—— 这正是「工厂返回值必须是裸 `ChatOpenAI`」那条约束的来由之一 |
 | **对外提供** | `build_mcp_agent()`（返回编译好的图，`:288`）· `mcp_session()` · `get_mcp_tools()` · `call_mcp_tool_with_cache()` |
 | **谁在用** | `api_v1_agent.py:450` 的 `POST /agent/mcp_chat`（**三代 Agent**） |
 | **规模** | 421 行（`wc -l api/agent_graph_advanced.py`）—— 2026-10-01 因 `B7`+`S12` 的注释与参数 +14 行 |
@@ -20,10 +20,13 @@
 
 - 🔴 **记账用错单价**（见 ⚠️②）—— 本 spec 新查出
 - 🔴 **超预算是软拦截**（见 ⚠️③）—— 上游文档已记，本 spec 确认落点
-- ⚠️ **`llm` 没有 `timeout` / `max_retries`**（`:39-44`）：`ChatOpenAI` 吃 SDK 默认
-  ⇒ 最坏 `600s × (1+2)`。⚠️ 同一类问题 `plan_execute.py` **已经修过**（显式设 30/20/15 + `max_retries=1`），**这里没修**
+- ~~⚠️ **`llm` 没有 `timeout` / `max_retries`**（`:39-44`）：`ChatOpenAI` 吃 SDK 默认
+  ⇒ 最坏 `600s × (1+2)`。~~ ✅ **2026-10-01 已修（🅗 `S12`）**：现为 `timeout=60` + `max_retries=1`。
+  ⚠️ **本条到 2026-10-02 才划掉** —— 2026-10-01 那天只改了状态表与「✅ 做了什么」，**这条 bullet 忘了同步**。<br>
+  🔴 **2026-10-02（`①b` Task 5）复核**：`timeout` / `max_retries` 现由 `make_llm(..., timeout=…, max_retries=…)` 的
+  `**extra` 传入 ⇒ **值没变**（60 / 1），只是换了个写法。
 - ⚠️ `check_token_budget(user_name, estimated_tokens=500)` 的 **500 硬编码**，且 **`agent_decide` 与 `chat_node` 各查一次**
-- ⚠️ `MemorySaver()`（`:397`）**进程内存** ⇒ 重启即丢（与 `/agent/langgraph_chat` 同）
+- ⚠️ `MemorySaver()`（现 `:414`）**进程内存** ⇒ 重启即丢（与 `/agent/langgraph_chat` 同）
 
 ## ⚠️ 看代码会误判的地方 ⭐
 
@@ -31,10 +34,10 @@
 |---|---|
 | 🔴 **① 这是"进阶示例"** | ⛔ **它是生产实现** —— 模块 docstring 第 2 行写着「LangGraph **进阶示例**」，<br>但它就是 **`POST /agent/mcp_chat`（三代 Agent）的图本体**。<br>📌 **`agent_graph.py` 的 docstring 反而老老实实**。名字与自述**都不可信**，**看谁 import 它**。 |
 | ✅ **② 记账记的是实际模型** | **2026-10-01 已修**（`🅗 S4`+`S5`）。原状：`model=` **写死成 `"qwen-turbo"`**（`:316` `:364`），而 `.env` 里实际是 `deepseek-v4-flash`。<br>**当时的完整影响链**：`record_usage(model="qwen-turbo")` ⇒ `PRICING["qwen-turbo"]` = 0.003/0.006<br>⇒ 写进 `token_usage_logs.cost` 的是**按 qwen-turbo 单价算的钱** ⇒ `get_thread_cost()`（`:702`）<br>⇒ **`check_multilevel_budget` 第二级 `MAX_THREAD_COST`（单位【元】）拿它比** ⇒ 🔴 **连拦截都是拿错的数在判**。<br>✅ **现状**：改成 `getattr(…, "model_name", …)`（`plan_execute.py:154` 的写法，**从对象取**），且 `MODEL_PRICING` **已补 `deepseek-v4-flash`**。<br>📌 **一处细节**（`agent_graph_advanced.py:366`）：记的是 **`llm_with_tools`**（`:345` 实际调用的那个），不是模块级的 `llm` —— 实测 `llm.bind_tools(...)` 后 `.model_name` 仍是 `deepseek-v4-flash`。<br>⚠️ **仍是近似**：单价**不区分缓存命中** ⇒ 偏高估（偏保守）。 |
-| 🔴 **③ 超预算会被拒** | ⛔ **不会 —— 是【软拦截】**（`:244-251`）：超预算时**塞一条 `ToolMessage` 文本提示**，<br>**HTTP 仍是 200**，只有 **LLM 自己能看到**那句"⚠️ 预算拦截" ⇒ **调用方在响应里看不出"被拒了"**。<br>📌 唯一的**硬拒绝**是该端点上的依赖 `check_budget`（`api_v1_agent.py:423-433`，抛 `AppException(QUOTA_EXCEEDED)`）——<br>⚠️ **但它判的是【用户每日 token 预算】，不是这一条**。<br>⇒ **"预算拦住了"这句话，在这个文件里只对 LLM 成立。** |
+| 🔴 **③ 超预算会被拒** | ⛔ **不会 —— 是【软拦截】**（现 `:249-257`）：超预算时**塞一条 `ToolMessage` 文本提示**，<br>**HTTP 仍是 200**，只有 **LLM 自己能看到**那句"⚠️ 预算拦截" ⇒ **调用方在响应里看不出"被拒了"**。<br>📌 唯一的**硬拒绝**是该端点上的依赖 `check_budget`（`api_v1_agent.py:423-433`，抛 `AppException(QUOTA_EXCEEDED)`）——<br>⚠️ **但它判的是【用户每日 token 预算】，不是这一条**。<br>⇒ **"预算拦住了"这句话，在这个文件里只对 LLM 成立。** |
 | ⚠️ **④ `should_continue` 跟 `agent_graph.py` 里那个是一回事** | ⛔ **不是** —— 本文件的是一个**内嵌在 `build_mcp_agent()` 里的局部函数**（`:377`），<br>返回值是 **`"tools"` / `"chat"`**；而 `agent_graph.py:95` 那个返回 **`"approval"` / `"tools"` / `END`**。<br>**同名、不同语义、不同作用域。** ⚠️ 搜 `should_continue` 会同时命中两个。 |
 | ⚠️ **⑤ 「MCP 会话是池化的」** | ⛔ **池化已移除**（2026-09-20）—— 但文件里**同时留着"曾经的方案是全局单例"那段叙述**（`:76-78`）<br>和"会话池已移除"的说明（`:83-105`）。**读开头那几行容易读成当前实现。**<br>✅ 现状：**谁调用，谁在自己 task 内开关**（`:117` `mcp_session`）。 |
-| ⚠️ **⑥ 记账的 `model=` 是"用了那个模型"** | ⛔ **那只是记账时的标签，不影响真调用** —— 真模型是 `llm`（`:39`，取 `LLM_MODEL_CHAT`）。<br>⇒ **换标签不会让服务换模型，只会改【单价口径】**。✅ 2026-10-01 起标签已从对象取（见 ⚠️②）。 |
+| ⚠️ **⑥ 记账的 `model=` 是"用了那个模型"** | ⛔ **那只是记账时的标签，不影响真调用** —— 真模型是 `llm`（**2026-10-02 起由 `make_llm("chat", …)` 决定**，即 `LLM_MODEL_CHAT`）。<br>⇒ **换标签不会让服务换模型，只会改【单价口径】**。✅ 2026-10-01 起标签已从对象取（见 ⚠️②）。 |
 
 ## 关联
 
@@ -44,7 +47,7 @@
 | `docs/specs/token_tracker.md` | `PRICING` / `check_multilevel_budget` / `get_thread_cost` 的本尊 · **计划 ①a 的 Task 2 要扩 `PRICING`** |
 | `docs/specs/plan_execute.md` | ⚠️ **同一个"漏传 / 写死"家族的对照**（那边超时都显式设了） |
 | `docs/specs/pending_approvals.md`（待建） | 三代图**没有审批中断**（与 `/agent/langgraph_chat` 不同） |
-| `后端补齐清单` **B7** | ✅ **已接（2026-10-01）** —— 原 `:39` 的 `llm` 现于 `:50` 接 `MAX_TOKENS_AGENT`（1024） |
+| `后端补齐清单` **B7** | ✅ **已接（2026-10-01）** —— 原 `:39` 的 `llm` 现于 `:50` 接 `MAX_TOKENS_AGENT`（1024）<br>✅ **2026-10-02（Task 5）**：这个 `max_tokens` 已**收进 `llm_factory`** ⇒ 本地改为 `make_llm("chat", "agent")` |
 | `后端补齐清单` **B13** | ⚠️ **R4「成本可见」就建立在本条 ⚠️② 之上** ⇒ **不修单价，看板上的钱就是错的** |
 | `docs/decisions/DEC-017` | MCP transport 的选型（HTTP/SSE 那条路） |
 

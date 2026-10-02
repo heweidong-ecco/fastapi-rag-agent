@@ -15,7 +15,7 @@ from ragas.metrics import (
     context_recall,
     context_precision  # 新增：上下文精确率
 )
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_openai import OpenAIEmbeddings
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
@@ -25,7 +25,13 @@ load_dotenv()
 #    （见其模块 docstring「不做热加载」）。放在 `load_dotenv()` 之前 ⇒ `.env` 里的
 #    `TOKEN_MAX_*` 会被**静默忽略**、用了代码默认值。本仓目前两者相等（没有这条 env），
 #    所以现在**看不出来** —— 正因为看不出来才要写死在正确的一侧。
-from token_config import MAX_TOKENS_ANSWER   # noqa: E402  # B7 接线：答案/评判类，2000
+#
+#    🔴 2026-10-02（Task 5）：原来的 `from token_config import MAX_TOKENS_ANSWER` 换成
+#    `from llm_factory import make_llm`。⚠️ **次序约束仍在，但落点变了** ——
+#    现在它管的是**调用** `make_llm(...)` 的时机（`llm_factory` 自己**不**在 import 时读
+#    `token_config`，是 `make_llm()` **在函数内**才 import 它）。下面的 `eval_llm`
+#    在 `load_dotenv()` **之后** ⇒ **同一条保证照旧成立**。
+from llm_factory import make_llm   # noqa: E402
 
 # ==================== 配置 ====================
 # ⚠️ 凭据一律从环境变量读（`load_dotenv()` 已在上方调用，会向上找到仓根 `.env`）。
@@ -47,15 +53,16 @@ TOP_K = 3
 #
 #    ⚠️ 顺带修掉一个隐患：原写法把 `qwen-plus` 和 DashScope 的 base_url **写死在脚本里**，
 #       ⇒ 项目换模型时**这个脚本不会跟着换**，而它看起来"还在正常工作"。
-eval_llm = ChatOpenAI(
-    model=os.getenv("LLM_MODEL_CHAT", "deepseek-chat"),
-    api_key=os.getenv("LLM_API_KEY"),
-    base_url=os.getenv("LLM_BASE_URL"),
-    temperature=0,
-    # B7：本脚本 :127 生成"被评的答案"、:272 又当 RAGAS judge —— **两处都是长输出**，
-    # ⇒ 给答案档（2000）。⚠️ 给 1024 的话 judge 输出可能**被截断 ⇒ 评分静默失真**，
-    #    那比没有上限更坏（错数据看不出来）。
-    max_tokens=MAX_TOKENS_ANSWER,
+#
+#    🔴 2026-10-02（Task 5）**又修掉一个**：本处的 `os.getenv("LLM_MODEL_CHAT", "deepseek-chat")`
+#       **兜底值和 `config.py:55` 的 `qwen-plus` 不一致** —— 一旦 env 缺失，脚本和应用会
+#       静默用上**两个不同的模型**。现在两者都走 `make_llm()` ⇒ **同一个默认值、同一个来源**。
+eval_llm = make_llm(
+    # ⚠️ 角色 = 「模型轴 chat」+「长度轴 answer(2000)」—— 见 `api/llm_factory.py` 的模块 docstring。
+    #    ⚠️ 为什么是 answer 档：本脚本 :144 生成"被评的答案"（`answer_chain`）、:289 又当 RAGAS judge
+    #       —— **两处都是长输出**。给 1024 的话 judge 输出可能**被截断 ⇒ 评分静默失真**，
+    #       那比没有上限更坏（错数据看不出来）。
+    "chat", "answer",
 )
 
 # ⚠️ **embedding 保持 DashScope**（业务方 2026-09-21 明确）——
