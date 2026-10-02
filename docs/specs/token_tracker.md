@@ -2,7 +2,7 @@
 
 | 项 | 内容 |
 |---|---|
-| **状态** | 🟡 **可用，但它是【三套额度口径】的其中一套** —— 见下 ⚠️<br>🟢 **①a 已落地（2026-10-01）**：额度常量已收口到 `api/token_config.py`（本文件**只剩同名别名**）· 本文件下方 **实施计划 ①a** 已执行完<br>🔵 **①b 进行中（2026-10-01）**：Task 0 ✅ / Task 1 ✅（B7 接线）/ **Task 2 ✅（B8 会话级 · 已接 7 条链，真能拦）** / **Task 3 ✅（B10 全局日级 · ⚠️ 只有函数，未接线）** / ⬜ **Task 4 起待做（B11 熔断）**<br>⚠️ **两者的完成度【不一样】，别一起读**：`B8` 有调用点 ⇒ **改行为**；`B10` **没有调用点** ⇒ **不产生任何行为变化**，接线在 `B11` |
+| **状态** | 🟡 **可用，但它是【三套额度口径】的其中一套** —— 见下 ⚠️<br>🟢 **①a 已落地（2026-10-01）**：额度常量已收口到 `api/token_config.py`（本文件**只剩同名别名**）· 本文件下方 **实施计划 ①a** 已执行完<br>🔵 **①b（2026-10-02）**：Task 0 ✅ / Task 1 ✅（B7 接线）/ **Task 2 ✅（B8 会话级 · 已接 7 条链）** / **Task 3 ✅（B10 全局日级 · 判定函数）** / **Task 4 ✅（B11 熔断 · 已接 8 处，`B10` 由此生效）** / ⬜ **Task 5 起（`L2` 换模型降级链）**<br>⚠️ **`B10` 曾一度"有函数没接线"（2026-10-01 当天）—— 那句话已作废**，2026-10-02 Task 4 接上了 |
 | **对外提供** | `record_usage()` · `record_cost()` · `check_multilevel_budget()` · `check_token_budget_detail()` · `get_token_budget_info()` · 9 个汇总函数 |
 | **谁在用** | `permission`（取角色）· `agent_graph_advanced.py:239`（唯一调多级预算的地方）· `cost_dashboard.py` · 各 `api_v1_*.py` |
 | **规模** | 888 行 |
@@ -937,15 +937,24 @@ venv/bin/python -m pytest api/ -m "not integration and not needs_db" -q
 
 ### ⚠️ 本任务【不接线】——「全绿」≠「全局限额生效」
 
-`check_global_daily_budget` **没有任何调用点**。接线在 **`Task 4`（`B11`）**：
-断路器 + `api/main.py` 放行路径。
+`check_global_daily_budget` **当时没有任何调用点**。接线在 **`Task 4`（`B11`）**。
 
-> 🔴 **这是同一个陷阱的第三次**：
+> ✅ **2026-10-02 更新：已经接上了** —— 落在 **`api/breaker.py`**（`circuit()` / `global_key()`），
+> 接在 **8 处**（`api_v1_agent.py` ×5 · `api_v1_rag.py` ×2 · `api_v1.py` ×1）。
+> ⚠️ **落点不是 `api/main.py`**（原计划写的）—— 理由是 `QuotaMiddleware` 整段包在
+> `if user_name:` 里 ⇒ **匿名请求完全绕过**，而 `benchmark-embedding` **恰恰是匿名能打且真花钱的**。
+> **判据（可打印）**：`grep -rn "circuit(global_key())" api/ --include="*.py" | grep -v test_` ⇒ **8 处**
+> 📌 模块详情 ⇒ `docs/specs/breaker.md`
+
+> 🔴 **这是同一个陷阱的第三次**（⚠️ 前两次都真栽了，第三次靠接线测试兜住）：
 > · `B7` 之前 —— 常量建好了，**没接上** ⇒ 单次上限不存在；
 > · `B8` 之前 —— 有 `SESSION_TOKEN_LIMIT`，**没有判定函数**；
-> · **`B10` 现在** —— 有判定函数，**没有调用点**。
-> ⇒ 📌 **判据**：`grep -rn "check_global_daily_budget" api/ --include="*.py"` 只应命中
-> **定义处 + 测试**；**命中不了任何 `api_v1_*.py` = 它还没生效**。
+> · `B10` —— 有判定函数，**曾一度没有调用点**（2026-10-01 当天）。
+> ⇒ 📌 **判据（已从"命中不了 api_v1_*.py"改成下面这条）**：
+> `grep -rn "circuit(global_key())" api/ --include="*.py" | grep -v test_` ⇒ **8 处**；
+> ⛔ **只 grep `check_global_daily_budget` 已经不够了** —— 现在它本来就该只出现在
+> **定义处 + `breaker.py` + 测试** 里（调用方走的是 `circuit()` 那一层）。
+> 📌 接线本身由 **`api/test_breaker_wiring.py`** 静态钉住（AST 查 8 个函数体）。
 
 ### 证据（可打印）
 

@@ -80,3 +80,47 @@ def test_global_usage_counts_a_user_who_would_be_over_his_own_limit():
         f"两个用户各写了 1000，全站合计却只有 {total} ⇒ 它没有跨用户求和"
     )
     assert GLOBAL_DAILY_TOKEN_LIMIT > 0, "全局上限必须是正数，否则判定永远拒"
+
+
+def test_yesterdays_usage_does_not_count():
+    """🔴 `B11` **要素④「恢复」** —— 昨天的行**不算数** ⇒ 跨天自然重置。
+
+    ## 为什么必须有这一条
+
+    `B11` 源文档把要素④标成「⚠️ **未核**」，并猜"要实测 **Redis 日级 key 的 TTL**"。
+    🔴 **那个猜测是错的** —— 全站用量**在 PG 里**（`token_usage_logs`），**不在 Redis**,
+    ⇒ **根本没有 TTL 可核**；恢复靠的是那条 SQL 的 `WHERE created_at >= CURRENT_DATE`
+    **自己翻页**。
+
+    ⚠️ 静态的 `test_global_query_is_today_only` 只能证明「SQL 里**写着** CURRENT_DATE」，
+       **证明不了**「昨天的行**真的**被排除」。差的那一步就是本条：
+       **塞一条昨天的巨量记录，看今日合计会不会被它污染。**
+
+    ⚠️ 若哪天 `CURRENT_DATE` 被去掉 ⇒ 额度**一旦用满就永不自愈**（跑分/演示会永久 429）。
+    """
+    import token_tracker
+    from db import get_db
+
+    before = token_tracker.get_global_daily_token_usage()
+
+    # 直接写库：只有这样才控制得了 created_at（record_usage 恒为 now()）
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO token_usage_logs
+                   (user_name, thread_id, model, purpose,
+                    prompt_tokens, completion_tokens, total_tokens, cost, created_at)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s,
+                           CURRENT_DATE - INTERVAL '1 day')""",
+                (f"{_PREFIX}yesterday", f"{_PREFIX}yesterday", "qwen-turbo", "test",
+                 999999, 0, 999999, 0),
+            )
+            conn.commit()
+
+    delta = token_tracker.get_global_daily_token_usage() - before
+
+    assert delta < 999999, (
+        f"塞了一条【昨天】的 999999 tokens，全站**今日**合计却涨了 {delta} ⇒ "
+        "日期窗口没有排除昨天 ⇒ 额度一旦用满就【永不自愈】（B11 要素④）。\n"
+        "  ⚠️ 检查 get_global_daily_token_usage 的 SQL 是不是丢了 `created_at >= CURRENT_DATE`。"
+    )

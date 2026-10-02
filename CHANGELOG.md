@@ -54,6 +54,73 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- 🔴 **`B11` 全站日级熔断【接上了 —— 这一次真的会拦】**（2026-10-02 · **①b Task 4**）。
+
+  🔴 **这是本阶段第一条【用户可感知】的行为变化**：全站当日合计 token 超过 **`1,000,000`** 时，
+  **所有调用方一起收 429**（`QUOTA_EXCEEDED`）—— **与你自己有没有用超无关**。
+  ⇒ ⚠️ 它同时是**破坏性变更**（对第一个外部用户而言），已写进 `docs/契约/版本与兼容.md` §三-4。
+
+  **为什么单靠 `B7`/`B8` 不够**：那两层是**按单次 / 按单会话**算的 ⇒
+  **"很多人各花一点、每人每会话都没超"** 这种花法**它俩一律拦不住**。
+  `B11` 是**全站求和**那一道 ⇒ **成本上最后一个闸**。
+  ⚠️ **它的恢复是"跨天自动放行"**（SQL 窗口 `created_at >= CURRENT_DATE`），
+  ⛔ **不是 Redis TTL** —— 别去 Redis 里找它（源文档这里写错过，见下）。
+
+  **做了什么**：新建 **`api/breaker.py`** —— 一个**按 `key` 的通用断路器**，
+  `circuit(key, estimated_tokens=0) -> (bool, str)`。
+  ⚠️ **它只【分派】，不【判定】**：`key` 以 `global:` 开头 ⇒ 转给 `token_tracker.check_global_daily_budget()`；
+  **未知前缀 ⇒ `fail-open` 放行**（⛔ 别改成 `return False`，理由见模块头）。
+
+  **接线（8 处）**：`api_v1_agent.py` 的 5 条对话链（与 `B8` **同一批调用点**）·
+  `api_v1_rag.py` 的 `stream_search` 与 `agent_websocket` · **`api_v1.py` 的 `benchmark_embedding`（`B11` 新增）**。
+  ⚠️ **与 `B8` 是【并列、都要过】的两段，⛔ 别合并成一个函数** —— 维度不同（`B8` 按会话 / `B11` 按全站），
+  合并之后**一改就会同时动到两层**。
+
+  ⭐ **`benchmark-embedding` 是全仓独一份**：**匿名可打、且真花钱**（签名里没有 `Depends` 鉴权，
+  而它真调 DashScope）。⚠️ **也正因如此它接不上 `B8`**（会话级要 `user_name`/`thread_id`，这里**两者都没有**）
+  ⇒ **`B11` 是唯一能管住这条的那层。**
+
+  🔴 **两处源文档的错，本次一并更正**（⛔ 别照着 `后端补齐清单` 的 `B11` 原文抄）：
+  | # | 源文档写 | 实际 |
+  |---|---|---|
+  | ① | 要素④「**未核：Redis 日级 key 的 TTL**」 | ⛔ **没有这个 TTL 可核** —— 日级用量在 **PG**（`token_usage_logs`，`created_at >= CURRENT_DATE`），**不是 Redis** |
+  | ② | 我方建议④「`admin` 应为 `float("inf")`」 | ✅ **2026-10-01 已被 `DEC-040` 修掉** —— **`admin` 不再是无限** ⇒ 这条建议**已作废** |
+
+  **证据（可打印）**：
+
+  ```bash
+  # ① 接线判据 —— 8 处（⛔ 别再只 grep check_global_daily_budget，那条现在不够了）
+  grep -rn "circuit(global_key())" api/ --include="*.py" | grep -v test_     # ⇒ 8 行
+
+  pytest api/test_breaker.py -q          # 9 passed —— 断路器语义（无 marker ⇒ 进 CI）
+  pytest api/test_breaker_wiring.py -q   # 9 passed —— 双向接线守卫
+  pytest api/test_global_daily_budget.py -q   # 4 passed —— needs_db（**必须带 POSTGRES_DB=rag_test**）
+  pytest api/ -m "not integration and not needs_db" -q   # 191 passed / 3 skipped / 19 deselected
+  ```
+
+  **变异验证（证明守卫真会红，不是摆设）**：
+
+  | 变异 | 变红的测试 |
+  |---|---|
+  | 未知 key 改成 `return False` | `test_unknown_key_fails_open`（4 个变体） |
+  | 删掉 `estimated_tokens` 的传参 | `test_estimated_tokens_reaches_the_global_budget` |
+  | 日级 SQL 改成 `WHERE TRUE` | `test_yesterdays_usage_does_not_count` **＋** 既有的 `test_global_query_is_today_only` |
+
+  ⚠️ **`test_yesterdays_usage_does_not_count` 是【真库】用例**（写一条 `created_at = CURRENT_DATE - 1 day`
+  的 `999999` tokens，断言它**不进**今日合计）—— 离线测试**盖不住**这条（它只 AST 取字符串，
+  表名/列名/语法错一律发现不了）。
+
+  **判据纪律的一处自我更正**：`test_unknown_key_fails_open` 第一版**一写完就是绿的** ——
+  因为 `fail-open` 那个分支是 cycle 1 的 GREEN 步骤里写的。
+  ⇒ 按 `test-driven-development` 的「**必须看着它失败**」**临时把 fallback 翻成 `return False`**，
+  跑出 **4 failed / 1 passed**，再还原。同法证了另两条。**产物文件 sha256 核对一致。**
+
+  📄 **决策全文 ⇒ `docs/decisions/DEC-043-断路器设计的三个选择.md`**
+  （分派不判定 / 未知 key fail-open / 熔断 429 不给 `retry_after` / 接线范围 —— 各含备选与反悔成本）
+  · 📄 spec 新建：`docs/specs/breaker.md`（含 **7 条「看代码会误判的地方」**）
+  · 📄 `docs/specs/token_tracker.md` · `token_config.md`（`B10` 从「零调用点」改口）
+  · 📄 `docs/契约/接口契约.md` §二（**熔断那条 429 【故意】不给 `retry_after`**）
+
 - 🟡 **`B10` 全局日级 token 总额【有函数了，⛔ 但还拦不住】**（2026-10-01 · **①b Task 3**）。
 
   ⚠️ **先读这一句，别被后面的一堆 ✅ 误导**：`check_global_daily_budget()` **没有任何调用点**

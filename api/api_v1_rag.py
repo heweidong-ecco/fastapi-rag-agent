@@ -19,6 +19,10 @@ from exceptions import ErrorCode, AppException
 #    （`db` / `langchain` 都是**函数内**惰性导入）⇒ 放文件头**不破坏**本文件
 #    「导入期不拉 langchain」的既有做法（与上面 `MAX_TOKENS_ANSWER` 同一条理由）。
 from token_tracker import check_session_token_budget
+# B11（①b Task 4）：全站日级熔断。与 B8 并列，⛔ 别合并（B8 按会话 / B11 按全站）。
+# ⚠️ breaker 只在**函数内**惰性导入 token_tracker ⇒ 放文件头不破坏本文件
+#    「导入期不拉重依赖」的既有做法（同上面 `token_tracker` 那条注释的道理）。
+from breaker import circuit, global_key
 from schemas import (
     QuestionRequest,
     DocumentInsert,
@@ -600,6 +604,11 @@ async def stream_search(
     ok, why = check_session_token_budget(user_name, thread_id)
     if not ok:
         raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
+
+    # B11 · 全站日级熔断（`①b` Task 4）—— 与上一段并列、都要过。
+    ok, why = circuit(global_key())
+    if not ok:
+        raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
     # 1. 检索（与普通接口相同）
     # 1. 向量检索（这部分不是流式的，一次性查完）
     # 构建当前输入的这条的历史对话，真停止按钮的调用（使它支持历史补偿）
@@ -810,6 +819,17 @@ async def agent_websocket(websocket: WebSocket):
             # B8：触顶直接拒绝 —— 用与本文件 `except` 分支**同一套帧格式**（`type` + `content`），
             # 因为 WS 没有 HTTP 状态码可抛（HTTP 端点那边才是 `AppException`）。
             ok, why = check_session_token_budget(ws_user_name, ws_session_id)
+            if not ok:
+                await websocket.send_text(json.dumps({
+                    "type": "error",
+                    "content": why
+                }))
+                await websocket.send_text(json.dumps({"type": "done"}))
+                continue
+
+            # B11 · 全站日级熔断（`①b` Task 4）—— 与上一段并列、都要过；
+            # ⚠️ WS 没有 HTTP 状态码可抛，用**同一套帧格式**（同上面 B8 那里）。
+            ok, why = circuit(global_key())
             if not ok:
                 await websocket.send_text(json.dumps({
                     "type": "error",

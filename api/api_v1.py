@@ -20,6 +20,8 @@ from schemas import (
 from deps import get_current_user_hybrid, get_current_user_jwt, require_admin
 from db import get_db, insert_document,insert_batch_documents
 from embedding_client import get_embedding
+# B11（①b Task 4）：全站日级熔断
+from breaker import circuit, global_key
 from auth import create_user_api_key, authenticate_user
 from jwt_handler import (
     create_access_token,
@@ -234,6 +236,15 @@ async def check_quota(user_name: str):
     tags=["调试"]
 )
 async def benchmark_embedding(req:QuestionRequest):
+    # B11 · 全站日级熔断（`①b` Task 4）。
+    # 🔴 本端点在全仓**独一份**：**匿名可打、且真花钱** ——
+    #    签名里没有 `Depends` 鉴权，而下面 `get_embedding()` 真调 DashScope。
+    #    ⚠️ 也正因如此它接不上 B8（会话级要 `user_name`/`thread_id`，这里**两者都没有**）；
+    #    B11 是**全站**级、`circuit("global:…")` 不需要用户身份 ⇒ 它是唯一能管住这条的那层。
+    ok, why = circuit(global_key())
+    if not ok:
+        raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
+
     start = time.time()
     vec1 = get_embedding(req.question)
     t1 = time.time() - start
