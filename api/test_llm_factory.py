@@ -1,0 +1,179 @@
+"""`make_llm()` —— LLM 客户端唯一构造落点（`①b Task 5` · 形态 `L2` 甲）。
+
+📄 模块为什么存在、两个轴为什么要分开 ⇒ `api/llm_factory.py` 的模块 docstring。
+
+⚠️ 本文件**不发网络请求** —— 只钉「造出来的对象**是什么、带什么属性、参数对不对**」。
+"""
+
+import importlib
+import os
+import sys
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).parent))
+
+ENV = {
+    "LLM_API_KEY": "sk-fake-for-test",
+    "LLM_BASE_URL": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "LLM_MODEL_FAST": "qwen-turbo",
+    "LLM_MODEL_CHAT": "qwen-plus",
+}
+
+
+@pytest.fixture
+def factory(monkeypatch):
+    """把环境变量摆好再拿模块 —— `make_llm` 是**调用时**读 env 的，所以能改得动。"""
+    for k, v in ENV.items():
+        monkeypatch.setenv(k, v)
+    return importlib.reload(importlib.import_module("llm_factory"))
+
+
+# ==================== 🔴 env 缺失时必须回落到 config ====================
+
+def test_falls_back_to_config_when_env_is_absent(monkeypatch):
+    """env 里**没设** `LLM_*` 时，`make_llm` 必须回落到 **`config` 的口径**（⛔ 不是 `None`）。
+
+    **为什么有这一条 —— 2026-10-02 线上 CI 实测，⛔ 不是我推的边界**：
+
+    CI 里**没有 `.env`**（日志原话 `.env 存在吗    = False`），也没设 `LLM_MODEL_*`。
+    当时的实现是 `os.getenv("LLM_" + key) or None` ⇒ **直给 `model=None`**
+    ⇒ `ChatOpenAI(model=None)` 抛 `ValidationError` ⇒ `import api_v1_rag` 就崩，
+    **一条测试都没跑到**（挂在 `conftest.py` 的 `from main import app`），整个 job `exit code 4`。
+
+    ⚠️ **本地为什么没暴露**：本机有 `.env`，那三个值都在。
+    ⇒ 📌 **本地全绿 [不能] 证明 CI 绿** —— 这条就是那个差集的守卫。
+    """
+    import config
+
+    for k in ENV:
+        monkeypatch.delenv(k, raising=False)
+    m = importlib.reload(importlib.import_module("llm_factory"))
+
+    llm = m.make_llm("fast", "agent")
+
+    assert llm.model_name == config.LLM_MODEL_FAST, (
+        "env 缺失时要回落到 `config.LLM_MODEL_FAST` —— "
+        "回落成 None 会让 ChatOpenAI 构造直接抛（CI 就是这么挂的）"
+    )
+    assert llm.openai_api_base == config.LLM_BASE_URL, "env 缺失时要回落到 `config.LLM_BASE_URL`"
+
+
+# ==================== ⭐ 最关键的一条：返回值形状 ====================
+
+def test_returns_bare_chatopenai_with_the_attrs_call_sites_use(factory):
+    """🔴 **返回值必须是裸 `ChatOpenAI`，且带 `bind_tools` / `model_name`。**
+
+    **为什么钉这条**（2026-10-02 实测，⚠️ **理由不是"会炸"，别记错**）：
+
+    | 属性 | 谁在用 | 处数 |
+    |---|---|---|
+    | **`bind_tools()`** | `llm.bind_tools(tools)` | **5** |
+    | **`model_name`** | `getattr(llm, "model_name", …)` —— **成本记账** | **4** |
+
+    📌 曾打算用 `主.with_fallbacks([备])` 做自动兜底。实测：`bind_tools` **能用**，
+    但 **`w.model_name` 永远返回【主】模型名** ⇒ **备用模型烧的 token 记到主模型头上**（静默错账）。
+    ⇒ **这条钉的是「记账不失真」，不是「不炸」。** 见 `api/llm_factory.py` 的同名小节。
+    """
+    from langchain_openai import ChatOpenAI
+
+    llm = factory.make_llm("chat", "answer")
+
+    assert isinstance(llm, ChatOpenAI), (
+        f"make_llm 必须返回裸 ChatOpenAI，实际是 {type(llm).__name__} —— "
+        "包装过的对象 `model_name` 取的是主模型，会让 4 处成本记账静默记错"
+    )
+    for attr in ("bind_tools", "model_name"):
+        assert hasattr(llm, attr), (
+            f"返回对象缺 `{attr}` ⇒ 调用点会炸（bind_tools 5 处 / model_name 4 处记账）"
+        )
+
+
+def test_wrapping_would_silently_break_cost_attribution(factory):
+    """**反证**：证明上一条**真的**在防一个存在的缺陷 —— ⛔ 不是空过。
+
+    拿**两个真的 `ChatOpenAI`** 组一个 `with_fallbacks`，证明：
+
+    * ✅ `bind_tools` 其实**能用**（⛔ 所以"会炸"的说法是错的，别写进文档）
+    * 🔴 但 `model_name` **只会报告主模型** ⇒ 备用接管时，账记错
+    """
+    primary = factory.make_llm("chat", "answer")
+    backup = factory.make_llm("chat", "answer")
+    wrapped = primary.with_fallbacks([backup])
+
+    assert hasattr(wrapped, "bind_tools"), "前提变了：with_fallbacks 现在连 bind_tools 都没了？"
+    assert wrapped.bind_tools([]) is not None, "前提变了：bind_tools 现在会抛？"
+
+    assert not isinstance(wrapped, type(primary)), "前提变了：包装后仍被认成 ChatOpenAI？"
+    assert wrapped.model_name == primary.model_name, (
+        "前提变了：包装后 model_name 不再返回主模型名？"
+        " —— 若真变了，本约束可以放宽，但**必须同时改 `api/llm_factory.py` 的说明**"
+    )
+
+
+# ==================== 两个轴各取各的 ====================
+
+@pytest.mark.parametrize(
+    "model_role,token_role,want_model,want_const",
+    [
+        ("chat", "answer", "qwen-plus", "MAX_TOKENS_ANSWER"),
+        ("chat", "agent", "qwen-plus", "MAX_TOKENS_AGENT"),
+        ("fast", "agent", "qwen-turbo", "MAX_TOKENS_AGENT"),
+        ("fast", "answer", "qwen-turbo", "MAX_TOKENS_ANSWER"),
+    ],
+)
+def test_two_axes_are_independent(factory, model_role, token_role, want_model, want_const):
+    """**模型轴**（fast/chat）与**长度轴**（answer/agent）互相独立 —— 4 种组合都得成立。
+
+    ⚠️ 这 4 种组合**现网都真实存在** ⇒ 合成一个参数会**悄悄截断某一类**。
+    """
+    import token_config
+
+    llm = factory.make_llm(model_role, token_role)
+
+    assert llm.model_name == want_model
+    assert llm.max_tokens == getattr(token_config, want_const)
+
+
+def test_temperature_and_streaming_reach_the_client(factory):
+    """`temperature` / `streaming` 是**逐点调参**，必须原样传到客户端（⛔ 别被吞掉）。"""
+    llm = factory.make_llm("chat", "answer", temperature=0.3, streaming=True)
+
+    assert llm.temperature == 0.3
+    assert llm.streaming is True
+
+
+# ==================== 参数校验 ====================
+
+@pytest.mark.parametrize(
+    "model_role,token_role",
+    [("chatt", "answer"), ("chat", "answers"), ("", ""), ("fast", "MAX_TOKENS_ANSWER")],
+)
+def test_unknown_roles_raise(factory, model_role, token_role):
+    """⛔ **打错字不许静默通过** —— 静默会退化成「用了错的角色」，而额度不报错。"""
+    with pytest.raises(ValueError):
+        factory.make_llm(model_role, token_role)
+
+
+# ==================== 不拉 langchain ====================
+
+def test_importing_the_module_does_not_pull_langchain(monkeypatch):
+    """`import llm_factory` **本身**不许拉 langchain（`api_v1_rag.py:567` 的教训）。
+
+    判据：在**全新的子进程**里只 import 本模块，看 `sys.modules` 里有没有 `langchain_openai`。
+    """
+    import subprocess
+
+    code = (
+        "import sys; sys.path.insert(0, 'api'); import llm_factory;"
+        "print('langchain_openai' in sys.modules or 'langchain_core' in sys.modules)"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True,
+        cwd=str(Path(__file__).parent.parent), env={**os.environ},
+    )
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "False", (
+        "import llm_factory 就把 langchain 拉进来了 ⇒ 与 api_v1_rag.py:567 记的教训冲突"
+    )

@@ -9,22 +9,15 @@ import operator
 
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
-from langchain_openai import ChatOpenAI
-from config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL_CHAT
-from token_config import MAX_TOKENS_AGENT   # B7 接线：中间步骤的单次上限（1024）
+from llm_factory import make_llm   # ①b Task 5：model / api_key / base_url / max_tokens 的唯一落点
 from search_tools import web_search
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage,SystemMessage
 from datetime import datetime
 
 # ==================== 初始化模型 ====================
-llm = ChatOpenAI(
-    model=LLM_MODEL_CHAT,
-    api_key=LLM_API_KEY,
-    base_url=LLM_BASE_URL,
-    temperature=0,
-    max_tokens=MAX_TOKENS_AGENT,   # B7
-)
+# ⚠️ 角色 = 「模型轴 chat」+「长度轴 agent(1024)」—— 见 `api/llm_factory.py` 的模块 docstring。
+llm = make_llm("chat", "agent")
 
 # ==================== 定义工具 ====================
 @tool
@@ -84,9 +77,10 @@ llm_with_tools = llm.bind_tools(tools)
 
 
 # 为每个工具创建模型实例（用于子图）
-llm_search = ChatOpenAI(model=LLM_MODEL_CHAT, api_key=LLM_API_KEY, base_url=LLM_BASE_URL, temperature=0, max_tokens=MAX_TOKENS_AGENT)   # B7
-llm_calc = ChatOpenAI(model=LLM_MODEL_CHAT, api_key=LLM_API_KEY, base_url=LLM_BASE_URL, temperature=0, max_tokens=MAX_TOKENS_AGENT)     # B7
-llm_date = ChatOpenAI(model=LLM_MODEL_CHAT, api_key=LLM_API_KEY, base_url=LLM_BASE_URL, temperature=0, max_tokens=MAX_TOKENS_AGENT)     # B7
+# ⚠️ 三个都 = 「模型轴 chat」+「长度轴 agent(1024)」，与上面的 `llm` 同角色。
+llm_search = make_llm("chat", "agent")
+llm_calc = make_llm("chat", "agent")
+llm_date = make_llm("chat", "agent")
 
 # ==================== 定义全局 State ====================
 class AgentState(TypedDict):
@@ -220,13 +214,8 @@ def create_react_subgraph():
     subgraph = StateGraph(AgentState)
 
     # 为子图单独绑定工具的模型
-    llm_react = ChatOpenAI(
-        model=LLM_MODEL_CHAT,
-        api_key=LLM_API_KEY,
-        base_url=LLM_BASE_URL,
-        temperature=0,
-        max_tokens=MAX_TOKENS_AGENT,   # B7
-    )
+    # ⚠️ 角色 = 「模型轴 chat」+「长度轴 agent(1024)」。
+    llm_react = make_llm("chat", "agent")
     llm_react_with_tools = llm_react.bind_tools(tools)
 
     def agent_decide(state: AgentState):

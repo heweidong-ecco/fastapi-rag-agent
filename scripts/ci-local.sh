@@ -53,9 +53,13 @@
 #
 #   1. **跑出来的数字 == CI 日志里的数字**（例：`139 passed, 3 skipped, 11 deselected`）。
 #      ⛔ **别只看"绿了"** —— 绿了但条数不同，说明还是两套环境。
-#   2. ⭐ **它自证 `.env` 已不在场**：横幅会打印**生效的** `LLM_MODEL_FAST/CHAT`。
-#      若你本机 `.env` 写的是 `deepseek-*` 而这里打印 `qwen-turbo/qwen-plus`
-#      ⇒ **代码默认值生效 ⇒ `.env` 确实被拿掉了**。这就是自证。
+#   2. ⭐ **它自证 `.env` 已不在场** —— 看横幅那两行,**以【直接判据】为准**：
+#      · **① 直接判据**：临时副本里 `.env` 存在吗 = 不在 ✅
+#        （并且 rsync 漏掉 `.env` 时脚本会**直接 exit 2**）
+#      · **② 旁证**：生效的 `LLM_MODEL_FAST/CHAT` 与主检出 `.env` 的对照
+#      🔴 **2026-10-02 起 ② 不再是判据**：`DEC-045` 把代码默认值也改成了
+#         `deepseek-v4-flash`，与 `.env` **同值** ⇒ 「两边一样」**再也分不出**
+#         `config` 默认值与 `.env`。旧注释（"打印 qwen-turbo 才是自证"）据此作废。
 #
 # ## ⚠️ 为什么是「rsync 到临时目录」而不是「设个环境变量」
 #
@@ -261,14 +265,16 @@ sed 's/^/    | /' "${RUN_SH}"
 echo "  环境变量（同一步的 env 段，共 $(printf '%s\n' "${ENV_PAIRS}" | grep -c . || true) 个）:"
 printf '%s\n' "${ENV_PAIRS}" | sed 's/^/    /'
 echo "------------------------------------------------------------------"
-echo "  ⭐ 自证「.env 不在场」—— 下面是【临时副本里实际生效】的模型名："
+echo "  ⭐ 自证「.env 不在场」—— 看 ①（**②只是旁证，2026-10-02 起不再是判据**）："
+echo "     ① 【直接判据】临时副本里 .env 存在吗 = $([ -e "${TMP}/.env" ] && echo '🔴 在（不该发生）' || echo '✅ 不在')"
 ( cd "${TMP}" && env ${ENV_FLAT}"${PY}" -c \
-    "import sys; sys.path.insert(0,'api'); import config; print('    LLM_MODEL_FAST =', config.LLM_MODEL_FAST); print('    LLM_MODEL_CHAT =', config.LLM_MODEL_CHAT)" \
+    "import sys; sys.path.insert(0,'api'); import config; print('     ② 【旁证】临时副本里生效的模型名：'); print('        LLM_MODEL_FAST =', config.LLM_MODEL_FAST); print('        LLM_MODEL_CHAT =', config.LLM_MODEL_CHAT)" \
     ) || echo "    （打印失败，见上方报错）"
 if [ -f "${REPO_ROOT}/.env" ]; then
-  echo "  本目录 .env 里写的（作为对照）："
-  grep -E '^[[:space:]]*LLM_MODEL_(FAST|CHAT)[[:space:]]*=' "${REPO_ROOT}/.env" | sed 's/^/    /' || true
-  echo "  ⇒ **上面两处不一样，就说明 .env 确实没被带进来**（本次红/绿是按【上半】那套算的）。"
+  echo "     ② 对照 · 主检出 .env 里写的："
+  grep -E '^[[:space:]]*LLM_MODEL_(FAST|CHAT)[[:space:]]*=' "${REPO_ROOT}/.env" | sed 's/^/        /' || true
+  echo "     ⇒ 🔴 **两边一样【不再能证明】.env 被拿掉了** —— DEC-045 起代码默认值与 .env 同为"
+  echo "        deepseek-v4-flash。**判据以 ① 为准**（本次红/绿是按【上半】那套算的）。"
 else
   echo "  ⚠️ 本目录没有 .env —— 上面那套就是 CI 的那套（代码默认值）。"
 fi

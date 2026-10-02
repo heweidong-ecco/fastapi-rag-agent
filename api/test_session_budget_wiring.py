@@ -28,7 +28,8 @@ import pathlib
 
 import pytest
 
-# (文件, 函数名) —— 表就是**权威清单**，与 `test_max_tokens_wiring.py` 的 `EXPECTED_MAX_TOKENS` 同性质
+# (文件, 函数名) —— 表就是**权威清单**，与 `test_max_tokens_wiring.py` 的 `EXPECTED_ROLES` 同性质
+#   ⚠️ 后者 2026-10-02（`①b` Task 5）由 `EXPECTED_MAX_TOKENS` 改名而来。
 EXPECTED_WIRED = [
     ("api_v1_agent.py", "langgraph_chat"),        # POST /agent/langgraph_chat
     ("api_v1_agent.py", "advanced_agent_chat"),   # POST /agent/advanced_chat

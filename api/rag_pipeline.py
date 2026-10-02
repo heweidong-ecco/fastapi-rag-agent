@@ -10,9 +10,7 @@ from reranker import rerank_async
 from embedding_client import get_embedding
 from db import search_similar_async, bm25_search_async
 from collections import defaultdict
-from langchain_openai import ChatOpenAI
-from config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL_FAST
-from token_config import MAX_TOKENS_ANSWER   # B7 接线：答案生成的单次上限（2000）
+from llm_factory import make_llm   # ①b Task 5：model / api_key / base_url / max_tokens 的唯一落点
 import os
 
 import asyncio
@@ -46,13 +44,8 @@ class RAGPipeline:
         self.rrf_k = rrf_k
         self.candidate_multiplier = candidate_multiplier
         # 增加一个用于生成答案的 LLM 实例
-        self.answer_llm = answer_llm or ChatOpenAI(
-            model=LLM_MODEL_FAST,
-            api_key=LLM_API_KEY,
-            base_url=LLM_BASE_URL,
-            temperature=0,
-            max_tokens=MAX_TOKENS_ANSWER,   # B7：答案生成，给足 2000
-        )
+        # ⚠️ 角色 = 「模型轴 fast」+「长度轴 answer(2000)」—— 见 `api/llm_factory.py` 的模块 docstring。
+        self.answer_llm = answer_llm or make_llm("fast", "answer")
 
     # ⚠️ 2026-09-20 删（§三·B8）：此处原有类属性 `preprocessor = DocumentPreprocessor()` ——
     #    **全仓零引用**（`grep -rn '\.preprocessor' api/` = 0）。它只是**在类定义时构造一次**，

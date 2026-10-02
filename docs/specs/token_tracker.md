@@ -2,7 +2,7 @@
 
 | 项 | 内容 |
 |---|---|
-| **状态** | 🟡 **可用，但它是【三套额度口径】的其中一套** —— 见下 ⚠️<br>🟢 **①a 已落地（2026-10-01）**：额度常量已收口到 `api/token_config.py`（本文件**只剩同名别名**）· 本文件下方 **实施计划 ①a** 已执行完<br>🔵 **①b（2026-10-02）**：Task 0 ✅ / Task 1 ✅（B7 接线）/ **Task 2 ✅（B8 会话级 · 已接 7 条链）** / **Task 3 ✅（B10 全局日级 · 判定函数）** / **Task 4 ✅（B11 熔断 · 已接 8 处，`B10` 由此生效）** / ⬜ **Task 5 起（`L2` 换模型降级链）**<br>⚠️ **`B10` 曾一度"有函数没接线"（2026-10-01 当天）—— 那句话已作废**，2026-10-02 Task 4 接上了 |
+| **状态** | 🟡 **可用，但它是【三套额度口径】的其中一套** —— 见下 ⚠️<br>🟢 **①a 已落地（2026-10-01）**：额度常量已收口到 `api/token_config.py`（本文件**只剩同名别名**）· 本文件下方 **实施计划 ①a** 已执行完<br>🔵 **①b（2026-10-02）**：Task 0 ✅ / Task 1 ✅（B7 接线）/ **Task 2 ✅（B8 会话级 · 已接 7 条链）** / **Task 3 ✅（B10 全局日级 · 判定函数）** / **Task 4 ✅（B11 熔断 · 已接 8 处，`B10` 由此生效）** / **Task 5 🟡 部分（`L2`）**（改写后只做构造收口，⛔ 自动兜底【推迟】—— 见该 Task 的修订块） / ⬜ **Task 6 起待做**<br>⚠️ **`B10` 曾一度"有函数没接线"（2026-10-01 当天）—— 那句话已作废**，2026-10-02 Task 4 接上了 |
 | **对外提供** | `record_usage()` · `record_cost()` · `check_multilevel_budget()` · `check_token_budget_detail()` · `get_token_budget_info()` · 9 个汇总函数 |
 | **谁在用** | `permission`（取角色）· `agent_graph_advanced.py:239`（唯一调多级预算的地方）· `cost_dashboard.py` · 各 `api_v1_*.py` |
 | **规模** | 888 行 |
@@ -650,7 +650,7 @@ git commit -m "refactor(配额): 决策一落地 —— 次数配额降级，统
 
 ---
 
-# 🔵 实施计划 ①b · **限额与熔断**（2026-09-30 立 · **执行中** —— Task 0 ✅ / Task 1 ✅ / Task 2 ✅ / Task 3 ✅ / **Task 4 起待做**）
+# 🔵 实施计划 ①b · **限额与熔断**（2026-09-30 立 · **执行中** —— Task 0 ✅ / Task 1 ✅ / Task 2 ✅ / Task 3 ✅ / Task 4 ✅ / **Task 5 🟡 部分** / **Task 6 起待做**）
 
 > **来源**：`后端补齐清单-待裁-20260929.md` 的 **B8 · B10 · B11 · B13 · 决策一（实现）**；
 > 以及 `LLM模型路由与额度策略-待裁-20260930.md` 的 **L2**（十几个 model 顺带）。
@@ -697,9 +697,10 @@ git commit -m "refactor(配额): 决策一落地 —— 次数配额降级，统
 >    计划里那张 Files 清单逐条数出来是 **14** —— 连清单本身也对不上 17。
 >    ⇒ **本 Task 的权威清单不是这张表，是 `api/test_max_tokens_wiring.py` 的
 >    `EXPECTED_MAX_TOKENS`**（它**同时**是守卫：漏一个就红）。
-> 2. 🔴 **`evaluate_with_ragas.py:44` 计划里【一次都没提】** —— 它也是个 `ChatOpenAI` 构造点，
+>    🔴 **2026-10-02（Task 5）该常量改名为 `EXPECTED_ROLES`** —— 门禁改写成「钉 `make_llm` 的角色」，见下方 Task 5 的修订块。
+> 2. 🔴 **`evaluate_with_ragas.py` 的 `eval_llm` 计划里【一次都没提】**（落盘时在 `:50`） —— 它也是个 `ChatOpenAI` 构造点，
 >    而且**恰恰是"漏掉会看不出来"的那类**（离线评测脚本，不跑就没人发现它没有上限）。
->    ⇒ 已补：接 `MAX_TOKENS_ANSWER`（它 `:127` 生成被评答案、`:272` 又当 RAGAS judge，
+>    ⇒ 已补：接 `MAX_TOKENS_ANSWER`（它在 `:137` 生成被评答案、`:282` 又当 RAGAS judge，
 >    **两处都是长输出**；给 1024 可能**截断 judge 输出 ⇒ 评分静默失真**）。
 > 📌 **教训与 `①a` 那条 CI 红同族**：**计划里的数字同样是"作者当时的理解"，不是事实。**
 >    ⇒ 计划交给守卫测试去核，⛔ 别交给"我记得写的是 17"。
@@ -768,7 +769,7 @@ def test_no_chat_openai_without_max_tokens():
 python -m pytest api/test_max_tokens_wiring.py -q
 ```
 预期：FAIL，并**列出**那 15 处（**这条失败信息本身就是待办清单**）。
-📌 **实测**：`2 failed, 1 passed` —— 两条红各列一遍那 15 行（含计划漏掉的 `evaluate_with_ragas.py:44`）。
+📌 **实测**：`2 failed, 1 passed` —— 两条红各列一遍那 15 行（含计划漏掉的 `evaluate_with_ragas.py` 那处）。
 
 > ⚠️ **本 Task 的 Step 1 最终落地**是 **3 条测试**（计划只写了 1 条）—— 多出来的两条见
 > `api/test_max_tokens_wiring.py` 顶部：
@@ -799,6 +800,7 @@ llm = ChatOpenAI(
 
 > ⚠️ **行号是 2026-10-01 接线【之后】的**（接线本身让每处 +1~2 行）。
 > ⛔ **别拿这张表当清单用** —— 权威清单是 `api/test_max_tokens_wiring.py` 的 `EXPECTED_MAX_TOKENS`。
+> 🔴 **2026-10-02（Task 5）该常量改名为 `EXPECTED_ROLES`**。
 
 - [x] **Step 4: 跑测试，确认通过** —— ✅ **2026-10-01**
 
@@ -1036,72 +1038,143 @@ PG 方言/时区下的**边界**行为、生产数据量下的表现，**都没�
 
 ## Task 4 · **B11** · 熔断（按 key 的通用断路器）
 
-**Files:**
-- Create: `api/breaker.py` + `docs/specs/breaker.md`（⛔ 新建模块**必须**同时建 spec，否则 `pre-commit-gates.py` 硬拦）
-- Create: `api/test_breaker.py`（无 marker）
-- Modify: `api/token_tracker.py`（触顶时开断路器）· `api/main.py`（放行前先问断路器）
+> ### 🔴 **本节是【原始计划】—— 它写的形状早被 `DEC-043` 推翻，⛔ 别照着它读**
+>
+> **2026-10-02 已做完**（`B11` 状态以 `docs/待办总表.md` 为准：**已完成**），
+> 但**落地的那套和这一节描述的【不是同一套】**：
+>
+> | | 本节（原计划） | ✅ 实际落地 |
+> |---|---|---|
+> | 接口 | `is_open()` / `trip()` / `seconds_until_reset()` | **`circuit(key, estimated_tokens)` / `global_key()`** |
+> | 存储 | **Redis**（`SETEX`） | **PG**（`token_usage_logs` 的日级 SQL）—— ⛔ 不碰 Redis |
+> | 恢复 | **TTL 到期** | **跨天自然重置**（`WHERE created_at >= CURRENT_DATE` 自己翻页）—— 🔴 **没有 TTL 可核** |
+> | 接线 | `main.py` 中间件里放行前先问 | **8 个端点函数**各自问一次 |
+>
+> ⇒ **实际形状** ⇒ `docs/specs/breaker.md`（含 **7 条「看代码会误判的地方」**）·
+> **设计裁定（四选一，含备选与反悔成本）** ⇒ `docs/decisions/DEC-043-断路器设计的三个选择.md`。
+>
+> 🔴 **为什么加这段横幅**：本节下面那 5 个 `- [ ]` **不是「没做」**，是**按旧形状写的**。
+> 接手人照原文会得出两个错结论 —— **「Task 4 没做」+「设计是 Redis 那套」**。
+> 📌 同型前科：本仓 `docs/复盘/2026-09-19-交接锚点第一屏失真.md`。
 
-**Interfaces:**
+**Files:**（⬇️ **原计划**的落点 —— ⛔ 与实际的差异见右栏）
+
+- Create: `api/breaker.py` + `docs/specs/breaker.md`（⛔ 新建模块**必须**同时建 spec，否则 `pre-commit-gates.py` 硬拦）⇒ ✅ **都建了**
+- Create: `api/test_breaker.py`（无 marker）⇒ ✅ 建了（**外加** `api/test_breaker_wiring.py` —— **双向接线守卫**）
+- Modify: `api/token_tracker.py`（触顶时开断路器）· `api/main.py`（放行前先问断路器）
+  ⇒ 🔴 **两个都没改**：判定函数本来就在 `token_tracker.py` 里；接线在 **8 个端点**、**不在中间件**。
+
+**Interfaces:**（⬇️ **原计划**的接口 —— ⛔ **这三个都没实现**）
+
 - Produces: `is_open(key: str) -> bool` · `trip(key: str, ttl_seconds: int) -> None` · `seconds_until_reset(key: str) -> int`
-- key 形如 `global:2026-09-30`（B11）/ `model:qwen-turbo:2026-09-30`（`L2`）
+- key 形如 `global:2026-09-30`（B11）/ `model:qwen-turbo:2026-09-30`（`L2`）⇒ ✅ **只有这一条对**，且 `Task 5` 直接靠它
 
 > ### 为什么是「按 key」而不是写死"全局额度"
 > 这就是 `L2`「十几个 model 顺带」的**具体形态**：**同一个函数换一个 key 前缀**。
+> ✅ **这一句仍然成立**，**是 `Task 5` 的直接依据**（见下）。
 > ⛔ 不为 `L2` 先建任何东西。
 
-- [ ] **Step 1: 写失败测试**（mock Redis，⛔ 不连真 Redis）
+- ⛔ **Step 1（旧形状）：写失败测试（mock Redis，⛔ 不连真 Redis）** —— **没按这个做**。
+  ✅ 实际是 `api/test_breaker.py` **9 条**，**里面没有一行 mock Redis**（因为**不用 Redis**）；
+  另有 **`api/test_breaker_wiring.py` 9 条**专钉接线（旧计划里没有这一层）。
 
-```python
-def test_trip_then_is_open_then_expires(monkeypatch):
-    """开 → 判 → 到期恢复。⚠️ 用假 Redis，不连真服务。"""
-    import breaker
-    fake = {}
-    monkeypatch.setattr(breaker, "_setex", lambda k, ttl, v: fake.__setitem__(k, (ttl, v)))
-    monkeypatch.setattr(breaker, "_exists", lambda k: k in fake)
-    monkeypatch.setattr(breaker, "_ttl", lambda k: fake.get(k, (0, None))[0])
+  <details><summary>旧计划里那段（⛔ 已作废，留档）</summary>
 
-    assert breaker.is_open("global:2026-09-30") is False
-    breaker.trip("global:2026-09-30", ttl_seconds=3600)
-    assert breaker.is_open("global:2026-09-30") is True
-    assert breaker.seconds_until_reset("global:2026-09-30") == 3600
+  ```python
+  def test_trip_then_is_open_then_expires(monkeypatch):
+      """开 → 判 → 到期恢复。⚠️ 用假 Redis，不连真服务。"""
+      import breaker
+      fake = {}
+      monkeypatch.setattr(breaker, "_setex", lambda k, ttl, v: fake.__setitem__(k, (ttl, v)))
+      monkeypatch.setattr(breaker, "_exists", lambda k: k in fake)
+      monkeypatch.setattr(breaker, "_ttl", lambda k: fake.get(k, (0, None))[0])
 
+      assert breaker.is_open("global:2026-09-30") is False
+      breaker.trip("global:2026-09-30", ttl_seconds=3600)
+      assert breaker.is_open("global:2026-09-30") is True
+      assert breaker.seconds_until_reset("global:2026-09-30") == 3600
+  ```
 
-def test_breaker_keys_are_daily():
-    """🔴 key 必须带日期 —— 那才让"跨天自然恢复"成立（B11 要素④）。"""
-    import breaker
-    k = breaker.daily_key("global")
-    import datetime
-    assert datetime.date.today().isoformat() in k
-```
+  </details>
 
-- [ ] **Step 2: 跑 → 失败 → Step 3: 实现 `api/breaker.py`**（用 `rate_limiter.py` 同一个 `redis.Redis` 连接方式；`trip` 用 `SETEX`）
+- ⛔ **Step 2–3（旧形状）：先跑失败 → 再实现 `api/breaker.py`（用 `rate_limiter.py` 同一个 `redis.Redis` 连接方式；`trip` 用 `SETEX`）**
+  —— ✅ **文件建了**，但**形状不是这个**：实际 `api/breaker.py` 是**PG 分派器**，**不建 Redis 连接**、**没有 `SETEX`**。
+  📌 TDD 的「先看着它失败」这一步**仍然做了** —— 只是对象换了（见 `CHANGELOG.md` 那条「判据纪律的一处自我更正」）。
 
-- [ ] **Step 4: 接线**（`token_tracker` 触顶 ⇒ `trip`；`main.py` 中间件先 `is_open` ⇒ 直接抛 `AppException(QUOTA_EXCEEDED, retry_after=…)`）
+- ⛔ **Step 4（旧形状）：接线（`token_tracker` 触顶 ⇒ `trip`；`main.py` 中间件先 `is_open` ⇒ 抛 `AppException`）**
+  —— ✅ **接上了，但位置不同**：接在 **8 个端点函数**里（**不是中间件**），
+  `token_tracker.py` / `main.py` **两个都没改**。
+  **判据（可打印）**：`grep -rn "circuit(global_key())" api/ --include="*.py" | grep -v test_` ⇒ **8 行**。
 
-- [ ] **Step 5: ⭐ 要素④ 的【实测】**（**这是 B11 唯一需要新实测的一条**）
+- ⛔ **Step 5（旧形状）：⭐ 要素④ 的【实测】—— 开一个 5 秒断路器，证明 TTL 到点会恢复**
+  —— 🔴 **没有 TTL 可核**：日级用量在 **PG**（`token_usage_logs`），恢复靠 SQL 自己翻页，
+  **整个机制里没有「到期释放」这回事**。⇒ 详见 `docs/specs/breaker.md` §⚠️ 第 1 条。
+  ✅ 替代的实测：`test_yesterdays_usage_does_not_count`（塞一条**昨天**的记录，断言它不进今日合计）。
+  ⚠️ **它顺带要求核掉的 `quota_limiter` 那条** —— **2026-10-02 已补核**，见 `docs/specs/quota_limiter.md`
+  （那条是**另一套机制**：`quota_limiter.py` 确实用 Redis + `EXPIRE 86400`）。
 
-```bash
-# 开一个 5 秒的断路器，等它自己消失 —— 证明"到点真的会恢复"
-docker compose exec redis-rag redis-cli --eval /dev/stdin <<'LUA'
-redis.call('SETEX', KEYS[1], ARGV[1], '1')
-return redis.call('TTL', KEYS[1])
-LUA
-```
-⇒ 记下 `TTL` 与到点后 `EXISTS` 的结果，**写进 `docs/specs/breaker.md`**。
-⚠️ `quota_limiter.md` 里那条「`EXPIRE 86400` 从未实测过 TTL」**一并核掉**（同一件事）。
-
-- [ ] **Step 6: 跑 + 建 spec + 提交**
+- ✅ **Step 6：跑了 + 建了 spec + 已提交**（`docs/specs/breaker.md` ·
+  落主干的那条 commit 是 **`0f9a67a`**，PR **#65**）
+  ⚠️ **⛔ 别引用 PR 之前的分支哈希** —— 本仓走 squash 合并，**分支上那些 sha 在主干上根本不存在**。
 
 ---
 
-## Task 5 · **`L2` 顺带** · 某个模型的免费额度耗尽 ⇒ 换下一个
+## Task 5 · **`L2` 顺带** · 某个模型的免费额度耗尽 ⇒ 换下一个 · 🟡 **改写后【部分】落地（2026-10-02）**
+
+> ### 🔴 **本节是【原始计划】—— 形状已被改写，⛔ 先读下面的修订块**
+>
+> 原计划要的是「**额度耗尽 ⇒ 自动换下一个模型**」。**2026-10-02 落地的不是这个**：
+> 落地的是 **`甲` = 只做构造收口，⛔ 不做自动兜底**。**两张的差别见下。**
+
+### 📌 修订块（2026-10-02 · 落地版）
+
+> 📄 **设计裁定（含备选与反悔成本）⇒ `docs/decisions/DEC-044-Task5只做构造收口不做自动兜底.md`**
+
+**实际做的（形态 `甲`）**：把 15 个 LLM 构造点收进**一个** `api/llm_factory.py` 的 `make_llm()`。
+⇒ 效果：`model` / `max_tokens` / `api_key` / `base_url` **各自只剩一个落点**；
+**行为零变化**（角色按改动前的取值原样固化，见 `api/test_max_tokens_wiring.py::EXPECTED_ROLES`）。
+
+**⛔ 没做的：自动兜底。** 这**不是忘了**，是**评估后故意推迟** —— 理由表见 `docs/specs/llm_factory.md`。
+
+> ### 🔴 一句话说清「为什么推迟」（2026-10-02 实测，⚠️ 中间我曾判断错两次，已更正）
+>
+> 我一开始说 `主.with_fallbacks([备])` 会**在 import 期 AttributeError ⇒ 整个服务起不来**（理由是类上没有 `bind_tools`）。
+> **⛔ 那是错的** —— 我查的是**类**，而实例有 `__getattr__` 委托。用**真的 `ChatOpenAI` 备用**实测：
+>
+> ```
+> w.bind_tools(tools)  →  ✅ 能用，且返回的对象仍然带兜底
+> w.model_name         →  🔴 永远返回【主】模型名
+> ```
+>
+> ⇒ **包上去不会炸**，**真正的缺陷是静默的**：**备用模型烧掉的 token 会被那 4 处记账记到主模型头上**。
+> ⇒ 收益只在**额度耗尽那一刻**兑现，代价是**账目静默失真** ⇒ 这一轮**不值得**。
+> 📌 反证测试钉在 `api/test_llm_factory.py::test_wrapping_would_silently_break_cost_attribution`。
+
+**⇒ 本轮的兜底方式仍是【手动】的**：额度耗尽 ⇒ 请求报错，人工改 `.env` 的
+`LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL_*` 并**重建容器**
+（⚠️ `docker compose restart` **不重读 `env_file`**，要用 `docker compose up -d api`）。
+
+**下面的原始计划【保留】**，因为 `L3` / `L4` / `L5` 的裁定仍然有效，将来做真兜底时直接用：
 
 **Files:** Modify `api/breaker.py` 接线处（**复用 Task 4 的断路器，不新建文件**）
+（⚠️ **本轮实际改的**是 `api/llm_factory.py`（新建） + 15 个调用点 + `api/test_max_tokens_wiring.py`（改写））
 
-- [ ] ⛔ **开工前必须已有 `L3` / `L4` / `L5` 的裁定**（Task 0）。
+- [x] ⛔ **开工前必须已有 `L3` / `L4` / `L5` 的裁定**（Task 0）。—— ✅ 2026-10-01 已裁
 - [ ] 判据（`LLM模型路由与额度策略` 坑②）：**只对 `403` + `AllocationQuota.FreeTierOnly` 开断路器**，
   ⛔ **`RateLimitExceeded`（限流）不许开** —— 那是"等一下"，不是"用完了"。
+  📌 ⬜ **本轮没做**；⚠️ 不过这条判据**技术上可分**：`403 → PermissionDeniedError` ·
+  `429 → RateLimitError`（openai SDK 的类型区分），**⛔ 不用去解析响应体**。
 - [ ] key 用 `model:<名>:<日期>`；动作按 `L4`/`L5` 裁的结果（换哪个、要不要对用户可见）。
+  📌 ⬜ **本轮没做**（`breaker.py` 的 `model:` 那一类仍是空的，见 `docs/specs/breaker.md`）。
+
+**落点已经收敛**：将来要做，**只需改 `api/llm_factory.py` + 处理那 5 个 `bind_tools` 点**，
+**15 个调用点一行都不用再动**。
+
+- [x] **本轮落地的东西**：`api/llm_factory.py`（新建）· 15 个调用点改走 `make_llm()` ·
+  `api/test_llm_factory.py`（新建 · 12 条）· `api/test_max_tokens_wiring.py`（改写：**工厂以外零 `ChatOpenAI(`**）·
+  `docs/specs/llm_factory.md`（新建）
+- [x] **顺带修掉**：`evaluate_with_ragas.py` 的 `os.getenv("LLM_MODEL_CHAT", "deepseek-chat")`
+  兜底值与 `config.py` 的 `qwen-plus` **不一致** —— 现在两边同源。
 
 ---
 

@@ -9,8 +9,8 @@
 📄 口径的裁定见 `docs/decisions/DEC-040-额度统一到token一套.md`。
 
 ⚠️ **本模块只读 env，不做热加载** —— 故意的。
-   `ChatOpenAI(model=…, max_tokens=…)` 是 **import 时求值**（17 个构造点全是），
-   改了值本来就要重启。**只求"集中"，不求"热加载"。**
+   读它的那 15 处都**在模块层**求值（`①b` Task 5 起统一经 `api/llm_factory.py` 的 `make_llm()`，
+   而调用点仍在 import 时执行）⇒ 改了值本来就要重启。**只求"集中"，不求"热加载"。**
 """
 import os
 

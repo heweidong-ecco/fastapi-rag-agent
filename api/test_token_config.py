@@ -50,8 +50,10 @@ def test_all_registered_prices_are_positive():
 
     ⚠️ **本条替代了原先的 `test_default_pricing_is_not_lower_than_models_in_use`**（2026-10-01 删）。
        那条断言「兜底价 >= 在用模型价」，**在 CI 上直接红**：
-       CI 没有 `.env` ⇒ `config.LLM_MODEL_CHAT` 落到**代码里的默认值 `qwen-plus`**
-       （`config.py:55`）⇒ 0.008/0.016 **本来就高于**兜底 0.003/0.006 ⇒ `assert 0.003 >= 0.008` 失败。
+       CI 没有 `.env` ⇒ `config.LLM_MODEL_CHAT` 落到**代码里的默认值**
+       （**当时**是 `config.py:55` 的 `qwen-plus`；⚠️ **2026-10-02 起已改成 `deepseek-v4-flash`**，
+       见 `DEC-045` —— 这条记的是**那天**的事实）
+       ⇒ 0.008/0.016 **本来就高于**兜底 0.003/0.006 ⇒ `assert 0.003 >= 0.008` 失败。
     🔴 **根因不是"CI 配置特殊"，是那条不变量本身不成立** ——
        兜底价是给**未登记**模型的猜测值，**与"在用模型贵不贵"没有推导关系**；
        而在用模型**只要登记了就永远不走兜底** ⇒ 那条断言**给不出任何保护**，
