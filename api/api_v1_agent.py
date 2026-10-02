@@ -31,6 +31,10 @@ from token_tracker import (
     get_intercept_count, record_cost,
     check_session_token_budget,       # B8（①b Task 2）：会话级上限
 )
+# B11（①b Task 4）：全站日级熔断。
+# ⚠️ 与 B8 **并列**，⛔ 别把两者合并成一个函数 —— 维度不同（B8 按会话 / B11 按全站），
+#    合并后一改就会同时动到两层。（`DEC-041` 与 `B11` 各裁各的范围）
+from breaker import circuit, global_key
 # 记录工具 开始追踪 结束追踪
 from tool_visualizer import start_trace, finish_trace, get_trace, get_all_traces
 # MCP Client 高级 Agent（会话池版）及动态工具列表
@@ -97,6 +101,12 @@ async def langgraph_chat(
     """
     # B8 · 会话级 token 上限（`DEC-041`）—— 触顶动作 = **直接拒绝**（`B11` 要素② 已裁）
     ok, why = check_session_token_budget(user_name, thread_id)
+    if not ok:
+        raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
+
+    # B11 · 全站日级熔断（`①b` Task 4）。与上一段**并列、都要过**：
+    # B8 管"这个会话花了多少"，这段管"全站今天花了多少"。
+    ok, why = circuit(global_key())
     if not ok:
         raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
 
@@ -171,6 +181,12 @@ async def advanced_agent_chat(
     if not ok:
         raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
 
+    # B11 · 全站日级熔断（`①b` Task 4）。与上一段**并列、都要过**：
+    # B8 管"这个会话花了多少"，这段管"全站今天花了多少"。
+    ok, why = circuit(global_key())
+    if not ok:
+        raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
+
     result = advanced_agent.invoke(
         {
             "messages": [HumanMessage(content=question)],
@@ -200,6 +216,12 @@ async def agent_plan_execute(
     """完整的 Plan-and-Execute 流程"""
     # B8 · 会话级 token 上限（`DEC-041`）—— 触顶直接拒绝
     ok, why = check_session_token_budget(user_name, thread_id)
+    if not ok:
+        raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
+
+    # B11 · 全站日级熔断（`①b` Task 4）。与上一段**并列、都要过**：
+    # B8 管"这个会话花了多少"，这段管"全站今天花了多少"。
+    ok, why = circuit(global_key())
     if not ok:
         raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
 
@@ -250,6 +272,12 @@ async def memory_chat(
     """带持久化记忆的 Agent 对话接口"""
     # B8 · 会话级 token 上限（`DEC-041`）
     ok, why = check_session_token_budget(user_name, thread_id)
+    if not ok:
+        raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
+
+    # B11 · 全站日级熔断（`①b` Task 4）。与上一段**并列、都要过**：
+    # B8 管"这个会话花了多少"，这段管"全站今天花了多少"。
+    ok, why = circuit(global_key())
     if not ok:
         raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
 
@@ -491,6 +519,12 @@ async def mcp_agent_chat(
     # ⚠️ 放在 `start_trace` **之后**：超限被拒时，追踪里仍留得下这次尝试的痕迹。
     #    本端点原有的 `check_budget` 依赖判的是【用户**日**预算】，与会话级是**两个东西**，并存。
     ok, why = check_session_token_budget(user_name, thread_id)
+    if not ok:
+        raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
+
+    # B11 · 全站日级熔断（`①b` Task 4）。与上一段**并列、都要过**：
+    # B8 管"这个会话花了多少"，这段管"全站今天花了多少"。
+    ok, why = circuit(global_key())
     if not ok:
         raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
 

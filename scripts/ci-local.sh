@@ -18,16 +18,32 @@
 #
 #   | 轴      | 本机（原先）          | CI                          | 本脚本                    |
 #   |---------|-----------------------|-----------------------------|---------------------------|
-#   | Redis   | **没有** ⇒ 15 条红    | `redis:7` service 容器      | ✅ 起容器（已开则复用）    |
+#   | Redis   | **没有** ⇒ 15 条红    | `redis:7` service 容器（**一次性 pristine**） | 🟡 **复用 `redis-rag`**（长期容器，**不是** pristine —— 见下） |
 #   | `.env`  | **有**（真实模型名）  | **没有** ⇒ 落代码默认值     | ✅ **rsync 掉**            |
 #   | 依赖    | 本机 venv             | 干净 ubuntu + requirements  | ⛔ **不管**（用你现有 venv）|
 #
 # ⚠️ **第三条轴本脚本【不复制】** —— 它不跑 `pip install`，用你现有的 venv。
 #    ⇒ **"依赖版本"这一层不等价。** 没复现的就明说 —— 见运行时横幅。
 #
+# ## 🔴 Redis 这一轴：**本机用的是 `redis-rag`，不是新起的容器**（2026-10-02 更正）
+#
+# 本脚本**原先**会 `docker run --rm --name raci-ci-local-redis` 起一个跑完就删的容器。
+# **实测：那条路在本机【一次都没走过】** —— 因为 `ci.yml:114` 把 `REDIS_PORT` 钉死成 `6379`，
+# 而本机 `6379` **长期被项目自己的 `redis-rag` 占着**（`127.0.0.1:6379->6379/tcp`）。
+# ⇒ `redis_up` 永远为真 ⇒ 永远走"复用"分支 ⇒ **`raci-ci-local-redis` 从来没被创建过**。
+#
+# 业务方 2026-10-02 裁定：**就认 `redis-rag`** —— 把它当作本机那个 CI redis，按**名字**管理：
+#   * 在跑 ⇒ 复用（⛔ 不新建、不抢占 6379）
+#   * 停了 ⇒ `docker start redis-rag`
+#   * **⛔ 永不删除它**（不再有 `--rm`、不再有 `docker rm -f`）
+#   * 镜像以 `ci.yml` 的 `services.redis.image` 为准；**不一致只提示，⛔ 不擅自重建**
+#
+# ⚠️ **代价（照实说）**：`redis-rag` 是**长期容器**，里头可能留着上一轮/开发期攒下的 key，
+# 而 CI 的 service 容器**每次都是全新空的**。⇒ **这一层不等价**，横幅里会打出来。
+#
 # ## 用法
 #
-#     bash scripts/ci-local.sh                    # 起 redis + 无 .env + 跑 CI 那一步
+#     bash scripts/ci-local.sh                    # 复用 redis-rag + 无 .env + 跑 CI 那一步
 #     bash scripts/ci-local.sh --keep             # 跑完不删临时目录（查现场）
 #     bash scripts/ci-local.sh --no-redis         # 不碰 docker（假定 6379 已经有人）
 #     bash scripts/ci-local.sh --no-syntax        # 跳过 compileall（syntax job）
@@ -65,7 +81,10 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CI_YML="${REPO_ROOT}/.github/workflows/ci.yml"
 JOB="offline-tests"
-REDIS_IMAGE="redis:7-alpine"   # ⚠️ CI 用的是 `redis:7`（非 alpine）—— 见横幅
+REDIS_CONTAINER="${CI_LOCAL_REDIS_CONTAINER:-redis-rag}"   # 🔴 本机 CI 用的 redis = 项目自己的那个容器
+                              #    （业务方 2026-10-02 裁；⛔ 别改回 `docker run --rm` 那套 —— 见文件头）
+                              #    `CI_LOCAL_REDIS_CONTAINER` 是**测试用**的覆盖口：
+                              #    拿它指向一个不存在的名字 ⇒ 能验「不存在」那条分支，⛔ 不必去停真的 redis-rag
 
 KEEP=0
 USE_REDIS=1
@@ -128,15 +147,36 @@ PY
 ENV_FLAT="$(printf '%s\n' "${ENV_PAIRS}" | tr '\n' ' ')"
 PYTEST_LINE="$(grep -m1 -E '^[[:space:]]*pytest' "${RUN_SH}" | sed 's/^[[:space:]]*//')"
 
-# ---------- 2. 起 Redis（CI 有 service 容器；本机原先没有） ----------
-STARTED_REDIS=0
-REDIS_NAME="raci-ci-local-redis"
+# ⚠️ redis 的**镜像**也从 ci.yml 读（它是 `services:` 段，不在上面那块 run/env 里）。
+#    用途：拿它和 `redis-rag` 实际用的镜像比 —— 不一致时**提示**（⛔ 不擅自重建那个容器）。
+CI_REDIS_IMAGE="$("${PY}" - "${CI_YML}" "${JOB}" <<'PY'
+import sys, yaml
+path, job = sys.argv[1], sys.argv[2]
+doc = yaml.safe_load(open(path, encoding="utf-8"))
+svc = (doc["jobs"][job].get("services") or {}).get("redis") or {}
+img = svc.get("image")
+if not img:
+    sys.exit(f"{path} 的 jobs.{job} 里没有 services.redis.image —— ci.yml 改了形状，"
+             f"本脚本要跟着改，⛔ 不许猜。")
+print(img)
+PY
+)" || { echo "❌ 从 ci.yml 读 services.redis.image 失败。" >&2; exit 2; }
+
+# ---------- 2. Redis：**复用 `redis-rag`**（⛔ 本脚本不再新建、不再删除容器） ----------
+# 业务方 2026-10-02 裁：「就认 redis-rag」。理由与代价见文件头「Redis 这一轴」。
 redis_up() { nc -z 127.0.0.1 6379 >/dev/null 2>&1; }
 
+# 6379 的占用者是哪个【容器】（不是容器 ⇒ 空）
+redis_owner() {
+  docker ps --format '{{.Names}}\t{{.Ports}}' 2>/dev/null \
+    | awk -F'\t' '$2 ~ /127\.0\.0\.1:6379->/ {print $1; exit}'
+}
+container_exists() { docker inspect -f '{{.Name}}' "$1" >/dev/null 2>&1; }
+container_image()  { docker inspect -f '{{.Config.Image}}' "$1" 2>/dev/null || echo "?"; }
+
+REDIS_NOTE=""   # 给横幅用：这一轴到底对齐到什么程度（仅在不对齐时非空）
 cleanup() {
-  if [ "${STARTED_REDIS}" = "1" ]; then
-    docker rm -f "${REDIS_NAME}" >/dev/null 2>&1 || true
-  fi
+  # ⛔ **不再 `docker rm`** —— redis 容器是长期资产，跑完留着（业务方 2026-10-02 裁）。
   rm -f "${RUN_SH:-}"
   if [ "${KEEP}" = "0" ] && [ -n "${TMP:-}" ]; then
     rm -rf "${TMP}"
@@ -146,8 +186,16 @@ trap cleanup EXIT
 
 if [ "${USE_REDIS}" = "1" ]; then
   if redis_up; then
-    echo "ℹ️  127.0.0.1:6379 已经在听 ⇒ **复用**，不另起容器。"
+    owner="$(redis_owner)"
+    if [ "${owner}" = "${REDIS_CONTAINER}" ]; then
+      echo "ℹ️  6379 已在听，占用者就是「${REDIS_CONTAINER}」⇒ 复用（⛔ 不新建、不删除）。"
+    elif [ -n "${owner}" ]; then
+      echo "⚠️  6379 已在听，但占用者是「${owner}」，不是「${REDIS_CONTAINER}」⇒ 照用（不对齐会在横幅里打出来）。"
+    else
+      echo "⚠️  6379 已在听，但它不是 docker 容器（宿主机上直接跑的？）⇒ 照用。"
+    fi
   else
+    # 6379 没人听 ⇒ 把 redis-rag 拉起来（⛔ 不新建别的容器）
     command -v docker >/dev/null 2>&1 || {
       echo "❌ 需要 docker 来起 redis（或先自己起一个，再用 --no-redis 跳过本步）。" >&2; exit 2; }
     # ⚠️ 本仓章程：有评测在跑时不许起容器（DEC-033）。
@@ -155,11 +203,23 @@ if [ "${USE_REDIS}" = "1" ]; then
       echo "🔴 有评测在跑（docker ps 里有 eval）—— 本仓章程不允许此时起容器，已中止。" >&2
       exit 2
     fi
-    echo "→ 起 redis（${REDIS_IMAGE}）…"
-    docker run -d --rm --name "${REDIS_NAME}" -p 6379:6379 "${REDIS_IMAGE}" >/dev/null
-    STARTED_REDIS=1
+    container_exists "${REDIS_CONTAINER}" || {
+      echo "🔴 容器「${REDIS_CONTAINER}」不存在，而本脚本【不会替你新建】。" >&2
+      echo "   它由 docker-compose.yml 的 redis 服务定义（127.0.0.1:6379）。建它：" >&2
+      echo "     docker compose up -d redis" >&2
+      echo "   ⚠️ 只 up redis —— ⛔ 别顺手 up postgres（容器重建会换网络名，打断 agent-eval-gate）。" >&2
+      exit 2
+    }
+    echo "→ 拉起「${REDIS_CONTAINER}」（本机 CI 的那个 redis；⛔ 跑完不删）…"
+    docker start "${REDIS_CONTAINER}" >/dev/null
     for _ in $(seq 1 30); do redis_up && break; sleep 0.5; done
-    redis_up || { echo "❌ redis 起来后 6379 仍不通。" >&2; exit 2; }
+    redis_up || { echo "❌ docker start ${REDIS_CONTAINER} 之后 6379 仍不通。" >&2; exit 2; }
+  fi
+
+  # 镜像对齐（**只提示，⛔ 不擅自重建长期容器**）
+  actual_image="$(container_image "${REDIS_CONTAINER}")"
+  if [ "${actual_image}" != "${CI_REDIS_IMAGE}" ]; then
+    REDIS_NOTE="不是 CI 那个镜像：本机 ${REDIS_CONTAINER} 用 ${actual_image}，ci.yml 写的是 ${CI_REDIS_IMAGE}（只提示，⛔ 不擅自重建长期容器）"
   fi
 fi
 
@@ -184,12 +244,17 @@ echo "==================== ci-local · 本次复现的边界 ===================
 echo "  仓        : ${REPO_ROOT}"
 echo "  临时副本  : ${TMP}"
 echo "  解释器    : ${PY}  ($("${PY}" -V 2>&1))"
-echo "  ✅ 已对齐 : Redis（service 容器）· .env（**已拿掉**）· run 块（**整块照抄 ci.yml**）"
+echo "  ✅ 已对齐 : .env（**已拿掉**）· run 块（**整块照抄 ci.yml**）"
+if [ "${USE_REDIS}" = "1" ]; then
+  echo "             Redis 有得用（复用「${REDIS_CONTAINER}」，端口按 ci.yml 的 6379）"
+  echo "  ⛔ 未对齐 : Redis 是【长期容器】—— ⛔ 不是 CI 那种「每次全新空」的一次性 service 容器，"
+  echo "             里头可能留着开发期/上一轮攒下的 key"
+  if [ -n "${REDIS_NOTE}" ]; then echo "             ${REDIS_NOTE}"; fi
+else
+  echo "  ⛔ 未对齐 : Redis（--no-redis：假定 6379 已经有人）"
+fi
 echo "  ⛔ 未对齐 : 依赖安装（用你现有 venv，**没跑 pip install -r**）"
 echo "             OS / 镜像（本机 macOS，CI 是 ubuntu-latest）"
-if [ "${USE_REDIS}" = "1" ]; then
-  echo "             redis 镜像版本（本脚本 ${REDIS_IMAGE}，ci.yml 写的是 redis:7）"
-fi
 echo "------------------------------------------------------------------"
 echo "  跑的是 ci.yml jobs.${JOB} 那一【整块 run】（${RUN_SH} 的内容）:"
 sed 's/^/    | /' "${RUN_SH}"

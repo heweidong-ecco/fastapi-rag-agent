@@ -33,11 +33,12 @@
 | `api/agent_graph_advanced.py` | 421 | ✅ [`specs/agent_graph_advanced.md`](./agent_graph_advanced.md) | 🟡 **可用，且是生产链** —— 但 🔴 **有两处实锤缺陷**（见下）<br>✅ **2026-10-01 改完**：`B7` + `S12` 都已落在它的 `llm`（`:50`）上 —— 见「✅ 做了什么」末条 |
 | `api/agent_graph_advanced_learning.py` | 400 | 🔴 **缺** | ❓ 未知 |
 | `api/answer_with_citations.py` | 58 | ✅ [`specs/answer_with_citations.md`](./answer_with_citations.md) | 🟡 **后端可用 · 但【默认不启用】—— 且零测试** |
-| `api/api_v1.py` | 313 | ✅ [`specs/api_v1.md`](./api_v1.md) | 🔴 **可用，但 11 条路由里【只有 1 条】带鉴权依赖** —— 其余任何人可调（含会花钱的和会泄露信息的）<br>⚠️ **本 spec 推翻了先前对 `B9` 的一个判断**（见 ⚠️②） |
-| `api/api_v1_agent.py` | 744 | ✅ [`specs/api_v1_agent.md`](./api_v1_agent.md) | 🟡 **可用，但 28 个路由【全都非流式】** —— `StreamingResponse` / `text/event-stream` / `yield` **全为 0**<br>🔵 **改造中**：本文件下方有 **实施计划 ②**（人工接管）与 **③**（流式与取消） |
-| `api/api_v1_rag.py` | 905 | ✅ [`specs/api_v1_rag.md`](./api_v1_rag.md) | 🟡 **部分可用** —— 有 3 条是"模拟类测试"<br>✅ 2026-10-01：两处 `ChatOpenAI`（`:566` 流式答案 · `:730` WS agent）接上 `MAX_TOKENS_ANSWER`（`B7`） |
+| `api/api_v1.py` | 324 | ✅ [`specs/api_v1.md`](./api_v1.md) | 🔴 **可用，但 11 条路由里【只有 1 条】带鉴权依赖** —— 其余任何人可调（含会花钱的和会泄露信息的）<br>⚠️ **本 spec 推翻了先前对 `B9` 的一个判断**（见 ⚠️②） |
+| `api/api_v1_agent.py` | 807 | ✅ [`specs/api_v1_agent.md`](./api_v1_agent.md) | 🟡 **可用，但 28 个路由【全都非流式】** —— `StreamingResponse` / `text/event-stream` / `yield` **全为 0**<br>🔵 **改造中**：本文件下方有 **实施计划 ②**（人工接管）与 **③**（流式与取消） |
+| `api/api_v1_rag.py` | 959 | ✅ [`specs/api_v1_rag.md`](./api_v1_rag.md) | 🟡 **部分可用** —— 有 3 条是"模拟类测试"<br>✅ 2026-10-01：两处 `ChatOpenAI`（`:566` 流式答案 · `:730` WS agent）接上 `MAX_TOKENS_ANSWER`（`B7`） |
 | `api/auth.py` | 108 | 🔴 **缺** | ❓ 未知 |
 | `api/bm25_index.py` | 66 | 🔴 **缺** | ❓ 未知 |
+| `api/breaker.py` | 78 | ✅ [`specs/breaker.md`](./breaker.md) | 🟡 **部分** —— `global:` 这一条 key **已生效**（2026-10-02 · `①b` Task 4）；`model:` 那类**还没做**（留给 `L2`） |
 | `api/browser_tools.py` | 84 | 🔴 **缺** | ❓ 未知 |
 | `api/cache.py` | 76 | 🔴 **缺** | ❓ 未知 |
 | `api/chunker.py` | 65 | 🔴 **缺** | ❓ 未知 |
@@ -72,8 +73,8 @@
 | `api/search_tools.py` | 129 | 🔴 **缺** | ❓ 未知 |
 | `api/simple_tools.py` | 36 | 🔴 **缺** | ❓ 未知 |
 | `api/simple_tools_impl.py` | 30 | 🔴 **缺** | ❓ 未知 |
-| `api/token_config.py` | 89 | ✅ [`specs/token_config.md`](./token_config.md) | 🟢 **新建（2026-10-01 · B7）** —— 额度类常量的**唯一落点**<br>✅ **`MAX_TOKENS_*` 已接线**（2026-10-01 · `①b` Task 1，15 处构造点）· ✅ **`SESSION_TOKEN_LIMIT` 已接线**（Task 2 · `B8`）<br>🟡 **`GLOBAL_DAILY_TOKEN_LIMIT` 有判定函数、⛔ 无调用点**（Task 3 · `B10`）⇒ **改它暂不改变任何行为** |
-| `api/token_tracker.py` | 888 | ✅ [`specs/token_tracker.md`](./token_tracker.md) | 🟡 **可用，但它是【三套额度口径】的其中一套** —— 见下 ⚠️<br>🟢 **①a 已落地（2026-10-01）**：额度常量已收口到 `api/token_config.py`（本文件**只剩同名别名**）· 本文件下方 **实施计划 ①a** 已执行完<br>🔵 **①b 进行中**：Task 0/1/2 ✅ · **Task 3 ✅（`B10` 全局日级 —— ⚠️ 只有函数、零调用点）** · ⬜ Task 4 起（`B11` 熔断 / 决策一落地） |
+| `api/token_config.py` | 89 | ✅ [`specs/token_config.md`](./token_config.md) | 🟢 **新建（2026-10-01 · B7）** —— 额度类常量的**唯一落点**<br>✅ **`MAX_TOKENS_*` 已接线**（2026-10-01 · `①b` Task 1，15 处构造点）<br>✅ **`SESSION_TOKEN_LIMIT` 已有判定函数 + 7 个调用点**（`①b` Task 2 · `B8`）<br>🟡 **`GLOBAL_DAILY_TOKEN_LIMIT` 已有判定函数、⛔ 但无调用点**（`①b` Task 3 · `B10`）⇒ **改它暂时不改变任何行为** |
+| `api/token_tracker.py` | 889 | ✅ [`specs/token_tracker.md`](./token_tracker.md) | 🟡 **可用，但它是【三套额度口径】的其中一套** —— 见下 ⚠️<br>🟢 **①a 已落地（2026-10-01）**：额度常量已收口到 `api/token_config.py`（本文件**只剩同名别名**）· 本文件下方 **实施计划 ①a** 已执行完<br>🔵 **①b 进行中（2026-10-01）**：Task 0 ✅ / Task 1 ✅（B7 接线）/ **Task 2 ✅（B8 会话级 · 已接 7 条链，真能拦）** / **Task 3 ✅（B10 全局日级 · ⚠️ 只有函数，未接线）** / ⬜ **Task 4 起待做（B11 熔断）**<br>⚠️ **两者的完成度【不一样】，别一起读**：`B8` 有调用点 ⇒ **改行为**；`B10` **没有调用点** ⇒ **不产生任何行为变化**，接线在 `B11` |
 | `api/tool_cache.py` | 96 | 🔴 **缺** | ❓ 未知 |
 | `api/tool_health.py` | 105 | 🔴 **缺** | ❓ 未知 |
 | `api/tool_visualizer.py` | 129 | 🔴 **缺** | ❓ 未知 |
