@@ -11,6 +11,7 @@ from exceptions import AppException, ErrorCode
 from api_v1 import router as public_router
 from api_v1_rag import router as rag_router
 from api_v1_agent import router as agent_router
+from pending_approvals import warn_if_backend_mismatch   # `②` Task 2（B5）：启动自检，见 startup_event
 from db import create_table, init_pool, close_pool
 from auth import ensure_admin_exists
 
@@ -581,6 +582,9 @@ async def startup_event():
     create_table()
     ensure_admin_exists(logger)
     warmup_cache()  # ← 新增这一行
+    # `②` Task 2（B5）：checkpoint 落盘 + 待接管队列在内存 ⇒ 重启后队列会丢、会话变孤儿。
+    # ⚠️ 只在 AGENT_CHECKPOINT_BACKEND=sqlite 时出声（默认的内存后端两边一致，那时必须安静）。
+    warn_if_backend_mismatch(logger)
     logger.info("应用启动完成")
     # 新增 Agent 工具 健康检查 启动时
     await run_health_check()

@@ -10,6 +10,118 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- 🟢 **`/agent/approve` 支持「改写后提交」**（2026-10-03 · `②` Task 3 · `B6`）—— **硬门 D 的最后一段**。
+
+  **改的是什么**：审批只有「批准 / 拒绝」两种。上游 `施工单 §3.1` 的接管页要的是
+  「**改写 / 批准 + 提交续跑**」—— 人能**把答案改一下再放行**。
+
+  **怎么改**：`approve_agent_action` 增加可选参数 **`edited_answer`**（`api/api_v1_agent.py:155`）：
+  · **批准 ∧ 给了改写** ⇒ 先 `update_state` 把它推成一条 **`AIMessage`**，再续跑
+  · **不给** ⇒ 走原来的 `update_state(values=None)`（**行为与改动前一致**）
+  · **拒绝** ⇒ 给了也**忽略**（拒绝的语义是"别做了"）
+
+  🔴 **为什么必须写进 state、不能只当返回值吐出去**：审批之后图**还要去 `tools` → `agent`**
+  ⇒ 只放响应里，**后续节点看不到这个改写** ⇒ **改了等于没改**。
+  ⚠️ **必须是 `AIMessage`** —— 用 `HumanMessage` 会让模型把"人给的结论"当成**用户新提的问题**再答一遍。
+
+  ⭐ **核心判据被测试钉住**：`api/test_approval_resume.py`（**6 条 · 纯离线 · 进 CI**），假图替掉真图：
+  · `invoke` 必须是 **`None`** —— `None` = **从 checkpoint 继续**；喂新消息 = **重开一轮**，
+    ⚠️ **两种的接口返回长得一模一样**（`{"status":"approved","answer":…}`）⇒ 只有钉住调用形状才拦得住
+  · `config` 里的 `thread_id` 必须是**请求里那个** —— `None` 只保证"是续跑"，保证不了"续的是**这一条**"
+  · **拒绝时不许写改写**（**反面**用例：只测"批准时会写"会漏掉它，而那种错不报错）
+  · **没停在审批点不许 `invoke`**
+
+  **判据（可打印）**：
+  ```bash
+  venv/bin/python -m pytest api/test_approval_resume.py -q
+  # ⇒ 6 passed
+  venv/bin/python -m pytest api/ -m "not integration and not needs_db" -q
+  # ⇒ 243 passed, 3 skipped, 22 deselected, 0 failed   （本轮之前 237 ⇒ +6，⛔ 无回归）
+  ```
+
+  ⚠️ **本 Task 只到"接线与语义"** —— 4 条新测试是**先红后绿**（真 TDD），另 2 条是**钉现有行为**的守卫
+  ⇒ 逐条变异自证（`/tmp/prove-resume.py`：**6/6 RED**，还原后 **6 passed**）。
+  🔴 **但"上下文真的连续"没有端到端跑过**（要真 LLM + 真 `MemorySaver`，**联网花钱**）
+  ⇒ **硬门 D 的验收演示仍差这一步**，⛔ 别把"6 passed"读成"硬门 D 已验证"。
+  📄 计划 ⇒ `docs/specs/api_v1_agent.md` 的「实施计划 ② · Task 3」。
+
+- 🟢 **待接管队列：新模块 `api/pending_approvals.py` + 端点 `GET /agent/pending`**（2026-10-03 · `②` Task 2 · `B5`）。
+
+  **为什么非要自己记账**：`MemorySaver`（`agent_graph.py`）**只按 `thread_id` 取，没有"列出全部"的 API**
+  ⇒ **没法从 checkpoint 反查"谁卡在审批"**。没有这条队列，接管事件**在界面上根本找不到**
+  （硬门 D 判据③ 的反例正是"口头说可以人工介入，界面上找不到"）。
+
+  **做了什么**：`register` / `resolve` / `list_pending`（**卡得最久的排最前**）· 端点 `GET /agent/pending`；
+  `langgraph_chat` 拿到 `summary` 后**登记或注销**，`approve_agent_action` **每条 return 前**注销。
+
+  ⚠️ **`else` 那一支不是可省的**：本轮没卡住就必须清掉上一次的登记，
+  否则某个 thread **卡过一次后会永远留在队列里** —— **假待办，且不报错**。
+
+  🔴 **两个"不报错"的坑，都写进了 spec**：
+  ① 队列是**进程内存** ⇒ **重启即空**（与默认 `MemorySaver` 一致，两边一起丢）；
+  ② ⛔ **但设 `AGENT_CHECKPOINT_BACKEND=sqlite` 就【不一致】了** —— 图落盘、队列不落
+  ⇒ **重启后图仍在等审批、队列里却查不到** ⇒ **会话变孤儿**。⇒ 启动时 `warn_if_backend_mismatch()` 兜底。
+
+  ⭐ **多做了两件计划没要求的**：
+  ① **接线守卫 `api/test_pending_approvals_wiring.py`（6 条）** —— 模块本身测过 ≠ 接线对；
+     漏一处 ⇒ **队列永远空**（不登记）或 **永远有假待办**（不注销），**两者都不报错**。
+  ② **那 6 条逐条【自证】** —— ⚠️ 它们是**写在实现之后**的（tests-after），**绿了不证明测的是对的东西**
+     ⇒ 逐条把接线拆掉、确认对应测试**真会红**、再还原（6/6 红了，还原后 6 passed）。
+
+  **判据（可打印）**：
+  ```bash
+  venv/bin/python -m pytest api/test_pending_approvals.py api/test_pending_approvals_wiring.py -q
+  # ⇒ 13 passed
+  venv/bin/python -m pytest api/ -m "not integration and not needs_db" -q
+  # ⇒ 237 passed, 3 skipped, 22 deselected, 0 failed   （本轮之前 224 ⇒ +13，⛔ 无回归）
+  ```
+
+  ⚠️ **顺手改的口径**：路由 **28 → 29**（`ROADMAP` · `待办总表` · `后端补齐清单` 三处
+  「28 个 agent 路由全部非流式」同步改）—— **新增这条也是非流式的 ⇒ 硬门 A 缺口一条没少**。
+  📄 模块 spec ⇒ `docs/specs/pending_approvals.md` · 计划 ⇒ `docs/specs/api_v1_agent.md` 的「实施计划 ② · Task 2」。
+  ⚠️ **`B6`（接管后续跑）仍未做 ⇒ 硬门 D 整体【未完成】。**
+  ➡️ **2026-10-03 更新**：`B6` **已于同日 `②` Task 3 完成**（见本文件顶部那条）⇒ **硬门 D 三段齐了**
+  （⚠️ 但**端到端验收**还没做，见那条的说明）。
+
+- 🟢 **审批触发条件从「任意 `tool_calls`」改成「工具白名单」**（2026-10-03 · `②` Task 1 · `B4`）。
+
+  **改的是什么**：`api/agent_graph.py` 的 `should_continue` 原先**只要模型产生任意 `tool_calls` 就进审批**
+  ⇒ **问一句"今天几号"也会停下来等人批**。硬门 D 要的是「**该被接管时被接管**」，⛔ 不是「全都接管」
+  —— 那条路**验收过不去**。
+
+  **怎么改**：新增 `SENSITIVE_TOOLS`（读 env · 默认 `search_tool`）· `needs_approval()`（判定）·
+  `validate_approval_config()`（**启动自检**）；`should_continue` **从两条路变三条**：
+
+  | 末条消息 | 改前 | 改后 |
+  |---|---|---|
+  | 没有 `tool_calls` | `END` | `END` |
+  | 有 `tool_calls`（**非敏感**，如 `calculator`/`date_today`） | 🔴 **`approval`**（无谓地停） | ✅ **`tools`**（直接跑完） |
+  | 有 `tool_calls`（**命中白名单**） | `approval` | `approval` |
+
+  🔴 **白名单第一版 = `{search_tool}` 一个**（业务方 2026-10-03 裁）—— 它会**把问题外发到第三方**；
+  `calculator`/`date_today` 是**本地纯函数**，不进白名单。⚠️ 位置 = **`.env` 的 `SENSITIVE_TOOLS`**。
+
+  ⚠️ **顺手修了三处"改完就成假话"的注释与文档** —— 本仓纪律是「**改口径立刻全仓搜那个词**」：
+  ① `api_v1_agent.py:66` 的 `summarize_agent_result` docstring（🔴 **判据的【理由】变了，结论没变**：
+  改前是"有 tool_calls ⇒ 一定停在审批"，改后是"非敏感的 tool_calls 不会出现在返回态里" ⇒
+  重写了它**为什么还成立**、以及**什么时候会失效**）② `api/test_agent_repairs.py:533` 的同款旧注释
+  ③ `docs/specs/agent_graph.md` 与 `docs/specs/api_v1_agent.md` 的 ⚠️ 表。
+
+  ⚠️ **发现一个尚未裁决的问题**（写进 spec，⛔ 未改行为）：`calculator` 用的是 **`eval(expression)`**
+  = 任意代码执行，而它的输入**来自 LLM、LLM 的输入来自用户** —— 它**不在白名单里**，即**无人值守直接跑**。
+
+  **判据（可打印）**：
+  ```bash
+  venv/bin/python -m pytest api/test_approval_trigger.py -q     # ⇒ 7 passed
+  venv/bin/python -m pytest api/ -m "not integration and not needs_db" -q
+  # ⇒ 224 passed, 3 skipped, 22 deselected, 0 failed   （改动前 217 passed ⇒ +7 = 新用例，⛔ 无回归）
+  ```
+
+  📄 裁定 ⇒ **`docs/decisions/DEC-048-审批触发条件改工具白名单.md`**（四个未定死处：语义 / 哪些工具 / 写在哪 / 空名单怎么办）
+  · `fastapi-rag-agent-TODO待办/后端补齐清单-待裁-20260929.md` 的 `B4 · ✍️ 裁` · `决策二`。
+  ⚠️ **`B5`（待接管队列）/ `B6`（接管后续跑）仍未做 ⇒ 硬门 D 整体【未完成】。**
+  ➡️ **2026-10-03 更新**：`B5` **已于同日 `②` Task 2 完成** · `B6` **已于同日 `②` Task 3 完成**（见本文件顶部两条）⇒ **硬门 D 三段齐了**（⚠️ 端到端验收仍未做）。
+
 - 🟢 **新增复盘 `docs/复盘/2026-10-02-判据写歪了不报错.md`** + 两条规矩落进 `docs/规范/开发规范.md`（2026-10-02）。
 
   **起因**：当天两次自核，**判据都是我自己写的，两次都歪**——

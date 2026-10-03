@@ -529,9 +529,15 @@ def test_stopped_at_approval_also_when_the_model_wrote_text_first():
     `if tool_calls and not content:` ⇒ 这种形态被判成 `answered`，
     **调用方照样不知道要去 `/agent/approve`** —— 原缺陷原样保留。
 
-    ⚠️ 判据只需看 `tool_calls`：图的接线是 `agent → (approval) → tools`，
-       **只要有 tool_calls 就一定停在审批点**；而 ToolMessage **没有 `tool_calls` 属性**，
-       本来就不会误报（见下一条用例）。
+    ⚠️ 判据只需看 `tool_calls`：图带 `interrupt_before=["approval"]` ⇒ 停在审批点时末条消息
+       必带 tool_calls；而 ToolMessage **没有 `tool_calls` 属性**，本来就不会误报（见下一条用例）。
+
+    🔴 **2026-10-03（B4）更正**：原文这里写「**只要有 tool_calls 就一定停在审批点**」——
+       **B4 之后这句是假的**（非敏感的 `calculator`/`date_today` 直接跑完，不停）。
+       ⚠️ 但**本用例仍然成立**，因为它是**手工造的 state**、不跑图：
+       它测的是「**给定一个停在审批点的返回态，能不能正确报出来**」，
+       ⛔ 不是「有 tool_calls 就会停」。**判据的等价性**见 `api_v1_agent.py` 的
+       `summarize_agent_result` docstring（那里写了它依赖什么、什么时候会失效）。
     """
     from langchain_core.messages import AIMessage, HumanMessage
 

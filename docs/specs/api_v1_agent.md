@@ -2,16 +2,24 @@
 
 | 项 | 内容 |
 |---|---|
-| **状态** | 🟡 **可用，但 28 个路由【全都非流式】** —— `StreamingResponse` / `text/event-stream` / `yield` **全为 0**<br>🔵 **改造中**：本文件下方有 **实施计划 ②**（人工接管）与 **③**（流式与取消） |
-| **对外提供** | 28 个路由（`/agent/langgraph_chat` · `/agent/approve` · `/agent/mcp_chat` · `/agent/advanced_chat` · `/agent/plan_execute` · `/agent/token/*` …）· `summarize_agent_result()` |
+| **状态** | 🟡 **可用，但 29 个路由【全都非流式】** —— `StreamingResponse` / `text/event-stream` / `yield` **全为 0**<br>🔵 **改造中**：本文件下方有 **实施计划 ②**（人工接管）与 **③**（流式与取消）<br>✅ **2026-10-03（`②` Task 2 · `B5`）**：新增 **`GET /agent/pending`** ⇒ 路由 **28 → 29**（⚠️ **新增这条也是非流式的，硬门 A 缺口一条没少**）<br>✅ **2026-10-03（`②` Task 3 · `B6`）**：`POST /agent/approve` 增加可选参数 **`edited_answer`** ⇒ **硬门 D 三段齐了** |
+| **对外提供** | 29 个路由（`/agent/langgraph_chat` · `/agent/approve` · **`/agent/pending`** · `/agent/mcp_chat` · `/agent/advanced_chat` · `/agent/plan_execute` · `/agent/token/*` …）· `summarize_agent_result()` |
 | **谁在用** | 前端（未做）· `test_public_paths.py` 等 |
-| **规模** | **835 行**（2026-10-03 重取；Task 7 之前是 743） |
+| **规模** | **894 行**（2026-10-03 实测 `wc -l`；⚠️ **别抄这个数** —— 它当天已被重取过**四次**：743 → 835 → 875 → 894） |
 
 ## ✅ 做了什么
 
 - **对话链**：`langgraph_chat`(:84) · `advanced_chat`(:154) · `plan_execute`(:183) · `memory_chat`(:227) · `mcp_chat`(:450)
   · 🔵 **B8（2026-10-01）**：这 5 条**全部接上会话级 token 上限**（`check_session_token_budget`），触顶抛 `QUOTA_EXCEEDED`
-- **人工审批**：`POST /agent/approve`（`:112`）—— 批准 / 拒绝，靠 `agent_graph` 的 `interrupt_before`
+- **人工审批**：`POST /agent/approve`（`:151`）—— 批准 / 拒绝 / **改写后提交**，靠 `agent_graph` 的 `interrupt_before`
+  · 🔵 **改写后提交（`②` Task 3 · `B6` · 2026-10-03）**：可选参数 **`edited_answer`（`:155`）**。
+    **批准 ∧ 给了改写** ⇒ 先 `update_state` 把它推成一条 **`AIMessage`**，再 `invoke(None, config)` 续跑；
+    **不给** ⇒ 走原来的 `update_state(values=None)`（行为与改动前一致）；**拒绝** ⇒ 给了也忽略。
+  · ⭐ **续跑形状被测试钉住**：`api/test_approval_resume.py`（6 条 · **纯离线 · 进 CI**）——
+    `invoke` 必须是 **`None`**（= 从 checkpoint 继续，⛔ 不是新开一轮）、`config` 必须是**请求里那个 thread_id**
+- 🔵 **待接管队列（`②` Task 2 · `B5` · 2026-10-03）**：新增 **`GET /agent/pending`** —— 列出**当前在等接管的会话**
+  （事实来源 = 新模块 **`api/pending_approvals.py`**，⛔ **不是从 checkpoint 反查** —— `MemorySaver` **没有"列出全部 thread"的 API**）。
+  `langgraph_chat` 在拿到 `summary` 后**登记 / 注销**，`approve_agent_action` 在**每条 return 前**注销。
 - **⭐ `summarize_agent_result()`（`:43`）** —— 把图的运行结果翻成 `{"status": "pending_approval"/"answered", …}`，
   并**把模型已写出的文字一并返回**（真实 LLM 常"先说一句再调工具"）
 - **预算**：`check_budget` 依赖（`:423`，抛 `AppException(QUOTA_EXCEEDED)`）· 6 个 `/agent/token/*` 查询路由
@@ -24,9 +32,13 @@
 
 ## 🟡 做到哪 / 缺什么
 
-- 🔴 **28 个路由全非流式** ⇒ **硬门 A 的缺口**（见计划 ③ 的 B1）
-- 🔴 **没有「待接管队列」端点** —— 有**单条**状态查询，**没有任何端点能列出"当前有哪些会话在等接管"**（见计划 ② 的 B5）
-- 🔴 **`/agent/approve` 的参数是 query 不是 body**（`:113-115`）⇒ 前端联调会踩
+- 🔴 **29 个路由全非流式** ⇒ **硬门 A 的缺口**（见计划 ③ 的 B1）
+- ✅ ~~🔴 **没有「待接管队列」端点**~~ ⇒ **2026-10-03 起【有了】**（`②` Task 2 · `B5`）：`GET /agent/pending`。
+  ⚠️ **但队列背后是【进程内存】**（`api/pending_approvals.py`）⇒ **重启即空** —— 见其 spec 里那条"已知限制"
+- ✅ ~~**`B6`（接管后续跑）未做**~~ ⇒ **2026-10-03 起【已做】**（`②` Task 3）：`edited_answer` 改写后提交 + 续跑形状被 `test_approval_resume.py` 钉住。
+  ⚠️ **但只是"接线与语义"层** —— **真跑一遍"上下文确实连续"（真 LLM + 真 MemorySaver）没有测**，
+  那需要联网花钱（见该测试文件的 docstring：本文件测的是**接线**，不是模型质量）。
+- 🔴 **`/agent/approve` 的参数是 query 不是 body**（`:152-155`，**含新的 `edited_answer`**）⇒ 前端联调会踩
 - 🔴 **`/agent/cost/overview` 的三个总数曾经是【进程内存】**（2026-10-03 修，`DEC-047`）——
   它**不报错、界面照常出数**，只是**重启后答 0**（实测库里有 4216 tokens、它答 0）。
   ⚠️ **同族的仍在**：`/agent/token/overview` · `/agent/thread/{id}/overview` · 看板第 2 格
@@ -38,10 +50,11 @@
 
 | 看代码会以为 | 实际 |
 |---|---|
-| 🔴 **「`status=answered` 就是拿到最终答案了」** | ⚠️ **要看 `status`** —— 返回 `pending_approval` 时 `answer` 里是**模型"先说的一句"**，**工具还没执行**。`summarize_agent_result` 的 docstring（`:55-61`）专门讲了这点：**不能加 `and not content`**，否则这种形态会被**误报成 `answered`** |
-| 🔴 **「审批已经能用了，硬门 D 算完成」** | ⛔ **不能** —— **触发条件是「任意 `tool_calls`」**（`agent_graph.py:100-137`）⇒ **问一句"今天几号"也会进审批**。**硬门 D 要的是"该被接管时被接管"，不是"全都接管"** |
-| ⚠️ **「`/agent/approve` 收 JSON body」** | ⛔ **不是** —— `thread_id` 与 `approved` **都是 query 参数**（`:113-115`） |
-| ⚠️ **「审批状态是持久化的」** | ⚠️ **默认不是** —— `agent_graph.py:148` 用的是 `MemorySaver()`（**进程内存**）⇒ **重启即丢**。只有设了 `AGENT_CHECKPOINT_BACKEND=sqlite` 才落盘 |
+| 🔴 **「`status=answered` 就是拿到最终答案了」** | ⚠️ **要看 `status`** —— 返回 `pending_approval` 时 `answer` 里是**模型"先说的一句"**，**工具还没执行**。`summarize_agent_result` 的 docstring（`:55-80`）专门讲了这点：**不能加 `and not content`**，否则这种形态会被**误报成 `answered`**。⚠️ **该 docstring 还写了这条判据"依赖什么、什么时候会失效"**（B4 后理由变了）—— 改图的路由时**要回去重看** |
+| ⚠️ ~~🔴 **「审批已经能用了，硬门 D 算完成」**~~ | ✅ **2026-10-03（`②` Task 1 · `B4`）改了口径**：**触发条件不再是「任意 `tool_calls`」**，而是**工具白名单**（`agent_graph.py` 的 `SENSITIVE_TOOLS`）⇒ **问个日期不再进审批**。<br>✅ **2026-10-03（`②` Task 2/3）：`B5` 队列 与 `B6` 续跑都【已做】** ⇒ **三段（什么时候停 / 停在哪看得到 / 批了怎么接着跑）齐了**。<br>⚠️ **但"齐了"≠"验收过"**：`B6` 只钉了**接线与语义**（`invoke(None)` + `edited_answer` 进 `AIMessage`），<br>**"上下文真的连续"没有端到端跑过**（要真 LLM + 真 `MemorySaver`，**联网花钱**）⇒ 验收演示时**要补那一步**。<br>⚠️ **本条 2026-10-03 之前写的是旧口径**，⛔ 别照旧理解 |
+| ⚠️ **「`/agent/approve` 收 JSON body」** | ⛔ **不是** —— `thread_id` / `approved` / **`edited_answer`** **都是 query 参数**（`:152-155`） |
+| 🔴 **「`edited_answer` 就是"把答案改一下再返回"」** | ⛔ **不止** —— 它**先写进 graph state**（`update_state` → `AIMessage`），**再从 checkpoint 续跑**。<br>⚠️ **差别在哪**：审批之后图**还要去 `tools` → `agent`** ⇒ 只把改写当返回值吐出去，**后续节点看不到它**（改写等于没改）。<br>⚠️ **必须是 `AIMessage`**：用 `HumanMessage` 会让模型把"人给的结论"当成**用户新提的问题**再答一遍 |
+| ⚠️ **「审批状态是持久化的」** | ⚠️ **默认不是** —— `agent_graph.py:179` 用的是 `MemorySaver()`（**进程内存**）⇒ **重启即丢**。只有设了 `AGENT_CHECKPOINT_BACKEND=sqlite` 才落盘 |
 | 🔴 **「`check_budget` 就是会话上限」** | ⛔ **不是** —— `check_budget`（`:426`）判的是**用户【每日】token 预算**。**会话级是另一个函数**（`check_session_token_budget`，B8 · 2026-10-01）。两者**并存**，⚠️ `/agent/mcp_chat` 上**两条都挂** |
 | 🔴 **「会话上限没拦住 = 没生效」** | ⚠️ **先看 `thread_id` 是不是默认值** —— 会话 key = **`user_name` + `thread_id`**（`DEC-041` 决策二）。<br>4 个端点的 `thread_id` 默认 `"default"` ⇒ **同一个人的**多次默认调用**共用**一个桶（**不同人不会互相踩** —— 这正是决策二加 `user_name` 的原因）。<br>⚠️ 但**换个 `thread_id` 就是换个桶** ⇒ 这是**设计如此**，不是漏拦 |
 | ⚠️ **「`/agent/plan_execute` 一直有 `thread_id`」** | 🔴 **2026-10-01 才补的**（B8）。此前它**没有**这个参数 ⇒ 老客户端不传也能跑（走默认值），**行为不变**；但**新加的这条上限**在它上面用的是 `"default"` 桶 |
@@ -57,11 +70,27 @@
 `docs/specs/api_v1_rag.md`（③ 的另一半）· `docs/specs/main.md` ·
 `docs/specs/token_tracker.md`（**`get_user_overview` 的本尊** + 内存/库两套口径的说明）·
 **`DEC-047`**（`①b` Task 7：`/agent/token/budget` 补全站字段 · `/agent/cost/overview` 换数据源）·
+**`DEC-048`**（`②` Task 1 · `B4` 审批触发条件改工具白名单）·
+**`docs/specs/pending_approvals.md`**（`②` Task 2 · `B5` 的队列模块）·
+**`docs/specs/agent_graph.md`**（审批那一侧）·
 `后端补齐清单` **B1 · B2 · B3 · B4 · B5 · B6 · B13**
 
 ---
 
-# 🔵 实施计划 ② · **人工接管**（2026-09-30 立 · 待执行）
+# 🔵 实施计划 ② · **人工接管**（2026-09-30 立 · **2026-10-03 执行中**）
+
+> ## 📊 进度（2026-10-03）
+>
+> | | Task | 状态 |
+> |---|---|---|
+> | ✅ | **Task 0** · 前置决策（白名单里放哪些工具） | **业务方 2026-10-03 已答** = `{search_tool}` · `.env SENSITIVE_TOOLS`（见 `DEC-048`） |
+> | ✅ | **Task 1** · `B4` 触发条件改工具白名单 | **已落地**（`DEC-048`）—— 判据：`pytest api/test_approval_trigger.py -q` ⇒ **7 passed** |
+> | ✅ | **Task 2** · `B5` 待接管队列（数据 + 端点） | **已落地** —— 判据：`pytest api/test_pending_approvals.py api/test_pending_approvals_wiring.py -q` ⇒ **13 passed** |
+> | ✅ | **Task 3** · `B6` 接管后续跑（含改写后提交） | **已落地** —— 判据：`pytest api/test_approval_resume.py -q` ⇒ **6 passed** |
+>
+> ⇒ **`②` 的 4 个 Task（0–3）全部落地** ⇒ **硬门 D 三段齐了**。
+> ⚠️ **但"齐了"≠"验收过"** —— `B6` 只钉了**接线与语义**（假图），
+> **"上下文真的连续"仍需一次真 LLM 端到端演示**（⛔ 本条别读成"硬门 D 已验证"）。
 
 > **来源**：`后端补齐清单-待裁-20260929.md` 的 **B4 · B5 · B6**（**业务方已裁：全部为「甲」**）。
 > **三者是同一件事的三段**：**什么时候该停（B4）→ 停在哪看得到（B5）→ 批了怎么接着跑（B6）**。
@@ -73,7 +102,7 @@ B5 新增一个**待接管注册表** + 一个查询端点；B6 给 `/agent/appr
 
 ---
 
-## Task 0 · **前置决策**：白名单里放哪些工具？（⛔ 决策二的附问，还没答）
+## Task 0 · **前置决策**：白名单里放哪些工具？· ✅ **已答（2026-10-03）**
 
 > `决策二` 已裁「**工具白名单**」，但**"白名单里放哪些工具"这个子问题还空着**。
 > ⬜ **我不替你定** —— 但把判断材料摆出来：
@@ -96,11 +125,19 @@ B5 新增一个**待接管注册表** + 一个查询端点；B6 给 `/agent/appr
 > **硬门 D 变成"有地基但从不启用"** —— 那是**验收上过不去**的。
 > ⇒ **不许让它悄悄为空。** 见 Task 1 的 Step 4（启动时校验）。
 
-- [ ] **Step 1**：把「白名单第一版放哪些工具」的裁定写进 `后端补齐清单` 的 **B4 · ✍️ 裁**栏，再开工。
+- [x] **Step 1**：把「白名单第一版放哪些工具」的裁定写进 `后端补齐清单` 的 **B4 · ✍️ 裁**栏，再开工。
 
 ---
 
-## Task 1 · **B4** · 触发条件改成「工具白名单」
+## Task 1 · **B4** · 触发条件改成「工具白名单」· ✅ **已落地（2026-10-03）**
+
+> ⚠️ **落地时与计划有两处不同**（都记在 `DEC-048` 与 `CHANGELOG`）：
+> ① **多写了 2 条测试**（计划 5 条 → 实际 7 条）：`validate_approval_config()` 的**正反两条** ——
+>    只测"空了会炸"**可能误报**（判据写反、恒炸）。
+> ② **顺手修了三处"改完就成假话"的注释/spec** —— 其中 `summarize_agent_result` 的 docstring
+>    **判据的【理由】变了、结论没变**：改前「有 `tool_calls` ⇒ 一定停在审批」，
+>    改后「**非敏感的 `tool_calls` 不会出现在返回态里**」⇒ 重写了它**为什么还成立**、**什么时候会失效**。
+
 
 **Files:**
 - Modify: `api/agent_graph.py`（`should_continue` `:95-103` · 条件边 `:130-137`）
@@ -112,7 +149,7 @@ B5 新增一个**待接管注册表** + 一个查询端点；B6 给 `/agent/appr
 - Produces: `needs_approval(tool_calls: list[dict]) -> bool`
 - ⚠️ `should_continue` 的返回值**从 2 种变 3 种**：`"approval"` / `"tools"` / `END`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # api/test_approval_trigger.py
@@ -168,14 +205,14 @@ def test_unknown_tool_is_not_sensitive_by_default():
     assert needs_approval(_calls("some_new_tool")) is False
 ```
 
-- [ ] **Step 2: 跑，确认失败**
+- [x] **Step 2: 跑，确认失败**
 
 ```bash
 python -m pytest api/test_approval_trigger.py -q
 ```
 预期：`ImportError: cannot import name 'needs_approval'`
 
-- [ ] **Step 3: 实现（`api/agent_graph.py`）**
+- [x] **Step 3: 实现（`api/agent_graph.py`）**
 
 在 `search_tool = DuckDuckGoSearchRun()` **之前**加：
 
@@ -235,7 +272,7 @@ def should_continue(state: AgentState):
     )
 ```
 
-- [ ] **Step 4: 加"白名单不许为空"的启动校验**
+- [x] **Step 4: 加"白名单不许为空"的启动校验**
 
 在 `build_agent_graph()` **之前**加：
 
@@ -261,7 +298,7 @@ def validate_approval_config():
 
 然后在 `agent_graph = build_agent_graph()` 那行**之前**调用 `validate_approval_config()`。
 
-- [ ] **Step 5: 跑测试**
+- [x] **Step 5: 跑测试**
 
 ```bash
 python -m pytest api/test_approval_trigger.py -q                        # → 5 passed
@@ -272,7 +309,7 @@ python -m pytest api/ -m "not integration and not needs_db" -q            # → 
 **红是预期的** —— 改的就是这个语义。**逐条看**：把"问日期会进审批"那类断言**改掉并写明新口径**，
 ⛔ **不要为了让测试过而回退实现**。
 
-- [ ] **Step 6: 补 `.env.example` + CHANGELOG + 提交**
+- [x] **Step 6: 补 `.env.example` + CHANGELOG + 提交**
 
 ```bash
 # .env.example 加一行（带注释说明它是干什么的）：
@@ -283,7 +320,26 @@ git commit -m "feat(硬门D): B4 —— 审批触发改成敏感工具白名单�
 
 ---
 
-## Task 2 · **B5** · 待接管队列（数据 + 端点）
+## Task 2 · **B5** · 待接管队列（数据 + 端点）· ✅ **已落地（2026-10-03）**
+
+> ### ✅ 落地结果（2026-10-03）
+>
+> | 计划怎么写 | 实际怎么做 | 差异 |
+> |---|---|---|
+> | 6 个 Step | **6 个全做了** | — |
+> | 4 条测试 | **7 条** | ➕ 3 条：**排序契约**（"卡得最久排最前"是 docstring 里写了却没人守的契约）· **启动警告的正反两条**（只测"设了会响"会误报） |
+> | （计划没提接线守卫） | **➕ 新增 `api/test_pending_approvals_wiring.py`（6 条）** | 🔴 **接线是这个模块最可能静默坏掉的地方**（漏一处 ⇒ 队列**永远空**或**永远有假待办**，且**都不报错**）⇒ 按本仓 `*_wiring.py` 既有做法补上 |
+> | （计划没提） | **➕ 那 6 条守卫逐条自证** | ⚠️ 它们是**写在实现之后**的（"tests-after"）⇒ **绿了不证明测的是对的东西**。⇒ 逐条把接线拆掉、确认对应测试**真会红**、再还原（脚本见 verdict：6/6 红了，还原后 6 passed） |
+>
+> **判据（可打印）**：
+> ```bash
+> venv/bin/python -m pytest api/test_pending_approvals.py api/test_pending_approvals_wiring.py -q
+> # ⇒ 13 passed
+> venv/bin/python -m pytest api/ -m "not integration and not needs_db" -q
+> # ⇒ 237 passed, 3 skipped, 22 deselected, 0 failed   （本轮之前 224 ⇒ +13）
+> ```
+> **顺手改的口径**：路由 **28 → 29**（`ROADMAP` · `待办总表` · `后端补齐清单` 三处「28 个 agent 路由全部非流式」同步改）。
+
 
 **Files:**
 - Create: `api/pending_approvals.py` + `docs/specs/pending_approvals.md`（⛔ 新建模块必须同时建 spec）
@@ -305,7 +361,7 @@ git commit -m "feat(硬门D): B4 —— 审批触发改成敏感工具白名单�
 >   **重启后：图还在等审批，队列里却查不到** ⇒ 会话变孤儿
 > ⇒ **本计划 v1 只支持内存**，并在 `pending_approvals.py` 顶部**写明这个限制** + 启动时若检测到 sqlite 后端就**警告**。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # api/test_pending_approvals.py
@@ -346,9 +402,9 @@ def test_register_twice_keeps_latest():
     assert len(rows) == 1 and rows[0]["tool_calls"][0]["name"] == "b"
 ```
 
-- [ ] **Step 2: 跑，确认失败**（`ModuleNotFoundError: pending_approvals`）
+- [x] **Step 2: 跑，确认失败**（`ModuleNotFoundError: pending_approvals`）
 
-- [ ] **Step 3: 实现 `api/pending_approvals.py`**
+- [x] **Step 3: 实现 `api/pending_approvals.py`**
 
 ```python
 """待接管会话的注册表（B5）。
@@ -407,9 +463,9 @@ def warn_if_backend_mismatch(logger=None) -> None:
         (logger.warning if logger else print)(msg)
 ```
 
-- [ ] **Step 4: 建 `docs/specs/pending_approvals.md`**（把上面那段「已知限制」原样搬进去 —— 它正是"看代码会误判"的那类）
+- [x] **Step 4: 建 `docs/specs/pending_approvals.md`**（把上面那段「已知限制」原样搬进去 —— 它正是"看代码会误判"的那类）
 
-- [ ] **Step 5: 接端点（`api/api_v1_agent.py`）**
+- [x] **Step 5: 接端点（`api/api_v1_agent.py`）**
 
 ```python
 from pending_approvals import list_pending, register, resolve
@@ -438,11 +494,31 @@ async def list_pending_approvals(
 
 在 `approve_agent_action`（`:112`）里，**每条 return 之前**调 `resolve(thread_id)`。
 
-- [ ] **Step 6: 跑 + 提交**
+- [x] **Step 6: 跑 + 提交**
 
 ---
 
-## Task 3 · **B6** · 接管后续跑（含"改写后提交"）
+## Task 3 · **B6** · 接管后续跑（含"改写后提交"）· ✅ **已落地（2026-10-03）**
+
+> ### ✅ 落地结果（2026-10-03）
+>
+> | 计划怎么写 | 实际怎么做 | 差异 |
+> |---|---|---|
+> | 4 个 Step | **4 个全做了** | — |
+> | 2 条测试 | **6 条** | ➕ 4 条：**`thread_id` 必须是请求里那个**（`None` 只保证"是续跑"，保证不了"续的是**这一条**"）· **改写必须是 `AIMessage`**（用 `HumanMessage` 会把"人给的结论"当**新输入**再答一遍）· **拒绝时不许写改写**（反面：只测"批准时会写"会漏掉这个）· **没停在审批点不许 `invoke`** |
+> | 2 条里 1 条就该绿 | **确实绿了** | ⚠️ `invoke(None)` 与"早退不 invoke"这两条**改前就绿** ⇒ 它们是**回归守卫**，不是新功能（docstring 已写明） |
+> | （计划没提自证） | **➕ 6/6 逐条变异自证** | 4 条新测试是**先红后绿**（真 TDD）；另 2 条是**钉现有行为**的守卫 ⇒ 逐条把接线改坏、确认**真会红**、再还原（脚本 `/tmp/prove-resume.py`：**6/6 RED**，还原后 **6 passed**） |
+>
+> **判据（可打印）**：
+> ```bash
+> venv/bin/python -m pytest api/test_approval_resume.py -q
+> # ⇒ 6 passed
+> venv/bin/python -m pytest api/ -m "not integration and not needs_db" -q
+> # ⇒ 243 passed, 3 skipped, 22 deselected, 0 failed   （本轮之前 237 ⇒ +6，⛔ 无回归）
+> ```
+> ⚠️ **本 Task 只到"接线与语义"** —— **"上下文真的连续"没有端到端跑过**（要真 LLM + 真 `MemorySaver`，**联网花钱**）。
+> ⇒ **硬门 D 的验收演示仍差这一步**，⛔ 别把"6 passed"读成"硬门 D 已验证"。
+
 
 **Files:**
 - Modify: `api/api_v1_agent.py`（`/agent/approve`）
@@ -451,7 +527,7 @@ async def list_pending_approvals(
 **Interfaces:**
 - Produces: `POST /agent/approve` 增加可选参数 **`edited_answer: str | None`**
 
-- [ ] **Step 1: 写失败测试**（用假图，⛔ 不真跑 LLM）
+- [x] **Step 1: 写失败测试**（用假图，⛔ 不真跑 LLM）
 
 ```python
 # api/test_approval_resume.py
@@ -507,7 +583,7 @@ def test_edit_note_is_written_into_state(monkeypatch):
     )
 ```
 
-- [ ] **Step 2: 跑，确认失败**
+- [x] **Step 2: 跑，确认失败**
 
 ```bash
 python -m pytest api/test_approval_resume.py -q
@@ -516,7 +592,7 @@ python -m pytest api/test_approval_resume.py -q
 （⚠️ 若它**直接通过**，说明 `invoke(None, …)` 那半条测的是现状 —— 那就把该断言留着当**回归守卫**，
 并在 docstring 里写明"这是钉住现有正确行为的守卫，不是新功能"）
 
-- [ ] **Step 3: 给 `/agent/approve` 加 `edited_answer`**
+- [x] **Step 3: 给 `/agent/approve` 加 `edited_answer`**
 
 ```python
 @router.post("/agent/approve")
@@ -560,7 +636,7 @@ async def approve_agent_action(
     return {"status": "approved" if approved else "rejected", ...}
 ```
 
-- [ ] **Step 4: 跑 + 提交**
+- [x] **Step 4: 跑 + 提交**
 
 ```bash
 python -m pytest api/test_approval_resume.py -q                       # → passed

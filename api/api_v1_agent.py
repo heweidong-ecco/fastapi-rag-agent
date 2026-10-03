@@ -10,7 +10,8 @@ from exceptions import ErrorCode, AppException
 from deps import get_current_user_hybrid, get_current_user_jwt, require_admin
 
 from agent_graph import agent_graph
-from langchain_core.messages import HumanMessage, ToolMessage
+from pending_approvals import list_pending, register, resolve   # `②` Task 2（B5）：待接管队列
+from langchain_core.messages import HumanMessage, ToolMessage, AIMessage
 # 多分支路由（意图分类）高级 Agent：定义在 agent_graph_advanced_learning.py
 from agent_graph_advanced_learning import build_advanced_agent
 from plan_execute import plan_task, execute_plan, BudgetExceededError
@@ -63,7 +64,14 @@ def summarize_agent_result(result: dict) -> dict:
       实测复现:POST /agent/langgraph_chat?question=请计算6*7 → `{"answer": ""}`。
 
     ⚠️ 判据是「**最后一条消息带 `tool_calls`**」—— 只看这一条。
-      · 图的接线是 `agent → (approval) → tools`，**只要有 tool_calls 就一定停在审批点**。
+      · **这条判据为什么成立**（🔴 B4 之后**理由变了**，⛔ 别照旧理解）：
+        图带 `interrupt_before=["approval"]` ⇒ 停在审批点时，末条消息**必带** tool_calls。
+        而**非敏感**的 tool_calls（`calculator` / `date_today`）**不会出现在本函数的输入里** ——
+        它们直接跑 `tools → agent → … → END`，**从不停在图中间**。
+        ⇒ 「末条带 tool_calls」在这里**仍然等价于**「停在审批点」。
+      · ⚠️ **但等价性依赖上面那一句**：若将来有**别的**路径把"跑了一半的图"喂进本函数
+        （流式返回 / 调试端点 / 某个非敏感工具提前返回），这条判据就会**误报 `pending_approval`**。
+        ⇒ **改图的路由时，回来重看这里。**
       · **不能**再加 `and not content`：真实 LLM 常见"既写文字又调工具"
         （"我来帮你算一下。" + tool_calls），那种形态同样在等审批，
         加了这个条件就会误报 `answered` ⇒ 调用方照样不知道要去 `/agent/approve`
@@ -121,6 +129,15 @@ async def langgraph_chat(
         config={"configurable": {"thread_id": thread_id}}
     )
     summary = summarize_agent_result(result)
+
+    # B5 · 待接管队列（`②` Task 2）—— `MemorySaver` 反查不出"谁卡住了"，只能在这里记账。
+    # ⚠️ `else` 那支不是可省的：**本轮没卡住 ⇒ 清掉上一次的登记**，
+    #    否则同一个 thread 一旦卡过一次，就会永远留在队列里**变成假待办**。
+    if summary.get("status") == "pending_approval":
+        register(thread_id, user_name, summary.get("pending_tool_calls") or [])
+    else:
+        resolve(thread_id)
+
     return {
         "question": question,
         "thread_id": thread_id,
@@ -135,22 +152,44 @@ async def langgraph_chat(
 async def approve_agent_action(
     thread_id: str,
     approved: bool,
+    edited_answer: str = None,
     user_name: str = Depends(get_current_user_hybrid),
 ):
     """
-    人工审批接口：批准或拒绝 Agent 的工具调用请求。
+    人工审批接口：批准 / 拒绝 / **改写后提交**（`B6`）。
+
+    🔴 **续跑走的是 `agent_graph.invoke(None, config)`** —— `None` = **从 checkpoint 继续**，
+       ⛔ **不是**新开一轮。改成喂新消息 = 上下文断裂，**而接口返回看着一模一样**。
+       守卫 ⇒ `api/test_approval_resume.py`（假图钉住调用形状）。
+
+    `edited_answer`：**人工把答案改过之后再放行**。
+      · 不给 ⇒ 按原样续跑（行为与改动前一致）
+      · 给了 ⇒ 先 `update_state` 把改写推成一条 **`AIMessage`**，再从 checkpoint 续跑
+        ⚠️ **必须进 state、不能只当返回值吐出去** —— 只放响应里，**后续节点看不到这个改写**。
+        ⚠️ 必须是 `AIMessage`，⛔ 不是 `HumanMessage` —— 后者会让模型把"人给的结论"当**新输入**再答一遍。
+      · ⚠️ **只有"批准"时才生效**；拒绝时给了也会被忽略（拒绝的语义是"别做了"）。
     """
     config = {"configurable": {"thread_id": thread_id}}
-    
+
     # 获取当前图的状态
     current_state = agent_graph.get_state(config)
-    
+
     if current_state.next != ("approval",):
+        # B5：图没停在审批点 ⇒ **注册表里若有这个 thread，那是陈的** ⇒ 顺手清掉。
+        # ⚠️ 这一支也要清 —— 否则"/agent/pending 说有，批的时候说没有"，对不上。
+        resolve(thread_id)
         return {"status": "error", "message": "当前没有等待审批的任务"}
-    
+
     if approved:
-        # 批准：直接执行 None，图会继续前进到 approval 节点，然后去 tools
-        agent_graph.update_state(config, values=None)
+        if edited_answer is not None:
+            # B6：人工改写 ⇒ 推进 messages，**再从 checkpoint 续跑**。
+            # ⚠️ 不能"跳过模型直接把这个答案返回" —— 那样后续节点（`tools`→`agent`）看不到它。
+            agent_graph.update_state(
+                config, values={"messages": [AIMessage(content=edited_answer)]}
+            )
+        else:
+            # 原样放行：`values=None` ⇒ 不改 state，图继续前进到 approval 节点，然后去 tools
+            agent_graph.update_state(config, values=None)
         result = agent_graph.invoke(None, config)
     else:
         # 拒绝：更新 state，添加一条消息，并终止工具调用流程
@@ -161,12 +200,32 @@ async def approve_agent_action(
         result = agent_graph.invoke(None, config)
     
     final_message = result["messages"][-1]
+
+    # B5：批完就注销 —— 否则它会**永远留在队列里**（`resolve` 幂等，重复调不抛）。
+    resolve(thread_id)
+
     return {
         "status": "approved" if approved else "rejected",
         "thread_id": thread_id,
         "answer": final_message.content,
         "requested_by": user_name,
     }
+
+
+@router.get("/agent/pending")
+async def list_pending_approvals(
+    user_name: str = Depends(get_current_user_hybrid),
+):
+    """列出**当前等待人工接管**的会话（硬门 D 的入口）。
+
+    🔴 **为什么要有这个端点**：`MemorySaver` **没有"列出全部 thread"的 API**
+    ⇒ 没有它，**接管事件在界面上根本找不到**（硬门 D 判据③ 的反例正是这个）。
+    数据来自 `api/pending_approvals.py`（**进程内存** —— ⚠️ 重启即空，见其 spec）。
+
+    ⚠️ **本端点只读**，不改任何状态；批准/拒绝走 `POST /agent/approve`。
+    """
+    rows = list_pending()
+    return {"count": len(rows), "items": rows, "requested_by": user_name}
 
 # ==================== 高级图LangGraph进阶 接口：包含---条件边、循环、子图  ====================
 
