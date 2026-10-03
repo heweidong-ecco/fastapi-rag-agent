@@ -317,7 +317,7 @@ class _FakeGraph:
         if self.tool_call:
             yield AIMessageChunk(
                 content="",
-                tool_call_chunks=[{"name": "search_tool", "args": "", "id": "c1", "index": 0}],
+                tool_call_chunks=[{"name": "web_search", "args": "", "id": "c1", "index": 0}],
             ), {"langgraph_node": "agent"}
             yield AIMessageChunk(
                 content="",
@@ -332,7 +332,7 @@ class _FakeGraph:
             messages = [AIMessage(content=tokens)]
             if self.tool_call:
                 messages = [AIMessage(content=tokens, tool_calls=[
-                    {"name": "search_tool", "args": {"query": "x"}, "id": "c1", "type": "tool_call"}])]
+                    {"name": "web_search", "args": {"query": "x"}, "id": "c1", "type": "tool_call"}])]
         return type("S", (), {"values": {"messages": messages}})
 
 
@@ -445,12 +445,18 @@ def test_status_comes_from_final_state_not_from_streamed_chunks(monkeypatch):
     ⚠️ 攒块本身还有第二个后果：`tool_calls` 里会出现
     `"date_todayduckduckgo_search"` 这种**两个名字粘在一起**的串
     （两轮的 name 被拼到一条上了）—— 在真服务上就是这么看到的。
+
+    🔴 **2026-10-03（DEC-051）更正**：上面那句是**当时的观察记录**（原文保留）。
+      它当时的**根因**是 `tool_execute` 按字面量 `"search"` 分派、而真名是
+      `duckduckgo_search` ⇒ 模型收到"未找到工具"后**反复重试**（名字现在已改成 `web_search`，
+      分派也改成查表了）。⚠️ **根因修掉 ≠ 本用例可以删** —— 它守的是**端点该从哪取状态**，
+      那是**另一件事**：只要端点还在拿流式块猜，多轮场景就会重演。
     """
     _install_fake_model(monkeypatch)                       # 先装，再换模型
     monkeypatch.setattr(agent_graph, "llm_with_tools",
                         _bind(_TwoRoundModel(tokens=[])))
     # `calculator` **不在**敏感名单里 ⇒ 走 `tools` 节点直接执行，图会跑完
-    monkeypatch.setattr(agent_graph, "SENSITIVE_TOOLS", frozenset({"search_tool"}))
+    monkeypatch.setattr(agent_graph, "SENSITIVE_TOOLS", frozenset({"web_search"}))
     graph = _SpyGraph(agent_graph.build_agent_graph())
 
     resp = _call_stream_route(monkeypatch, graph)

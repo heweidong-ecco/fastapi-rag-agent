@@ -10,12 +10,12 @@ import operator
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 from llm_factory import make_llm   # ①b Task 5：model / api_key / base_url / max_tokens 的唯一落点
-from langchain_community.tools import DuckDuckGoSearchRun
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig   # B1：节点要靠它把回调接进模型调用
 from datetime import datetime
 from safe_math import calculate  # DEC-049：`calculator` 的求值实现 —— ⛔ 别改回 `eval`
+from search_tools import web_search  # DEC-051：搜索工具换成 Bing 版（旧的 DuckDuckGo 本机不可达）
 
 # ==================== 初始化模型 ====================
 # ⚠️ 角色 = 「模型轴 fast」+「长度轴 agent(1024)」—— 见 `api/llm_factory.py` 的模块 docstring。
@@ -40,8 +40,18 @@ def date_today(query: str = "") -> str:
     weekdays = ["一", "二", "三", "四", "五", "六", "日"]
     return f"今天是{now.year}年{now.month}月{now.day}日，星期{weekdays[now.weekday()]}"
 
-search_tool = DuckDuckGoSearchRun()
-tools = [search_tool, calculator, date_today]
+# 🔴 DEC-051：搜索工具从 `DuckDuckGoSearchRun` 换成 `search_tools.web_search`。
+#    理由**不是"图新"**：`api/search_tools.py:47` 记着 2026-09-21 的实测 ——
+#    `duckduckgo.com` 本机**完全不通**（`cn.bing.com` 是当时唯一可达的）。
+#    ⇒ 旧那份在**本机部署下必定失败**，换掉它是修 bug 的一部分，⛔ 不是顺手升级。
+# ⚠️ 两者都返回 `str`、都是**同步**工具 ⇒ `tool_execute` **不必**变 async。
+tools = [web_search, calculator, date_today]
+
+# 🔴 DEC-051：工具名的**唯一来源** —— 分派必须查这张表，⛔ 不许再在 `tool_execute` 里抄一遍名字。
+#    病根就是"名字写在两处"：抄的那份一旦对不上，落的是 `else` 分支（**如实报错、不崩溃**）
+#    ⇒ 那个工具**从来没被执行过**，而接口一切正常（本仓 2026-10-03 实测，见 DEC-051）。
+# 📌 守卫 ⇒ `api/test_tool_dispatch.py`
+TOOLS_BY_NAME = {t.name: t for t in tools}
 
 # 将工具绑定到模型，这样模型就知道可以调用哪些工具
 llm_with_tools = llm.bind_tools(tools)
@@ -51,22 +61,44 @@ llm_with_tools = llm.bind_tools(tools)
 #    硬门 D 要的是「**该被接管时被接管**」，⛔ 不是「全都接管」。
 # ⚠️ 它是**白名单**：没登记的工具**默认不敏感** ⇒ **新加的工具默认不过审批**。
 #    要它过，就把名字加进 `.env` 的 `SENSITIVE_TOOLS`（逗号分隔）。
+# 🔴 DEC-051：默认值**原来写的是 `"search_tool"`（那是**变量名**，不是工具名）** ⇒
+#    与 `{t.name for t in tools}` 的**交集恒空** ⇒ 审批永不触发，且**没有任何报错**。
+#    现在写**真工具名** `web_search`（= `tools` 里那个，见上面 `TOOLS_BY_NAME`）。
 # 📄 裁定 ⇒ `fastapi-rag-agent-TODO待办/后端补齐清单-待裁-20260929.md` B4 · 📌 判据 ⇒ `api/test_approval_trigger.py`
 SENSITIVE_TOOLS: frozenset[str] = frozenset(
-    n.strip() for n in os.getenv("SENSITIVE_TOOLS", "search_tool").split(",") if n.strip()
+    n.strip() for n in os.getenv("SENSITIVE_TOOLS", "web_search").split(",") if n.strip()
 )
 
 
 def validate_approval_config() -> None:
-    """启动自检：白名单**不许为空**。
+    """启动自检：白名单**不许为空**，且里面的名字**必须真的存在**。
 
-    🔴 空 ⇒ 审批**永不触发** ⇒ 硬门 D 名存实亡 —— 而且**不会有任何报错**，
-       要等人验收时才发现「接管从来没发生过」。⇒ 让它在**启动时就报**。
+    🔴 两种都是「**静默失效**」—— 审批永不触发，但**不会有任何报错**，
+       要等人验收时才发现「接管从来没发生过」。⇒ 让它们在**启动时就报**。
+
+    | 形态 | 什么时候发生 | 加进来的时间 |
+    |---|---|---|
+    | **空名单** | 有人在 `.env` 里把它**显式清空** | `DEC-048 §四`（2026-10-03） |
+    | 🔴 **名字不存在** | 手滑写了错名字 / 工具改名后没同步 | `DEC-051`（2026-10-03）—— **本仓真的发生过**：默认值写成了变量名 `search_tool`，**活了三天** |
+
+    ⚠️ **第二段是本函数存在的真正理由**：`DEC-048` 只拦了空名单，
+       于是**同一个失败**换了个形状（"名字全都对不上"）**绕过了它自己设的闸**。
+       ⇒ 判据从「非空」升级为「**非空 且 名字真的在 `tools` 里**」。
     """
     if not SENSITIVE_TOOLS:
         raise EnvironmentError(
             "SENSITIVE_TOOLS 为空 —— 人工审批将永不触发（硬门 D 名存实亡）。"
-            " 请在 .env 里写明需要审批的工具名（逗号分隔），例如 SENSITIVE_TOOLS=search_tool"
+            " 请在 .env 里写明需要审批的工具名（逗号分隔），例如 SENSITIVE_TOOLS=web_search"
+        )
+
+    known = {t.name for t in tools}
+    unknown = SENSITIVE_TOOLS - known
+    if unknown:
+        raise EnvironmentError(
+            f"SENSITIVE_TOOLS 里有不存在的工具名：{sorted(unknown)}"
+            f" —— 它们**永远不会被审批**（硬门 D 名存实亡）。"
+            f" 可用的工具名：{sorted(known)}。"
+            " ⚠️ 这里要写**工具名**，⛔ 不是代码里的变量名。"
         )
 
 # ==================== 定义 Agent 的状态 ====================
@@ -119,6 +151,14 @@ def agent_decide(state: AgentState, config: RunnableConfig):
 def tool_execute(state: AgentState):
     """
     执行节点：解析模型的工具调用请求，执行工具，并返回ToolMessage。
+
+    🔴 **DEC-051：分派走 `TOOLS_BY_NAME` 查表，⛔ 不许再写 `if tool_name == "search"`**。
+       改前那样写是把工具名**抄了第二份**，而抄的那份写的是 `"search"`、真名是
+       `duckduckgo_search` ⇒ **永远落 `else`** ⇒ 搜索工具**从来没被执行过**，
+       模型收到的却是一条正常的 `未找到工具: duckduckgo_search`（**不报错**）。
+       📌 同型 bug 在本仓是**第二次**：`plan_execute.py:101-110` 记着上一回（prompt 写 `search`、
+       注册表里叫 `web_search`）。⇒ 病根不是"写错了"，是"**名字有两个来源**"。
+       📌 守卫 ⇒ `api/test_tool_dispatch.py`
     """
     last_message = state["messages"][-1]
     tool_messages = []
@@ -127,15 +167,10 @@ def tool_execute(state: AgentState):
         tool_name = tc["name"]
         tool_args = tc["args"]
 
-        # 找到对应的工具并执行
-        if tool_name == "search":
-            result = search_tool.invoke(tool_args["query"])
-        elif tool_name == "calculator":
-            result = calculator.invoke(tool_args)
-        elif tool_name == "date_today":
-            result = date_today.invoke(tool_args)
-        else:
-            result = f"未找到工具: {tool_name}"
+        # 按名字查表执行。⚠️ 三个工具都传 **dict**（`t.invoke(tool_args)`）——
+        #    旧的 `if` 分支对搜索传的是裸字符串 `tool_args["query"]`，换表后统一成 dict。
+        tool = TOOLS_BY_NAME.get(tool_name)
+        result = tool.invoke(tool_args) if tool else f"未找到工具: {tool_name}"
 
         # 生成ToolMessage
         tool_msg = ToolMessage(
@@ -150,7 +185,7 @@ def tool_execute(state: AgentState):
 def needs_approval(tool_calls: list) -> bool:
     """这轮 tool_calls 里**有没有**需要人工审批的（B4）。
 
-    ⚠️ 判据是「**有任何一个**」⇒ 混合调用（本地工具 + search_tool）**整体**审批，
+    ⚠️ 判据是「**有任何一个**」⇒ 混合调用（本地工具 + `web_search`）**整体**审批，
        ⛔ 不能"挑着执行"—— 那等于给敏感调用开了个绕过口子。
     """
     names = {tc.get("name") for tc in tool_calls or []}

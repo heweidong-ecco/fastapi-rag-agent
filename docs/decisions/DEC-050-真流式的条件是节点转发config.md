@@ -158,6 +158,13 @@ summary = summarize_agent_result(state.values or {})
 
 📌 **两条都记进了 `docs/specs/agent_graph.md` 的 🟡 节**，⛔ 本条 DEC **不处理**它们。
 
+> ✅ **2026-10-03 已结** —— 上面两条**当天就单独立了 `DEC-051`**（业务方裁：**两处都修 · 名字不存在就不许启动 · 一并换成 Bing 版 `web_search`**）。
+> · ① 默认值改成真工具名 `web_search` + `validate_approval_config()` **加第二段硬拦**（名字不存在 ⇒ 拒绝启动）
+> · ② 两个文件的 `tool_execute` 都改成**查 `TOOLS_BY_NAME` 表**（`agent_checkpointer.py` 是**第二处现场**，活路径 `/agent/memory_chat`）
+> 📄 `DEC-051-工具名分派与审批白名单的标识符勘误.md` · 📌 守卫 ⇒ `api/test_tool_dispatch.py`（9 例）
+> ⚠️ **但上面那个"多轮聚合缺陷"本身没消失** —— 它守的是**端点该从哪取状态**，与"模型为什么重试"是两件事。
+> ⇒ `api/test_agent_sse.py::test_status_comes_from_final_state_not_from_streamed_chunks` **仍然必须留着**。
+
 ## 反悔成本
 
 | 若将来要改成… | 要动哪里 | 成本 |

@@ -63,9 +63,9 @@
 
 | 看代码会以为 | 实际 |
 |---|---|
-| 🔴🔴 **「`/agent/langgraph_chat/stream` 的结尾那个 `summary`，把流过 `agent` 节点的块攒起来算就行」** | ⛔ **不行，会算错**（2026-10-03 **真服务**撞见，`③` Task 4）。<br>**攒块 = 跨多轮累积** —— 模型因工具返回"未找到工具"而**重试**时，`agent` 节点会进**多次** ⇒ 攒出来的东西带着**上一轮的** `tool_calls` ⇒ `summarize_agent_result` 报 **`pending_approval`，而图其实已经跑完**（前端会**永远等一个不会来的审批**）。<br>⚠️ 实测症状：`tool_calls` 的 name 被**拼接**成 `"date_todayduckduckgo_search"`。<br>✅ **正确做法：从图的最终状态取** —— `await agent_graph.aget_state(config)` ⇒ `summarize_agent_result(state.values)`，与 `/agent/langgraph_chat` **完全同一套语义**。<br>📌 判据（可打印）：`api/test_agent_sse.py::test_status_comes_from_final_state_not_from_streamed_chunks`（`_TwoRoundModel` 逼出第二轮） |
+| 🔴🔴 **「`/agent/langgraph_chat/stream` 的结尾那个 `summary`，把流过 `agent` 节点的块攒起来算就行」** | ⛔ **不行，会算错**（2026-10-03 **真服务**撞见，`③` Task 4）。<br>**攒块 = 跨多轮累积** —— 模型因工具返回"未找到工具"而**重试**时，`agent` 节点会进**多次** ⇒ 攒出来的东西带着**上一轮的** `tool_calls` ⇒ `summarize_agent_result` 报 **`pending_approval`，而图其实已经跑完**（前端会**永远等一个不会来的审批**）。<br>⚠️ 实测症状：`tool_calls` 的 name 被**拼接**成 `"date_todayduckduckgo_search"`。<br>🔴 **2026-10-03（`DEC-051`）**：那次"反复重试"的**根因已修**（`tool_execute` 原来是按字面量 `"search"` 分派、真名是 `duckduckgo_search`）⇒ ⚠️ **但本行仍照旧成立** —— 只要端点还在拿流式块猜，**任何**多轮场景都会重演。<br>✅ **正确做法：从图的最终状态取** —— `await agent_graph.aget_state(config)` ⇒ `summarize_agent_result(state.values)`，与 `/agent/langgraph_chat` **完全同一套语义**。<br>📌 判据（可打印）：`api/test_agent_sse.py::test_status_comes_from_final_state_not_from_streamed_chunks`（`_TwoRoundModel` 逼出第二轮） |
 | 🔴 **「`status=answered` 就是拿到最终答案了」** | ⚠️ **要看 `status`** —— 返回 `pending_approval` 时 `answer` 里是**模型"先说的一句"**，**工具还没执行**。`summarize_agent_result` 的 docstring（`:55-80`）专门讲了这点：**不能加 `and not content`**，否则这种形态会被**误报成 `answered`**。⚠️ **该 docstring 还写了这条判据"依赖什么、什么时候会失效"**（B4 后理由变了）—— 改图的路由时**要回去重看** |
-| ⚠️ ~~🔴 **「审批已经能用了，硬门 D 算完成」**~~ | ✅ **2026-10-03（`②` Task 1 · `B4`）改了口径**：**触发条件不再是「任意 `tool_calls`」**，而是**工具白名单**（`agent_graph.py` 的 `SENSITIVE_TOOLS`）⇒ **问个日期不再进审批**。<br>✅ **2026-10-03（`②` Task 2/3）：`B5` 队列 与 `B6` 续跑都【已做】** ⇒ **三段（什么时候停 / 停在哪看得到 / 批了怎么接着跑）齐了**。<br>⚠️ **但"齐了"≠"验收过"**：`B6` 只钉了**接线与语义**（`invoke(None)` + `edited_answer` 进 `AIMessage`），<br>**"上下文真的连续"没有端到端跑过**（要真 LLM + 真 `MemorySaver`，**联网花钱**）⇒ 验收演示时**要补那一步**。<br>⚠️ **本条 2026-10-03 之前写的是旧口径**，⛔ 别照旧理解 |
+| ⚠️ ~~🔴 **「审批已经能用了，硬门 D 算完成」**~~ | ✅ **2026-10-03（`②` Task 1 · `B4`）改了口径**：**触发条件不再是「任意 `tool_calls`」**，而是**工具白名单**（`agent_graph.py` 的 `SENSITIVE_TOOLS`）⇒ **问个日期不再进审批**。<br>🔴 **但白名单里的名字当时写错了**（`search_tool` 是**变量名**）⇒ **交集恒空 ⇒ 审批其实【永不触发】**，**直到 2026-10-03 才由 `DEC-051` 修掉**。⇒ ⚠️ **"改了口径"与"口径真的生效"是两件事** —— 前者当天就成立了，后者晚了三天。<br>✅ **2026-10-03（`②` Task 2/3）：`B5` 队列 与 `B6` 续跑都【已做】** ⇒ **三段（什么时候停 / 停在哪看得到 / 批了怎么接着跑）齐了**。<br>⚠️ **但"齐了"≠"验收过"**：`B6` 只钉了**接线与语义**（`invoke(None)` + `edited_answer` 进 `AIMessage`），<br>**"上下文真的连续"没有端到端跑过**（要真 LLM + 真 `MemorySaver`，**联网花钱**）⇒ 验收演示时**要补那一步**。<br>⚠️ **本条 2026-10-03 之前写的是旧口径**，⛔ 别照旧理解 |
 | ⚠️ **「`/agent/approve` 收 JSON body」** | ⛔ **不是** —— `thread_id` / `approved` / **`edited_answer`** **都是 query 参数**（`:152-155`） |
 | 🔴 **「`edited_answer` 就是"把答案改一下再返回"」** | ⛔ **不止** —— 它**先写进 graph state**（`update_state` → `AIMessage`），**再从 checkpoint 续跑**。<br>⚠️ **差别在哪**：审批之后图**还要去 `tools` → `agent`** ⇒ 只把改写当返回值吐出去，**后续节点看不到它**（改写等于没改）。<br>⚠️ **必须是 `AIMessage`**：用 `HumanMessage` 会让模型把"人给的结论"当成**用户新提的问题**再答一遍 |
 | ⚠️ **「审批状态是持久化的」** | ⚠️ **默认不是** —— `agent_graph.py:179` 用的是 `MemorySaver()`（**进程内存**）⇒ **重启即丢**。只有设了 `AGENT_CHECKPOINT_BACKEND=sqlite` 才落盘 |
@@ -85,6 +85,7 @@
 `docs/specs/token_tracker.md`（**`get_user_overview` 的本尊** + 内存/库两套口径的说明）·
 **`DEC-047`**（`①b` Task 7：`/agent/token/budget` 补全站字段 · `/agent/cost/overview` 换数据源）·
 **`DEC-048`**（`②` Task 1 · `B4` 审批触发条件改工具白名单）·
+🔴 **`DEC-051`**（**工具名分派与白名单的标识符勘误** —— 本节顶部那个勘误框、以及上面那条"名字写错了"的来源）·
 **`DEC-050`**（`③` Task 4 · `B1` Agent 端 SSE —— 真流式的唯一条件 + `aget_state` 那个修正）·
 **`docs/specs/pending_approvals.md`**（`②` Task 2 · `B5` 的队列模块）·
 **`docs/specs/agent_graph.md`**（审批那一侧 · **也是 B1 流式的另一半**）·
@@ -98,7 +99,7 @@
 >
 > | | Task | 状态 |
 > |---|---|---|
-> | ✅ | **Task 0** · 前置决策（白名单里放哪些工具） | **业务方 2026-10-03 已答** = `{search_tool}` · `.env SENSITIVE_TOOLS`（见 `DEC-048`） |
+> | ✅ | **Task 0** · 前置决策（白名单里放哪些工具） | **业务方 2026-10-03 已答** = ~~`{search_tool}`~~ → **`{web_search}`** · `.env SENSITIVE_TOOLS`（见 `DEC-048`；🔴 **标识符已由 `DEC-051` 勘误**） |
 > | ✅ | **Task 1** · `B4` 触发条件改工具白名单 | **已落地**（`DEC-048`）—— 判据：`pytest api/test_approval_trigger.py -q` ⇒ **7 passed** |
 > | ✅ | **Task 2** · `B5` 待接管队列（数据 + 端点） | **已落地** —— 判据：`pytest api/test_pending_approvals.py api/test_pending_approvals_wiring.py -q` ⇒ **13 passed** |
 > | ✅ | **Task 3** · `B6` 接管后续跑（含改写后提交） | **已落地** —— 判据：`pytest api/test_approval_resume.py -q` ⇒ **6 passed** |
@@ -106,6 +107,23 @@
 > ⇒ **`②` 的 4 个 Task（0–3）全部落地** ⇒ **硬门 D 三段齐了**。
 > ⚠️ **但"齐了"≠"验收过"** —— `B6` 只钉了**接线与语义**（假图），
 > **"上下文真的连续"仍需一次真 LLM 端到端演示**（⛔ 本条别读成"硬门 D 已验证"）。
+
+> ### 🔴🔴 **勘误（2026-10-03 · `DEC-051`）—— 读本节之前先读这一段**
+>
+> **本节正文（Task 0 的裁定表、Task 1 的逐 Step 代码块）是【当时的计划原文】，⛔ 别照抄。**
+> 里面那个白名单名字 **~~`search_tool`~~ 是错的** —— 它是**变量名**，不是工具名
+> （真名原为 `duckduckgo_search`，现随 `DEC-051` 换成 **`web_search`**）。
+>
+> | 本节写的 | 现在的实际 |
+> |---|---|
+> | `SENSITIVE_TOOLS` 默认 `"search_tool"` | **`"web_search"`**（`api/agent_graph.py:68`） |
+> | `validate_approval_config()` **只查"非空"** | **两段** —— 空名单 **+ 名字不存在**，都 `raise`（`:73`） |
+> | `tool_execute` 判 `if tool_name == "search"` | **查 `TOOLS_BY_NAME` 表**（`:172`），⛔ 不再有字面量 |
+> | 工具 = `DuckDuckGoSearchRun()` | **`search_tools.web_search`**（Bing 版） |
+>
+> ⚠️ **后果**：按本节原文落地的那一版，**审批从来没触发过**（交集恒空）而**没有任何报错**。
+> 📄 全文（含"为什么连测试文件自己都钉着错名字"）⇒ `docs/decisions/DEC-051-工具名分派与审批白名单的标识符勘误.md`
+> 📌 **现在 `agent_graph.py` 长什么样**，以 `docs/specs/agent_graph.md` 为准（本节是**记录**，不是规范）。
 
 > **来源**：`后端补齐清单-待裁-20260929.md` 的 **B4 · B5 · B6**（**业务方已裁：全部为「甲」**）。
 > **三者是同一件事的三段**：**什么时候该停（B4）→ 停在哪看得到（B5）→ 批了怎么接着跑（B6）**。
@@ -124,14 +142,15 @@ B5 新增一个**待接管注册表** + 一个查询端点；B6 给 `/agent/appr
 
 | 工具 | 有没有**外部副作用** | 建议 |
 |---|---|---|
-| ⭐ **`search_tool`**（`DuckDuckGoSearchRun`） | 🔴 **有** —— **它把查询内容发到第三方** | ✅ **放进白名单** |
+| ⭐ ~~**`search_tool`**~~ → **`web_search`**（原 `DuckDuckGoSearchRun`，`DEC-051` 换成 Bing 版） | 🔴 **有** —— **它把查询内容发到第三方** | ✅ **放进白名单**（🔴 **写 `web_search`，⛔ 不是 `search_tool`**） |
 | `calculator` | ⛔ 无 —— 纯本地计算 | ❌ 不放 |
 | `date_today` | ⛔ 无 —— 纯本地取时间 | ❌ 不放 |
 
-> ### ⇒ 我的建议：**白名单第一版 = `{search_tool}`**
+> ### ⇒ 我的建议：**白名单第一版 = ~~`{search_tool}`~~ → `{web_search}`**
 >
-> **理由**：**"敏感操作"的现实定义就是"会对外产生副作用"** —— 而 `search_tool`
-> **会把用户的问题原文发给 DuckDuckGo**。这**不是"贵不贵"的问题，是"数据出去了"的问题**。
+> **理由**：**"敏感操作"的现实定义就是"会对外产生副作用"** —— 而 ~~`search_tool`~~ **`web_search`**
+> **会把用户的问题原文发给搜索引擎**。这**不是"贵不贵"的问题，是"数据出去了"的问题**。
+> ⚠️ **判据（`DEC-048` 的原话）一条都没变，改的只是那个名字** —— 见本节顶部的勘误框。
 > ⚠️ 而 `calculator` / `date_today` 是纯本地的，**审批它们只会让人烦**（现状就是这个问题）。
 >
 > ### 🔴 而「空白名单」这个状态**必须明确表态**（三方文档都指出来了）

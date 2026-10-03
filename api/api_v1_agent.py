@@ -224,7 +224,8 @@ async def langgraph_chat_stream(
         #    原先攒块 ⇒ 攒出的消息**带着上一轮的 `tool_calls`** ⇒ `summarize_agent_result`
         #    判成 `pending_approval` ⇒ **接口报"在等人工审批"，而图其实早就跑完了**
         #    （前端会一直等一个**永远不会来**的批准）。
-        #    攒块还会让两轮的 name 粘成 `"date_todayduckduckgo_search"` 这种串。
+        #    攒块还会让两轮的 name 粘成 `"date_todayduckduckgo_search"` 这种串
+        #    （⚠️ 那是**当时的工具名**；`DEC-051` 已把搜索换成 `web_search` ⇒ ⛔ 别拿这串当真名）。
         #
         #    ⚠️ 一轮就能跑完的场景**盖不住**它 ⇒ 守卫用**两轮**的假图：
         #       `api/test_agent_sse.py::test_status_comes_from_final_state_not_from_streamed_chunks`

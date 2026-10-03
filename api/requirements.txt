@@ -26,8 +26,12 @@ docx2txt>=0.8
 
 # 工具与搜索
 # ⚠️ `duckduckgo-search` 已**改名为 `ddgs`**，新版 langchain_community 要的是后者。
-#    旧名留着会导致 api/agent_graph.py:43（**模块级**调 DuckDuckGoSearchRun()）
+#    旧名留着会导致**模块级**调 `DuckDuckGoSearchRun()` 的文件
 #    → ImportError: Could not import ddgs python package（2026-09-15 实测）。
+# 🔴 **2026-10-03（DEC-051）锚点更正**：原注释锚的是 `api/agent_graph.py:43`，
+#    但那个文件**已改用 `search_tools.web_search`（Bing 版）** ⇒ ⛔ 别再拿它当判据。
+#    ⚠️ **`ddgs` 仍然不能删** —— `api/api_v1_rag.py:746` 还在惰性 import `DuckDuckGoSearchRun`
+#    （RAG 侧 `/ws/agent`；见 `DEC-051` 遗留·1）。
 ddgs>=9.0.0
 
 # 数据库

@@ -10,6 +10,46 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- 🔴 **两条「静默失效」的既有 bug 结掉 + 搜索工具换掉**（2026-10-03 · `DEC-051`）。
+  ⛔ **不是新功能** —— 是 `③` Task 4 跑**真服务**时照出来的**既有缺陷**，两条都在**硬门 D（人工接管）**的路径上。
+
+  **改前实测（可打印，不是推演）**：
+  ```
+  真实工具名     : ['duckduckgo_search', 'calculator', 'date_today']
+  SENSITIVE_TOOLS: ['search_tool']
+  交集           : []        <-- 空 = 审批永不触发
+  tool_execute 判的串: []    <-- 空 = 分派永远落 else
+  ```
+
+  **① 分派按【硬编码字面量】走** —— `tool_execute` 判 `if tool_name == "search"`，而真名是 `duckduckgo_search`
+  ⇒ 永远落 `else`、返回字面量 `"未找到工具: …"`。⚠️ **它不崩溃、不报错** ——
+  模型收到的是一条正常的"工具不存在"，于是**反复重试**（正是 `DEC-050` 那个多轮聚合缺陷的触发器）。
+  **修法**：建 `TOOLS_BY_NAME = {t.name: t for t in tools}`，**两条分派都改成查表**。
+  ⚠️ **第二次犯了** —— `plan_execute.py:101-110` 记着上一回（prompt 写 `search`、注册表里叫 `web_search`）
+  ⇒ 病根不是"写错"，是**名字有两个来源**。
+
+  **② `SENSITIVE_TOOLS` 的默认值写的是【变量名】`search_tool`，不是工具名** ⇒ **交集恒空** ⇒
+  **审批从来没触发过**。而 `validate_approval_config()` 当时**只查"非空"不查"名字真的存在"** ⇒ **照常启动**。
+  ⚠️ **`DEC-048 §四` 自己点名要防这个形态，却只拦了「空名单」** ⇒ 同一个失败**换个形状绕过了它自己的闸**；
+  且 **`api/test_approval_trigger.py:13` 自己也钉着那个错名字** ⇒ **不可能发现它**。
+  **修法**：默认值改成真工具名 **`web_search`** + 启动自检**加第二段**（名字不存在 ⇒ `raise EnvironmentError`，**拒绝启动**，
+  报错里**列出可用工具名**）。
+
+  **③ 顺带换掉旧搜索工具**：`DuckDuckGoSearchRun` → **`search_tools.web_search`（Bing 版）**。
+  ⚠️ **这不是"图新"** —— `search_tools.py:47` 记着 2026-09-21 实测 **`duckduckgo.com` 本机完全不通**。
+  ✅ 顺带修好**成本漏账**：`web_search` 已在 `token_tracker` 的成本/token 两张表里，**`duckduckgo_search` 一张都没有**。
+
+  ⭐ **判据（可打印）**：`api/test_tool_dispatch.py`（**9 例**：2 条 AST 静态 + 1 条全仓防第三份拷贝 +
+  2 条行为 + 2 条**子进程起服自检**）· `api/test_approval_trigger.py` **8 例**（+1）。
+  全量：**333 → 343 passed**（+10 = 新增用例，⛔ **零回归**）。
+
+  ⛔ **本 DEC 不声明"搜索能用了"** —— 只声明**"分派走对了"**（离线可验证）；联网效果**本机不可验证**。
+
+  ⚠️ **遗留（已留痕）**：`api_v1_rag.py:746` **还有第三份** `DuckDuckGoSearchRun`（只登记不动）·
+  `/agent/memory_chat`（`agent_checkpointer.py`）**整条路径没有审批门**（本次只修了它的分派）·
+  `agent_checkpointer.agent_decide` **没转发 `config`**（无真流式）。
+  📄 全文 ⇒ `docs/decisions/DEC-051-工具名分派与审批白名单的标识符勘误.md`
+
 - 🔵 **Agent 端真流式【第一条】**（2026-10-03 · `③` Task 4 · `B1` · `DEC-050`）—— 新增 **`POST /agent/langgraph_chat/stream`**（SSE）。
 
   **为什么单独立档**：计划把这件事写成「**加一条 SSE 路由**」，判据是
@@ -44,6 +84,8 @@ All notable changes to this project will be documented in this file.
   ① `SENSITIVE_TOOLS` 默认值 `search_tool` **匹配不到任何真实工具**（真名是 `duckduckgo_search`）⇒ **审批永不触发**，
   而 `validate_approval_config()` **只查"非空"不查"名字存在"**；
   ② `tool_execute` 分派 `"search"` 而真名是 `duckduckgo_search` ⇒ **搜索工具永远返回"未找到工具"**（触发模型的搜索重试）。
+  ⇒ ✅ **当天就结掉了** ⇒ **`DEC-051`**（见上面第一条）—— 两条都已修 + 加了防复发的守卫。
+  ⚠️ **但①/②不是本条目（`B1`）的成果**，本条目只是**把它们照了出来**。
 
 - 🔴 **`calculator` 的任意代码执行面【已消除】**（2026-10-03 · `DEC-049`）—— **5 处 `eval` 收口到 AST 白名单求值**。
 
@@ -193,6 +235,14 @@ All notable changes to this project will be documented in this file.
 
   🔴 **白名单第一版 = `{search_tool}` 一个**（业务方 2026-10-03 裁）—— 它会**把问题外发到第三方**；
   `calculator`/`date_today` 是**本地纯函数**，不进白名单。⚠️ 位置 = **`.env` 的 `SENSITIVE_TOOLS`**。
+
+  > 🔴 **2026-10-03 勘误（`DEC-051`）**：上面那条里的 **`search_tool` 是【变量名】，不是工具名** ——
+  > 真名原为 `duckduckgo_search`，现为 **`web_search`**（`DEC-051` 换成 Bing 版）。
+  > ⇒ **本条当日落地的版本，白名单与真实工具名【交集恒空】⇒ 审批其实【从未触发过】**，
+  > 而 `validate_approval_config()` **只查"非空"不查"名字存在"** ⇒ **照常启动、不报错**。
+  > ⚠️ **"改了口径"与"口径真的生效"是两件事** —— 前者当天成立，后者**晚了三天**。
+  > 📄 全文 ⇒ `docs/decisions/DEC-051-工具名分派与审批白名单的标识符勘误.md`
+  > 📌 **本条目其余内容（三条路的表格、语义裁定、`.env` 位置）全部仍然成立** —— 改的只有那个名字。
 
   ⚠️ **顺手修了三处"改完就成假话"的注释与文档** —— 本仓纪律是「**改口径立刻全仓搜那个词**」：
   ① `api_v1_agent.py:66` 的 `summarize_agent_result` docstring（🔴 **判据的【理由】变了，结论没变**：
