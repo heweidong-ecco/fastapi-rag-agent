@@ -24,25 +24,63 @@ _lock = threading.Lock()
 _pending: dict[str, dict] = {}
 
 
-def register(thread_id: str, user_name: str, tool_calls: list) -> None:
-    """登记一个卡在审批的会话。同一 thread 重复登记 ⇒ **覆盖**（⛔ 不产生两条）。"""
+def register(session_key: str, user_name: str, tool_calls: list, *,
+             raw_thread_id: str | None = None, graph: str = "agent_graph") -> None:
+    """登记一个卡在审批的会话。同一键重复登记 ⇒ **覆盖**（⛔ 不产生两条）。
+
+    🔴 **2026-10-03（`DEC-056` 丙段）**：第一个形参由「裸 `thread_id`」改成**会话键**
+       （`session_key(user_name, thread_id)`）—— 理由：登记表原先也按裸 `thread_id` 记账
+       ⇒ 两个人用同一个 `thread_id` **在队列里也串号**，`/agent/approve` 会拿着
+       别人的键去续跑。⚠️ 形参**改名**了（`thread_id` → `session_key`）是**故意的**：
+       叫 `thread_id` 会让人继续往里塞裸值。
+
+    `raw_thread_id`：调用方传进来的**原值**（⛔ 不是拼过的键）。
+      ⚠️ **必须有它**：`/agent/approve` 拿到的是**原 `thread_id`**，
+         而它得先**按原值反查属主**、再按属主拼键（`find_by_raw_thread_id()`）。
+         没有这个字段就只剩"按调用方拼"一条路 ⇒ **admin 永远批不了别人的**（硬门 D 死掉）。
+      ⚠️ 不传 ⇒ 退回等于 `session_key`（**只为兼容老调用点 / 测试**；新代码一律显式传）。
+
+    `graph`：这条会话**停在【哪张图】**的审批点上（`"agent_graph"` / `"checkpointer_agent"`）。
+      🔴 **必须有它**（业务方 2026-10-03 裁）：`/agent/approve` 早先把 `agent_graph` **写死**了，
+         而 `/agent/memory_chat` 走的是 `checkpointer_agent` ⇒ 光给它加审批门，
+         **那个会话会永远停在审批点、没人放行**（比不加门还糟）。
+         ⚠️ 默认值 `"agent_graph"` 只是**兼容老调用点**；新调用点**一律显式写**。
+    """
     with _lock:
-        _pending[thread_id] = {
-            "thread_id": thread_id,
+        _pending[session_key] = {
+            "thread_id": session_key,          # ⚠️ 字段名保留（对外形状不变）= 拼过的键
+            "raw_thread_id": raw_thread_id if raw_thread_id is not None else session_key,
             "user_name": user_name,
+            "graph": graph,
             "tool_calls": list(tool_calls or []),
             "since": time.time(),
         }
 
 
-def resolve(thread_id: str) -> None:
+def resolve(session_key: str) -> None:
     """会话已不再等待审批 ⇒ 注销。
 
     ⚠️ **注销不存在的【是正常的】**（重复点批准 / 线程从没卡住过）⇒ **幂等，不抛异常**。
        `/agent/approve` 会调到它，而那条路**本来就会遇到"没有待审批任务"的情况**。
     """
     with _lock:
-        _pending.pop(thread_id, None)
+        _pending.pop(session_key, None)
+
+
+def find_by_raw_thread_id(raw_thread_id: str) -> list[dict]:
+    """按【调用方传的原 `thread_id`】反查登记 ⇒ `/agent/approve` 靠它定位**属主**。
+
+    🔴 **为什么不能按调用方拼键就完事**：`/agent/pending` 是**跨用户队列**（硬门 D）
+       ⇒ admin 得能批**别人**的会话。若用调用方自己的键，admin 会拼出 `admin:…`
+       而属主的是 `alice:…` ⇒ **永远批不了**。⇒ 必须**先查属主**（本函数），再按属主拼键。
+
+    ⚠️ 返回 **list** 而不是单条：两个人可能都用 `thread_id="default"` ⇒ **会有多条**
+       （这正是隔离问题本身）。挑哪条是**调用方**的裁决（`/agent/approve` 会据此拒绝歧义）。
+
+    ⚠️ 返回**浅拷贝**（同 `list_pending`）—— 别改返回值里的 `tool_calls`。
+    """
+    with _lock:
+        return [dict(v) for v in _pending.values() if v["raw_thread_id"] == raw_thread_id]
 
 
 def list_pending() -> list[dict]:

@@ -59,11 +59,18 @@ class RAGPipeline:
         generate_answer: bool = False,   # 新增
         strict_mode: bool = False,        # 新增
         citations: bool = False,          # 新增
+        *,
+        user_id: str,                     # 🔴 2026-10-03 加（DEC-056 决策 4/5）
     ) -> dict:
         """执行完整检索流程，返回结果和管线元信息。
 
         ⚠️ 2026-09-20 修：这段 docstring 原先**躺在查询规范化那几行之后**，是**空操作** ——
            本方法**没有 docstring**。已上移到签名正下方（代码一行未动）。
+
+        🔴 2026-10-03：加**必填** `user_id`（`DEC-056`）—— 检索**只在该用户自己的文档内**做。
+           身份用**显式形参**贯穿到 `db.search_similar_async` / `bm25_search_async`，
+           ⛔ 不用 contextvar（决策 4）。**必填、不给默认值** ⇒ 漏传 = `TypeError`，
+           ⛔ 不是"静默查全库"。
         """
         timing = {}  # 存储各阶段耗时（毫秒）
         t_total_start = time.time()
@@ -105,12 +112,16 @@ class RAGPipeline:
         for sq in search_queries:
             # 向量检索
             query_embedding = get_embedding(sq)
-            vector_results = await search_similar_async(query_embedding, top_k=top_k * self.candidate_multiplier)
+            vector_results = await search_similar_async(
+                query_embedding, top_k=top_k * self.candidate_multiplier, user_id=user_id
+            )
 
             # BM25 检索
             bm25_results = []
             if self.enable_bm25:
-                bm25_results = await bm25_search_async(sq, top_k=top_k * self.candidate_multiplier)
+                bm25_results = await bm25_search_async(
+                    sq, top_k=top_k * self.candidate_multiplier, user_id=user_id
+                )
 
             # RRF 融合当前子查询的两路结果
             fused = self._rrf_fusion(vector_results, bm25_results, top_k * self.candidate_multiplier)

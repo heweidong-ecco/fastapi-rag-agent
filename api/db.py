@@ -194,16 +194,35 @@ def insert_batch_documents(docs: list[tuple[str, str, list,]]):
             )
             conn.commit()
 
-def search_similar(query_embedding: list, top_k: int = 3):
-    """根据向量相似度检索文档"""
+def _require_identity(user_id, where: str) -> None:
+    """fail-closed：没有身份 ⇒ **抛错**，⛔ 不是"当成匿名、查全库"（`DEC-056` §六 ③）。
+
+    ⚠️ 为什么放在**取连接之前**：必须在**任何查询发出去之前**就挡住 ——
+       否则"传 None ⇒ 不过滤 ⇒ 返回全库"这条 fail-open 路仍然存在。
+    """
+    if not user_id:
+        raise ValueError(
+            f"{where} 需要 user_id（非空）—— 传空就等于「查全库」，"
+            f"那是本仓已裁定的 fail-open 反模式（DEC-056 §二 根因 / §六 ③）"
+        )
+
+
+def search_similar(query_embedding: list, top_k: int = 3, *, user_id: str):
+    """根据向量相似度检索文档 —— **只在该用户自己的文档内**。
+
+    🔴 2026-10-03：加 `WHERE requested_by = %s`（`DEC-056` 决策 5：共享层承重）。
+       原先无 WHERE ⇒ 查全库 ⇒ 这里**就是**「A 能看见 B 的文档」那条路。
+    """
+    _require_identity(user_id, "search_similar")
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT id,content, source, 1 - (embedding <=> %s::vector) AS similarity
                 FROM documents
+                WHERE requested_by = %s          -- 只检索当前用户的文档
                 ORDER BY embedding <=> %s::vector
                 LIMIT %s;
-            """, (query_embedding, query_embedding, top_k))
+            """, (query_embedding, user_id, query_embedding, top_k))
             return cur.fetchall()
 
 # ==================== 兼容转发层（重构计划 ⑥ 切开点 1）====================
@@ -220,10 +239,13 @@ def search_similar(query_embedding: list, top_k: int = 3):
 # ⚠️ `alembic/env.py` 需要的 `metadata` **没有**在这里转发（它是值不是函数，转发要动
 #    PEP 562 的 `__getattr__`）—— 已改为直接从 `db_metadata` 导入。
 
-def bm25_search(query: str, top_k: int = 10):
-    """转发到 `bm25_index.bm25_search`（惰性导入，见上方说明）。"""
+def bm25_search(query: str, top_k: int = 10, *, user_id: str):
+    """转发到 `bm25_index.bm25_search`（惰性导入，见上方说明）。
+
+    🔴 2026-10-03：加 `user_id`（`DEC-056`）—— 过滤实现在 `bm25_index` 里，本层只转发。
+    """
     from bm25_index import bm25_search as _impl
-    return _impl(query, top_k)
+    return _impl(query, top_k, user_id=user_id)
 
 # ⚠️ 2026-09-20 删（§三·B5/B6）：此处原有 `get_bm25_index()` 与 `get_all_documents()`
 #    两个**转发壳**（各自 `return _impl()`），但**全仓零外部调用**：
@@ -237,9 +259,9 @@ def invalidate_bm25_cache():
     return _impl()
 
 # ==================== 异步包装 ====================
-async def search_similar_async(query_embedding: list, top_k: int = 3):
-    return await asyncio.to_thread(search_similar, query_embedding, top_k)
+async def search_similar_async(query_embedding: list, top_k: int = 3, *, user_id: str):
+    return await asyncio.to_thread(search_similar, query_embedding, top_k, user_id=user_id)
 
-async def bm25_search_async(query: str, top_k: int = 10):
+async def bm25_search_async(query: str, top_k: int = 10, *, user_id: str):
     from bm25_index import bm25_search as _impl
-    return await asyncio.to_thread(_impl, query, top_k)
+    return await asyncio.to_thread(_impl, query, top_k, user_id=user_id)

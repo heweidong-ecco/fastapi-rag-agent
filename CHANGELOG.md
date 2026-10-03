@@ -10,6 +10,171 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- 🔴 **多用户检索隔离【收官】：最后 2 条端点收口 ⇒ 8 条检索路径全部按身份过滤**（2026-10-03 · `DEC-056` **乙段**）——
+  **甲段（共享层承重）一次修好 4 条，但那 2 条【自己写 SQL】⇒ 改共享层根本碰不到它们。**
+
+  **改之前的实测**（不是推断 —— `api/test_isolation.py` 的红就是它俩自己说出来的）：
+  - **`/rag/jwt_ask`** —— `isolation_b` 打**自己的** JWT，拿回了 **20 篇 `admin` 的文档**（`SELECT content FROM documents LIMIT %s`，**零 `WHERE`**）。
+  - **`/rag/stream_search`** —— `isolation_b` 的检索上下文（喂给 LLM 的 system prompt）里
+    **逐字**出现了 `isolation_a` 的文档（同上，内联裸 SQL，**零 `WHERE`**）。
+
+  **改了什么**（两条走的是**不同的**修法，因为它们的形状不同）：
+  - **`stream_search` → 改走共享层**：删掉它那段自己写的裸 SQL，换成
+    `search_similar(query_embedding, req.top_k, user_id=user_name)`。
+    ⚠️ 这是**正确的**修法而不是"照抄旁边那条" —— 共享层**已带 `WHERE`**，且**返回同样的 4 列**
+    （`id` / `content` / `source` / `similarity`）⇒ 下游映射一行都不用改。
+  - **`jwt_ask` → 只加 `WHERE`**（最小收口）。⚠️ **⛔ 没动它的检索语义** —— 见下方「没解决的」。
+
+  **判据（都可打印）**：
+  - 用例 —— `POSTGRES_DB=rag_test venv/bin/python -m pytest api/test_isolation.py -q -m needs_db` ⇒ **10 passed**
+    （该文件合计 **19 条**：离线 9 + `needs_db` 10）
+  - 静态 —— `grep -n 'WHERE requested_by' api/api_v1_rag.py | grep -v '#'` ⇒ **3 行**
+    （`pg_search` · `jwt_ask` · `ask` —— **正好 = 自己写 SQL 的 3 条读端点**；其余 5 条走共享层）。
+    ⚠️ **必须带 `| grep -v '#'`** —— 乙段加的**注释**里也含这个串，不带就会数成 5。
+  - 全量 —— ⚠️ **2026-10-03 同日更正这个标签**：`-m "not integration and not needs_db"` **⛔ 不是"CI 口径"**，
+    它只是 CI 的「**选中哪些测试**」那条命令。**CI 没有 Postgres、也没有 `.env`，本机两样都有** ⇒
+    **要 CI 的【结果】，跑 `bash scripts/ci-local.sh`**（本 PR **就栽在这上面**：裸命令跑出 411 全绿，CI 却 **12 failed**）：
+    `bash scripts/ci-local.sh` ⇒ **411 passed, 3 skipped, 32 deselected**
+    （收集数 **446** = 411+3+32，与 CI 那次 `12 failed + 399 passed + 3 + 32` **逐字对齐**）
+    （deselected 30 → 32 就是乙段那 +2 条 `needs_db` 用例）
+    📄 `docs/复盘/2026-10-03-CI同款命令不等于CI等价物.md`
+  - **证伪**：分别**退回**那两处修改 ⇒ **各恰好 1 条红**（`stream_search` 退回时 `jwt_ask` 仍绿，反之亦然）；
+    还原用 `cp` 备份并核 `sha256`（⛔ **不用 `git checkout`** —— 它恢复 HEAD，会抹掉未提交的编辑）。
+
+  ⚠️ **乙段【没有】解决的**（⛔ 别读成"都好了"）：
+  - **`/rag/jwt_ask` 拿到 `question` 却不拿它做检索**（无 embedding、无 `ORDER BY`）——
+    「**承诺检索**」与「**实际不检索**」的矛盾。**不在隔离收口内**，已单独立账。
+  - **`/rag/ask` 的定位** —— 它是 `tags=["模拟类测试"]` 的桩，却**读真库**，且 `LIMIT` 无 `ORDER BY`
+    ⇒ **结果不可复现**。**业务方已裁：删，但排在乙段之后**（单独一个任务，不动本轮改动）。
+  - **检索侧不给 admin 例外** —— 这**跟的是实现**（6 条已收口路径本来就是 0/6 给例外），
+    ⇒ `DEC-056` §七 **裁决 2 的文字已按实现更正**（⛔ 不是改代码去迁就文字）。
+
+  ⚠️ **顺带核出 3 处账实不符**（都以函数名为准，行号会漂）：
+  ① `DEC-056` §1.2 第 2 行的端点名写错（写成 `WS /ws/agent`，**实际是 `/rag/ask`** ——
+  `WS /ws/agent` 整条**不碰 `documents`**，且**无鉴权**、身份写死 `"unknown"`）；
+ ② `docs/specs/api_v1_rag.md` 有**同一处**错标（已一并更正）；
+  ③ 该 spec 里的 **LLM 记账**那一行把 `/rag/jwt_ask` 列了进去 —— 它**一处 LLM 都不调**。
+
+- 🔴 **追踪轴（`/agent/trace*`）的跨用户可见已修**（2026-10-03 · `DEC-056` **决策 9** / 待办 **N4**）——
+  **改之前：任何登录用户一条 GET 就能读到别人的提问原文与工具结果。**
+
+  **三条症状**（都实测过，不是推断）：
+
+  ```bash
+  # 用真实端点跑一遍（改之前）
+  tv.start_trace('default','爱丽丝的私密提问'); tv.finish_trace('default','答案')
+  tv.get_all_traces()                     # ⇒ 不带任何身份就返回了爱丽丝那条（含 user_query[:100]）
+  tv.get_trace('default')['user_query']   # ⇒ 鲍勃拿同一个 thread_id 直接读到
+  tv.start_trace('default','鲍勃的提问')   # ⇒ 爱丽丝那条被顶掉（后问的盖先问的）
+  ```
+
+  **改了什么**：
+  - **键**：`_traces` 由**裸 `thread_id`** 改成 **`session_key(user_name, thread_id)`**
+    （复用丙段那份，⛔ 不另拼）。⚠️ **`AgentTrace.thread_id` 存的仍是【原值】** —— 响应回显的是它。
+  - **读**：`/agent/traces` **默认只给本人**，admin 看全量（**显式一行**）；
+    `/agent/trace/{thread_id}` **判属主**，非属主与"不存在"**答同一个**（⛔ 不给"存在与否"的 oracle）。
+  - **写**：`start_trace` / `finish_trace` / `record_tool_start` / `record_tool_end` /
+    `record_agent_decision` 全部**多一个必填 `user_name`**（无默认值 ⇒ 漏传是 `TypeError`，fail-closed）。
+    ⚠️ **写侧不需要新贯穿** —— `user_name` **本来就在图 state 里**（`agent_graph_advanced.py:238`，预算检查在用）。
+
+  ⚠️ **它与丙段修的不是同一条轴** —— 丙段动的是 **checkpoint**（LangGraph 的 `config`），
+  这条是 `tool_visualizer` 里**另一份进程内存存储**。同型的病、不同的键面。
+  ⚠️ **花费轴不用动**：`check_session_token_budget(user_name, thread_id)` **本来就带 `user_name`**，⛔ 别去"顺手统一"。
+
+  ⚠️ **顺带**：`tool_visualizer.py` 原先**没有 spec**（`DEC-047` §遗留）⇒ 补了
+  `docs/specs/tool_visualizer.md`（它现在是隔离的又一处承重层）。
+
+  ⚠️ **本轮【没有】解决的**：上游 `state.get("user_name", "default_user")` 仍是 fail-open（属 **N5**）·
+  `_traces` **无淘汰**（只增不减）· 只有 `mcp_agent_chat` **一个端点建轨迹**。
+
+  📌 判据：`api/test_trace_isolation.py` ⇒ **13 passed**（全带**正向控制** · **三条证伪**各只杀它该杀的）。
+
+- 🔴 **多用户会话隔离：checkpoint 键拼身份 + `/agent/approve` 归属校验 + `memory_chat` 审批门**（2026-10-03 · `DEC-056` 丙段）——
+  **两个用户用同一个 `thread_id="default"`（那是 6 条端点的默认值）时，会话记忆不再互相串。**
+
+  **根因**：4 张图 · **7 处** `{"configurable": {"thread_id": …}}` 的 key **里都没有人**，
+  而 state 的 reducer 是 `Annotated[List, operator.add]`（**append**）⇒ **B 的提问接在 A 的历史后面，模型两边的都看得到**。
+  ⚠️ **不是"理论上会串"，是"默认就串"** —— 默认值本身就是 `"default"`。
+  对照：**花费**那条轴没有这个问题（`check_session_token_budget` 的 key 含 `user_name`）⇒ 同一个仓里两套口径。
+
+  - 🆕 `api/session_key.py` —— `session_key(user_name, thread_id)`，**长度前缀**（`11:isolation_a:default`）。
+    ⚠️ 为什么不用朴素 `f"{user}:{thread}"`：`("a","b:c")` 与 `("a:b","c")` **都拼成 `"a:b:c"`**，
+    而**用户名没有字符校验**（`create_user_api_key`）⇒ 在一个**专门修隔离**的改动里留歧义 = 没修。
+    `_require_identity` fail-closed（缺身份 ⇒ 抛 `ValueError`），与 `db` / `bm25_index` 同一条约定。
+  - **7 处接线**：`langgraph_chat` · `langgraph_chat_stream`（`astream` + `aget_state` **两处必须同键**）·
+    `advanced_agent_chat` · `memory_chat` · `mcp_agent_chat` · `approve_agent_action`（续跑）。
+    ⚠️ **对外契约不变** —— 响应里回显的仍是调用方传进来的**原 `thread_id`**。
+    ⚠️ **只动了 checkpoint 那条轴**：`mcp_chat` 喂给 state 的 `thread_id` **保持原值**
+    （它走**追踪/花费轴**，读端点是 `/agent/trace/{thread_id}`，用的也是原值）。
+  - 🔴 **`/agent/approve` 加了归属校验**（**本人或 admin**）—— 改之前它**没有任何校验**，
+    任何登录用户拿一个 `thread_id` 就能批准并续跑那个会话。
+    ⚠️ **不能"按调用方拼"**：`/agent/pending` 是**跨用户队列**（硬门 D）⇒ admin 会拼出 `admin:…`
+    而属主是 `alice:…` ⇒ **admin 永远批不了别人的**。⇒ **先按原 `thread_id` 反查属主，再按属主拼，再判角色**。
+  - 🔴 **`/agent/memory_chat` 接上审批门**（`interrupt_before=["approval"]`）——
+    关掉 `DEC-051` §遗留·2「同一个仓里，一条路停下等人批，另一条直接执行」。
+    路由/白名单**从 `agent_graph` 引入**（`SENSITIVE_TOOLS` / `should_continue` / `human_approval`），
+    ⛔ **不是抄一份** —— 抄一份正是 `DEC-051` 记的病根。
+    ⚠️ **输出形状变了**：新增 `status` / `pending_tool_calls`（⛔ 不再返回 200 + 空答案）。
+  - 🔴 **`/agent/approve` 改为按登记表里的 `graph` 字段路由**（业务方 2026-10-03 裁）——
+    它原先把 `agent_graph` **写死**；光给 `checkpointer_agent` 加门而不改它 ⇒
+    那个会话**停在审批点、永远没人能放行**（**门关了却没有钥匙**）。
+
+  ⚠️ **代价（知道再选）**：`/agent/approve` **改为从队列反查**（队列成唯一入口）⇒
+  `AGENT_CHECKPOINT_BACKEND=sqlite` 重启后（图在盘、队列在内存）会答「没有待审批任务」，**而改动前能批**。
+  ⚠️ 那类会话**本来就是孤儿** ⇒ 这与「从静默错误地跑」改成「响亮地拒绝」，⛔ 不是新增的坏。
+
+  ⛔ **丙段【没有】解决的**（别读成全好了）：~~**追踪轴仍按裸 `thread_id`**~~ ⇒ ✅ **同日 `N4` 已修** ·
+  ~~`add_memory` / `search_memory` 仍是朴素拼接~~ ⇒ ⬜ **仍待（`N5`，随记忆系统下次动它一起做）** ·
+  ~~乙段两条未动~~ ⇒ ✅ **同日乙段已收口**。
+
+  ⭐ **判据（可打印）**：
+  `venv/bin/python -m pytest api/test_session_key.py api/test_session_isolation.py api/test_approve_ownership.py api/test_memory_chat_approval.py -q -p no:warnings` ⇒ **29 passed**
+  · `grep -c 'thread_id": *sess' api/api_v1_agent.py` ⇒ **7**
+  ⚠️ **三份都做过证伪**：朴素 `:` 拼接 ⇒ 恰好 1 条红（歧义那条）；一条端点退回裸 id ⇒ **恰好 2 条红**；
+  关掉归属校验 ⇒ 恰好 1 条红。随后按 sha256 复原。
+  全量 **398 passed / 3 skipped**（369 → 398 的 **+29 全是本轮新增用例**）。
+  📄 `docs/decisions/DEC-056-…md` 决策 8 · `docs/specs/session_key.md`
+
+- ✅ **多用户检索隔离：4 条端点按身份过滤（甲段底座）**（2026-10-03 · `DEC-056` 甲段）——
+  **同一份 `documents` 表里，A 检索不到 B 的文档**。此前是**潜伏**（真库 84 篇 `requested_by`
+  100% 是 `admin`），但**代码默认 fail-open**：全仓 7 条检索路径只有 2 条自己写了 `WHERE`。
+
+  **做法：过滤写在【共享层】，⛔ 不是每个端点各写一遍**（`DEC-056` 决策 5 —— 「承重」）：
+
+  - `db.search_similar` / `db.bm25_search`(+async) 加 `WHERE requested_by = %s`
+  - `bm25_index` 的**缓存按 `user_id` 分桶**，语料在 **SQL 层**就过滤
+    （⛔ 不是"检索出来再筛掉" —— 后者别人的文档**仍参与 IDF 统计**，是另一条渗漏）
+  - `hybrid_search` / `rerank_search` / `hybrid_search_with_rewrite` / `search_async`
+    加 **【必填】`*, user_id`** —— ⛔ **不给默认值**：有默认值 = "可以忘记传" = 还是 fail-open，
+    漏传即 `TypeError`（`DEC-056` §六 ③）
+  - `_require_identity()` 挡在**取连接之前** —— 否则"传 None ⇒ 不过滤 ⇒ 返回全库"那条路还在
+
+  **一次修好 4 条**：`/rag/hybrid_search` · `/rag/rerank_search` · `/rag/rewrite_search` · `/rag/search`。
+  ⚠️ ~~**代价（产品面，知道再选）**：4 条端点的**召回会降**（此前能捞到别人的文档）~~ ——
+  🔴 **2026-10-03 更正（乙段顺带核出）：这句写过头了。** 非 admin 用户在那 4 条路径上
+  **本来就只有 0 篇自己的文档** ⇒ 收口是**消除不一致**，⛔ 不是新加一道限制。
+  ✅ ~~**未做（乙段）**：`/rag/jwt_ask`（`:550`）与 `/rag/stream_search`（`:647`）**仍查全库**~~
+  ⇒ **2026-10-03 乙段已收口**（见本文件顶部那条）—— **8 条检索路径全部按身份过滤**。
+
+  ⚠️ **连带改了一处打分判据（`DEC-056` 决策 7，本 Agent 拍的板，已标"请业务方过目"）**：
+  BM25 的**入选判据**由「分数为正」改成「实词有重合」。根因：`rank_bm25` 的 idf =
+  `log(N-n+0.5) - log(n+0.5)`，**词出现在超过一半文档里就是负的**；语料**按人切**后小用户（1 篇）
+  必然触发 ⇒ 原判据**恒假** ⇒ 关键词检索对小用户**整个失效**（hybrid 退化成纯向量）。
+  实测：1 篇时 `idf=-0.27 / score=-0.82`；5 篇时 `idf=+1.10 / score=+2.18`。
+  ⚠️ 这是**独立的打分数义变更**，由隔离连带触发 —— 若业务方认为该拆成单独的 DEC，拆即可。
+
+  **探针身份**（`DEC-056` §七 裁决：身份进真库长期留 · 文档自造自清）：`.env` 加 3 把明文 key
+  （⛔ **未入库** —— 本仓密钥红线），`permission.py` 加注释说明 `isolation_a/b`（FREE）、
+  `isolation_c`（PREMIUM）—— ⛔ 别当成真业务角色；探针**文档**由测试幂等建、自己清。
+
+  ⭐ **判据（可打印）**：
+  `venv/bin/python -m pytest api/test_isolation.py -q -m "not needs_db" -p no:warnings` ⇒ **8 passed**
+  · `POSTGRES_DB=rag_test venv/bin/python -m pytest api/test_isolation.py -q -m needs_db` ⇒ 带库那 4 条。
+  ⚠️ **已做过证伪**（TDD 的红是红过的）：临时拿掉 `WHERE` ⇒ **4 条变红**
+  （向量路径 1 条 + 端点 3 条），BM25 那几条**正确地不红**，按 md5 复原。
+  全量 **369 passed / 3 skipped**（与改之前**一字不差**）· 带库 **398 passed**。
+  📄 `docs/decisions/DEC-056-多用户资源隔离的现状审计与分阶段收口.md`
+
 - ✅ **中断后那半截答案【存进历史】并打中断标记**（2026-10-03 · `③` Task 6 · `B3` · `DEC-053`）——
   计划写的是「**不写代码先核**」，核出来的东西比判据假设的大一圈：
 
@@ -117,7 +282,9 @@ All notable changes to this project will be documented in this file.
   ⛔ **本 DEC 不声明"搜索能用了"** —— 只声明**"分派走对了"**（离线可验证）；联网效果**本机不可验证**。
 
   ⚠️ **遗留（已留痕）**：`api_v1_rag.py:746` **还有第三份** `DuckDuckGoSearchRun`（只登记不动）·
-  `/agent/memory_chat`（`agent_checkpointer.py`）**整条路径没有审批门**（本次只修了它的分派）·
+  ~~`/agent/memory_chat`（`agent_checkpointer.py`）**整条路径没有审批门**（本次只修了它的分派）~~ ⇒
+  ✅ **2026-10-03（`DEC-056` 丙段）已关闭** —— `checkpointer_agent` 接上 `interrupt_before=["approval"]`
+  + `/agent/approve` 改按登记表里的 `graph` 路由（详见本文件上方「丙段」那一条）·
   `agent_checkpointer.agent_decide` **没转发 `config`**（无真流式）。
   📄 全文 ⇒ `docs/decisions/DEC-051-工具名分派与审批白名单的标识符勘误.md`
 
@@ -966,6 +1133,32 @@ All notable changes to this project will be documented in this file.
   **移入 = 源处删除 + 留指针**（516 → 480 行）。
 
 ### Fixed
+
+- 🔴 **PR #74 的 CI 红 12 条：乙段改了 `stream_search` 的【依赖来源】，测试里的 monkeypatch 够不着了**（2026-10-03）。
+
+  **现象**：CI `离线测试` **12 failed / 399 passed**，全部是
+  `psycopg2.OperationalError: connection to server at "localhost", port 5432 failed: Connection refused`，
+  全在 `api/test_cancel_propagation.py`（同文件 `test_agent_*` 5 条**全绿**）。
+
+  **根因**：乙段把 `/rag/stream_search` 从「自己写 SQL」改成「调共享层 `db.search_similar`」
+  ⇒ `get_db()` 的解析位置从 **`api_v1_rag` 的模块全局** 变成 **`db.py` 的模块全局**，
+  而测试只 patch 了 `rag_mod.get_db` ⇒ **短路静默失效** ⇒ 真去连库。
+  ⚠️ **本机看不见**：本机 Postgres 真开着 ⇒ 连上、`fetchall()` 回 `[]` —— **与假连接返回值恰好一样**。
+
+  **修法**：`_call_rag_stream` 补一行 `monkeypatch.setattr(db_mod, "get_db", lambda: _FakeConn())`
+  （⛔ 不是把 `search_similar` 整个换掉 —— 那会让"共享层还在不在用"测不到）。
+
+  **判据（可打印）**：把修复临时退回 ⇒ `bash scripts/ci-local.sh` **逐字复现**
+  `12 failed, 399 passed, 3 skipped, 32 deselected`；修后同一条命令 ⇒ **411 passed, 3 skipped, 32 deselected**
+  （收集数 **446** 两处一致）。还原用 `cp` 备份 + 核 `sha256`（⛔ 不用 `git checkout`）。
+
+  🔴 **顺带更正的三处口径**（都指向 `bash scripts/ci-local.sh`，⛔ 不是再抄一遍命令）：
+  `ROADMAP.md` 自检三问① · `docs/规范/开发规范.md §2.4·5`（并更正其原写
+  「`-m "not … needs_db"` **恰好是"把库减掉"**」—— **不成立**：它减的是「**自称**需要库的用例」）·
+  `docs/说明/测试.md`（「= CI 那套」限定为**收集口径** · 表头「**CI 实跑**」更正）。
+  📄 复盘 ⇒ `docs/复盘/2026-10-03-CI同款命令不等于CI等价物.md`
+  （**本仓 2026-10-01 就有 `ci-local.sh`，但 `ROADMAP`/`开发规范` 两处"推送前干什么"都没指向它** ——
+  「**门挂在别处，就等于没有门**」）
 
 - 🔴🔴 **取消路径的收尾在真服务的【主场景】下一条都不跑 —— 而单测全绿**（2026-10-03 · `③` Task 6 真服务验证 · `DEC-054`）。
 

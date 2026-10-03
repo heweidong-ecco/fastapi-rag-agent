@@ -48,6 +48,8 @@ from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, Too
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from langchain_core.runnables.base import RunnableBinding
 
+from session_key import session_key          # `DEC-056` 丙段：进图的键要拼身份
+
 
 # ==================== 假模型 / 假图（⛔ 不联网、不花钱） ====================
 
@@ -405,7 +407,12 @@ def test_stream_route_forwards_question_and_thread_id(monkeypatch):
     assert len(fake.astream_calls) == 1, f"图被调了 {len(fake.astream_calls)} 次"
     payload, config, stream_mode = fake.astream_calls[0]
     assert payload["messages"][0].content == "帮我算 6*7"
-    assert config["configurable"]["thread_id"] == "t-42"
+    # 🔴 2026-10-03（`DEC-056` 丙段）【口径变了】：进图的键**不再是裸 thread_id**，
+    #    而是 `session_key(user_name, thread_id)` —— 否则两个用户用同一个 `thread_id`
+    #    会**共用一个 checkpoint 桶**（消息是 append 的 ⇒ 模型看得到别人的对话）。
+    assert config["configurable"]["thread_id"] == session_key("tester", "t-42"), (
+        f"进图的 checkpoint 键不对：{config['configurable']['thread_id']!r}"
+    )
     assert stream_mode == "messages", "⛔ 不是 messages 模式 ⇒ 拿不到 token 块"
 
 

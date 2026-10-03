@@ -71,14 +71,20 @@ def reciprocal_rank_fusion(
     return results
 
 
-def hybrid_search(query: str, top_k: int = 5):
-    """混合检索：向量检索 + BM25 关键词检索，使用 RRF 融合。"""
+def hybrid_search(query: str, top_k: int = 5, *, user_id: str):
+    """混合检索：向量检索 + BM25 关键词检索，使用 RRF 融合。
+
+    🔴 2026-10-03：加**必填** `user_id`（`DEC-056` 决策 4/5）—— 身份用**显式形参**贯穿到
+       `db.search_similar` / `bm25_index.bm25_search`，那两处负责真正过滤。
+       ⚠️ **必填、⛔ 不给默认值** —— 有默认值就等于"可以忘记传"，
+          那就还是 `DEC-056` §二 那个 fail-open 根因。
+    """
     # 1. 向量检索
     query_embedding = get_embedding(query)
-    vector_results = search_similar(query_embedding, top_k=top_k * 2)  # 多召回一些
+    vector_results = search_similar(query_embedding, top_k=top_k * 2, user_id=user_id)  # 多召回一些
 
     # 2. BM25 关键词检索
-    bm25_results = bm25_search(query, top_k=top_k * 2)  # 多召回一些
+    bm25_results = bm25_search(query, top_k=top_k * 2, user_id=user_id)  # 多召回一些
 
     # 3. RRF 融合
     return reciprocal_rank_fusion(
@@ -90,13 +96,15 @@ def hybrid_search(query: str, top_k: int = 5):
     
 
 # 在 RRF 融合后，增加重排序步骤：
-def rerank_search(query: str, top_k: int = 3) -> list[dict]:
+def rerank_search(query: str, top_k: int = 3, *, user_id: str) -> list[dict]:
     """
     完整的混合检索 + RRF 融合 + 重排序流程。
     这是最终版检索入口。
+
+    🔴 2026-10-03：加**必填** `user_id`（`DEC-056` 决策 4/5），向下透传。
     """
     # 1. RRF 混合检索（多召回一些，给重排序留足候选池）
-    candidates = hybrid_search(query, top_k=top_k * 3)
+    candidates = hybrid_search(query, top_k=top_k * 3, user_id=user_id)
 
     # 2. Cross-Encoder 重排序（精细打分）
     return rerank(query, candidates, top_k=top_k)
@@ -105,7 +113,9 @@ def rerank_search(query: str, top_k: int = 3) -> list[dict]:
 def hybrid_search_with_rewrite(
     query: str,
     top_k: int = 5,
-    conversation_history: list[dict] = None   # [{"role","content"}]；旧形态 list[str] 也兼容，见 query_rewriter._history_lines
+    conversation_history: list[dict] = None,  # [{"role","content"}]；旧形态 list[str] 也兼容，见 query_rewriter._history_lines
+    *,
+    user_id: str,
 ) -> list[dict]:
     """
     带查询改写的完整检索流程：
@@ -125,7 +135,7 @@ def hybrid_search_with_rewrite(
     seen_contents = set()
 
     for variant in query_variants:
-        docs = hybrid_search(variant, top_k=top_k * 2)  # 多召回一些
+        docs = hybrid_search(variant, top_k=top_k * 2, user_id=user_id)  # 多召回一些
         for doc in docs:
             if doc["content"] not in seen_contents:
                 seen_contents.add(doc["content"])

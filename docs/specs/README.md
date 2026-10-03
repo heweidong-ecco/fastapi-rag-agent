@@ -28,16 +28,16 @@
 
 | 模块 | 行数 | spec | 自报状态 |
 |---|---:|---|---|
-| `api/agent_checkpointer.py` | 117 | ✅ [`specs/agent_checkpointer.md`](./agent_checkpointer.md) | 🟡 **地基在，但零测试 · 且有一处忽略配置**（**118 → 117 行**，2026-10-03 `DEC-049`）<br>⚠️ **行数口径**：用 `scripts/spec_status.sh` 的数（= **真实行数**）。`wc -l` 对本文件**少算 1**（末行没有换行符）⇒ 两边会差 1，⛔ **不是笔误**<br>✅ 2026-10-01：`llm`（`:21`）接上 `MAX_TOKENS_AGENT`（`B7`）<br>✅ 2026-10-02（`①b` Task 5）：该 `llm`（现于 `:21`）**改走 `llm_factory.make_llm("fast", "agent")`** —— `model`/`api_key`/`base_url`/`max_tokens` 不再写在本地。⚠️ `:39` 的 `bind_tools` 与 `:55` 的 `model_name`（**记账**）是**返回值必须是裸 `ChatOpenAI`** 的原因之一<br>✅ **2026-10-03（`DEC-049`）：`calculator` 的 `eval(expression)` 换成 `safe_math.calculate`**（`:28`；新增 import 在 `:17`）。⚠️ **本模块的 `calculator` 是活的** —— 走 `/agent/memory_chat` 那条链 |
-| `api/agent_graph.py` | 223 | ✅ [`specs/agent_graph.md`](./agent_graph.md) | ⚰️ **遗留 / 未经裁决** —— **6 套 Agent 实现之一**<br>✅ 2026-10-01：`llm`（`:21`）接上 `MAX_TOKENS_AGENT`（`B7`）<br>✅ 2026-10-02（`①b` Task 5）：该 `llm`（现于 `:20`）**改走 `llm_factory.make_llm("fast", "agent")`**。⚠️ **模型轴是 `fast`**（不是 chat）—— 这是改动前的实际取值，收口时**原样保留**<br>✅ 2026-10-03（**`②` Task 1 · `B4`**）：审批触发条件**从「任意 tool_calls」改成「工具白名单」**<br>✅ **2026-10-03（`DEC-049`）：`calculator` 的 `eval(expression)` 换成 `safe_math.calculate`** —— 本文件 **185 → 189 行**（多出的行是解释为什么不许改回去的注释）<br>🔵 **2026-10-03（`③` Task 4 · `B1`）：`agent_decide` 改成【流式可透传】的** —— 声明 `config: RunnableConfig` + 改用 `llm_with_tools.stream(…, config=config)` 逐块聚合。本文件 **189 → 222 行**（多出的行全是"为什么必须这样写 / 为什么不许改成 `async`"的注释）。📄 `DEC-050`<br>⚠️ **行数口径**：本仓一律用 `scripts/spec_status.sh` 的数（= **真实行数**）。`wc -l` 对本文件**少算 1**（它末行没有换行符）⇒ 两边会差 1，⛔ **不是笔误**<br>⚠️ **`②` Task 2/3（`B5`/`B6`）⛔ 没动过本文件** —— 队列与续跑都落在 `api_v1_agent.py`（见下） |
+| `api/agent_checkpointer.py` | 139 | ✅ [`specs/agent_checkpointer.md`](./agent_checkpointer.md) | 🟡 **地基在，但零测试 · 且有一处忽略配置**（117 → **121 行**，2026-10-03 `DEC-051`）<br>⚠️ **行数口径**：用 `scripts/spec_status.sh` 的数（= **真实行数**）。`wc -l` 对本文件**少算 1**（末行没有换行符）⇒ 两边会差 1，⛔ **不是笔误**<br>✅ 2026-10-01：`llm`（`:21`）接上 `MAX_TOKENS_AGENT`（`B7`）<br>✅ 2026-10-02（`①b` Task 5）：该 `llm`（现于 `:21`）**改走 `llm_factory.make_llm("fast", "agent")`** —— `model`/`api_key`/`base_url`/`max_tokens` 不再写在本地。⚠️ `:39` 的 `bind_tools`（现于 `:42`）与 `:55` 的 `model_name`（**记账**）是**返回值必须是裸 `ChatOpenAI`** 的原因之一<br>✅ **2026-10-03（`DEC-049`）：`calculator` 的 `eval(expression)` 换成 `safe_math.calculate`**（`:28`；新增 import 在 `:17`）。⚠️ **本模块的 `calculator` 是活的** —— 走 `/agent/memory_chat` 那条链<br>🔴 **2026-10-03（`DEC-051`）：两处修掉** —— ① `tool_execute`（`:66`）改成**查 `TOOLS_BY_NAME` 表**分派（改前判 `if tool_name == "search"`、而真名是 `duckduckgo_search` ⇒ **搜索永远落 `else`**）；② 搜索工具换成 `search_tools.web_search`（`tools` 在 `:37`，表在 `:41`）。⚠️ **本模块的分派 bug 是"第二处现场"**（第一处在 `agent_graph.py`），且这条是**活路径**（`POST /agent/memory_chat`）。📄 `DEC-051` |
+| `api/agent_graph.py` | 258 | ✅ [`specs/agent_graph.md`](./agent_graph.md) | ⚰️ **遗留 / 未经裁决** —— **6 套 Agent 实现之一**<br>✅ 2026-10-01：`llm`（`:21`）接上 `MAX_TOKENS_AGENT`（`B7`）<br>✅ 2026-10-02（`①b` Task 5）：该 `llm`（现于 `:22`）**改走 `llm_factory.make_llm("fast", "agent")`**。⚠️ **模型轴是 `fast`**（不是 chat）—— 这是改动前的实际取值，收口时**原样保留**<br>✅ 2026-10-03（**`②` Task 1 · `B4`**）：审批触发条件**从「任意 tool_calls」改成「工具白名单」**<br>✅ **2026-10-03（`DEC-049`）：`calculator` 的 `eval(expression)` 换成 `safe_math.calculate`** —— 本文件 **185 → 189 行**（多出的行是解释为什么不许改回去的注释）<br>🔵 **2026-10-03（`③` Task 4 · `B1`）：`agent_decide` 改成【流式可透传】的** —— 声明 `config: RunnableConfig` + 改用 `llm_with_tools.stream(…, config=config)` 逐块聚合。189 → **222 行**。📄 `DEC-050`<br>🔴 **2026-10-03（`DEC-051`）：两条既有 bug 结掉 + 搜索工具换掉** —— ①`tool_execute` 改成**查 `TOOLS_BY_NAME` 表**分派；②`SENSITIVE_TOOLS` 默认值改成真工具名 `web_search`，且 `validate_approval_config()` **加第二段硬拦**（名字不存在 ⇒ 拒绝启动）；③搜索工具 `DuckDuckGoSearchRun` → `search_tools.web_search`。222 → **258 行**（多出的行是"病根是名字有两个来源"的解释 + 新硬拦）。📄 `DEC-051`<br>⚠️ **行数口径**：本仓一律用 `scripts/spec_status.sh` 的数（= **真实行数**）。`wc -l` 对本文件**少算 1**（它末行没有换行符）⇒ 两边会差 1，⛔ **不是笔误**<br>⚠️ **`②` Task 2/3（`B5`/`B6`）⛔ 没动过本文件** —— 队列与续跑都落在 `api_v1_agent.py`（见下） |
 | `api/agent_graph_advanced.py` | 417 | ✅ [`specs/agent_graph_advanced.md`](./agent_graph_advanced.md) | 🟡 **可用，且是生产链** —— 但 🔴 **有两处实锤缺陷**（见下）<br>✅ **2026-10-01 改完**：`B7` + `S12` 都已落在它的 `llm`（`:50`）上 —— 见「✅ 做了什么」末条<br>✅ **2026-10-02（`①b` Task 5）**：该 `llm` **改走 `llm_factory.make_llm("chat", "agent")`** —— `model`/`api_key`/`base_url`/`max_tokens` 不再写在本地。<br>⚠️ **`timeout` / `max_retries` 没丢**：它们走 `make_llm` 的 `**extra` **逐点透传**（这是本仓第一处用到 `**extra` 的地方）。<br>⚠️ **`llm.bind_tools(...)` 照旧能用**（那句在 `get_llm_with_mcp_tools()` 里，现于 `:295`；`llm_with_tools` 是 `:354` 拿到它的）—— 这正是「工厂返回值必须是裸 `ChatOpenAI`」那条约束的来由之一 |
 | `api/agent_graph_advanced_learning.py` | 388 | 🔴 **缺** | ❓ 未知 |
 | `api/answer_with_citations.py` | 58 | ✅ [`specs/answer_with_citations.md`](./answer_with_citations.md) | 🟡 **后端可用 · 但【默认不启用】—— 且零测试** |
 | `api/api_v1.py` | 329 | ✅ [`specs/api_v1.md`](./api_v1.md) | 🔴 **可用，但 11 条路由里【只有 1 条】带鉴权依赖** —— 其余任何人可调（含会花钱的和会泄露信息的）<br>⚠️ **本 spec 推翻了先前对 `B9` 的一个判断**（见 ⚠️②）<br>🔴 **2026-10-03（`①b` Task 6 · `DEC-046`）**：`/debug/quota` 的返回从「每日**次数**」换成「每日 **token**」—— **字段名没变、单位变了** |
-| `api/api_v1_agent.py` | 1007 | ✅ [`specs/api_v1_agent.md`](./api_v1_agent.md) | 🟡 **可用；流式【有了第一条】**（`③` Task 4 · `B1` · 2026-10-03）—— ⚠️ **但只有 `/agent/langgraph_chat/stream` 这一条**，其余 **29 条仍全非流式**<br>🔵 **改造中**：本文件下方有 **实施计划 ②**（人工接管 · **已完成**）与 **③**（流式与取消 · **进行中，还剩 `B2`/`B3`**）<br>✅ **2026-10-03（`②` Task 2 · `B5`）**：新增 **`GET /agent/pending`** ⇒ 路由 **28 → 29**<br>✅ **2026-10-03（`②` Task 3 · `B6`）**：`POST /agent/approve` 增加可选参数 **`edited_answer`** ⇒ **硬门 D 三段齐了**<br>🔵 **2026-10-03（`③` Task 4 · `B1`）**：新增 **`POST /agent/langgraph_chat/stream`**（SSE）⇒ 路由 **29 → 30**。📄 `DEC-050` |
-| `api/api_v1_rag.py` | 952 | ✅ [`specs/api_v1_rag.md`](./api_v1_rag.md) | 🟡 **部分可用** —— 有 3 条是"模拟类测试"<br>✅ 2026-10-01：两处 `ChatOpenAI`（现 `:578` 流式答案 · `:751` WS agent）接上 `MAX_TOKENS_ANSWER`（`B7`）<br>✅ 2026-10-02（`①b` Task 5）：那两处**改走 `llm_factory.make_llm("chat", "answer")`** ⇒ **本文件已不再 import `ChatOpenAI` / `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL_CHAT`**。<br>⚠️ **`get_llm_stream()` 的惰性没变**（`make_llm` 自己把 langchain 的 import 关在函数内）· ⚠️ `temperature=0.3` + `streaming=True` 是**本处特有的逐点调参**，仍写在调用点上 |
+| `api/api_v1_agent.py` | 1167 | ✅ [`specs/api_v1_agent.md`](./api_v1_agent.md) | 🟡 **可用；流式【有了第一条】**（`③` Task 4 · `B1` · 2026-10-03）—— ⚠️ **但只有 `/agent/langgraph_chat/stream` 这一条**，其余 **29 条仍全非流式**<br>🔵 **改造中**：本文件下方有 **实施计划 ②**（人工接管 · **已完成**）与 **③**（流式与取消 · **进行中，还剩 `B2`/`B3`**）<br>✅ **2026-10-03（`②` Task 2 · `B5`）**：新增 **`GET /agent/pending`** ⇒ 路由 **28 → 29**<br>✅ **2026-10-03（`②` Task 3 · `B6`）**：`POST /agent/approve` 增加可选参数 **`edited_answer`** ⇒ **硬门 D 三段齐了**<br>🔵 **2026-10-03（`③` Task 4 · `B1`）**：新增 **`POST /agent/langgraph_chat/stream`**（SSE）⇒ 路由 **29 → 30**。📄 `DEC-050`<br>✅ **2026-10-03（`③` Task 5 · `B2`）**：新加的这条流式路由**补上了 cancel 传播**（关图的流 + 记数）—— `DEC-050` §遗留·3 自己点的那个洞**已堵**。📄 `DEC-052`<br>🔴 **2026-10-03（`DEC-056` 丙段）· 三条口径变了**：<br>① **进图的 checkpoint 键**由裸 `thread_id` 改成 **`session_key(user_name, thread_id)`**（4 张图 · 7 处）；⚠️ **响应仍回显原值**<br>② **`/agent/approve` 加了归属校验**（**本人或 admin**）+ **按登记表里的 `graph` 字段路由**；⛔ 它**不再**直接吃 `agent_graph` 写死<br>③ **`/agent/memory_chat` 接上审批门**（`interrupt_before=["approval"]`）⇒ **`DEC-051` §遗留·2 关闭** |
+| `api/api_v1_rag.py` | 1035 | ✅ [`specs/api_v1_rag.md`](./api_v1_rag.md) | 🟡 **部分可用** —— 有 3 条是"模拟类测试"<br>✅ **2026-10-03（`③` Task 5 · `B2`）**：`/rag/stream_search` 的**取消传播做完了** —— 上游改 `astream`、`finally` 里 `aclose()` 关流、取消时记 `stream_cancelled_total`（`DEC-052`）。⚠️ **"上游真停"仍只有代码内证据**（本机无出账）<br>✅ **2026-10-03（`③` Task 6 · `B3`）**：中断后**那半截答案存进历史**（提问 + 半截 + `INTERRUPTED_SUFFIX` 标记，落 `finally` —— `DEC-053`）<br>🔴 **未修**：**本文件的 LLM 调用一处都不记账**（`grep -c record_usage api/api_v1_rag.py` ⇒ **0**）⇒ 见下方「做到哪」与 `DEC-053` §遗留·2<br>✅ 2026-10-01：两处 `ChatOpenAI`（现 `:578` 流式答案 · `:751` WS agent）接上 `MAX_TOKENS_ANSWER`（`B7`）<br>✅ 2026-10-02（`①b` Task 5）：那两处**改走 `llm_factory.make_llm("chat", "answer")`** ⇒ **本文件已不再 import `ChatOpenAI` / `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL_CHAT`**。<br>⚠️ **`get_llm_stream()` 的惰性没变**（`make_llm` 自己把 langchain 的 import 关在函数内）· ⚠️ `temperature=0.3` + `streaming=True` 是**本处特有的逐点调参**，仍写在调用点上 |
 | `api/auth.py` | 108 | 🔴 **缺** | ❓ 未知 |
-| `api/bm25_index.py` | 66 | 🔴 **缺** | ❓ 未知 |
+| `api/bm25_index.py` | 142 | ✅ [`specs/bm25_index.md`](./bm25_index.md) | 🟡 **可用** —— 且 **2026-10-03 起它是「多用户隔离」的两个承重层之一**（`DEC-056` 决策 5：过滤写在共享层） |
 | `api/breaker.py` | 78 | ✅ [`specs/breaker.md`](./breaker.md) | 🟡 **部分** —— `global:` 这一条 key **已生效**（2026-10-02 · `①b` Task 4）；`model:` 那类**还没做**（留给 `L2`） |
 | `api/browser_tools.py` | 84 | 🔴 **缺** | ❓ 未知 |
 | `api/cache.py` | 76 | 🔴 **缺** | ❓ 未知 |
@@ -46,7 +46,7 @@
 | `api/code_executor_impl.py` | 218 | 🔴 **缺** | ❓ 未知 |
 | `api/config.py` | 88 | 🔴 **缺** | ❓ 未知 |
 | `api/cost_dashboard.py` | 294 | 🔴 **缺** | ❓ 未知 |
-| `api/db.py` | 245 | 🔴 **缺** | ❓ 未知 |
+| `api/db.py` | 267 | ✅ [`specs/db.md`](./db.md) | 🟡 **可用** —— 连接池 + 建表 + 向量检索；**2026-10-03 起它同时是「多用户隔离」的两个承重层之一**（`DEC-056` 决策 5） |
 | `api/db_metadata.py` | 84 | 🔴 **缺** | ❓ 未知 |
 | `api/deps.py` | 78 | 🔴 **缺** | ❓ 未知 |
 | `api/document_parser.py` | 242 | 🔴 **缺** | ❓ 未知 |
@@ -54,7 +54,7 @@
 | `api/embedding_client.py` | 48 | ✅ [`specs/embedding_client.md`](./embedding_client.md) | 🟡 **可用，但有一处【启动崩溃】隐患**（`ROADMAP` 待办 **T1**） |
 | `api/evaluate_with_ragas.py` | 313 | 🔴 **缺** | ❓ 未知 |
 | `api/exceptions.py` | 70 | 🔴 **缺** | ❓ 未知 |
-| `api/hybrid_search.py` | 139 | ✅ [`specs/hybrid_search.md`](./hybrid_search.md) | 🟡 **可用，但它在全仓是【第二份 RRF 实现】** |
+| `api/hybrid_search.py` | 149 | ✅ [`specs/hybrid_search.md`](./hybrid_search.md) | 🟡 **可用，但它在全仓是【第二份 RRF 实现】** |
 | `api/jwt_handler.py` | 74 | 🔴 **缺** | ❓ 未知 |
 | `api/llm_factory.py` | 139 | ✅ [`specs/llm_factory.md`](./llm_factory.md) | 🟢 **新建（2026-10-02 · `①b` Task 5）** —— LLM 客户端的**唯一构造落点**<br>✅ 15 个调用点**已全部改走它**（`api/test_max_tokens_wiring.py` 钉着）<br>⬜ **自动兜底没做**（评估后**故意推迟**，见下）—— ⛔ 别以为它能"兜底" |
 | `api/logger_config.py` | 46 | 🔴 **缺** | ❓ 未知 |
@@ -62,24 +62,25 @@
 | `api/mcp_server.py` | 112 | 🔴 **缺** | ❓ 未知 |
 | `api/mcp_tool_factory.py` | 108 | 🔴 **缺** | ❓ 未知 |
 | `api/memory_store.py` | 72 | 🔴 **缺** | ❓ 未知 |
-| `api/metrics.py` | 36 | 🔴 **缺** | ❓ 未知 |
-| `api/pending_approvals.py` | 75 | ✅ [`specs/pending_approvals.md`](./pending_approvals.md) | 🆕 **新建（2026-10-03 · `②` Task 2 · `B5`）** —— 待接管队列（硬门 D 的"数据"那一半） |
-| `api/permission.py` | 35 | 🔴 **缺** | ❓ 未知 |
+| `api/metrics.py` | 54 | ✅ [`specs/metrics.md`](./metrics.md) | ✅ **可用** —— 4 个指标，全部走 `prometheus_client` 默认 REGISTRY<br>✅ **2026-10-03（`③` Task 5 · `B2`）**：新增 **`stream_cancelled_total`** —— 它是判据③**唯一可执行的观测对象**（`DEC-052`） |
+| `api/pending_approvals.py` | 113 | ✅ [`specs/pending_approvals.md`](./pending_approvals.md) | 🆕 **新建（2026-10-03 · `②` Task 2 · `B5`）** —— 待接管队列（硬门 D 的"数据"那一半）<br>🔴 **2026-10-03 丙段改键**：登记键由**裸 `thread_id`** 改成 **`session_key(user_name, thread_id)`**，并新增 `raw_thread_id` / `graph` 两个字段 |
+| `api/permission.py` | 58 | 🔴 **缺** | ❓ 未知 |
 | `api/plan_execute.py` | 589 | ✅ [`specs/plan_execute.md`](./plan_execute.md) | 🟡 **可用** —— 规划 + 逐步**真调用工具**；有超时、有总预算、有重规划、有降级<br>🔴 **但查出 1 处真缺陷 + 5 处"看代码会误判"**（见下）<br>✅ 2026-10-01：三个 `_llm`（`:93` / `:251` / `:461`）接上 `MAX_TOKENS_AGENT`（`B7`）<br>✅ 2026-10-02（`①b` Task 5）：三个 `_llm` **改走 `llm_factory.make_llm("chat", "agent")`**（现于 `:92` / `:248` / `:455`）—— `model`/`api_key`/`base_url`/`max_tokens` 不再写在本地。<br>⚠️ **超时/重试没丢**：`timeout` / `max_retries` 走 `make_llm` 的 `**extra` **逐点透传**，**值一字符未变**（30/20/15 + `max_retries=1`）。<br>⚠️ `executor_llm` 的 `temperature=0.1` 是**本文件特有的**逐点调参，仍写在调用点上 |
 | `api/query_rewriter.py` | 159 | 🔴 **缺** | ❓ 未知 |
-| `api/rag_pipeline.py` | 242 | 🔴 **缺** | ❓ 未知 |
+| `api/rag_pipeline.py` | 253 | 🔴 **缺** | ❓ 未知 |
 | `api/rate_limiter.py` | 140 | ✅ [`specs/rate_limiter.md`](./rate_limiter.md) | 🟡 **可用** —— 基于 Redis 的令牌桶，**全局 + 用户两层**<br>🔴 **但它有 3 个"看代码看不出来"的性质**（见下 ⚠️ 节）—— 其中 2 条是本 spec 新查出来的 |
 | `api/reranker.py` | 59 | ✅ [`specs/reranker.md`](./reranker.md) | 🟡 **仅开发机可用** |
 | `api/safe_math.py` | 235 | ✅ [`specs/safe_math.md`](./safe_math.md) | 🟢 **新建（2026-10-03 · `DEC-049`）** —— `calculator` 工具的**求值实现**，替代 `eval(expression)` |
 | `api/schemas.py` | 104 | 🔴 **缺** | ❓ 未知 |
 | `api/search_tools.py` | 129 | 🔴 **缺** | ❓ 未知 |
+| `api/session_key.py` | 60 | ✅ [`specs/session_key.md`](./session_key.md) | 🆕 **新建（2026-10-03 · `DEC-056` 丙段）** —— 会话键：**把身份拼进 checkpoint / 会话 id** |
 | `api/simple_tools.py` | 36 | 🔴 **缺** | ❓ 未知 |
 | `api/simple_tools_impl.py` | 35 | 🔴 **缺** | ❓ 未知 |
 | `api/token_config.py` | 93 | ✅ [`specs/token_config.md`](./token_config.md) | 🟢 **新建（2026-10-01 · B7）** —— 额度类常量的**唯一落点**<br>✅ **`MAX_TOKENS_*` 已接线**（2026-10-01 · `①b` Task 1，15 处构造点；**2026-10-02 · Task 5 起收进 `api/llm_factory.py`**）<br>✅ **`SESSION_TOKEN_LIMIT` 已有判定函数 + 7 个调用点**（`①b` Task 2 · `B8`）<br>✅ **`GLOBAL_DAILY_TOKEN_LIMIT` 已接线**（2026-10-02 · `①b` Task 4 · `B11`，经 `api/breaker.py` **8 处**）<br>⚠️ **2026-10-01 当天它曾是"有函数、无调用点"—— 那句已作废** |
 | `api/token_tracker.py` | 963 | ✅ [`specs/token_tracker.md`](./token_tracker.md) | 🟡 **可用** —— ⚠️ **2026-10-03 起它不再是"三套口径"之一**（次数那套已删，`DEC-046`）<br>🟢 **①a 已落地（2026-10-01）**：额度常量已收口到 `api/token_config.py`（本文件**只剩同名别名**）· 本文件下方 **实施计划 ①a** 已执行完<br>🔵 **①b（2026-10-02）**：Task 0 ✅ / Task 1 ✅（B7 接线）/ **Task 2 ✅（B8 会话级 · 已接 7 条链）** / **Task 3 ✅（B10 全局日级 · 判定函数）** / **Task 4 ✅（B11 熔断 · 已接 8 处，`B10` 由此生效）** / **Task 5 🟡 部分（`L2`）**（改写后只做构造收口，⛔ 自动兜底【推迟】—— 见该 Task 的修订块） / **Task 6 ✅（`决策一` 落地 · `DEC-046` —— 撤次数配额、原位换 token 口径 = `R1.3`）** / **Task 7 ✅（`B13` 实跑核成本可见 · `DEC-047` —— `①b` 收尾）**<br>⚠️ **`B10` 曾一度"有函数没接线"（2026-10-01 当天）—— 那句话已作废**，2026-10-02 Task 4 接上了 |
 | `api/tool_cache.py` | 96 | 🔴 **缺** | ❓ 未知 |
 | `api/tool_health.py` | 105 | 🔴 **缺** | ❓ 未知 |
-| `api/tool_visualizer.py` | 129 | 🔴 **缺** | ❓ 未知 |
+| `api/tool_visualizer.py` | 176 | ✅ [`specs/tool_visualizer.md`](./tool_visualizer.md) | 🟡 **部分可用** —— 记录与查询都在，但① 存储是**进程内存**（重启即空）② **只有一个端点**（`/agent/mcp_chat`）往里写 |
 | `api/tools_with_cache.py` | 18 | 🔴 **缺** | ❓ 未知 |
 | `api/websocket_callback.py` | 52 | 🔴 **缺** | ❓ 未知 |
 <!-- MODULE-TABLE-END -->

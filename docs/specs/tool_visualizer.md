@@ -1,0 +1,45 @@
+# `api/tool_visualizer.py`
+
+| 项 | 内容 |
+|---|---|
+| **状态** | 🟡 **部分可用** —— 记录与查询都在，但① 存储是**进程内存**（重启即空）② **只有一个端点**（`/agent/mcp_chat`）往里写 |
+| **对外提供** | `start_trace` · `finish_trace` · `record_tool_start` · `record_tool_end` · `record_agent_decision` · `get_trace` · `get_trace_of_any_owner` · `get_all_traces` · 数据类 `AgentTrace` / `ToolCallRecord` |
+| **谁在用** | 写：`api_v1_agent.mcp_agent_chat`（建轨迹）· `agent_graph_advanced` 的两个节点（工具与决策）。<br>读：`/agent/trace/{thread_id}` · `/agent/traces` 两个端点 |
+| **存储** | 模块级字典 `_traces`，**键 = `session_key(user_name, thread_id)`**（`DEC-056` 决策 9 / N4） |
+
+## ✅ 做了什么
+
+- **一次 Agent 任务的完整轨迹**：提问原文、每个工具调用的入参/结果/耗时/状态、
+  Agent 的决策理由、最终输出、token 与花费。
+- 🔴 **2026-10-03（`DEC-056` N4）收口**：键由**裸 `thread_id`** 改成**拼了身份**，
+  并给两个读端点加了归属判定 —— 改之前是三处跨用户可见（见下）。
+
+## 🟡 做到哪 / 缺什么
+
+| 缺什么 | 说明 |
+|---|---|
+| ⚠️ **重启即空** | `_traces` 是**进程内存** ⇒ 重启后 `/agent/trace/*` 一律"未找到"。与 `/agent/pending`（`pending_approvals`）同一形态 |
+| ⚠️ **只有 1 个端点往里写** | 只有 `mcp_agent_chat` 调 `start_trace` ⇒ 其余 Agent 端点**根本没有轨迹可查**（⛔ 不是"查不到"，是"从来没建过"） |
+| ⚠️ **无淘汰** | 字典只增不减 ⇒ 长跑进程内存单调增长（🔴 **未立账**） |
+| ✅ **无 spec 这条欠账已清（2026-10-03）** | 原先记在 `DEC-047` §遗留（「`tool_visualizer.py` 与 `cost_dashboard.py` 无 spec」）—— 本文件是它那一半 |
+
+## ⚠️ 看代码会误判的地方
+
+| 会以为 | 实际 |
+|---|---|
+| 🔴 **「`_traces[thread_id]` —— 键就是 `thread_id`」** | **不是**。键是 `session_key(user_name, thread_id)`（长度前缀，见 `docs/specs/session_key.md`）。⚠️ **`AgentTrace.thread_id` 存的是【原值】** —— 响应里回显的是它，⛔ 不是键。**两个不同的东西共用一个名字** |
+| 🔴 **「`/agent/traces` 是管理员看板」** | **默认不是** —— 它**只给调用者本人的**。看全量要 `include_all=True`，而那个开关**由端点按角色给**（`api_v1_agent.agent_trace_list` 里一行）。本模块**⛔ 不 import `permission`**，它不认识角色 |
+| 🔴 **「`get_trace_of_any_owner` 是个普通的查询函数」** | ⛔ **它是 admin 旁路**（`DEC-056` 决策 2 的「读侧给 admin 例外」）。**按原值反查、不看属主** ⇒ ⛔ **别在普通路径上调**。普通路径一律走 `get_trace(user_name, thread_id)` |
+| ⚠️ **「非属主查询会报『这个线程不属于你』」** | ⛔ **不会** —— 非属主与"真不存在"**返回同一个答复**（`未找到线程 …`）。这是**有意的**：否则那个错误本身就是"该线程存在"的 oracle |
+| ⚠️ **「`get_all_traces()` 不带参数」** | 现在**必须传 `user_name`**（位置形参、无默认值）。⚠️ 与 `session_key` 同一取向：**漏传要 `TypeError`，⛔ 不是悄悄返回全量** |
+| ⚠️ **「身份漏传会落到某个默认桶」** | 本模块**不会**（形参无默认值）。🔴 **但上游会** —— `agent_graph_advanced` 从 state 取身份用的是 `state.get("user_name", "default_user")` / `"unknown"` ⇒ 那些**默认值本身是 fail-open**，是 **N5** 那一族的病，⛔ 不在本模块修 |
+| ⚠️ **「追踪轴和花费轴是一回事，改了一处另一处跟上」** | ⛔ **两条轴**：本模块是**追踪**（进程内存）；`token_tracker.check_session_token_budget(user_name, thread_id)` 是**花费**（查 `token_usage_logs` 表）。⚠️ **花费轴本来就带 `user_name`** ⇒ **它没这个病，⛔ 别去"顺手统一"** |
+| ⚠️ **「`record_tool_*` 找不到轨迹就是 bug」** | **不是** —— 查不到时**静默 `return`**（`if key not in _traces`）。设计如此：没建过轨迹的会话不记。⚠️ 但副作用是「**身份拼错 ⇒ 记录悄悄丢**」，⛔ 不报错 |
+
+## 关联
+
+- 📄 决策 ⇒ `docs/decisions/DEC-056-多用户资源隔离的现状审计与分阶段收口.md` **决策 9**（本轴的归属口径与 `/agent/traces` 的语义）
+- 📄 身份键 ⇒ `docs/specs/session_key.md`（本模块的键**就是**它）
+- 📄 待办 ⇒ `docs/待办总表.md` **N4**（2026-10-03 已修）· **N5**（同族，未修）
+- 📄 端点 ⇒ `docs/specs/api_v1_agent.md` 的「看代码会误判」表
+- 📌 判据 ⇒ `api/test_trace_isolation.py`（13 例 · 全带**正向控制** · 三条证伪都做过）

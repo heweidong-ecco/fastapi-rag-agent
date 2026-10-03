@@ -14,7 +14,9 @@
 import asyncio
 
 import api_v1_agent as m
+import pending_approvals as pa
 from langchain_core.messages import AIMessage
+from session_key import session_key
 
 
 class _FakeGraph:
@@ -56,6 +58,13 @@ def _approve(monkeypatch, fake, **kw):
     kw.setdefault("thread_id", "t1")
     kw.setdefault("approved", True)
     kw.setdefault("user_name", "admin")
+    # 🔴 2026-10-03（`DEC-056` 丙段）【口径变了】：`/agent/approve` 现在**先从待接管队列
+    #    反查属主**、再按属主拼 checkpoint 键、并按「本人或 admin」校验。
+    #    ⇒ 这些用例必须先**登记**（改动前 approve 不看队列，所以不用登记）。
+    #    ⚠️ 键也变了：登记用的是 `session_key(属主, thread_id)`，⛔ 不是裸 `thread_id`。
+    pa.clear()
+    pa.register(session_key(kw["user_name"], kw["thread_id"]), kw["user_name"], [],
+                raw_thread_id=kw["thread_id"], graph="agent_graph")
     return asyncio.run(m.approve_agent_action(**kw))
 
 
@@ -93,7 +102,12 @@ def test_resume_uses_the_requested_thread_id(monkeypatch):
     _approve(monkeypatch, fake, thread_id="thread-abc")
     assert fake.configs, "一次都没 invoke"
     got = [c.get("configurable", {}).get("thread_id") for c in fake.configs]
-    assert got == ["thread-abc"], f"续跑用的不是请求里的 thread_id：{got}"
+    # 🔴 2026-10-03（`DEC-056` 丙段）：键 = `session_key(属主, 请求里的 thread_id)`。
+    #    ⚠️ 这条**仍然**在守"续的是**这一条**" —— 只是"这一条"现在**带上了人**：
+    #       裸 `thread_id` 会让两个用户指向**同一个** checkpoint（丙段修的正是它）。
+    assert got == [session_key("admin", "thread-abc")], (
+        f"续跑用的不是「属主 + 请求里的 thread_id」拼出来的键：{got}"
+    )
 
 
 # ==================== ③ 改写后提交（B6 的新东西） ====================

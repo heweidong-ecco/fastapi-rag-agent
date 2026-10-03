@@ -2,14 +2,16 @@
 
 | 项 | 内容 |
 |---|---|
-| **状态** | 🆕 **新建（2026-10-03 · `②` Task 2 · `B5`）** —— 待接管队列（硬门 D 的"数据"那一半） |
-| **对外提供** | 函数 `register` / `resolve` / `list_pending` / `clear` / `warn_if_backend_mismatch`；<br>经路由 **`GET /agent/pending`** 露出 |
-| **谁在用** | `api_v1_agent.py` —— `langgraph_chat`（登记/注销）· `approve_agent_action`（注销）· `list_pending_approvals` 端点 |
+| **状态** | 🆕 **新建（2026-10-03 · `②` Task 2 · `B5`）** —— 待接管队列（硬门 D 的"数据"那一半）<br>🔴 **2026-10-03 丙段改键**：登记键由**裸 `thread_id`** 改成 **`session_key(user_name, thread_id)`**，并新增 `raw_thread_id` / `graph` 两个字段 |
+| **对外提供** | 函数 `register` / `resolve` / `list_pending` / **`find_by_raw_thread_id`** / `clear` / `warn_if_backend_mismatch`；<br>经路由 **`GET /agent/pending`** 露出 |
+| **谁在用** | `api_v1_agent.py` —— `langgraph_chat`（登记/注销）· `langgraph_chat_stream`（登记/注销）· **`memory_chat`（登记/注销）** · `approve_agent_action`（**反查属主** + 注销）· `list_pending_approvals` 端点 |
 
 ## ✅ 做了什么
 
-- **一张内存注册表**：`{thread_id → {thread_id, user_name, tool_calls, since}}`，`threading.Lock` 保护
-- `register`（同一 thread **覆盖**）· `resolve`（**幂等**，注销不存在的**是正常的**）· `list_pending`（**卡得最久的排最前**）
+- **一张内存注册表**：`{会话键 → {thread_id, raw_thread_id, user_name, graph, tool_calls, since}}`，`threading.Lock` 保护
+- `register`（同一键**覆盖**）· `resolve`（**幂等**，注销不存在的**是正常的**）· `list_pending`（**卡得最久的排最前**）
+- **`find_by_raw_thread_id(raw)`** —— 丙段新增：`/agent/approve` 拿到的只有**原 `thread_id`**，
+  靠它**反查属主**，再按属主拼键（见「看代码会误判」第 1 行）
 - `warn_if_backend_mismatch()` —— 启动警告（见下）
 
 ## 🟡 做到哪 / 缺什么
@@ -19,9 +21,13 @@
 - ⬜ **没有"超时自动清理"** —— 登记后没人处理，它会**一直留在队列里**（在进程活着的前提下）
 - ➡️ **`B6`（接管后续跑）已做**（`②` Task 3 · 2026-10-03）—— ⚠️ **但续跑逻辑不在本模块里**，
   在 `api/api_v1_agent.py` 的 `approve_agent_action`（见 `docs/specs/api_v1_agent.md`）。
-  **本模块只被"批完之后"顺手调一个 `resolve(thread_id)` 注销**（`:205`），
-  **"批了之后图怎么接着跑"仍然不由本模块管。**
+  **本模块只负责"谁停了 / 是谁的 / 停在哪张图"**，⛔ 不碰"批了之后图怎么接着跑"。
+- 🔴 **队列【也】按身份分桶了**（丙段）：键 = `session_key(user_name, thread_id)`。
+  ⚠️ 改动前它和 checkpoint 一样按**裸 `thread_id`** 记账 ⇒ 两个人用同一个 `thread_id`
+  时，**队列里也串号** —— `/agent/approve` 会拿着**别人的**键去续跑。
 - ✅ **有测试**：`api/test_pending_approvals.py`（7 条 · **纯离线** ⇒ 进 CI）
+  · 🆕 丙段另有 `api/test_approve_ownership.py`（归属校验 · 歧义拒绝）
+  · `api/test_memory_chat_approval.py`（图名登记 + `/agent/approve` 按图路由）
 
 ## ⚠️ 看代码会误判的地方 ⭐
 
@@ -34,9 +40,15 @@
 | ⚠️ **「`list_pending` 随便什么顺序都行」** | ⛔ **有契约**：**按 `since` 升序 = 卡得最久的排最前**（最该先处理）。⚠️ 排错了**不会报错**，只会让人**从最不紧急的那条开始处理** |
 | ⚠️ **「返回的 dict 可以随便改」** | ⚠️ **浅拷贝** —— 改**顶层字段**不影响注册表，但 **`tool_calls` 那个 list 是共享的**，⛔ 别去改 |
 | ⚠️ **「`clear()` 是个重置接口」** | ⛔ **不是** —— **仅供测试隔离**。**生产代码里零调用点** |
+| 🔴 **「`/agent/approve` 按【调用方】拼键就行」** | ⛔ **不行** —— `/agent/pending` 是**跨用户队列**（硬门 D）：按调用方拼 ⇒ admin 会拼出 `admin:…`、属主是 `alice:…` ⇒ **admin 永远批不了别人的**。⇒ 必须**先 `find_by_raw_thread_id()` 查属主、再按属主拼**。🔴 **这条是 2026-10-03 的裁定**（业务方），守卫 ⇒ `api/test_approve_ownership.py` |
+| 🔴 **「`thread_id` 字段 = 调用方传的原值」** | ⛔ **不是** —— 它是**拼过的会话键**（`11:isolation_a:default` 这种）。**原值**在 **`raw_thread_id`** 里（丙段新增）。⚠️ 拿错一个，`approve` 就会去一个**不存在的桶**里找，然后答"没有待审批任务"（**不报错**） |
+| 🔴 **「`graph` 字段可以省，反正只有一张图」** | ⛔ **有两张**：`/agent/langgraph_chat` 走 `agent_graph`、`/agent/memory_chat` 走 **`checkpointer_agent`**（丙段给它加了审批门）。`/agent/approve` **按这个字段路由** ⇒ 写错/不写 ⇒ 会话**永远放行不了**。⚠️ 默认值 `"agent_graph"` 只是兼容老调用点 |
+| ⚠️ **「一个原 `thread_id` 只会有一条登记」** | ⚠️ **不保证** —— 两个人用同一个 `thread_id="default"` 就**有两条**。`find_by_raw_thread_id()` 因此返回 **list**；`/agent/approve` 遇到多条会**如实拒绝**（⛔ 不"挑第一条" —— 那是随机批一个人的会话） |
 
 ## 关联
 
 `B5`（`后端补齐清单`）· `docs/specs/api_v1_agent.md`（**计划 ② · Task 2** —— 逐 Step 真代码）
-· `docs/specs/agent_graph.md`（`interrupt_before=["approval"]` 那一侧 —— **本模块记的是"谁停了"，它管的是"为什么停"**）
+· `docs/specs/agent_graph.md` / `docs/specs/agent_checkpointer.md`（`interrupt_before=["approval"]` 那一侧 —— **本模块记的是"谁停了、停在哪张图"，它管的是"为什么停"**）
+· `docs/specs/session_key.md`（**键怎么拼** —— 本模块的键就是它生成的）
+· `docs/decisions/DEC-056-…md` **决策 2 / 丙段**（按属主拼 + 「本人或 admin」· 按登记的图路由）
 · `ROADMAP.md`（硬门 D 那一行）· `DEC-048`（审批触发条件的决策前提 —— **决定谁会被登记进来**）

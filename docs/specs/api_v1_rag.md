@@ -12,8 +12,46 @@
 |---|---|
 | 文档管理 | `/rag/insert` · `/rag/insert_batch` · `/rag/upload_document` · **`DELETE /rag/documents/{doc_id}`** |
 | 检索 | `/rag/pg_search` · `/rag/hybrid_search` · `/rag/rerank_search` · `/rag/rewrite_search` · `/rag/search` · `/rag/jwt_ask` |
-| **流式** | **`/rag/stream_search`**（`:687`）—— ⚠️ **"全仓唯一 SSE 端点"这句 2026-10-03 起失效**：Agent 端已有第二条（`POST /agent/langgraph_chat/stream` · `DEC-050`） |
+| **流式** | **`/rag/stream_search`**（`stream_search`，`:625`）—— ⚠️ **"全仓唯一 SSE 端点"这句 2026-10-03 起失效**：Agent 端已有第二条（`POST /agent/langgraph_chat/stream` · `DEC-050`） |
 | WebSocket | `/ws/agent` · `/ws/test` |
+
+## 🔴 2026-10-03 · 多用户隔离（`DEC-056` **甲段 + 乙段**）—— ✅ **8 条检索路径全部收口**
+
+**「谁能看见谁的文档」已收口。** 做法是**共享层承重**（决策 5）——过滤写在
+`db.search_similar` / `bm25_index.bm25_search`，⛔ 不是每个端点各写一遍。
+⚠️ **但乙段那两条【不走共享层】**（自己写 SQL）⇒ 改共享层**碰不到它们**，只能各修各的。
+⇒ **下面这张表按「是否走共享层」分成两组**，这就是本节的读法。
+
+| 端点（函数名锚点 ⭐ 行号会漂） | 现状 | 怎么过滤的 |
+|---|---|---|
+| `/rag/pg_search`（`pg_search`） | ✅ **本来就对** | **自己写 SQL**，一直有 `WHERE requested_by = %s` |
+| `/rag/ask`（`ask_question`） | ✅ **本来就对** | **自己写 SQL**，一直有 `WHERE requested_by = %s`<br>🔴 **2026-10-03 更正**：本行原先写 `/ws/agent`（`:973`）—— **错**。`WS /ws/agent`（`agent_websocket`）**整条不碰 `documents`**（只 `executor.ainvoke`，且**无鉴权**、身份写死 `"unknown"`）；`:973` 那句 SQL 属于 `/rag/ask` |
+| `/rag/hybrid_search`（`hybrid_search_api`） | ✅ **甲段已收口** | `hybrid_search(…, user_id=user_name)` → 共享层 |
+| `/rag/rerank_search`（`rerank_search_api`） | ✅ **甲段已收口** | `rerank_search(…, user_id=user_name)` → 共享层 |
+| `/rag/rewrite_search`（`rewrite_search_api`） | ✅ **甲段已收口** | `hybrid_search_with_rewrite(…, user_id=user_name)` → 共享层 |
+| `/rag/search`（`unified_search`） | ✅ **甲段已收口** | `pipeline.search_async(…, user_id=user_name)` → `db.search_similar` |
+| `/rag/jwt_ask`（`jwt_ask_question`） | ✅ **乙段已收口** | **自己写 SQL**，补 `WHERE requested_by = %s` —— ⚠️ **只加过滤，⛔ 没动检索语义**（见下） |
+| `/rag/stream_search`（`stream_search`） | ✅ **乙段已收口** | **改成走共享层**：`search_similar(query_embedding, req.top_k, user_id=user_name)` |
+
+⚠️ **乙段【没有】动的两件事**（⛔ 别读成"乙段全修好了"）：
+* **`/rag/jwt_ask` 拿到 `question` 却不拿它做检索**（无 embedding、无 `ORDER BY`）——
+  「**承诺检索**」与「**实际不检索**」的矛盾，**不在隔离收口内**（已单独立账）。
+* **`/rag/ask` 的定位** —— `tags=["模拟类测试"]` 的桩，却**读真库**，且 `LIMIT` 无 `ORDER BY`
+  ⇒ **结果不可复现**。**已裁：删，但排在乙段之后**，单独一个任务。
+
+⚠️ **甲段 / 乙段都只动「检索」** —— 写入侧（`/rag/insert` · `/rag/insert_batch` · `/rag/upload_document`）
+本来就把 `user_name` 写进 `requested_by`，**不属于 fail-open 那一类**。
+（`DELETE /rag/documents/{doc_id}` 的**归属校验**是另一件事，记在 `DEC-056` §遗留。）
+
+🔴 **检索侧【有意不给】admin 例外**（`DEC-056` §七 裁决 2 的文字 2026-10-03 已更正）——
+已过滤的端点**对 admin 一视同仁**。⚠️ **今天看不出差别**（admin 拥有 100% 语料）。
+
+📌 **判据（可打印）**：
+* **用例** —— `POSTGRES_DB=rag_test venv/bin/python -m pytest api/test_isolation.py -q -m needs_db` ⇒ **10 passed**
+* **静态** —— `grep -n 'WHERE requested_by' api/api_v1_rag.py | grep -v '#'` ⇒ **3 行**
+  （`pg_search` · `jwt_ask` · `ask` —— **正好 = 自己写 SQL 的 3 条读端点**；其余 5 条走共享层）
+  ⚠️ **必须带 `| grep -v '#'`** —— 乙段加的两行**注释**里也含这个串（本仓判据纪律第 2 条：
+  「批量替换后按位置核，⛔ 别只数替换了几处 —— **注释里也有同样的串**」）
 
 ## 🟡 做到哪 / 缺什么
 
@@ -25,8 +63,13 @@
 - ✅ ~~**中断后那半截答案【直接丢】**（`DEC-052` §遗留·3 点的名）~~ ⇒ **2026-10-03（`③` Task 6 · `B3`）已改**：
   取消时**存**「提问 + 半截 + 中断标记」（`_persist_interrupted_turn`，`:594-608`；调用点 `:769`），落点是 `finally`。
   📄 `DEC-053`。⚠️ **`except Exception` 那条路仍然丢提问**（**有意**，见该 DEC §遗留·1）
-- 🔴 **本文件的 LLM 调用【一处都不记账】** —— `grep -c record_usage api/api_v1_rag.py` ⇒ **0**
-  （`/rag/stream_search` · `/rag/search?generate_answer=true` · `/rag/jwt_ask` · `/ws/agent` 四条都是）。
+- 🔴 **本文件的 LLM 调用【一处都不记账】** —— `grep -c record_usage api/api_v1_rag.py` ⇒ **0**。
+  ⚠️ **本文件里真正的 LLM 调用点只有这些**（`grep -n 'astream(\|ainvoke(\|make_llm(' api/api_v1_rag.py`）：
+  `stream_search`（`:726`）· `get_agent_executor`（`:834`，被 Agent 端点共用）· `agent_websocket`（`:930`）。
+  🔴 **2026-10-03 更正（乙段顺带核出）**：本行原先列的四条里有**两条是错的** ——
+  · **`/rag/jwt_ask` 一处 LLM 都不调**（`jwt_ask_question` 整条是 `SELECT content … LIMIT` 然后返回）；
+  · **`/rag/search?generate_answer=true` 的 LLM 调用不在本文件** —— 它在 `rag_pipeline` 里
+    （本文件只 `pipeline.search_async(…)`）⇒ **那条账要记到 pipeline 头上，不是这里**。
   真库佐证：`token_usage_logs` 里非 embedding 行**全库只有 6 行**，全是 2026-09-20 的 agent graph 运行。
   ⚠️ **取消场景补不了**（`llm_factory` 没开 `stream_usage` ⇒ 提前 `aclose()` 就永远收不到 usage 帧）
   ⇒ 已立进 `docs/待办总表.md`，**范围是成功路径**（`DEC-053` §遗留·2）
@@ -34,12 +77,24 @@
   `api/test_cancel_propagation.py`（**13 例**）覆盖 **`/rag/stream_search` 的取消路径**
   （关流 `DEC-052` + 半截答案 `DEC-053`）。
   ⚠️ **但只盖了取消这一条路** —— 检索 / 引用 / 历史落库**仍然零覆盖**
+- ✅ ~~**隔离：4 条收口 / 2 条没做**~~ ⇒ **2026-10-03（乙段）后：8 条检索路径全部收口**（`DEC-056` 甲段 + 乙段）。
+  `api/test_isolation.py` **19 条用例守着**（离线 **9** · `needs_db` **10**）。
+  已做过证伪：**甲段**拿掉共享层 `WHERE` ⇒ **4 条变红**；**乙段**分别退回那两条的修改 ⇒ **各恰好 1 条红**。
+  ⚠️ **乙段那两条不走共享层**（自己写 SQL）⇒ 它们的过滤**不在** `db.py` / `bm25_index.py` 里 ——
+  **改共享层碰不到它们**，这是本节最该记住的一条。
+  ⚠️ ~~「收口后召回会降」~~ —— **2026-10-03 更正：这句过头了**。非 admin 用户在那 6 条已收口的路径上
+  **本来就只有 0 篇自己的文档** ⇒ 乙段是**消除不一致**，⛔ 不是新加一道限制。
+  ⛔ **仍未修（且都不是隔离问题）**：`jwt_ask` 的「拿到 `question` 却不拿它做检索」·
+  `/rag/ask` 的定位（已裁：删，排在乙段之后）—— 见上方专节的「乙段【没有】动的两件事」。
 
 ## ⚠️ 看代码会误判的地方 ⭐
 
 | 看代码会以为 | 实际 |
 |---|---|
-| 「15 条端点都是正经功能」 | 🔴 **其中 3 条是"模拟类测试"**：<br>· `/rag/ask`（`:832`）—— 是 **`tags=["模拟类测试"]` 的桩**，**直接 SQL 取 `documents` 原始行返回，没有 `answer` 字段**<br>· `/rag/async_ask` · `/rag/parallel_ask` —— **返回假文档**（`asyncio.sleep(2)` 后返回 3 条硬编码串） |
+| 「15 条端点都是正经功能」 | 🔴 **其中 3 条是"模拟类测试"**：<br>· `/rag/ask`（`ask_question`）—— 是 **`tags=["模拟类测试"]` 的桩**，**直接 SQL 取 `documents` 原始行返回，没有 `answer` 字段**。⚠️ **它读的是【真库】**，`LIMIT` 又没有 `ORDER BY` ⇒ **每次结果都可能不同**。🔴 **已裁：删，但排在乙段之后**（见上方专节）<br>· `/rag/async_ask` · `/rag/parallel_ask` —— **返回假文档**（`asyncio.sleep(2)` 后返回 3 条硬编码串） |
+| 🔴🔴 **「响应体里有 `"requested_by": user_name` ⇒ 这个端点按人筛过了」** | ⛔ **那只是个【回显】** —— 它告诉调用方"你是谁"，**与 SQL 里有没有 `WHERE` 毫无关系**。<br>📌 **两条可打印的计数**（2026-10-03 乙段后实测）：`grep -c '"requested_by"' api/api_v1_rag.py` ⇒ **12**；而 `grep -c 'WHERE requested_by' api/api_v1_rag.py` ⇒ **5** —— 🔴 **但 5 里有 2 处是【注释】**（乙段自己加的）⇒ **真正在 SQL 里的只有 3 处**(`:413` `:557` `:980`)。<br>⇒ ⚠️ **所以这条判据必须写成 `grep -n 'WHERE requested_by' api/api_v1_rag.py \| grep -v '#'`** —— 本仓判据纪律第 2 条：「批量替换后按位置核，⛔ 别只数替换了几处 —— **注释里也有同样的串**」。<br>⇒ 带引号的 12 处**没有一处在 SQL 里过滤**（实测 0），其中 **4 处在【写入】函数里**（`:167` `:267` `:331` `:361`）—— 与读侧过滤**根本不搭界**。<br>⚠️ **2026-10-03 乙段后，8 条读端点【恰好】都是真过滤了** —— 但「回显」与「过滤」**对得上纯属巧合**，⛔ **不是因果关系**；那个巧合正是这条误读危险的地方（下一条新端点照抄回显就会再犯）。<br>⇒ **本仓最容易踩的误读。** 判据只有一条：**去那条端点的 SQL 里找 `WHERE requested_by`** —— ⛔ 别看响应字段（`DEC-056` §1.2） |
+| 🔴 **「2026-10-03 修过隔离了 ⇒ 检索都隔离了」** | ✅ **2026-10-03（乙段）后【成立】** —— 8 条检索路径全部收口。<br>⚠️ **但这句话在 2026-10-03 当天曾经是错的** —— 「甲段」只收口 **4 条**，`/rag/jwt_ask` 与 `/rag/stream_search` 当时**照样能读到别人的文档**（当天实测：isolation_b 的 JWT 拿回 20 篇 admin 文档；stream_search 的 prompt 里**逐字**出现别人的文档）。<br>⇒ **教训**：「修过」≠「都修好」 —— ⛔ **说这句话必须带【哪个阶段】**；判据是 `api/test_isolation.py` **覆盖到哪几条**，⛔ 不是"今天有人动过这个模块" |
+| 🔴 **「`user_id` 是本文件在过滤」** | ⛔ **不是** —— **甲段那 4 条**只是**把 `user_name` 往共享层传**（`hybrid_search_api` · `rerank_search_api` · `rewrite_search_api` · `unified_search`），过滤**发生在** `db.search_similar` / `bm25_index.bm25_search`（`DEC-056` 决策 5：**共享层承重**）。<br>⇒ **要改过滤改那两个；要改"谁能调"改本文件的调用点。**<br>🔴 **2026-10-03 更正**：本行原先写「**本文件一行 SQL 都没改**」—— **乙段起不成立**：`jwt_ask` 补了 `WHERE`（`:557`）·`stream_search` 的裸 SQL **被删掉**改调共享层（`:660`）。<br>⇒ 正确说法：**走共享层的那 5 条不碰 SQL；自己写 SQL 的那 3 条（`pg_search` · `jwt_ask` · `ask`）改的就是本文件** |
 | 「`/rag/stream_search` 带真中断」 | ✅ **2026-10-03 起【成立】**（`③` Task 5 · `B2`）—— 客户端断开 ⇒ 取消传给生成器 ⇒ 关上游流。⚠️ 之前写这句是**错的**（`CLAUDE.md`/`README` 都写过）。<br>⚠️ **但"真中断"≠"账单停了"** —— 本机看不到上游出账（`DEC-052` §遗留·2）。<br>🔴 **2026-10-03 更正**：这句**只在"早切"（还没吐字就断）时成立** —— 见下一行 |
 | 🔴🔴 **「`finally` 里 `await stream.aclose()` 就等于"把上游关了"」** | ⛔ **不够** —— **二次投递的取消**会在下一个真实挂起点重投：`aclose()` 一挂起 ⇒ 抛 `CancelledError` ⇒ **`finally` 剩余部分整体作废**。<br>⚠️ **真服务实测（2026-10-03）**：「晚切」时计数 `2.0→2.0` ❌、**无 `[cancel]` 日志** ❌、半截 **0 条** ❌ —— 而**单测当时 13 条全绿**（假流的 `aclose()` 不抛）。<br>⚠️ **早切测不出来**：生成器**还没被推进过** ⇒ `aclose()` 不必真收尾 ⇒ **不挂起 ⇒ 打不断**。**只有「用户已经看到字再点停止」才露出来**（而那才是主场景）。<br>✅ **两条一起**（缺一不可）：① **同步**收尾（计数/日志/落盘）提到**任何 `await` 之前** · ② 关流包 `anyio.CancelScope(shield=True)`。<br>📌 判据（可打印）：`api/test_cancel_propagation.py` ⇒ **17 passed**；两条修法**各有一条用例独立钉住**（`…survives_interrupted_aclose` 钉 shield · `…lands_even_when_aclose_itself_fails` 钉顺序 —— 实测把关流挪回前面 ⇒ **只有后者变红**）<br>📄 `DEC-054` · 复盘 `docs/复盘/2026-10-03-单测全绿而真服务全废.md` |
 | 🔴 **「自己去 `request.is_disconnected()` 轮询才知道客户端断了」** | ⛔ **不用，那是框架给的** —— uvicorn 报 `spec_version 2.3` ⇒ Starlette 已监听 `http.disconnect` 并**取消生成器**。<br>⇒ 真正的缺口只有「**停下并关掉上游**」这一件。**自己加轮询 = 多余，且会掩盖真缺口**（`DEC-052`） |
@@ -48,13 +103,15 @@
 | 🔴 **「历史里那条助手消息是完整回答」** | ⛔ **可能是半截**（`③` Task 6 · `B3` 起）—— 被中断的那轮存进去的答案**尾部带 `INTERRUPTED_SUFFIX`**（"…（本次回答被中断，以上为已生成部分）"）。<br>⇒ **读历史的人（人 / 模型 / 另一个脚本）必须看这个尾巴**，⛔ 别把半截当结论。⚠️ 这个尾巴是**故意**进 prompt 的：不标 ⇒ 模型会把断掉的话当成自己说完了（`DEC-053`） |
 | 🔴 **「取消后用户那问句也没了，是设计如此」** | ⛔ **不是设计，是碰巧** —— 改动前 `append_chat_history(user, …)` 与答案写在同一段收尾代码里，取消先 `raise` ⇒ **两个一起丢**。<br>⇒ **2026-10-03（`B3`）已让取消路径成对写**（`DEC-053`）。⚠️ **`except Exception` 那条路【仍然丢】**（**有意留着**，属另一件事 —— 已立 `DEC-055`，⬜ 未实施） |
 | 「`/rag/search` 是纯检索」 | 🟡 **它能生成答案** —— 传 `generate_answer: true` 即可（**默认 `False`**，`api/schemas.py:14`） |
-| 「检索都走 `rag_pipeline`」 | 🔴 **`/rag/stream_search` 是内联裸 SQL**（`:581-590`）—— **不走 pipeline / hybrid_search / BM25 / reranker** ⇒ **与 `/rag/search` 召回不同源** |
+| 「检索都走 `rag_pipeline`」 | 🔴 **`/rag/stream_search` 不走 pipeline** —— 它直接调**共享层**的**纯向量那一档**<br>`search_similar(query_embedding, req.top_k, user_id=user_name)`，**不经过** `pipeline` / `hybrid_search` / **BM25** / **reranker** ⇒ **与 `/rag/search` 召回不同源**。<br>⚠️ **2026-10-03 更正**：本行原先写「**内联裸 SQL**」—— 乙段起**不再成立**（改走共享层了）。<br>🔴 **别把这句和隔离混起来**：乙段让它的**过滤**跟上了（共享层带 `WHERE`），但**召回源【没】拉齐** —— 这两件事在这条端点上恰好相反：**隔离对齐了，召回没对齐** |
 | 🔴 **「本文件的端点都接了会话上限」** | ⛔ **不是** —— **只有 2 条接**（B8 · 2026-10-01）：`/rag/stream_search` 与 `/ws/agent`。<br>**`/rag/ask` · `/rag/jwt_ask` · `/rag/async_ask` · `/rag/parallel_ask` 【故意不接】** —— 它们**不调 LLM**（前两条只 `SELECT documents`，后两条是 mock）⇒ 接上去会让**没花钱的接口占额度**。<br>⚠️ 这条有**双向守卫**：`api/test_session_budget_wiring.py` 既查该接的接了，也查**不该接的没接** |
 | ⚠️ **「`/rag/stream_search` 一直有 `thread_id`」** | 🔴 **2026-10-01 才补的**（B8，query 参数）。`QuestionRequest` **没有**这个字段 ⇒ 它**不在 body 里** |
 | 🔴 **「`/ws/agent` 的额度是按人算的」** | ⛔ **按连接算** —— 该 WS **整条没有鉴权**，拿不到用户身份 ⇒ `user_name` 只能是 `"unknown"`，会话 id 用**每连接生成的 uuid**。<br>⇒ **断开重连 = 换一个新桶**。⚠️ 这不是漏洞：**没有身份就谈不上按人计**；根因（WS 无鉴权）记在 `DEC-041` 遗留·1 |
+| 🔴🔴 **「乙段之后，单测 patch `api_v1_rag.get_db` 就够短路了」** | ⛔ **不够，而且本机看不出来** —— 乙段让 `stream_search` **改调共享层** `db.search_similar` ⇒ **`get_db()` 的解析位置从 `api_v1_rag` 的模块全局搬到了 `db.py` 的模块全局**。<br>⇒ 只 patch `rag_mod.get_db` 的测试**够不着真实连接点**，会**真去连库**。<br>🔴 **本机为什么看不见**：本机 Postgres 真开着 ⇒ 连上、`fetchall()` 回 `[]` —— **与假连接的返回值恰好一样** ⇒ **全绿**。**CI 没有 Postgres ⇒ `Connection refused`**（实测 12 条红，`2026-10-03`）。<br>⇒ **判据**：`grep -rn 'setattr(.*get_db' api/test_*.py` —— 逐条看它 patch 的是**哪个模块的** `get_db`；<br>⚠️ **改了任何函数的【依赖来源】（换模块调 / 走共享层 / 抽公共层）⇒ 必须回头过一遍这个 grep**。<br>📄 `docs/复盘/2026-10-03-CI同款命令不等于CI等价物.md`（**教训是"入口没指向 `scripts/ci-local.sh`"**） |
 
 ## 关联
 
+`docs/decisions/DEC-056-多用户资源隔离的现状审计与分阶段收口.md` ·
 `后端补齐清单` **B1/B2/B3** · `docs/decisions/DEC-052-取消传播的观测对象与上游改异步.md` ·
 `docs/decisions/DEC-053-中断后的半截答案存进历史并打标记.md` ·
 `docs/decisions/DEC-054-取消路径的收尾顺序与关流护盾.md` ·
