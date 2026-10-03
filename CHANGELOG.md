@@ -1168,7 +1168,11 @@ All notable changes to this project will be documented in this file.
   - `grep -n 'WHERE requested_by' api/api_v1_rag.py | grep -v '#'` ⇒ **2 行**（删前 3）
   - 两份接线守卫的**反向清单**仍绿 —— `api/test_breaker_wiring.py` ·
     `api/test_session_budget_wiring.py`（已由 4 条改 3 条，**用例名**同步由 `four` 改 `three`）
-  - 全量 CI 口径 —— `venv/bin/python -m pytest api/ -q -m "not integration and not needs_db"` ⇒ **412 passed**
+  - 全量 —— ⚠️ **⛔ 别改回裸命令**：`bash scripts/ci-local.sh` ⇒ **412 passed, 3 skipped, 32 deselected**
+    （收集数 **447** = 412+3+32；比乙段那次的 446 多 1，就是本 PR 新增的 `test_removed_endpoints.py` 那一条）。
+    📌 **原写的是**「全量 CI 口径 —— `venv/bin/python -m pytest api/ -q -m "not integration and not needs_db"`
+    ⇒ 412 passed」—— **标签是错的**（那条只对齐「选哪些测试」，⛔ 不是 CI 口径；见 `CHANGELOG` 上方乙段那条的
+    2026-10-03 同日更正与 `docs/复盘/2026-10-03-CI同款命令不等于CI等价物.md`）。**数 412 本身是对的**，错的是挂的标签。
 
   **改了 7 处**（⚠️ **原文只清点了 6 处** —— 第 7 处是删完才发现的）：
   ① `api/api_v1_rag.py`（端点 → 墓碑注释）② `api/test_breaker_wiring.py` 的 `NON_SPENDING`
@@ -1184,6 +1188,28 @@ All notable changes to this project will be documented in this file.
   📄 全文（含消费者清点 · 7 处改动 · 2 处活口径同步 · **反悔成本**）⇒ `docs/decisions/DEC-057-删除-rag-ask.md`
 
 ### Fixed
+
+- 🔴 **本 PR 自己新加的 `api/test_removed_endpoints.py` 是红的 —— 它用了 `with TestClient(app) as`**（2026-10-03）。
+
+  **现象**：`bash scripts/ci-local.sh` ⇒ **1 failed, 411 passed**，红的就这一条
+  （`test_rag_ask_stays_removed` · `psycopg2.OperationalError` · `Connection refused`）。
+
+  **根因**：`with TestClient(app) as client:` **会触发 lifespan 的 startup** ⇒ `init_pool()`
+  **真去连 Postgres**。⚠️ 本用例**只断路由存不存在（404）**，**根本不需要 startup**。
+  ⚠️ **本机看不出来**：本机 Postgres 真开着 ⇒ 连得上 ⇒ 照样绿。
+
+  **修法**：改回**裸 `TestClient(app)`**。📌 **这就是本仓的既有写法** ——
+  `grep -rn 'with TestClient' api/*.py` ⇒ **改之前全仓只有这一处**，就是它把自己坑了；
+  其余不连库的用例（`test_isolation.py` · `test_rag_search.py` …）**一律裸用**。
+
+  **判据（可打印）**：修前 `bash scripts/ci-local.sh` ⇒ `1 failed, 411 passed, 3 skipped, 32 deselected`；
+  修后同一条命令 ⇒ **`412 passed, 3 skipped, 32 deselected`**（收集数 **447**）。
+
+  🔴 **为什么它一直没被发现**：这条 commit 只 **push 过分支、从没开过 PR**
+  ⇒ `ci.yml` 只跑 `push main` / `pull_request main` ⇒ **它一次 CI 都没跑过**。
+  ⇒ **与 #74 那 12 条同一个成因家族**（「本机看得见的东西，不代表 CI 看得见」），
+  只不过这次的触发面是**"分支推了但没开 PR"**。
+  📄 `docs/复盘/2026-10-03-CI同款命令不等于CI等价物.md`
 
 - 🔴 **PR #74 的 CI 红 12 条：乙段改了 `stream_search` 的【依赖来源】，测试里的 monkeypatch 够不着了**（2026-10-03）。
 
