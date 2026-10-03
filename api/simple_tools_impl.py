@@ -8,18 +8,23 @@
 ⚠️ **依赖方向单向**：本模块**只 import 标准库**（`datetime`）。
 `simple_tools.py` 引用本模块；**本模块绝不反向引用**它。
 
+⚠️ **2026-10-03 例外（DEC-049）**：多了一个 `from safe_math import calculate`。
+   它**不破坏上面那条不变量** —— `safe_math` 自己也**只用标准库**（`ast` / `math` / `operator`），
+   没有任何 langchain 依赖。**这是本模块唯一允许的外部依赖，⛔ 别再往里加第二个。**
+
 📌 函数名带 `_impl` 后缀是**故意的** —— 提醒读者：**这不是给 LLM 看的工具**。
 面向 LLM 的工具描述（docstring）留在 `simple_tools.py` 的 `@tool` 那一层。
 """
 from datetime import datetime
 
+from safe_math import calculate  # DEC-049：⛔ 别改回 `eval`（理由见 `api/safe_math.py`）
+
 
 def calculator_impl(expression: str) -> str:
     """计算一个数学表达式（纯逻辑，无 langchain 依赖）。"""
-    try:
-        return str(eval(expression))
-    except Exception as e:
-        return f"计算错误: {e}"
+    # ⚠️ 返回值形状**与改前逐字一致**：成功 `str(结果)`；失败 `计算错误: {原因}`。
+    #    `test_impl_modules.py` 断言了 `1/0` 那条要含 `division by zero` —— 已保留。
+    return calculate(expression)
 
 
 def date_today_impl() -> str:

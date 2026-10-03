@@ -14,6 +14,7 @@ from langchain_community.tools import DuckDuckGoSearchRun
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 from datetime import datetime
+from safe_math import calculate  # DEC-049：`calculator` 的求值实现 —— ⛔ 别改回 `eval`
 
 # ==================== 初始化模型 ====================
 # ⚠️ 角色 = 「模型轴 fast」+「长度轴 agent(1024)」—— 见 `api/llm_factory.py` 的模块 docstring。
@@ -23,10 +24,13 @@ llm = make_llm("fast", "agent")
 @tool
 def calculator(expression: str) -> str:
     """计算数学表达式，例如 3*4-5/6。"""
-    try:
-        return str(eval(expression))
-    except Exception as e:
-        return f"计算错误: {e}"
+    # 🔴 DEC-049：**不许改回 `eval(expression)`**。
+    #    `expression` 是 LLM 生成的，而 LLM 的输入包含用户提问 / RAG 文档 / 搜索结果
+    #    ⇒ `eval` 等于把任意代码执行开在服务进程里。实测（改前）：喂
+    #    `__import__('os').system('touch /tmp/x')` **命令真的跑了**，返回 `'0'`
+    #    —— 模型收到的是一条正常的"答案是 0"，没有任何异常信号。
+    #    ⇒ 实现与三道闸见 `api/safe_math.py`；接线由 `api/test_safe_math_wiring.py` 守。
+    return calculate(expression)
 
 @tool
 def date_today(query: str = "") -> str:
