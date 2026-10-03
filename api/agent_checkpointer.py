@@ -16,6 +16,13 @@ from datetime import datetime
 from safe_math import calculate  # DEC-049：`calculator` 的求值实现 —— ⛔ 别改回 `eval`
 from search_tools import web_search  # DEC-051：换掉本机不可达的 DuckDuckGo（见 `agent_graph.py` 同名处）
 
+# 🔴 2026-10-03（`DEC-056` 丙段）：本图**接上审批门**，语义**从 `agent_graph` 引入**。
+#    ⛔ **不在这里抄一份** —— 抄一份正是 `DEC-051` 记的病根（同一个判断两处实现，
+#       一边改了另一边不知道，而**不一致时不报错** ⇒ 审批静默地永不触发 / 对错的工具触发）。
+#    ⚠️ `agent_graph.py` 末行在 **import 期**就跑 `validate_approval_config()` ⇒
+#       白名单为空 / 名字不存在，会在这里**一并响亮地报**（不用再调一次）。
+from agent_graph import SENSITIVE_TOOLS, should_continue, human_approval
+
 # ==================== 初始化模型 ====================
 # ⚠️ 角色 = 「模型轴 fast」+「长度轴 agent(1024)」—— 见 `api/llm_factory.py` 的模块 docstring。
 llm = make_llm("fast", "agent")
@@ -66,9 +73,11 @@ def agent_decide(state: AgentState):
 def tool_execute(state: AgentState):
     """执行节点。🔴 **DEC-051：按 `TOOLS_BY_NAME` 查表分派** —— 理由与实测见 `agent_graph.py` 同名处。
 
-    ⚠️ 本文件**没有审批节点**（无 `interrupt_before` / 无 `SENSITIVE_TOOLS`）⇒
-       这里**不做** `validate_approval_config()` 那种启动自检。
-       📌 「`/agent/memory_chat` 这条路径完全没有审批门」是**已知遗留**，见 `DEC-051` 遗留·2。
+    ✅ **2026-10-03 更正（`DEC-056` 丙段已修）**：本文件原先**没有审批门**
+       （`DEC-051` §遗留·2：「同一个仓里，一条路停下等人批，另一条直接执行」）。
+       现在 `build_checkpointer_agent()` 带 `interrupt_before=["approval"]`，
+       路由/白名单**从 `agent_graph` 引入**（⛔ 不是抄一份）。
+       ⇒ **能走到本节点的 `tool_calls` 都是非敏感的**（敏感的会先停在 `approval`）。
     """
     last_message = state["messages"][-1]
     tool_messages = []
@@ -82,11 +91,9 @@ def tool_execute(state: AgentState):
 
     return {"messages": tool_messages}
 
-def should_continue(state: AgentState):
-    last_message = state["messages"][-1]
-    if hasattr(last_message, "tool_calls") and last_message.tool_calls:
-        return "tools"
-    return END
+# 🔴 2026-10-03（`DEC-056` 丙段）：本文件原先在这里**自己写了一份** `should_continue`
+#    （只有两条路：`tool_calls` ⇒ "tools" / 否则 END）。已删除 —— 改用 `agent_graph` 那一份
+#    （三条路，含 `"approval"`）。理由：审批的判据只能有**一处**，见文件顶部 import 处的注释。
 
 # ==================== 构建图（支持选择 Checkpointer 后端） ====================
 # ======= 支持 MemorySaver SqliteSaver RedisSaver 自主选择架构后端 =======
@@ -95,8 +102,17 @@ def build_checkpointer_agent(backend: str = "memory"): # 默认memory即MemorySa
     # 添加节点和边（与基础 Agent 一致：决策 → 工具 → 决策循环）
     workflow.add_node("agent", agent_decide)
     workflow.add_node("tools", tool_execute)
+    # 🔴 2026-10-03（`DEC-056` 丙段）：审批节点 —— 与 `agent_graph` 同形（三条路由 + `interrupt_before`）。
+    workflow.add_node("approval", human_approval)
     workflow.set_entry_point("agent")
-    workflow.add_conditional_edges("agent", should_continue, {"tools": "tools", END: END})
+    # ⚠️ 映射必须**写全三条**：`should_continue` 现在会返回 `"approval"`，
+    #    少了它 langgraph 会以 "unknown branch" 抛错（不是静默走默认）。
+    workflow.add_conditional_edges(
+        "agent", should_continue,
+        {"approval": "approval", "tools": "tools", END: END},
+    )
+    # 审批通过后，从 "approval" 去 "tools" 执行（与 `agent_graph` 同）
+    workflow.add_edge("approval", "tools")
     workflow.add_edge("tools", "agent")
 
     # 根据后端选择 Checkpointer
@@ -114,7 +130,9 @@ def build_checkpointer_agent(backend: str = "memory"): # 默认memory即MemorySa
     else:  # 默认 memory
         checkpointer = MemorySaver()
 
-    return workflow.compile(checkpointer=checkpointer)
+    # 🔴 `interrupt_before=["approval"]` —— 进入审批节点**之前**暂停（与 `agent_graph` 同）。
+    #    ⚠️ 少了这个参数，`approval` 节点会被**直接走进去**（它什么也不做）⇒ 门形同虚设。
+    return workflow.compile(checkpointer=checkpointer, interrupt_before=["approval"])
 
 # 全局实例（可通过环境变量 AGENT_CHECKPOINT_BACKEND 切换）
 backend = os.getenv("AGENT_CHECKPOINT_BACKEND", "memory")

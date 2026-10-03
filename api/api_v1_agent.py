@@ -16,7 +16,13 @@ from exceptions import ErrorCode, AppException
 from deps import get_current_user_hybrid, get_current_user_jwt, require_admin
 
 from agent_graph import agent_graph
-from pending_approvals import list_pending, register, resolve   # `②` Task 2（B5）：待接管队列
+from pending_approvals import (
+    list_pending, register, resolve,
+    find_by_raw_thread_id,            # 丙段：按原 thread_id 反查**属主**
+)
+# 角色（`DEC-046`）—— `/agent/approve` 的「本人或 admin」判据走这里，
+# ⛔ 别在本文件另写 `user_name == "admin"`（那就又多一处口径）。
+from permission import UserRole, get_user_role
 from langchain_core.messages import HumanMessage, ToolMessage, AIMessage
 # 多分支路由（意图分类）高级 Agent：定义在 agent_graph_advanced_learning.py
 from agent_graph_advanced_learning import build_advanced_agent
@@ -48,6 +54,12 @@ from token_config import GLOBAL_DAILY_TOKEN_LIMIT
 # ⚠️ 与 B8 **并列**，⛔ 别把两者合并成一个函数 —— 维度不同（B8 按会话 / B11 按全站），
 #    合并后一改就会同时动到两层。（`DEC-041` 与 `B11` 各裁各的范围）
 from breaker import circuit, global_key
+# 会话键（`DEC-056` 丙段）：**把身份拼进 checkpoint / 会话 id**。
+# ⚠️ 为什么必须拼：`thread_id` 在**本文件 6 条端点上**默认就是 `"default"`
+#    ⇒ 两个用户都用默认值 ⇒ 共用一个 checkpoint 桶，而消息 reducer 是
+#    `Annotated[List, operator.add]`（append）⇒ **模型看得到别人的对话**。
+#    ⛔ 只在**传进图 / 传进待接管队列**时拼 —— 响应里回显的仍是调用方传进来的**原值**。
+from session_key import session_key
 # 记录工具 开始追踪 结束追踪
 from tool_visualizer import start_trace, finish_trace, get_trace, get_all_traces
 # MCP Client 高级 Agent（会话池版）及动态工具列表
@@ -130,19 +142,25 @@ async def langgraph_chat(
     if not ok:
         raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
 
+    # 🅾 丙段断言点 #1：**图收到的键**（⛔ 不是 `thread_id`）—— 守卫 `api/test_session_isolation.py`
+    sess = session_key(user_name, thread_id)
+
     result = agent_graph.invoke(
         {"messages": [HumanMessage(content=question)]},
-        config={"configurable": {"thread_id": thread_id}}
+        config={"configurable": {"thread_id": sess}}
     )
     summary = summarize_agent_result(result)
 
     # B5 · 待接管队列（`②` Task 2）—— `MemorySaver` 反查不出"谁卡住了"，只能在这里记账。
     # ⚠️ `else` 那支不是可省的：**本轮没卡住 ⇒ 清掉上一次的登记**，
     #    否则同一个 thread 一旦卡过一次，就会永远留在队列里**变成假待办**。
+    # ⚠️ 记账也用 `sess`（⛔ 不是裸 `thread_id`）—— 否则两个人用同一个 `thread_id`
+    #    会在**队列里也串号**，`/agent/approve` 会拿着别人的 key 去续跑（丙段）。
     if summary.get("status") == "pending_approval":
-        register(thread_id, user_name, summary.get("pending_tool_calls") or [])
+        register(sess, user_name, summary.get("pending_tool_calls") or [],
+                 raw_thread_id=thread_id, graph="agent_graph")
     else:
-        resolve(thread_id)
+        resolve(sess)
 
     return {
         "question": question,
@@ -197,6 +215,10 @@ async def langgraph_chat_stream(
     if not ok:
         raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
 
+    # 🅾 丙段：**checkpoint / 待接管队列**用拼过身份的键；⛔ 响应里回显的仍是原 `thread_id`。
+    #    ⚠️ 与 `check_session_token_budget`（上面，用原值）**是两条轴**，别合并。
+    sess = session_key(user_name, thread_id)
+
     ENDPOINT = "agent_langgraph_chat_stream"   # Prometheus 的 label（`③` Task 5）
 
     async def generate():
@@ -209,7 +231,7 @@ async def langgraph_chat_stream(
             #    ⛔ 别退回"在 `async for` 里内联调用" —— 那样拿不到这个流的句柄，关不掉。
             stream = agent_graph.astream(
                 {"messages": [HumanMessage(content=question)]},
-                config={"configurable": {"thread_id": thread_id}},
+                config={"configurable": {"thread_id": sess}},
                 stream_mode="messages",
             )
             async for chunk, meta in stream:
@@ -269,16 +291,17 @@ async def langgraph_chat_stream(
         #
         #    ✅ 这样与 `/agent/langgraph_chat` 的口径**完全一致**（它也喂 `result` 整份 state），
         #       状态判定只有 `summarize_agent_result` 一处，⛔ 不在这里另写一套。
-        state = await agent_graph.aget_state({"configurable": {"thread_id": thread_id}})
+        state = await agent_graph.aget_state({"configurable": {"thread_id": sess}})
         summary = summarize_agent_result(state.values or {})
 
         # B5 · 待接管队列（`②` Task 2）—— 与 `/agent/langgraph_chat` 同款：
         # ⚠️ `else` 那支不是可省的：本轮没卡住 ⇒ 清掉上一次的登记，
         #    否则同一个 thread 卡过一次就**永远留在队列里变成假待办**。
         if summary.get("status") == "pending_approval":
-            register(thread_id, user_name, summary.get("pending_tool_calls") or [])
+            register(sess, user_name, summary.get("pending_tool_calls") or [],
+                     raw_thread_id=thread_id, graph="agent_graph")
         else:
-            resolve(thread_id)
+            resolve(sess)
 
         yield f"data: {json.dumps({'thread_id': thread_id, **summary}, ensure_ascii=False)}\n\n"
         yield "data: [DONE]\n\n"
@@ -319,40 +342,83 @@ async def approve_agent_action(
         ⚠️ 必须是 `AIMessage`，⛔ 不是 `HumanMessage` —— 后者会让模型把"人给的结论"当**新输入**再答一遍。
       · ⚠️ **只有"批准"时才生效**；拒绝时给了也会被忽略（拒绝的语义是"别做了"）。
     """
-    config = {"configurable": {"thread_id": thread_id}}
+    # 🔴 丙段（`DEC-056`）：**先按【原 thread_id】查队列定属主，再按属主拼键**。
+    #    ⛔ 别按调用方拼 —— admin 会拼出自己那个不存在的桶 ⇒ **永远批不了别人的**（硬门 D 死掉）。
+    candidates = find_by_raw_thread_id(thread_id)
+    if not candidates:
+        # ⚠️ 队列是**唯一**入口（`MemorySaver` 反查不出"谁卡住了"）⇒ 这里没有 = 没有可批的。
+        #    已知代价：`AGENT_CHECKPOINT_BACKEND=sqlite` 重启后（图在盘上、队列在内存）
+        #    会走到这一支 —— 但那种会话**本来就已经是孤儿**（见 `pending_approvals` 模块 docstring）。
+        return {"status": "error", "message": "当前没有等待审批的任务"}
+
+    if len(candidates) > 1:
+        # 同一个原 thread_id 被多个人用过 ⇒ **光凭它定不了是哪一条**（这正是隔离问题本身）。
+        # ⛔ 别"挑第一条" —— 那等于随机批一个人的会话。
+        owners = sorted({c["user_name"] for c in candidates})
+        return {
+            "status": "error",
+            "message": (f"thread_id={thread_id!r} 对应多条待审批会话（属主：{owners}）—— "
+                        f"请先看 `/agent/pending` 确认是哪一个"),
+        }
+
+    owner = candidates[0]["user_name"]
+    # 🔴 归属校验：**本人或 admin**（admin 那条不是可省的 —— 队列本来就跨用户）。
+    if user_name != owner and get_user_role(user_name) != UserRole.ADMIN:
+        return {"status": "error", "message": f"无权审批：该会话属于 {owner}"}
+
+    # ⚠️ 用**登记时拼好的**那个键（`candidates[0]["thread_id"]`），⛔ **不在这里重拼** ——
+    #    重拼 = 又多一处"拼法"口径，两处一旦不一致，`resolve()` 会静默清不掉（幂等、不报错）。
+    sess = candidates[0]["thread_id"]
+    config = {"configurable": {"thread_id": sess}}
+
+    # 🔴 按**登记的图**路由（业务方 2026-10-03 裁）：`/agent/langgraph_chat` ⇒ `agent_graph`，
+    #    `/agent/memory_chat` ⇒ `checkpointer_agent`。
+    #    ⛔ 写死 `agent_graph` 的后果：memory_chat 那条会话**永远放行不了**
+    #    （门关了却没有钥匙 —— 比不加门还糟）。
+    # ⚠️ 字典**在这里现建**（⛔ 不是模块级常量）：模块级常量会把图对象**早绑定**，
+    #    测试里 `monkeypatch.setattr(m, "agent_graph", …)` 就换不掉了。
+    GRAPHS = {"agent_graph": agent_graph, "checkpointer_agent": checkpointer_agent}
+    graph_name = candidates[0].get("graph", "agent_graph")
+    target = GRAPHS.get(graph_name)
+    if target is None:
+        # ⛔ 别「猜一个」 —— 猜错就是往**别的图**上写状态。
+        return {
+            "status": "error",
+            "message": f"登记表里的图名不认识：{graph_name!r}（已知：{sorted(GRAPHS)}）",
+        }
 
     # 获取当前图的状态
-    current_state = agent_graph.get_state(config)
+    current_state = target.get_state(config)
 
     if current_state.next != ("approval",):
         # B5：图没停在审批点 ⇒ **注册表里若有这个 thread，那是陈的** ⇒ 顺手清掉。
         # ⚠️ 这一支也要清 —— 否则"/agent/pending 说有，批的时候说没有"，对不上。
-        resolve(thread_id)
+        resolve(sess)
         return {"status": "error", "message": "当前没有等待审批的任务"}
 
     if approved:
         if edited_answer is not None:
             # B6：人工改写 ⇒ 推进 messages，**再从 checkpoint 续跑**。
             # ⚠️ 不能"跳过模型直接把这个答案返回" —— 那样后续节点（`tools`→`agent`）看不到它。
-            agent_graph.update_state(
+            target.update_state(
                 config, values={"messages": [AIMessage(content=edited_answer)]}
             )
         else:
             # 原样放行：`values=None` ⇒ 不改 state，图继续前进到 approval 节点，然后去 tools
-            agent_graph.update_state(config, values=None)
-        result = agent_graph.invoke(None, config)
+            target.update_state(config, values=None)
+        result = target.invoke(None, config)
     else:
         # 拒绝：更新 state，添加一条消息，并终止工具调用流程
-        agent_graph.update_state(
+        target.update_state(
             config,
             values={"messages": [HumanMessage(content="审批拒绝，请忽略工具调用请求，直接告知用户操作已被拒绝。")]}
         )
-        result = agent_graph.invoke(None, config)
+        result = target.invoke(None, config)
     
     final_message = result["messages"][-1]
 
     # B5：批完就注销 —— 否则它会**永远留在队列里**（`resolve` 幂等，重复调不抛）。
-    resolve(thread_id)
+    resolve(sess)
 
     return {
         "status": "approved" if approved else "rejected",
@@ -373,6 +439,11 @@ async def list_pending_approvals(
     数据来自 `api/pending_approvals.py`（**进程内存** —— ⚠️ 重启即空，见其 spec）。
 
     ⚠️ **本端点只读**，不改任何状态；批准/拒绝走 `POST /agent/approve`。
+
+    🔴 **2026-10-03（`DEC-056` 丙段）起每行多两个字段**（**加性**，老调用方不受影响）：
+      · `raw_thread_id` —— 调用方传的**原值**（`thread_id` 现在是**拼过身份**的键）
+      · `graph` —— 这条会话停在**哪张图**上（`agent_graph` / `checkpointer_agent`）
+        ⇒ **批量批的时候要看它**：`/agent/approve` 按它选图。
     """
     rows = list_pending()
     return {"count": len(rows), "items": rows, "requested_by": user_name}
@@ -402,13 +473,16 @@ async def advanced_agent_chat(
     if not ok:
         raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
 
+    # 🅾 丙段断言点：图收到的键 = 拼过身份的（⛔ 不是裸 `thread_id`）
+    sess = session_key(user_name, thread_id)
+
     result = advanced_agent.invoke(
         {
             "messages": [HumanMessage(content=question)],
             "user_name": user_name,
             "memory_space": memory_space,
         },
-        config={"configurable": {"thread_id": thread_id}}
+        config={"configurable": {"thread_id": sess}}
     )
     return {
         "question": question,
@@ -484,7 +558,13 @@ async def memory_chat(
     thread_id: str = "default",
     user_name: str = Depends(get_current_user_hybrid),
 ):
-    """带持久化记忆的 Agent 对话接口"""
+    """带持久化记忆的 Agent 对话接口。
+
+    ⚠️ **2026-10-03（`DEC-056` 丙段）起带人工审批**：若返回 `status="pending_approval"`，
+       说明**工具还没执行**，要带同一个 `thread_id` 走 `/agent/approve` 继续。
+       🔴 改动前本端点**没有审批门** —— 同一个仓里，`/agent/langgraph_chat` 停下等人批、
+       而这里**直接执行**（`DEC-051` §遗留·2）。
+    """
     # B8 · 会话级 token 上限（`DEC-041`）
     ok, why = check_session_token_budget(user_name, thread_id)
     if not ok:
@@ -496,17 +576,33 @@ async def memory_chat(
     if not ok:
         raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
 
-    config = {"configurable": {"thread_id": thread_id}}
+    # 🅾 丙段断言点：图收到的键 = 拼过身份的（⛔ 不是裸 `thread_id`）
+    # 🔴 本端点就是 `DEC-056` 丙段点名的那个 —— 两个人用默认 `thread_id` 曾共用一个桶。
+    sess = session_key(user_name, thread_id)
+    config = {"configurable": {"thread_id": sess}}
     result = checkpointer_agent.invoke(
         {"messages": [HumanMessage(content=question)]},
         config=config
     )
-    final_message = result["messages"][-1]
+    # 🔴 丙段：本端点现在**会停在审批点**（`checkpointer_agent` 的 `interrupt_before=["approval"]`）。
+    #    ⇒ 状态判定**复用 `summarize_agent_result`**，⛔ 别再在这里另写一套
+    #      （它已经是"停没停在审批点"的**唯一**口径，见其 docstring）。
+    summary = summarize_agent_result(result)
+
+    # B5 · 待接管队列 —— 与 `/agent/langgraph_chat` 同款：卡住 ⇒ 登记；没卡住 ⇒ 清掉上一次的。
+    # ⚠️ `graph="checkpointer_agent"` **必须写**：`/agent/approve` 靠它决定续跑哪张图
+    #    （写上之前，approve 只会去问 `agent_graph` ⇒ 这个会话**永远放行不了**）。
+    if summary.get("status") == "pending_approval":
+        register(sess, user_name, summary.get("pending_tool_calls") or [],
+                 raw_thread_id=thread_id, graph="checkpointer_agent")
+    else:
+        resolve(sess)
+
     return {
         "question": question,
-        "answer": final_message.content,
         "thread_id": thread_id,
         "requested_by": user_name,
+        **summary,
     }
 # ==================== Men0 添加记忆管理接口 测试 ====================
 
@@ -760,14 +856,21 @@ async def mcp_agent_chat(
     if not ok:
         raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
 
+    # 🅾 丙段断言点：**checkpoint 键**拼身份（⛔ 不是裸 `thread_id`）。
+    # ⚠️ 但下面 state 里的 `thread_id` **保持原值** —— 它喂的是【追踪/花费】那条轴
+    #    （`agent_graph_advanced.py:239/334/359` → `record_tool_*`），
+    #    那条轴的**读**端点 `/agent/trace/{thread_id}`（`:1029`）用的也是原值。
+    #    ⛔ 两条轴别混：混了就得连追踪的读写一起改（那是另一件事，不是丙段）。
+    sess = session_key(user_name, thread_id)
+
     result = await mcp_agent.ainvoke(
         {
             "messages": [HumanMessage(content=question)],
             "user_name": user_name,
             "memory_space": memory_space,
-            "thread_id": thread_id,     # 注入 thread_id
+            "thread_id": thread_id,     # 注入 thread_id（追踪轴，保持原值）
         },
-        config={"configurable": {"thread_id": thread_id}}
+        config={"configurable": {"thread_id": sess}}
     )
     final_message = result["messages"][-1]
 

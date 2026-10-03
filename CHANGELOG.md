@@ -10,6 +10,51 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- 🔴 **多用户会话隔离：checkpoint 键拼身份 + `/agent/approve` 归属校验 + `memory_chat` 审批门**（2026-10-03 · `DEC-056` 丙段）——
+  **两个用户用同一个 `thread_id="default"`（那是 6 条端点的默认值）时，会话记忆不再互相串。**
+
+  **根因**：4 张图 · **7 处** `{"configurable": {"thread_id": …}}` 的 key **里都没有人**，
+  而 state 的 reducer 是 `Annotated[List, operator.add]`（**append**）⇒ **B 的提问接在 A 的历史后面，模型两边的都看得到**。
+  ⚠️ **不是"理论上会串"，是"默认就串"** —— 默认值本身就是 `"default"`。
+  对照：**花费**那条轴没有这个问题（`check_session_token_budget` 的 key 含 `user_name`）⇒ 同一个仓里两套口径。
+
+  - 🆕 `api/session_key.py` —— `session_key(user_name, thread_id)`，**长度前缀**（`11:isolation_a:default`）。
+    ⚠️ 为什么不用朴素 `f"{user}:{thread}"`：`("a","b:c")` 与 `("a:b","c")` **都拼成 `"a:b:c"`**，
+    而**用户名没有字符校验**（`create_user_api_key`）⇒ 在一个**专门修隔离**的改动里留歧义 = 没修。
+    `_require_identity` fail-closed（缺身份 ⇒ 抛 `ValueError`），与 `db` / `bm25_index` 同一条约定。
+  - **7 处接线**：`langgraph_chat` · `langgraph_chat_stream`（`astream` + `aget_state` **两处必须同键**）·
+    `advanced_agent_chat` · `memory_chat` · `mcp_agent_chat` · `approve_agent_action`（续跑）。
+    ⚠️ **对外契约不变** —— 响应里回显的仍是调用方传进来的**原 `thread_id`**。
+    ⚠️ **只动了 checkpoint 那条轴**：`mcp_chat` 喂给 state 的 `thread_id` **保持原值**
+    （它走**追踪/花费轴**，读端点是 `/agent/trace/{thread_id}`，用的也是原值）。
+  - 🔴 **`/agent/approve` 加了归属校验**（**本人或 admin**）—— 改之前它**没有任何校验**，
+    任何登录用户拿一个 `thread_id` 就能批准并续跑那个会话。
+    ⚠️ **不能"按调用方拼"**：`/agent/pending` 是**跨用户队列**（硬门 D）⇒ admin 会拼出 `admin:…`
+    而属主是 `alice:…` ⇒ **admin 永远批不了别人的**。⇒ **先按原 `thread_id` 反查属主，再按属主拼，再判角色**。
+  - 🔴 **`/agent/memory_chat` 接上审批门**（`interrupt_before=["approval"]`）——
+    关掉 `DEC-051` §遗留·2「同一个仓里，一条路停下等人批，另一条直接执行」。
+    路由/白名单**从 `agent_graph` 引入**（`SENSITIVE_TOOLS` / `should_continue` / `human_approval`），
+    ⛔ **不是抄一份** —— 抄一份正是 `DEC-051` 记的病根。
+    ⚠️ **输出形状变了**：新增 `status` / `pending_tool_calls`（⛔ 不再返回 200 + 空答案）。
+  - 🔴 **`/agent/approve` 改为按登记表里的 `graph` 字段路由**（业务方 2026-10-03 裁）——
+    它原先把 `agent_graph` **写死**；光给 `checkpointer_agent` 加门而不改它 ⇒
+    那个会话**停在审批点、永远没人能放行**（**门关了却没有钥匙**）。
+
+  ⚠️ **代价（知道再选）**：`/agent/approve` **改为从队列反查**（队列成唯一入口）⇒
+  `AGENT_CHECKPOINT_BACKEND=sqlite` 重启后（图在盘、队列在内存）会答「没有待审批任务」，**而改动前能批**。
+  ⚠️ 那类会话**本来就是孤儿** ⇒ 这与「从静默错误地跑」改成「响亮地拒绝」，⛔ 不是新增的坏。
+
+  ⛔ **丙段【没有】解决的**（别读成全好了）：**追踪轴仍按裸 `thread_id`**（`/agent/trace/{thread_id}`
+  能看到同 thread 下别人的轨迹）· `add_memory` / `search_memory` 仍是朴素拼接 · 乙段两条未动。
+
+  ⭐ **判据（可打印）**：
+  `venv/bin/python -m pytest api/test_session_key.py api/test_session_isolation.py api/test_approve_ownership.py api/test_memory_chat_approval.py -q -p no:warnings` ⇒ **29 passed**
+  · `grep -c 'thread_id": *sess' api/api_v1_agent.py` ⇒ **7**
+  ⚠️ **三份都做过证伪**：朴素 `:` 拼接 ⇒ 恰好 1 条红（歧义那条）；一条端点退回裸 id ⇒ **恰好 2 条红**；
+  关掉归属校验 ⇒ 恰好 1 条红。随后按 sha256 复原。
+  全量 **398 passed / 3 skipped**（369 → 398 的 **+29 全是本轮新增用例**）。
+  📄 `docs/decisions/DEC-056-…md` 决策 8 · `docs/specs/session_key.md`
+
 - ✅ **多用户检索隔离：4 条端点按身份过滤（甲段底座）**（2026-10-03 · `DEC-056` 甲段）——
   **同一份 `documents` 表里，A 检索不到 B 的文档**。此前是**潜伏**（真库 84 篇 `requested_by`
   100% 是 `admin`），但**代码默认 fail-open**：全仓 7 条检索路径只有 2 条自己写了 `WHERE`。
@@ -155,7 +200,9 @@ All notable changes to this project will be documented in this file.
   ⛔ **本 DEC 不声明"搜索能用了"** —— 只声明**"分派走对了"**（离线可验证）；联网效果**本机不可验证**。
 
   ⚠️ **遗留（已留痕）**：`api_v1_rag.py:746` **还有第三份** `DuckDuckGoSearchRun`（只登记不动）·
-  `/agent/memory_chat`（`agent_checkpointer.py`）**整条路径没有审批门**（本次只修了它的分派）·
+  ~~`/agent/memory_chat`（`agent_checkpointer.py`）**整条路径没有审批门**（本次只修了它的分派）~~ ⇒
+  ✅ **2026-10-03（`DEC-056` 丙段）已关闭** —— `checkpointer_agent` 接上 `interrupt_before=["approval"]`
+  + `/agent/approve` 改按登记表里的 `graph` 路由（详见本文件上方「丙段」那一条）·
   `agent_checkpointer.agent_decide` **没转发 `config`**（无真流式）。
   📄 全文 ⇒ `docs/decisions/DEC-051-工具名分派与审批白名单的标识符勘误.md`
 
