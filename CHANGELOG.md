@@ -600,6 +600,32 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- 📄 **`/specs` 对账 + 四处【计数口径】更正 —— 本轮只改文档里的数，⛔ 没动代码**（2026-10-03）。
+
+  **对账结果**（`bash scripts/spec_status.sh`）：**55 个产品模块 / 有 spec 24 / 没 spec 31 / 残留 0**。
+
+  **改了哪四个数** —— ⛔ **全是"改完忘了回头改"的那一类，不是算错**：
+
+  | 位置 | 原写 | 实测 | **判据（可打印）** |
+  |---|---|---|---|
+  | `docs/文档地图.md` —— `docs/decisions/` 份数 | 45（后改 47） | **58** | `ls -1 docs/decisions/*.md \| wc -l` |
+  | `docs/文档地图.md` —— `docs/复盘/` 份数 | 26 | **29** | `ls docs/复盘/*.md \| grep -vc 模板` |
+  | `ROADMAP.md` 待办总账「六」 | 42 | **31** | `bash scripts/spec_status.sh` |
+  | `docs/待办总表.md` §六（写了 / 没写） | 22 / 32 | **24 / 31** | 同上 |
+
+  🔴 **其中那一行【一天之内错了两次】**（45 → 47 → 58）⇒ **教训不是「记得回头改数」，而是
+  「能跑命令拿到的数就不该写死」**。⇒ `docs/文档地图.md` 那两行的命令已换成
+  **能直接跑、且与所写数同口径**的形式（`ls -1 docs/decisions/*.md | wc -l`）。
+  ⚠️ **顺带撞到检查器一个假阳性**：`check_doc_links.sh:152` 的正则是「**反引号里任何以 `.md` 结尾的串**」
+  ⇒ 我初稿写的 `grep -c '\.md$'` 里那个 **`\.md` 被当成文件路径** ⇒ 报 `docs/文档地图.md:69 \.md` **真断链**（**假红**）。
+  ⇒ **本次是【绕开】它**（换成检查器认的形式），⛔ **没有改检查器**（属另一件事，⛔ 未顺手改）。
+  📌 同族 ⇒ `docs/复盘/2026-10-03-判据脚本自己撒谎.md`
+
+  ⚠️ **§六 那两个数为什么会变**：2026-10-03 又添了 **2 份 spec** ——
+  `session_key`（`DEC-056` 丙段新模块）· `tool_visualizer`（`N4` 追踪轴收口顺带补，它此前**无 spec**）。
+
+  📄 `docs/文档地图.md` · `ROADMAP.md`（④ 做到哪了 / ⑤ 下一步 / 待办总账）· `docs/待办总表.md` §六
+
 - 🔴 **`B13` 实跑核出两处口径错 —— `/agent/cost/overview` 换数据源 + 补上「全站还剩多少」的出口**（2026-10-03 · `①b` Task 7 · `DEC-047`）。
 
   `B13` 的原话是「**先实跑核一遍，缺了再补**」。跑完**四个面都打得开**，但核出两处
@@ -1226,7 +1252,10 @@ All notable changes to this project will be documented in this file.
   ⚠️ **本机看不出来**：本机 Postgres 真开着 ⇒ 连得上 ⇒ 照样绿。
 
   **修法**：改回**裸 `TestClient(app)`**。📌 **这就是本仓的既有写法** ——
-  `grep -rn 'with TestClient' api/*.py` ⇒ **改之前全仓只有这一处**，就是它把自己坑了；
+  `grep -rnE '^[[:space:]]*with TestClient' api/*.py` ⇒ **改之前全仓只有这一处**，就是它把自己坑了；
+  ⚠️ **判据的写法本身有坑（⛔ 别照旧形式抄）**：`grep -rn 'with TestClient'`（**不带行首锚定**）
+  **现在会命中修复代码里那句「⛔ 别改回 `with … as`」的提醒** ⇒ **数成 1**（实测）。
+  ⇒ **判据纪律第 2 条**：按位置核 —— 注释 / docstring 里也有同样的串。见 `DEC-058` §五。
   其余不连库的用例（`test_isolation.py` · `test_rag_search.py` …）**一律裸用**。
 
   **判据（可打印）**：修前 `bash scripts/ci-local.sh` ⇒ `1 failed, 411 passed, 3 skipped, 32 deselected`；
