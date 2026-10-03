@@ -44,6 +44,7 @@ from prometheus_client import REGISTRY
 
 import api_v1_agent as agent_mod
 import api_v1_rag as rag_mod
+import db as db_mod
 from schemas import QuestionRequest
 
 RAG_ENDPOINT = "rag_stream_search"
@@ -266,6 +267,18 @@ def _call_rag_stream(monkeypatch, llm, history=None, get_history=None, **kw):
     monkeypatch.setattr(rag_mod, "get_embedding", lambda text: [0.0] * 8)
     monkeypatch.setattr(rag_mod, "get_llm_stream", lambda: llm)
     monkeypatch.setattr(rag_mod, "get_db", lambda: _FakeConn())
+    # 🔴 2026-10-03 补丁的**第二个** `get_db` —— 为什么一个不够（`DEC-056` 乙段）。
+    #
+    # 乙段把 `/rag/stream_search` 从「自己写 SQL」改成「调共享层 `db.search_similar`」。
+    # 连接点**换了模块**：原先 `get_db()` 解析到 `api_v1_rag` 的模块全局（上一行能挡），
+    # 现在解析到 **`db.py` 的模块全局** —— 上面那行 monkeypatch **够不着它**。
+    #
+    # ⚠️ **这个洞在本机是看不见的**：本机 postgres 真开着 ⇒ 真连上去、`fetchall()` 回 `[]`
+    #    ⇒ 12 条用例照样全绿。CI 没有 postgres ⇒ `Connection refused` ⇒ 12 条全红。
+    #    ⇒ **判据不能是「本机跑绿」**，得跑 CI 等价物：
+    #       `POSTGRES_PORT=59999 venv/bin/python -m pytest api/ -q -m "not integration and not needs_db"`
+    #    📄 复现与根因 ⇒ `docs/复盘/2026-10-03-CI同款命令不等于CI等价物.md`
+    monkeypatch.setattr(db_mod, "get_db", lambda: _FakeConn())
     if history is None:
         monkeypatch.setattr(rag_mod, "append_chat_history", lambda *a, **k: None)
     else:

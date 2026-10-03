@@ -31,8 +31,13 @@ All notable changes to this project will be documented in this file.
   - 静态 —— `grep -n 'WHERE requested_by' api/api_v1_rag.py | grep -v '#'` ⇒ **3 行**
     （`pg_search` · `jwt_ask` · `ask` —— **正好 = 自己写 SQL 的 3 条读端点**；其余 5 条走共享层）。
     ⚠️ **必须带 `| grep -v '#'`** —— 乙段加的**注释**里也含这个串，不带就会数成 5。
-  - 全量 CI 口径 —— `venv/bin/python -m pytest api/ -q -m "not integration and not needs_db"` ⇒
-    **411 passed, 3 skipped, 32 deselected**（deselected 30 → 32 就是这 +2 条 `needs_db` 用例）
+  - 全量 —— ⚠️ **2026-10-03 同日更正这个标签**：`-m "not integration and not needs_db"` **⛔ 不是"CI 口径"**，
+    它只是 CI 的「**选中哪些测试**」那条命令。**CI 没有 Postgres、也没有 `.env`，本机两样都有** ⇒
+    **要 CI 的【结果】，跑 `bash scripts/ci-local.sh`**（本 PR **就栽在这上面**：裸命令跑出 411 全绿，CI 却 **12 failed**）：
+    `bash scripts/ci-local.sh` ⇒ **411 passed, 3 skipped, 32 deselected**
+    （收集数 **446** = 411+3+32，与 CI 那次 `12 failed + 399 passed + 3 + 32` **逐字对齐**）
+    （deselected 30 → 32 就是乙段那 +2 条 `needs_db` 用例）
+    📄 `docs/复盘/2026-10-03-CI同款命令不等于CI等价物.md`
   - **证伪**：分别**退回**那两处修改 ⇒ **各恰好 1 条红**（`stream_search` 退回时 `jwt_ask` 仍绿，反之亦然）；
     还原用 `cp` 备份并核 `sha256`（⛔ **不用 `git checkout`** —— 它恢复 HEAD，会抹掉未提交的编辑）。
 
@@ -1128,6 +1133,32 @@ All notable changes to this project will be documented in this file.
   **移入 = 源处删除 + 留指针**（516 → 480 行）。
 
 ### Fixed
+
+- 🔴 **PR #74 的 CI 红 12 条：乙段改了 `stream_search` 的【依赖来源】，测试里的 monkeypatch 够不着了**（2026-10-03）。
+
+  **现象**：CI `离线测试` **12 failed / 399 passed**，全部是
+  `psycopg2.OperationalError: connection to server at "localhost", port 5432 failed: Connection refused`，
+  全在 `api/test_cancel_propagation.py`（同文件 `test_agent_*` 5 条**全绿**）。
+
+  **根因**：乙段把 `/rag/stream_search` 从「自己写 SQL」改成「调共享层 `db.search_similar`」
+  ⇒ `get_db()` 的解析位置从 **`api_v1_rag` 的模块全局** 变成 **`db.py` 的模块全局**，
+  而测试只 patch 了 `rag_mod.get_db` ⇒ **短路静默失效** ⇒ 真去连库。
+  ⚠️ **本机看不见**：本机 Postgres 真开着 ⇒ 连上、`fetchall()` 回 `[]` —— **与假连接返回值恰好一样**。
+
+  **修法**：`_call_rag_stream` 补一行 `monkeypatch.setattr(db_mod, "get_db", lambda: _FakeConn())`
+  （⛔ 不是把 `search_similar` 整个换掉 —— 那会让"共享层还在不在用"测不到）。
+
+  **判据（可打印）**：把修复临时退回 ⇒ `bash scripts/ci-local.sh` **逐字复现**
+  `12 failed, 399 passed, 3 skipped, 32 deselected`；修后同一条命令 ⇒ **411 passed, 3 skipped, 32 deselected**
+  （收集数 **446** 两处一致）。还原用 `cp` 备份 + 核 `sha256`（⛔ 不用 `git checkout`）。
+
+  🔴 **顺带更正的三处口径**（都指向 `bash scripts/ci-local.sh`，⛔ 不是再抄一遍命令）：
+  `ROADMAP.md` 自检三问① · `docs/规范/开发规范.md §2.4·5`（并更正其原写
+  「`-m "not … needs_db"` **恰好是"把库减掉"**」—— **不成立**：它减的是「**自称**需要库的用例」）·
+  `docs/说明/测试.md`（「= CI 那套」限定为**收集口径** · 表头「**CI 实跑**」更正）。
+  📄 复盘 ⇒ `docs/复盘/2026-10-03-CI同款命令不等于CI等价物.md`
+  （**本仓 2026-10-01 就有 `ci-local.sh`，但 `ROADMAP`/`开发规范` 两处"推送前干什么"都没指向它** ——
+  「**门挂在别处，就等于没有门**」）
 
 - 🔴🔴 **取消路径的收尾在真服务的【主场景】下一条都不跑 —— 而单测全绿**（2026-10-03 · `③` Task 6 真服务验证 · `DEC-054`）。
 

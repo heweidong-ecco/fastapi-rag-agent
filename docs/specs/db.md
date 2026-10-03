@@ -51,6 +51,7 @@
 | ⚠️ **「`user_id` 传进来就安全了」** | ⚠️ **`_require_identity` 只挡【空值】，不挡【伪造】** —— 它查的是 `if not user_id`。<br>⇒ **身份真假由端点层的 `get_current_user_hybrid` 保证**；若哪条端点把**请求体里**的字段直接传下来，这层**挡不住**。<br>📌 判据：`grep -n "user_id=user_name" api/api_v1_rag.py` ⇒ 传的必须**是鉴权依赖的返回值**，⛔ 不是 `req.` 上的字段 |
 | ⚠️ **「`get_db()` 用完不 commit 会丢」** | ✅ **不会** —— 它是 `@contextmanager`（`:35`）：正常退出 `commit`、异常 `rollback`、`finally` 归还连接。<br>⚠️ 但**别因此把 `with` 写成手动 `getconn/putconn`** —— 那会绕过归还逻辑，**连接池会漏** |
 | ⚠️ **「`search_similar` 第 4 列是"距离"，越小越像」** | ⛔ **是"相似度"** —— SQL 里写的是 `1 - (embedding <=> %s)`，`<=>` 是余弦**距离**，减完变成相似度 ⇒ **越大越像** |
+| 🔴🔴 **「调用方 patch 了【自己模块的】`get_db`，就能把这里的连接短路掉」** | ⛔ **不能** —— 本文件里的 `search_similar` / `bm25_search` 调的是 **`db.py` 自己的模块全局 `get_db`**。调用方 patch `api_v1_rag.get_db` **够不着这里**。<br>⇒ **调用方一旦从"自己写 SQL"改成"调共享层"**，原来那条 monkeypatch **静默失效** ⇒ 会**真去连库**。<br>🔴 **而本机看不出来**（本机 Postgres 开着 ⇒ 连上、回 `[]`，与假连接**返回值一样**）；**CI 没有 Postgres ⇒ `Connection refused`**（2026-10-03 实测 12 条红）。<br>⇒ **判据**：`grep -rn 'setattr(.*get_db' api/test_*.py` —— 逐条看 patch 的是**哪个模块的**。📄 `docs/复盘/2026-10-03-CI同款命令不等于CI等价物.md` |
 
 ## 关联
 

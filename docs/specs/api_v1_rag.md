@@ -107,6 +107,7 @@
 | 🔴 **「本文件的端点都接了会话上限」** | ⛔ **不是** —— **只有 2 条接**（B8 · 2026-10-01）：`/rag/stream_search` 与 `/ws/agent`。<br>**`/rag/ask` · `/rag/jwt_ask` · `/rag/async_ask` · `/rag/parallel_ask` 【故意不接】** —— 它们**不调 LLM**（前两条只 `SELECT documents`，后两条是 mock）⇒ 接上去会让**没花钱的接口占额度**。<br>⚠️ 这条有**双向守卫**：`api/test_session_budget_wiring.py` 既查该接的接了，也查**不该接的没接** |
 | ⚠️ **「`/rag/stream_search` 一直有 `thread_id`」** | 🔴 **2026-10-01 才补的**（B8，query 参数）。`QuestionRequest` **没有**这个字段 ⇒ 它**不在 body 里** |
 | 🔴 **「`/ws/agent` 的额度是按人算的」** | ⛔ **按连接算** —— 该 WS **整条没有鉴权**，拿不到用户身份 ⇒ `user_name` 只能是 `"unknown"`，会话 id 用**每连接生成的 uuid**。<br>⇒ **断开重连 = 换一个新桶**。⚠️ 这不是漏洞：**没有身份就谈不上按人计**；根因（WS 无鉴权）记在 `DEC-041` 遗留·1 |
+| 🔴🔴 **「乙段之后，单测 patch `api_v1_rag.get_db` 就够短路了」** | ⛔ **不够，而且本机看不出来** —— 乙段让 `stream_search` **改调共享层** `db.search_similar` ⇒ **`get_db()` 的解析位置从 `api_v1_rag` 的模块全局搬到了 `db.py` 的模块全局**。<br>⇒ 只 patch `rag_mod.get_db` 的测试**够不着真实连接点**，会**真去连库**。<br>🔴 **本机为什么看不见**：本机 Postgres 真开着 ⇒ 连上、`fetchall()` 回 `[]` —— **与假连接的返回值恰好一样** ⇒ **全绿**。**CI 没有 Postgres ⇒ `Connection refused`**（实测 12 条红，`2026-10-03`）。<br>⇒ **判据**：`grep -rn 'setattr(.*get_db' api/test_*.py` —— 逐条看它 patch 的是**哪个模块的** `get_db`；<br>⚠️ **改了任何函数的【依赖来源】（换模块调 / 走共享层 / 抽公共层）⇒ 必须回头过一遍这个 grep**。<br>📄 `docs/复盘/2026-10-03-CI同款命令不等于CI等价物.md`（**教训是"入口没指向 `scripts/ci-local.sh`"**） |
 
 ## 关联
 
