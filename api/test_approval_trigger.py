@@ -6,11 +6,16 @@
 ⚠️ 不碰 DB / Redis / 网络 —— 只测路由函数的返回值。
 
 📄 裁定 ⇒ `fastapi-rag-agent-TODO待办/后端补齐清单-待裁-20260929.md` 的 B4 · `✍️ 裁` 栏
-   （白名单第一版 = `{search_tool}` · 写在 `.env` 的 `SENSITIVE_TOOLS`）
+   （白名单第一版 = `{web_search}` · 写在 `.env` 的 `SENSITIVE_TOOLS`）
+
+🔴 **2026-10-03（DEC-051）勘误**：上面那个名字**原来写的是 `search_tool`** ——
+   那是**变量名**，不是工具名（真名是 `duckduckgo_search`，后换成 `web_search`）。
+   ⇒ 交集恒空 ⇒ **审批永不触发**，而这份文件**全程没红**（它自己就钉着那个错名字）。
+   ⛔ 别再写变量名 —— `SENSITIVE_TOOLS` 装的是**工具名**，判据在 `api/test_tool_dispatch.py`。
 """
 import os
 
-os.environ.setdefault("SENSITIVE_TOOLS", "search_tool")
+os.environ.setdefault("SENSITIVE_TOOLS", "web_search")
 
 import pytest                                                       # noqa: E402
 
@@ -28,13 +33,13 @@ def test_local_only_tools_do_not_need_approval():
 
 
 def test_external_side_effect_tool_needs_approval():
-    """`search_tool` 会把问题发到第三方 ⇒ 是敏感操作。"""
-    assert needs_approval(_calls("search_tool")) is True
+    """`web_search` 会把问题发到第三方 ⇒ 是敏感操作。"""
+    assert needs_approval(_calls("web_search")) is True
 
 
 def test_mixed_calls_need_approval():
     """只要**有任何一个**敏感 ⇒ 整体审批（不能"挑着执行"）。"""
-    assert needs_approval(_calls("date_today", "search_tool")) is True
+    assert needs_approval(_calls("date_today", "web_search")) is True
 
 
 def test_no_tool_calls_ends_the_graph():
@@ -75,11 +80,41 @@ def test_empty_whitelist_is_rejected_at_startup(monkeypatch):
     assert "SENSITIVE_TOOLS" in str(exc.value)
 
 
+def test_unknown_name_in_whitelist_is_rejected_at_startup(monkeypatch):
+    """🔴 **名单里有不存在的工具名 ⇒ 也不许启动**（DEC-051 · 第二段硬拦）。
+
+    ⚠️ 这一条是**上一条（空名单）的孪生兄弟**，而且它是**更常见的那种**：
+       空名单要"显式清空"才会发生，而**写错名字**是手滑就会发生的 ——
+       本仓自己就发生了（默认值写成了变量名 `search_tool`），且**活了整整三天**：
+       `validate_approval_config()` 当时只查"非空"，于是它**照常启动**、审批**从不触发**。
+
+    ⚠️ 判据是**集合差**，不是"名单非空"：名字必须能在 `tools` 里找到。
+    """
+    import agent_graph
+
+    monkeypatch.setattr(agent_graph, "SENSITIVE_TOOLS", frozenset({"no_such_tool"}))
+
+    with pytest.raises(EnvironmentError) as exc:
+        agent_graph.validate_approval_config()
+
+    assert "no_such_tool" in str(exc.value), "报错要点名那个不认识的名字"
+
+
 def test_validate_approval_config_passes_with_the_shipped_default():
     """反向：**出厂配置必须是通的** —— 否则服务根本起不来。
 
-    ⚠️ 与上一条配成一对：只测"空了会炸" ⇒ **可能误报**（比如判据写反、恒炸）。
+    ⚠️ 与上面两条配成一对：只测"错了会炸" ⇒ **可能误报**（比如判据写反、恒炸）。
+
+    🔴 **2026-10-03（DEC-051）加强**：原来只断言"不抛" —— 而**错名字当年也不抛**，
+       于是这条用例**在 bug 存在时照样是绿的**。⇒ 补一条"默认值必须真的命中工具"。
     """
+    import agent_graph
     from agent_graph import validate_approval_config
 
     validate_approval_config()      # 不抛即通过
+
+    assert agent_graph.SENSITIVE_TOOLS & {t.name for t in agent_graph.tools}, (
+        "🔴 出厂默认的白名单与真实工具名**没有交集** ⇒ 审批永不触发。"
+        f" 名单={sorted(agent_graph.SENSITIVE_TOOLS)} · "
+        f"工具={sorted(t.name for t in agent_graph.tools)}"
+    )

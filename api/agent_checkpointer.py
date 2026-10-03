@@ -10,11 +10,11 @@ from langgraph.checkpoint.memory import MemorySaver
 # 新增,RedisSaver 版本不兼容问题还没解决，现在暂时不用
 # from langgraph.checkpoint.redis import RedisSaver  
 from llm_factory import make_llm   # ①b Task 5：model / api_key / base_url / max_tokens 的唯一落点
-from langchain_community.tools import DuckDuckGoSearchRun
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 from datetime import datetime
 from safe_math import calculate  # DEC-049：`calculator` 的求值实现 —— ⛔ 别改回 `eval`
+from search_tools import web_search  # DEC-051：换掉本机不可达的 DuckDuckGo（见 `agent_graph.py` 同名处）
 
 # ==================== 初始化模型 ====================
 # ⚠️ 角色 = 「模型轴 fast」+「长度轴 agent(1024)」—— 见 `api/llm_factory.py` 的模块 docstring。
@@ -34,8 +34,12 @@ def date_today(query: str = "") -> str:
     weekdays = ["一", "二", "三", "四", "五", "六", "日"]
     return f"今天是{now.year}年{now.month}月{now.day}日，星期{weekdays[now.weekday()]}"
 
-search_tool = DuckDuckGoSearchRun()
-tools = [search_tool, calculator, date_today]
+tools = [web_search, calculator, date_today]
+# 🔴 DEC-051：工具名的**唯一来源** —— 分派查这张表，⛔ 别在 `tool_execute` 里再抄一遍名字。
+#    ⚠️ 本文件是那次「按 `"search"` 分派、而真名是 `duckduckgo_search`」bug 的**第二处**现场
+#       （活路径 = `POST /agent/memory_chat`）。守卫 ⇒ `api/test_tool_dispatch.py`
+TOOLS_BY_NAME = {t.name: t for t in tools}
+
 llm_with_tools = llm.bind_tools(tools)
 
 # ==================== 定义 State ====================
@@ -60,19 +64,19 @@ def agent_decide(state: AgentState):
     return {"messages": [response]}
 
 def tool_execute(state: AgentState):
+    """执行节点。🔴 **DEC-051：按 `TOOLS_BY_NAME` 查表分派** —— 理由与实测见 `agent_graph.py` 同名处。
+
+    ⚠️ 本文件**没有审批节点**（无 `interrupt_before` / 无 `SENSITIVE_TOOLS`）⇒
+       这里**不做** `validate_approval_config()` 那种启动自检。
+       📌 「`/agent/memory_chat` 这条路径完全没有审批门」是**已知遗留**，见 `DEC-051` 遗留·2。
+    """
     last_message = state["messages"][-1]
     tool_messages = []
     for tc in last_message.tool_calls:
         tool_name = tc["name"]
         tool_args = tc["args"]
-        if tool_name == "search":
-            result = search_tool.invoke(tool_args["query"])
-        elif tool_name == "calculator":
-            result = calculator.invoke(tool_args)
-        elif tool_name == "date_today":
-            result = date_today.invoke(tool_args)
-        else:
-            result = f"未找到工具: {tool_name}"
+        tool = TOOLS_BY_NAME.get(tool_name)
+        result = tool.invoke(tool_args) if tool else f"未找到工具: {tool_name}"
         tool_msg = ToolMessage(content=str(result), tool_call_id=tc["id"], name=tool_name)
         tool_messages.append(tool_msg)
 

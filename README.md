@@ -115,7 +115,11 @@
     > **能点的界面还没做**（属**硬门 B 的前端部分**，排在「后端先行」之后）。
     > ⚠️ 另：**`citations` 默认 `False`** —— 不显式打开，**连后端都不会给引用**。
     > 详见 `docs/契约/接口契约.md` §四 · `ROADMAP.md` 功能现状表。
--   **流式输出**：基于 SSE 逐字生成（`POST /rag/stream_search`，**全仓唯一 SSE 端点**）。
+-   **流式输出**：基于 SSE 逐字生成。
+    -   `POST /rag/stream_search`（RAG 端）
+    -   🔵 `POST /agent/langgraph_chat/stream`（**Agent 端 · 2026-10-03 新增** · `DEC-050`）——
+        ⚠️ **Agent 的 30 个端点里只有这 1 条是流式的**，其余 29 条仍全非流式（**硬门 A 缺口未关掉**）。
+        > 📌 **「全仓唯一 SSE 端点」这句 2026-10-03 起失效** —— 现在有 2 条。
     > 🔴 **2026-09-29 更正**：原文写「**支持真中断，避免 Token 浪费**」—— **不成立**。
     > 实测：全仓**唯一**的中断处理是 `api/api_v1_rag.py:676` 的 `except asyncio.CancelledError`
     > ⇒ 只有 `print` + `yield [DONE]`；**全仓无 `is_disconnected` / `aclose`** ⇒ **不关上游 HTTP 流**；

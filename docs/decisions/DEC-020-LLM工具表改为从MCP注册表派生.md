@@ -90,7 +90,8 @@ LLM 现在看到的 `calculator` / `date_today` 描述来自 `simple_tools`，**
 
 **⬜ 登记为后续**（不属本决策）：
 - **同类隐患**：`api/agent_graph.py:44` 与 `api/agent_checkpointer.py:43` **各自还有一份手工工具表**
-  （`[search_tool, calculator, date_today]`，3 个）。⚠️ 它们是**活路径**（被 `api_v1*.py` 导入），
+  （`[search_tool, calculator, date_today]`，3 个 —— ⚠️ **这是当时的名字与行号**；
+  `DEC-051`（2026-10-03）后搜索工具换成 `web_search`，两份手工表**仍然各自一份**）。⚠️ 它们是**活路径**（被 `api_v1*.py` 导入），
   但**没纳入本次修复** —— 是否同源化涉及"代际裁决"（M5 范围，`Agent 不代判`）。
 - **重复定义清理**：本文件的 `calculator` / `date_today` 与 `simple_tools` 的同名重复。
 

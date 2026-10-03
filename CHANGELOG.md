@@ -10,6 +10,154 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- ✅ **中断后那半截答案【存进历史】并打中断标记**（2026-10-03 · `③` Task 6 · `B3` · `DEC-053`）——
+  计划写的是「**不写代码先核**」，核出来的东西比判据假设的大一圈：
+
+  - **判据①「cancel 后已产生的 token 有记账」落空 —— 而且不是"取消时没记"**：
+    `grep -c record_usage api/api_v1_rag.py` ⇒ **0**、`api/rag_pipeline.py` ⇒ **0**
+    ⇒ **RAG 侧四条真调 LLM 的路径从来不记账**（`/rag/stream_search` · `/rag/search?generate_answer=true`
+    · `/rag/jwt_ask` · `/ws/agent`），**成功路径也不记**。真库佐证：`token_usage_logs` 里
+    **非 embedding 行全库只有 6 行**，全是 2026-09-20 的 agent graph 运行。
+    ⚠️ **还有一条技术上绕不过去的**：取消瞬间的 token 数**协议上拿不到** ——
+    `llm_factory` 没开 `stream_usage`，usage 只在**最后一帧**回来，而我们提前 `aclose()` ⇒
+    那一帧**永远不会到** ⇒ 硬补只能估算 = **往账本写假数**，比空着更坏。
+  - **判据②「半截答案处理方式明确」—— 现状是"丢"，但那是碰巧、不是决定**：
+    `append_chat_history` 写在循环之后，取消在它之前 `raise` ⇒ 一行都不跑；
+    ⚠️ **用户那句提问跟着一起丢**（它和答案写在同一个收尾段里）。
+
+  **决策：存，不是丢。** ① 作者原意就是存（`api_v1_rag.py:691` 注释写着"**使它支持历史补偿**"）；
+  ② 形态 = **提问 + 半截 + `INTERRUPTED_SUFFIX` 标记**（成对写；标记**必须**有 ——
+  历史会被原样拼进下一轮 prompt，不标 ⇒ 模型会把**断掉的话**当成"我上一轮说完了"）；
+  ③ 落点 **`finally`**（⛔ 不是 `except CancelledError` —— 2.4 分支抛 `GeneratorExit`，同 `DEC-052` 的理由）；
+  ④ **一块都没生成 ⇒ 什么都不写**（写空助手消息只会污染下一轮 prompt）。
+
+  ⚠️ **Agent 端不用改** —— 它的半路状态由 langgraph checkpointer（`MemorySaver`）持有，
+  取消时**已经在里面**；RAG 端什么都没有 ⇒ 两端本就不对称。
+
+  ⭐ **判据（可打印）**：`api/test_cancel_propagation.py` **10 → 13 例**
+  （`test_rag_persists_partial_answer_when_cancelled` 断言"存的就是客户端真收到的那段 + 标记" ·
+  反面 `…_full_answer_is_saved_without_interrupt_marker` · 边界 `…_cancel_before_any_chunk_saves_nothing`）
+  · 全量 **353 → 356 passed**（⛔ 零回归）· `bash scripts/ci-local.sh` **退出码 0**。
+  ⚠️ **第三条红不出来**（改动前它本来就过）—— 它是**反面守卫**，防"修过头"。
+  ⚠️ **本轮没起 Docker 真服务**（用户手动关了 `rag-api`）：判据落在进程内，且测试走的是**真 ASGI 断开**
+  （与 `B2` 同一段取消代码）；`B2` 那轮必须真服务是要证"计数在真 uvicorn 下也涨"，这一轮没有同类观测对象。
+  ⚠️ **仍未端到端验**：「**下一轮 prompt 真的读到了那半截**」。
+  📄 全文 ⇒ `docs/decisions/DEC-053-中断后的半截答案存进历史并打标记.md`（含 §遗留：
+  `except Exception` 那条路仍丢提问 · **RAG 侧零 LLM 记账**是独立缺陷、已立进 `docs/待办总表.md`）
+
+- ✅ **服务端 cancel 传播到上游 —— 两条流式端点**（2026-10-03 · `③` Task 5 · `B2` · `DEC-052`）——
+  客户端断开后**真的停掉并关掉上游**，⛔ 不是"前端不显示了"（后者后端仍在烧钱）。
+
+  **改了哪两条**：`/rag/stream_search` 与 `/agent/langgraph_chat/stream`
+  （后者是 `DEC-050` §遗留·3 **自己点的那个洞**：「新的流式路由同样没有 cancel 处理」）。
+
+  **计划要补三件，实际是「①不用补 · ②③照做 · 判据落空」**：
+
+  - ① **断开检测是框架给的** —— uvicorn 报 `spec_version 2.3` ⇒ Starlette 监听 `http.disconnect`
+    后**取消生成器**。⇒ 真缺口只有「停下并关掉上游」，**自己加 `is_disconnected()` 轮询是多余的**。
+  - ② 上游 `stream()` → **`astream()`** —— 同步 `for` 会**阻塞事件循环** ⇒ 取消得等"下一块到达"
+    才送得进来；上游卡住时最坏完全不生效。
+  - ③ 关流 + 记账放 **`finally`**：Starlette 有**两条**关闭路径（2.3 抛 `CancelledError`、
+    2.4 抛 **`GeneratorExit`** —— 后者**不是**前者的子类）⇒ 只写 `except` 的实现换条分支就**静默不记**。
+
+  🔴 **计划里那条判据「token 计数在该时间点停止增长」【无法证伪】** —— 实测**那个计数在流式路径上不存在**：
+  `grep -ci token api/metrics.py` ⇒ **0**（Prometheus 三个指标全是 HTTP 层）；PG 记账**只在生成结束后整笔写**，
+  实测流式请求**只有一行 embedding 记账、从没有 LLM 那一行** ⇒ **任何实现都能通过** ——
+  而这道硬门自标的正是「最容易假完成」。
+  ✅ 换成三个可打印的：① 日志有 `[cancel]` ② 新指标 **`stream_cancelled_total{endpoint}` +1**
+  ③ `outcome == "cancelled"`（它是**初值**，只有跑到收尾才置 `"done"` ⇒ 为真 = **循环没跑完**）。
+  新指标 ⇒ 新 spec `docs/specs/metrics.md`（⚠️ **Grafana 面板仍要手工加一格** —— provisioning 缺口没关）。
+
+  ⚠️ **两个当场踩到的坑**（已记进 `DEC-052`）：**中间件日志那个秒数不是生成耗时**（记到「响应开始返回」
+  为止 —— 实测 `0.019s` 的那条客户端收了 **27KB**）· 本机**有语义缓存**（问句只差两个字会被当成
+  同一个问题、`0.006s` 返回全量 ⇒ **测取消必须换语义上不同的问句**）。
+
+  ⛔ **不声明"上游计费停了"** —— 本机没有 DashScope 出账。只声明「**我们把上游的流关掉了**」。
+  ⚠️ **`B3`（半截答案）当时未做** ⇒ 那半截**直接丢**（不落库、不记账）。
+  🔴 **2026-10-03 当天已补**（`③` Task 6 · `DEC-053`）⇒ **改存进历史 + 打中断标记**；见本文件上一条。
+
+  ⭐ **判据（可打印）**：`api/test_cancel_propagation.py`（**10 例** · 纯离线 · 驱动**真 ASGI 取消路径**）·
+  全量 **343 → 353 passed**（+10，⛔ 零回归）· `bash scripts/ci-local.sh` **退出码 0** ·
+  真服务两条端点各验一遍（计数 +1 且日志有 `[cancel]`）。
+  📄 全文 ⇒ `docs/decisions/DEC-052-取消传播的观测对象与上游改异步.md`
+
+- 🔴 **两条「静默失效」的既有 bug 结掉 + 搜索工具换掉**（2026-10-03 · `DEC-051`）。
+  ⛔ **不是新功能** —— 是 `③` Task 4 跑**真服务**时照出来的**既有缺陷**，两条都在**硬门 D（人工接管）**的路径上。
+
+  **改前实测（可打印，不是推演）**：
+  ```
+  真实工具名     : ['duckduckgo_search', 'calculator', 'date_today']
+  SENSITIVE_TOOLS: ['search_tool']
+  交集           : []        <-- 空 = 审批永不触发
+  tool_execute 判的串: []    <-- 空 = 分派永远落 else
+  ```
+
+  **① 分派按【硬编码字面量】走** —— `tool_execute` 判 `if tool_name == "search"`，而真名是 `duckduckgo_search`
+  ⇒ 永远落 `else`、返回字面量 `"未找到工具: …"`。⚠️ **它不崩溃、不报错** ——
+  模型收到的是一条正常的"工具不存在"，于是**反复重试**（正是 `DEC-050` 那个多轮聚合缺陷的触发器）。
+  **修法**：建 `TOOLS_BY_NAME = {t.name: t for t in tools}`，**两条分派都改成查表**。
+  ⚠️ **第二次犯了** —— `plan_execute.py:101-110` 记着上一回（prompt 写 `search`、注册表里叫 `web_search`）
+  ⇒ 病根不是"写错"，是**名字有两个来源**。
+
+  **② `SENSITIVE_TOOLS` 的默认值写的是【变量名】`search_tool`，不是工具名** ⇒ **交集恒空** ⇒
+  **审批从来没触发过**。而 `validate_approval_config()` 当时**只查"非空"不查"名字真的存在"** ⇒ **照常启动**。
+  ⚠️ **`DEC-048 §四` 自己点名要防这个形态，却只拦了「空名单」** ⇒ 同一个失败**换个形状绕过了它自己的闸**；
+  且 **`api/test_approval_trigger.py:13` 自己也钉着那个错名字** ⇒ **不可能发现它**。
+  **修法**：默认值改成真工具名 **`web_search`** + 启动自检**加第二段**（名字不存在 ⇒ `raise EnvironmentError`，**拒绝启动**，
+  报错里**列出可用工具名**）。
+
+  **③ 顺带换掉旧搜索工具**：`DuckDuckGoSearchRun` → **`search_tools.web_search`（Bing 版）**。
+  ⚠️ **这不是"图新"** —— `search_tools.py:47` 记着 2026-09-21 实测 **`duckduckgo.com` 本机完全不通**。
+  ✅ 顺带修好**成本漏账**：`web_search` 已在 `token_tracker` 的成本/token 两张表里，**`duckduckgo_search` 一张都没有**。
+
+  ⭐ **判据（可打印）**：`api/test_tool_dispatch.py`（**9 例**：2 条 AST 静态 + 1 条全仓防第三份拷贝 +
+  2 条行为 + 2 条**子进程起服自检**）· `api/test_approval_trigger.py` **8 例**（+1）。
+  全量：**333 → 343 passed**（+10 = 新增用例，⛔ **零回归**）。
+
+  ⛔ **本 DEC 不声明"搜索能用了"** —— 只声明**"分派走对了"**（离线可验证）；联网效果**本机不可验证**。
+
+  ⚠️ **遗留（已留痕）**：`api_v1_rag.py:746` **还有第三份** `DuckDuckGoSearchRun`（只登记不动）·
+  `/agent/memory_chat`（`agent_checkpointer.py`）**整条路径没有审批门**（本次只修了它的分派）·
+  `agent_checkpointer.agent_decide` **没转发 `config`**（无真流式）。
+  📄 全文 ⇒ `docs/decisions/DEC-051-工具名分派与审批白名单的标识符勘误.md`
+
+- 🔵 **Agent 端真流式【第一条】**（2026-10-03 · `③` Task 4 · `B1` · `DEC-050`）—— 新增 **`POST /agent/langgraph_chat/stream`**（SSE）。
+
+  **为什么单独立档**：计划把这件事写成「**加一条 SSE 路由**」，判据是
+  `content-type` 是 `text/event-stream` + `data:` ≥ 2。🔴 **那条判据抓不到假流式** ——
+  后端整段一次性吐出来**也是 2 条 `data:`**，**照样绿**。
+
+  🔴 **真流式的必要条件在图那一侧**：`agent_decide` 必须**声明 `config: RunnableConfig`
+  并把它转发进模型的流式调用**。不这么做 ⇒ `astream(stream_mode="messages")` **只吐 1 块**（整段），
+  ⚠️ **而接口长得一模一样**（照样 `text/event-stream`、照样 `data:` 帧）。
+
+  **怎么改（两处，缺一不可）**：
+  · `api/agent_graph.py`：`agent_decide` 加 `config` 参数 + `.stream(…, config=config)` + **`+` 聚合**（189 → 222 行）
+  · `api/api_v1_agent.py`：新增流式路由（`StreamingResponse` + **`X-Accel-Buffering: no`**）
+  ⚠️ **`X-Accel-Buffering` 不是可选项** —— 少了它 Nginx/Cloudflare 会把整段缓冲住，**又变回假流式**（本仓要上 CF 隧道）。
+  ⚠️ **聚合必须用 `AIMessageChunk.__add__`**，⛔ 不能 `content +=` —— `tool_calls` 是**碎片化**到达的，
+  丢了它 ⇒ **`B4` 人工审批静默失效**，而接口返回 `{"status":"answered"}` 一切正常。
+
+  ⭐ **判据（可打印）**：`api/test_agent_sse.py`（**12 例 · 纯离线 · 进 CI**）——
+  数**块数**（⛔ 不看 header）· 不重复 · `tool_calls` 不丢 · 同步 `invoke()` 没被弄坏 · 空流不写 `None`。
+
+  🔴🔴 **真服务 Step 4 抓到我自己的一个 bug**：结尾的 `summary` 原本是**把流过 `agent` 节点的块攒起来**算的。
+  模型因工具返回"未找到工具"**重试**时节点进**多次** ⇒ 攒出了**上一轮的** `tool_calls`
+  ⇒ `summarize_agent_result` 误报 **`pending_approval`，而图其实跑完了**（前端会**永远等一个不会来的审批**）。
+  ✅ **修法**：从**图的最终状态**取（`await agent_graph.aget_state(config)` ⇒ `summarize_agent_result`），
+  与 `/agent/langgraph_chat` **同一套语义**。
+  **实测**：修前 29 帧 / 搜到 bug；修后 **216 个内容帧 + `status: answered` + `pending_tool_calls: null`**。
+
+  ⚠️ **本次只开了一条流式路由** —— 其余 **29 条仍全非流式**，硬门 A 的缺口**没关掉**。
+  ⚠️ **`B2`（cancel 传播）· `B3`（半截答案）仍未做**；本路由**同样没有 cancel 处理**（客户端断开后图会继续跑完）。
+
+  ⚠️ **顺带照出两个既有 bug（不是 `③` 引入的）**，记在 `docs/specs/agent_graph.md`：
+  ① `SENSITIVE_TOOLS` 默认值 `search_tool` **匹配不到任何真实工具**（真名是 `duckduckgo_search`）⇒ **审批永不触发**，
+  而 `validate_approval_config()` **只查"非空"不查"名字存在"**；
+  ② `tool_execute` 分派 `"search"` 而真名是 `duckduckgo_search` ⇒ **搜索工具永远返回"未找到工具"**（触发模型的搜索重试）。
+  ⇒ ✅ **当天就结掉了** ⇒ **`DEC-051`**（见上面第一条）—— 两条都已修 + 加了防复发的守卫。
+  ⚠️ **但①/②不是本条目（`B1`）的成果**，本条目只是**把它们照了出来**。
+
 - 🔴 **`calculator` 的任意代码执行面【已消除】**（2026-10-03 · `DEC-049`）—— **5 处 `eval` 收口到 AST 白名单求值**。
 
   **改的是什么**：`calculator` 工具的 `expression` 参数**是 LLM 生成的**，而 LLM 的输入包含
@@ -158,6 +306,14 @@ All notable changes to this project will be documented in this file.
 
   🔴 **白名单第一版 = `{search_tool}` 一个**（业务方 2026-10-03 裁）—— 它会**把问题外发到第三方**；
   `calculator`/`date_today` 是**本地纯函数**，不进白名单。⚠️ 位置 = **`.env` 的 `SENSITIVE_TOOLS`**。
+
+  > 🔴 **2026-10-03 勘误（`DEC-051`）**：上面那条里的 **`search_tool` 是【变量名】，不是工具名** ——
+  > 真名原为 `duckduckgo_search`，现为 **`web_search`**（`DEC-051` 换成 Bing 版）。
+  > ⇒ **本条当日落地的版本，白名单与真实工具名【交集恒空】⇒ 审批其实【从未触发过】**，
+  > 而 `validate_approval_config()` **只查"非空"不查"名字存在"** ⇒ **照常启动、不报错**。
+  > ⚠️ **"改了口径"与"口径真的生效"是两件事** —— 前者当天成立，后者**晚了三天**。
+  > 📄 全文 ⇒ `docs/decisions/DEC-051-工具名分派与审批白名单的标识符勘误.md`
+  > 📌 **本条目其余内容（三条路的表格、语义裁定、`.env` 位置）全部仍然成立** —— 改的只有那个名字。
 
   ⚠️ **顺手修了三处"改完就成假话"的注释与文档** —— 本仓纪律是「**改口径立刻全仓搜那个词**」：
   ① `api_v1_agent.py:66` 的 `summarize_agent_result` docstring（🔴 **判据的【理由】变了，结论没变**：
@@ -810,6 +966,36 @@ All notable changes to this project will be documented in this file.
   **移入 = 源处删除 + 留指针**（516 → 480 行）。
 
 ### Fixed
+
+- 🔴🔴 **取消路径的收尾在真服务的【主场景】下一条都不跑 —— 而单测全绿**（2026-10-03 · `③` Task 6 真服务验证 · `DEC-054`）。
+
+  `③` Task 6（`B3`）的端到端验证**失败**，失败的方式是本次最值钱的收获：
+
+  | 轮次 | 切法 | 计数 | `[cancel]` 日志 | Redis 历史 |
+  |---|---|---|---|---|
+  | `B2` 轮 | **早切**（一块都没吐就断） | 1.0 → 2.0 ✅ | 有 ✅ | —— |
+  | `B3` 轮 | **晚切**（已吐字再断） | 2.0 → **2.0** ❌ | **无** ❌ | **0 条** ❌ |
+  | 修后复验 | 晚切 | 2.0 → **3.0** ✅ | 有 ✅ | **2 条**（提问 + 半截**带中断标记**）✅ |
+  | 对照组（容器里**未修**的同一份代码） | 晚切 | 2.0 → 2.0 ❌ | 无 ❌ | 0 条 ❌ |
+
+  **根因**：**二次投递的取消**。Starlette 取消流式任务后，取消会在**下一个真实挂起点**重投
+  ⇒ `finally` 里的 `await stream.aclose()` 一挂起就抛 `CancelledError`
+  ⇒ **排在它后面的收尾（计数 / 日志 / 半截落盘）整体作废**。
+  ⚠️ **单测当时 13 条全绿** —— 假流的 `aclose()` 只置位后正常返回，**它不会失败，所以照不出真服务**。
+  ⚠️ **早切测不出来**：生成器还没被推进过 ⇒ `aclose()` 不必真收尾 ⇒ 不挂起 ⇒ 打不断。
+  **只有「用户已经看到字再点停止」才露出来 —— 而那才是主场景。**
+
+  **修法（两条一起，缺一不可）**：
+  ① **同步**收尾（`track_stream_cancel` / `[cancel]` 日志 / `_persist_interrupted_turn`）提到**任何 `await` 之前**；
+  ② 关流包 `anyio.CancelScope(shield=True)`（取消会**反复投递**，不护住 ⇒ "关"每次都半途而废）。
+  ⇒ 两条端点同改：`api/api_v1_rag.py` · `api/api_v1_agent.py`。
+
+  **判据**：`api/test_cancel_propagation.py` **17 passed**（`B2` 10 · `B3` 3 · 10-03 复现 4）；
+  ⚠️ 两条修法**各有一条用例独立钉住** —— 实测把"关流"挪回收尾之前 ⇒ **只有"顺序"那条变红**
+  （`assert 6.0 == 6.0 + 1`），shield 那条照样绿 ⇒ **不是重复用例**。
+  全量 `360 passed` · `bash scripts/ci-local.sh` 退出码 0。
+  📄 `DEC-054` · 复盘 `docs/复盘/2026-10-03-单测全绿而真服务全废.md` ·
+  `docs/复盘/2026-10-03-判据脚本自己撒谎.md`
 
 - 🔴 **提交钩子把「本次没有 .py 改动」说成了「git 读不到 staged」**（2026-10-01 · `.claude/hooks/pre-commit-gates.py`）。
 

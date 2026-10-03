@@ -11,7 +11,7 @@ import pending_approvals as pa
 
 def test_register_then_list():
     pa.clear()                                   # 测试隔离
-    pa.register("t1", "admin", [{"name": "search_tool", "args": {"q": "x"}}])
+    pa.register("t1", "admin", [{"name": "web_search", "args": {"q": "x"}}])
     rows = pa.list_pending()
     assert len(rows) == 1
     assert rows[0]["thread_id"] == "t1"

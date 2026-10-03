@@ -3,9 +3,15 @@ API v1 路由集中定义
 所有 /api/v1 前缀的接口在此管理。
 """
 import asyncio
+# `③` Task 5 补（2026-10-03 · 真服务实测）：`finally` 里关图的流要用 `anyio.CancelScope(shield=True)`
+# **护住** —— 否则那一次 `await` 会被反复投递的取消打断（与 `api_v1_rag.py` 同一处病）。
+import anyio
 import json
 import time
 from fastapi import APIRouter, Depends, Path, Query
+from fastapi.responses import StreamingResponse   # B1：Agent 端 SSE
+from loguru import logger                          # `③` Task 5：取消事件要落到日志（判据①）
+from metrics import track_stream_cancel            # `③` Task 5：取消事件进 Prometheus（判据③的观测对象）
 from exceptions import ErrorCode, AppException
 from deps import get_current_user_hybrid, get_current_user_jwt, require_admin
 
@@ -144,6 +150,150 @@ async def langgraph_chat(
         "requested_by": user_name,
         **summary,
     }
+
+@router.post("/agent/langgraph_chat/stream")
+async def langgraph_chat_stream(
+    question: str,
+    thread_id: str = "default",
+    user_name: str = Depends(get_current_user_hybrid),
+):
+    """`/agent/langgraph_chat` 的**流式**版本（`B1`）。SSE 逐 token 返回。
+
+    ## 帧格式（与 `/rag/stream_search` 一致，便于前端复用）
+
+    | 帧 | 何时 |
+    |---|---|
+    | `data: {"content": "…"}` | **每个 token 一帧** |
+    | `data: {"thread_id": …, "status": …, "answer": …, "pending_tool_calls": […]}` | 收尾**一帧汇总** |
+    | `data: [DONE]` | 结束哨兵 |
+
+    ⚠️ 那一帧**汇总**不是可有可无的：`status="pending_approval"` 是**唯一**告诉调用方
+       "工具还没执行、要带同一个 `thread_id` 去 `/agent/approve`"的地方。
+       **砍掉它 = 前端只会看到一个戛然而止的半截答案**，而 HTTP 返回 200。
+
+    ## 🔴 判据是「**逐字出现**」，⛔ 不是「有 `text/event-stream`」
+
+    **假流式**（整段一次到、前端再切字符）**照样有 `text/event-stream`、照样有 `data:` 帧**。
+    ⇒ 判据钉在**后端出块**：`api/test_agent_sse.py::test_graph_streams_one_chunk_per_token`。
+    ⇒ 「时间戳递增」那一条 TestClient 测不出（拿到的是已缓冲的整段），
+      用**真服务 + 真 HTTP** 验：
+       `curl -N … | while IFS= read -r line; do echo "$(date +%T.%3N)  $line"; done`
+
+    ## ⚠️ 三条接线**必须与 `/agent/langgraph_chat` 保持一致**（⛔ 别只做一半）
+
+    1. **B8 会话级上限 + B11 全站日级熔断** —— 两条都要过（在**进生成器之前**，
+       否则触顶会变成"HTTP 200 + 流到一半断掉"，调用方看不出是被限额拒了）；
+    2. **B5 待接管队列** —— 停在审批点时要 `register`，否则 `/agent/pending` 里**找不到它**
+       （`MemorySaver` 没有"列出全部 thread"的 API，这个登记是**唯一**的入口）；
+    3. **`summarize_agent_result`** —— 状态口径只有它一处，⛔ 别在这里另写一套判断。
+    """
+    # B8 · 会话级 token 上限（`DEC-041`）—— 触顶动作 = 直接拒绝（与 `/agent/langgraph_chat` 同）
+    ok, why = check_session_token_budget(user_name, thread_id)
+    if not ok:
+        raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
+
+    # B11 · 全站日级熔断（`①b` Task 4）—— 与上一段**并列、都要过**
+    ok, why = circuit(global_key())
+    if not ok:
+        raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
+
+    ENDPOINT = "agent_langgraph_chat_stream"   # Prometheus 的 label（`③` Task 5）
+
+    async def generate():
+        stream = None
+        # ⚠️ 默认按「被取消」算 —— 只有跑到收尾才改成 `"done"`（理由同 `/rag/stream_search`：
+        #    Starlette 2.3 抛 `CancelledError`、2.4 抛 `GeneratorExit`，两条都要记到）。
+        outcome = "cancelled"
+        try:
+            # ⚠️ 必须**绑成变量**：`finally` 里要 `aclose()` 它。
+            #    ⛔ 别退回"在 `async for` 里内联调用" —— 那样拿不到这个流的句柄，关不掉。
+            stream = agent_graph.astream(
+                {"messages": [HumanMessage(content=question)]},
+                config={"configurable": {"thread_id": thread_id}},
+                stream_mode="messages",
+            )
+            async for chunk, meta in stream:
+                # ⚠️ 只转发 `agent` 节点出的块。图里还有 `tools` / `approval` 节点，
+                #    不加这道过滤，它们吐的消息会**混进正文**
+                #    （实测：`tools` 节点的 `ToolMessage` 内容会作为一块出现）。
+                if meta.get("langgraph_node") != "agent":
+                    continue
+
+                # ⚠️ 空 content 的块**必须跳过**：`tool_call` 的碎片 content 就是空的
+                #    （实测：一次 tool_call 会来 2–3 个空 content 块）。
+                #    不过滤 ⇒ 前端收到一串空白帧。
+                if chunk.content:
+                    yield f"data: {json.dumps({'content': chunk.content}, ensure_ascii=False)}\n\n"
+            outcome = "done"
+        except asyncio.CancelledError:
+            # 客户端断开（`③` Task 5 · `B2`）—— ⛔ **不许吞**：吞掉外层会以为这是"正常结束"。
+            # ⚠️ 也**不许在这里 yield**：接收方已经走了，发出去只会让帧层面分不清
+            #    「已取消」与「正常收尾」（`/rag/stream_search` 那边的实测同款）。
+            raise
+        except Exception as e:
+            outcome = "error"
+            # 兜底：⛔ 别让异常**静默**变成"流自然结束" —— 那前端看到的是
+            # "答案说了一半就没了"，而**没有任何错误信号**。
+            yield f"data: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+            yield "data: [DONE]\n\n"
+            return
+        finally:
+            # 🔴🔴 **顺序与关流方式 = 2026-10-03 真服务实测改的**（与 `api_v1_rag.py` 同一处病）：
+            #    `await stream.aclose()` 会被**二次投递的取消**打断 ⇒ 抛 `CancelledError`
+            #    ⇒ 排在它后面的计数与日志**一件都不跑**（实测：计数 `2.0→2.0`、日志没有）。
+            #    ⇒ ① **同步**的收尾提到 `await` 之前 · ② 关流用 shield 护住。
+            if outcome == "cancelled":
+                track_stream_cancel(ENDPOINT)
+                logger.info(f"[cancel] 客户端断开，已停止生成并关闭图的流 endpoint={ENDPOINT}")
+
+            # 🔴🔴 **本任务的核心动作**：客户端断开后**关掉图的流**。
+            #    不关 ⇒ 图会**继续跑完**（`DEC-050` §遗留·3 自己点了这条：
+            #    "新的流式路由同样没有 cancel 处理"）—— 继续跑 = 继续调模型 = 继续烧钱。
+            #    ⚠️ `shield=True` **必须**：取消作用域反复投递取消，不护住 ⇒ 关流半途而废。
+            if stream is not None:
+                with anyio.CancelScope(shield=True):
+                    await stream.aclose()
+
+        # 🔴🔴 **状态必须取自【图的最终状态】，⛔ 不是"把 `agent` 节点的流式块攒起来"。**
+        #
+        #    这一条是 **2026-10-03 在真服务上跑出来的**（`③` Task 4 Step 4），不是想出来的：
+        #    问一句会触发搜索的话，模型因工具报「未找到工具」而**重试了好几轮**。
+        #    原先攒块 ⇒ 攒出的消息**带着上一轮的 `tool_calls`** ⇒ `summarize_agent_result`
+        #    判成 `pending_approval` ⇒ **接口报"在等人工审批"，而图其实早就跑完了**
+        #    （前端会一直等一个**永远不会来**的批准）。
+        #    攒块还会让两轮的 name 粘成 `"date_todayduckduckgo_search"` 这种串
+        #    （⚠️ 那是**当时的工具名**；`DEC-051` 已把搜索换成 `web_search` ⇒ ⛔ 别拿这串当真名）。
+        #
+        #    ⚠️ 一轮就能跑完的场景**盖不住**它 ⇒ 守卫用**两轮**的假图：
+        #       `api/test_agent_sse.py::test_status_comes_from_final_state_not_from_streamed_chunks`
+        #
+        #    ✅ 这样与 `/agent/langgraph_chat` 的口径**完全一致**（它也喂 `result` 整份 state），
+        #       状态判定只有 `summarize_agent_result` 一处，⛔ 不在这里另写一套。
+        state = await agent_graph.aget_state({"configurable": {"thread_id": thread_id}})
+        summary = summarize_agent_result(state.values or {})
+
+        # B5 · 待接管队列（`②` Task 2）—— 与 `/agent/langgraph_chat` 同款：
+        # ⚠️ `else` 那支不是可省的：本轮没卡住 ⇒ 清掉上一次的登记，
+        #    否则同一个 thread 卡过一次就**永远留在队列里变成假待办**。
+        if summary.get("status") == "pending_approval":
+            register(thread_id, user_name, summary.get("pending_tool_calls") or [])
+        else:
+            resolve(thread_id)
+
+        yield f"data: {json.dumps({'thread_id': thread_id, **summary}, ensure_ascii=False)}\n\n"
+        yield "data: [DONE]\n\n"
+
+    # ⚠️ `X-Accel-Buffering: no` 不能省：有反代（Nginx / Cloudflare）时它会把 SSE **攒着发**，
+    #    本地直连一切正常、**上线后变成假流式** —— 而那是本任务唯一要防的东西。
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 # ==================== 属于AgentGraph 接口下  新增的： AgentGraph 人工审批接口 ====================
 

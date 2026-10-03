@@ -21,6 +21,24 @@ REQUEST_IN_PROGRESS = Gauge(
     "Number of requests currently in progress"
 )
 
+# 流式响应被客户端中途断开的次数（`③` Task 5 · `B2` · 硬门 C）。
+# ⚠️ **为什么需要它**：上面前三个指标数的是**请求**（HTTP 层），
+#    而"上游到底停没停"是**另一件事**；本仓的 token 记账走 `token_tracker` → PG，
+#    而那条链**在流式生成阶段一行都不写** ⇒ 没有这个计数器，取消**没有任何可观测对象**
+#    （实测：`grep -ci token api/metrics.py` = 0 · `grep -c prometheus api/token_tracker.py` = 0）。
+# 📌 **Grafana 固定看板要手工加一格** —— provisioning 缺口仍在（ROADMAP 阻塞项 #2），
+#    这个 counter 不会自动变成面板。先在 Explore 里查：`sum(rate(stream_cancelled_total[5m]))`
+STREAM_CANCELLED = Counter(
+    "stream_cancelled_total",
+    "流式响应被客户端中断、服务端已停止生成并关闭上游流的次数",
+    ["endpoint"],
+)
+
+
+def track_stream_cancel(endpoint: str):
+    """记一次「流式被取消」。⚠️ 幂等由调用方保证 —— 每条流**最多记一次**。"""
+    STREAM_CANCELLED.labels(endpoint=endpoint).inc()
+
 
 def track_request(endpoint: str, method: str, status: int, duration: float):
     """记录一次请求的指标"""
