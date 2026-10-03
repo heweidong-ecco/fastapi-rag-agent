@@ -10,6 +10,33 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- 🟢 **新增 `DEC-058` + 一条规矩落进 `docs/规范/开发规范.md §2.5·5`**（2026-10-03）——
+  **「不连库的用例一律用【裸】`TestClient(app)`，⛔ 不用 `with … as`」**。
+
+  **起因**：`PR #74` 合并后、N6 开 PR 前跑 `bash scripts/ci-local.sh` ⇒ **`1 failed, 411 passed`**，
+  红的正是 N6 自己新写的反向守卫 `api/test_removed_endpoints.py::test_rag_ask_stays_removed`。
+
+  **根因**：`with TestClient(app) as client:` 的**唯一效果**就是**跑 lifespan 的 startup**
+  ⇒ 拉起整个应用启动流程（含 `init_pool()`）⇒ **真去连 Postgres**。
+  ⚠️ **本机看不见**（本机 Postgres 真开着 ⇒ 连得上 ⇒ 照样绿）；**CI 没有 Postgres ⇒ `Connection refused`**。
+
+  **裁的三条路**（⛔ 不是"写法偏好"）：
+  | | 方案 | 结局 |
+  |---|---|---|
+  | **甲** | **裸 `TestClient(app)`** | ✅ **选用** —— 本仓**既有写法**（修复前全仓只有这一处用 `with … as`） |
+  | **乙** | 给该用例标 `needs_db` | ⛔ **自废武功** —— 它**与库无关**；标了 ⇒ 被 `-m` 排除 ⇒ **守卫从 CI 里消失**（「门挂在别处＝没有门」的变体） |
+  | **丙** | 保留 `with … as`，patch `init_pool` | ⛔ **把"猜的答案"固化进代码** —— 它默认"这用例需要 startup"，而**事实相反**；下一个人会照抄那个前提 |
+
+  **立成的规矩**：**两个集合应当 `A ⊆ B`** ——
+  `grep -rlnE '^[[:space:]]*with TestClient'` 的文件，必须同时出现在 `grep -rln 'needs_db'` 里。
+
+  ⚠️ **写判据时又栽了一次（⛔ 别照抄）**：`grep -rn 'with TestClient'` 会命中**本文件 docstring 里**
+  那句「⛔ 别把这里改成 `with TestClient(app) as client:`」的提醒 ⇒ **数成 1**（实测）。
+  ⇒ **判据纪律第 2 条**：按位置核，注释 / 文档串里也有同样的串。**已做判据自证**：退回修复 ⇒ 1 命中；修后 ⇒ 0。
+
+  📄 `docs/decisions/DEC-058-不连库的用例用裸TestClient.md` ·
+  `docs/规范/开发规范.md §2.5·5` · 同族复盘 `docs/复盘/2026-10-03-CI同款命令不等于CI等价物.md`
+
 - 🔴 **多用户检索隔离【收官】：最后 2 条端点收口 ⇒ 8 条检索路径全部按身份过滤**（2026-10-03 · `DEC-056` **乙段**）——
   **甲段（共享层承重）一次修好 4 条，但那 2 条【自己写 SQL】⇒ 改共享层根本碰不到它们。**
 

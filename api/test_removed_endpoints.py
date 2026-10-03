@@ -32,6 +32,8 @@ def test_rag_ask_stays_removed():
     📌 **本仓判据**：本用例只断**路由存不存在**，**不需要任何 startup** ⇒ 用**裸 `TestClient(app)`**
     （全仓不连库的用例都是这么写的；`with … as` 全仓**只有这一处**，就是它把自己坑了）。
     📄 `docs/复盘/2026-10-03-CI同款命令不等于CI等价物.md`
+    📄 **裁决全文（含"为什么不标 `needs_db`"）⇒ `docs/decisions/DEC-058-不连库的用例用裸TestClient.md`**
+    　　· 规矩落在 `docs/规范/开发规范.md §2.5·5`
     """
     client = TestClient(app)
     resp = client.post("/api/v1/rag/ask", json={"question": "x", "top_k": 3})
