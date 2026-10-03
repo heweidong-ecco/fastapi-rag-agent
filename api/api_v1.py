@@ -28,8 +28,8 @@ from jwt_handler import (
     create_refresh_token,
     verify_refresh_token,
 )
-from permission import get_user_role, get_user_quota, UserRole
-from quota_limiter import quota_limiter
+from permission import get_user_role
+from token_tracker import get_token_budget_info
 from rate_limiter import user_limiter
 from cache import redis_client
 from embedding_client import client
@@ -214,19 +214,24 @@ async def debug_count():
 @router.get(
     "/debug/quota/{user_name}",
     summary="权限分流的测试接口",
-    description="权限分流的测试接口，限流（按角色不同限额）",
+    description="查看用户的日配额（**token 口径** · 按角色不同预算）",
     tags=["调试"]
 )
 async def check_quota(user_name: str):
-    """查看用户配额"""
+    """查看用户的日配额（**token 口径** · `DEC-046`）。
+
+    🔴 2026-10-03 改：原先返回「每日**请求次数**」（`permission.ROLE_QUOTA` + `quota_limiter`）。
+    两者口径实测**差 35 倍**（`DEC-029`）⇒ 业务方裁「统一到 token 一套」（`DEC-040`）。
+    ⚠️ 字段名 `daily_limit` / `remaining` **保留**，但**单位已从「次」变成 token**。
+    """
     role = get_user_role(user_name)
-    quota = get_user_quota(user_name)
-    remaining = quota_limiter.get_remaining(user_name, quota)
+    info = get_token_budget_info(user_name)
     return {
         "user_name": user_name,
         "role": role,
-        "daily_limit": quota,
-        "remaining": remaining if remaining != -1 else "无限",
+        "daily_limit": info["daily_budget"],
+        "remaining": info["remaining"],
+        "used_today": info["used_today"],
     }
 
 #对比测试：缓存命中和无缓存命中 时间差距 ，正常生产级数据库大概是5倍，看数据库大小

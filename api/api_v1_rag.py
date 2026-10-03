@@ -36,7 +36,7 @@ from deps import get_current_user_hybrid, get_current_user_jwt, require_admin
 from db import get_db, insert_document,insert_batch_documents
 from embedding_client import get_embedding
 
-from permission import get_user_role, get_user_quota, UserRole
+from permission import get_user_role, UserRole  # ⚠️ 2026-10-03 删 `get_user_quota`（本文件从未使用；该函数已随 DEC-046 一起删）
 from tools_with_cache import get_weather  # ⚠️ 2026-09-20 删 `calculator`（D1）：它在被下方那个**函数内的局部 calculator** 覆盖前从未使用
 from db import invalidate_bm25_cache
 from hybrid_search import hybrid_search

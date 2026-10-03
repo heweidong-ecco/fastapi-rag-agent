@@ -220,12 +220,72 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 # 将中间件添加到应用
 app.add_middleware(RateLimitMiddleware)
 
-# ==================== 权限分级中间件 ====================
-from permission import get_user_role, get_user_quota
-from quota_limiter import quota_limiter
+# ==================== 权限分级中间件（按用户按天的 token 上限 · R1.3） ====================
+# 🔴 2026-10-03 改（决策一落地 · DEC-046）—— 原先是「**每日请求次数**」配额
+#    （`permission.ROLE_QUOTA` + `quota_limiter`），与 token 那套**互不知情**：
+#    `DEC-029` 实测两者口径**差 35 倍**（`plan_execute` 一次 ~3346 token
+#    ⇒ 按次数能跑 100 次、按 token 只能跑 ~3 次）⇒ 业务方裁「统一到 token 一套」(`DEC-040`)。
+#
+# ⚠️ 这里是**原位置换**，⛔ 不是「把这一层删掉」：
+#    次数配额是当时**唯一**覆盖「所有非公开路径 + 按用户 + 按天」的一层
+#    （会话级 `B8` 按 (用户,会话) 计、换个 `thread_id` 就重置；全局日级 `B10` 看不到「某一个人」）
+#    ⇒ 直接撤会开一个「单用户跨会话无限花」的洞。所以撤旧的同时**就地**接上 token 口径 = `R1.3`。
+from datetime import datetime, timedelta
+
+from token_tracker import get_token_budget_info
+
+
+def _next_day_reset_ts() -> int:
+    """次日 0 点的 Unix 时间戳 —— 日预算由 SQL 的 `created_at >= CURRENT_DATE` 翻页。"""
+    now = datetime.now()
+    tomorrow = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+    return int(tomorrow.timestamp())
+
+
+def quota_reject_payload(info: dict) -> dict | None:
+    """按【用户】【每天】的 token 预算判定 —— 返回「**拒绝体 or None**」。
+
+    ⚠️ **抽成纯函数**的理由与 `_rate_limited_payload` / `resolve_rate_limit_identity` 相同：
+    中间件本体要连 DB（`token_tracker` 查 `token_usage_logs` 表），抽出来才能**不连库单测**
+    （见 `api/test_quota_middleware.py`）。
+    """
+    remaining = info.get("remaining")
+    # `get_token_budget_info` 对 inf 预算返回字符串 "无限"；`None` / `-1` 是防御性兜底。
+    if remaining in (None, "无限", -1):
+        return None
+    if remaining > 0:
+        return None
+    return {
+        "error": (
+            f"今日 Token 预算已用完（已用 {info.get('used_today')}，"
+            f"日预算 {info.get('daily_budget')}）。请明日再试。"
+        ),
+        "code": ErrorCode.QUOTA_EXCEEDED.value,
+        "status_code": 429,
+        "extra": {
+            "daily_budget": info.get("daily_budget"),
+            "used_today": info.get("used_today"),
+            "remaining": 0,
+        },
+    }
+
+
+def quota_headers(info: dict) -> dict:
+    """构造 `X-Quota-*` 响应头 —— ⚠️ **语义已从「次数」变为「token」**。
+
+    ⚠️ 头名**故意不改**：客户端已经在读它们，改名的破坏面比改语义更大。
+       但**值的意思变了** —— `X-Quota-Limit` 现在是**每天的 token 预算**，不是次数。
+    ⚠️ `X-Quota-Reset` 仍是「次日 0 点的 Unix 时间戳」（与改动前一致）。
+    """
+    return {
+        "X-Quota-Limit": str(info.get("daily_budget")),
+        "X-Quota-Remaining": str(info.get("remaining")),
+        "X-Quota-Reset": str(_next_day_reset_ts()),
+    }
+
 
 class QuotaMiddleware(BaseHTTPMiddleware):
-    """检查用户配额，超出限制返回429"""
+    """按【用户】【每天】的 **token 上限** 检查（`R1.3`），超出返回 429。"""
     
     async def dispatch(self, request: Request, call_next):
         # 跳过公开接口（名单见模块级 PUBLIC_PATHS —— 原先这里与 RateLimitMiddleware 各写一份）
@@ -249,47 +309,29 @@ class QuotaMiddleware(BaseHTTPMiddleware):
                 from jwt_handler import verify_access_token
                 user_name = verify_access_token(token)
         
-        if user_name:
-            # 获取配额
-            quota = get_user_quota(user_name)
-            info = quota_limiter.get_quota_info(user_name, quota)
-            if not quota_limiter.increment_and_check(user_name, quota):
-                # 配额已用完，返回429，使用标准化错误格式
-                # ⚠️ 2026-09-20 删（D1/pyflakes：局部变量赋值后从未使用）：此处原有
-                #     remaining = quota_limiter.get_remaining(user_name, quota)
-                #     role      = get_user_role(user_name)
-                #   两行 —— 但下面的响应体里**没有用它们**：`role` 是**又调了一遍**
-                #   `get_user_role(user_name).value`，而 `remaining` 直接硬编码成 `0`
-                #   （在"配额已用完"这条分支里，它本来就恒为 0 ⇒ 硬编码是对的）。
-                #   ⇒ 这两行是死代码，删掉。行为不变。
-                response = JSONResponse(
-                    status_code=429,
-                    content={
-                        "error": f"今日调用次数已用完，您的角色为 {get_user_role(user_name).value}，每日限额 {quota} 次。",
-                        "code": ErrorCode.QUOTA_EXCEEDED.value,
-                        "status_code": 429,
-                        # 额外信息仍可保留，方便调用方调试
-                        "extra": {
-                            "role": get_user_role(user_name).value,
-                            "daily_limit": quota,
-                            "remaining": 0
-                        }
-                    }
-                )
-                # 添加标准配额头
-                response.headers["X-Quota-Limit"] = str(info["limit"])
-                response.headers["X-Quota-Remaining"] = str(info["remaining"])
-                response.headers["X-Quota-Reset"] = str(info["reset"])
-                return response
-            # 配额未满，放行
+        # 未识别身份的请求**原样放行**（与改动前一致）——
+        # ⚠️「匿名可打」是另一个问题（`B9`），⛔ 本任务不碰它，撤次数配额不应顺带改变匿名行为。
+        if not user_name:
+            return await call_next(request)
+
+        info = get_token_budget_info(user_name)
+
+        body = quota_reject_payload(info)
+        if body is not None:
+            # 日 token 预算已用完
+            request_id = request_id_var.get()
+            logger.bind(request_id=request_id).warning(f"用户 {user_name} 触发日 token 预算上限")
+            response = JSONResponse(status_code=429, content=body)
+            # `retry_after` 与 `X-Quota-Reset` 同源：次日 0 点（见 `_next_day_reset_ts`）
+            response.headers["Retry-After"] = str(max(1, _next_day_reset_ts() - int(time.time())))
+        else:
+            # 预算未满，放行
             response = await call_next(request)
-            # 请求成功时也添加配额头，方便客户端了解当前用量
-            response.headers["X-Quota-Limit"] = str(info["limit"])
-            response.headers["X-Quota-Remaining"] = str(info["remaining"])
-            response.headers["X-Quota-Reset"] = str(info["reset"])
-            return response
-        
-        return await call_next(request)
+
+        # ⚠️ 请求**成功时也**返回配额头，方便客户端了解当前用量（与改动前一致）
+        for _k, _v in quota_headers(info).items():
+            response.headers[_k] = _v
+        return response
 
 # 将中间件添加到应用（放在限流中间件之后）
 app.add_middleware(QuotaMiddleware)

@@ -59,7 +59,7 @@ bash scripts/list_endpoints.sh          # 默认 http://127.0.0.1:8000
 | 硬门 D · 人工接管 | 🟡 | 地基在（`api/agent_checkpointer.py` + `interrupt_before=["approval"]`）；⚠️ **触发条件 = 任意 tool_calls**，且**无「待接管队列」端点** |
 | 认证（API Key + JWT · 三级角色） | ✅ | `api/deps.py` · `api/auth.py` · `api/permission.py` ⚠️ 角色**按名字硬编码** |
 | 限流（频率） | 🟡 | `api/rate_limiter.py` —— ⚠️ **所有匿名共用一个桶**，且 `X-API-Key` 分支**不验签** |
-| 限额 · 四层 | 🟡 | **3 层能拦 · 1 层没有**（2026-10-02）：<br>✅ `R1.1` 单次上限（常量收口 + **15 处接线**）· ✅ `R1.2` 会话级（`B8`，接在 **7 条对话链**上）<br>✅ `R1.4` 全局日级（`B10` 判定 + **`B11` 接线 8 处**，2026-10-02）· ⬜ `R1.3` 用户日级（**没有**）<br>⚠️ **另有一层是漏的**：`quota_limiter.py` 对**匿名请求完全绕过**（与上面四层不是同一件事）<br>📌 **逐层详表见下方「R1.1–R1.4 四层限额」行** |
+| 限额 · 四层 | ✅ | **4 层齐了**（`R1.3` 于 **2026-10-03** 补齐 · `①b` Task 6 · `DEC-046`）：<br>✅ `R1.1` 单次上限（常量收口 + **15 处接线**）· ✅ `R1.2` 会话级（`B8`，接在 **7 条对话链**上）<br>✅ `R1.3` **用户日级**（token 口径 · `main.QuotaMiddleware` **全路径** · 2026-10-03）· ✅ `R1.4` 全局日级（`B10` 判定 + **`B11` 接线 8 处**）<br>⚠️ **仍有一层是漏的**：配额那层对**匿名请求完全绕过**（`main.py:314` 的 `if not user_name:`，与上面四层不是同一件事）—— 旧写「`quota_limiter.py` 绕过」，**该模块 2026-10-03 已删**，行为不变<br>📌 **逐层详表见下方「R1.1–R1.4 四层限额」行** |
 | 熔断 | 🟡 | **有（2026-10-02 · `B11`）** —— `api/breaker.py` 的通用**按 key** 断路器；**只接了 `global:` 一条**<br>⚠️ `model:` 那类（`L2` 降级链 / `L3` TTL / `L4` 可见标记 / `L5` 排序）**还没做** |
 | 成本 / token 可见 | ✅ | `api/token_tracker.py`（9 个汇总函数）· Gradio 看板挂在 `/dashboard` |
 | Agent（4 套实现） | ✅ | `agent_graph.py` · `agent_graph_advanced.py` · `agent_graph_advanced_learning.py` · `plan_execute.py` |
@@ -153,9 +153,12 @@ bash scripts/list_endpoints.sh          # 默认 http://127.0.0.1:8000
 > * ✅ **熔断（`B11`）【已建、已接】** —— 按 key 断路器，**但只接了 `global:` 一条**；
 >   `model:` 那类（`L2` 降级链）**还没做**。⇒
 >   **现在拦得住「单条回复多长」·「某人某会话今天花了多少」·「全站今天花超了」**，
->   ⛔ **仍拦不住「某个用户今天花超了」**（`R1.3` 没有）。
-> * **`decision one`（统一到 token）只落了 DEC，没落代码** —— 次数配额的降级排在 **①b 最后一步**
->   （⚠️ **顺序陷阱**：必须【新先旧后】—— 先降次数、后接 token 会留一个**谁都不拦**的窗口）
+>   ✅ **2026-10-03 起能拦住了** —— `R1.3`（用户日级）已随 `①b` Task 6 落地（`DEC-046`）。
+> * ✅ **`decision one`（统一到 token）已【落 DEC + 落代码】（2026-10-03 · `①b` Task 6）** ——
+>   ⚠️ 但**不是**原计划写的「降级」，而是「**次数那套整张删掉 + `QuotaMiddleware` 原位换成 token 口径**」。
+>   ⚠️ **原计划那句"必须最后做"的理由不完整** —— 它说「到这一步，`B8`/`B10`/`B11` 已经在拦了」，
+>   但 `B8` 是**会话级**、`B10` 是**全站合计**，**没有一层是「按用户每天」** ⇒ 直接撤会开洞。
+>   ⇒ **原位换**（撤旧与接新同一处、同一次），**没有空窗**。📄 `DEC-046`
 
 > ### 📄 `①b` Task 0 + Task 1（**2026-10-01 同日**）
 >
@@ -224,11 +227,13 @@ bash scripts/list_endpoints.sh          # 默认 http://127.0.0.1:8000
 > | ✅ | **Task 3** | **`B10` · 全局日级 token 总额** —— `get_global_daily_token_usage()` / `check_global_daily_budget()`（`api/token_tracker.py`）<br>🔴 **核心判据：SQL 里 ⛔ 不许有 `user_name`** —— 漏了就退化成「单用户」，且**返回值正常、只是偏小** ⇒ **已用 AST 配对守卫钉死**（`api/test_global_daily_budget_offline.py`，12 passed）<br>✅ **阈值由业务方 2026-10-01 裁定 = `1,000,000` /天** ⇒ **关掉了源文档 B10 那个 `______（业务判断，我不替你定）` 的空**<br>📄 `docs/decisions/DEC-042-B10全局日级阈值与fail-open.md`<br>✅ **2026-10-02 已接线（Task 4 · `B11`）⇒ 本 Task【已生效】** —— 上面那句「⚠️ 零调用点 ⇒ 不产生任何行为变化」**已作废**，⛔ 别照旧读<br>📌 判据（可打印）：`grep -rn "circuit(global_key())" api/ --include="*.py" \| grep -v test_` ⇒ **8 处**（`api_v1_agent.py` 5 · `api_v1_rag.py` 2 · `api_v1.py` 1） |
 > | ✅ | **Task 4** | **`B11` · 熔断（按 key 断路器）**（2026-10-02）—— 新建 `api/breaker.py`（`circuit()` / `global_key()`）+ `docs/specs/breaker.md`；测试 `test_breaker.py`（9）· `test_breaker_wiring.py`（9）<br>🔴 **接线 8 处**＝与 `B8` 同一批 **7 处 + `benchmark_embedding`**（`api_v1.py:244`）—— 后者是**全仓唯一「匿名可打且真花钱」**的端点（签名没有 `Depends`），而它**接不上 `B8`**（没有 `user_name`/`thread_id`）⇒ **只有全站级能管住它**<br>⭐ **顺带纠正源文档一处误判**：`B11` 要素④原写「Redis 日级 key 的 TTL 未核」—— **日级用量在 PG（`token_usage_logs`），不在 Redis** ⇒ 恢复靠 SQL 的 `created_at >= CURRENT_DATE` 自翻页，**没有 TTL 可核**；补 `test_yesterdays_usage_does_not_count` 真库钉住<br>📌 `L2` **只顺带做了"接口"没做"实现"** —— `circuit()` 换个 key 前缀即可，⛔ 没为它预建任何东西 |
 > | ✅ | **Task 5** | **`L2` · 只做构造收口（形态甲）**（2026-10-02）—— 15 个 LLM 构造点收进 **`api/llm_factory.py::make_llm()`**，`model`/`max_tokens`/`api_key`/`base_url` **各自只剩一个落点**；**行为零变化**（角色由 `api/test_max_tokens_wiring.py::EXPECTED_ROLES` 钉住）<br>⛔ **自动兜底【裁定不做 · 推迟】** —— 实测 `主.with_fallbacks([备])` **不会炸**，但 `w.model_name` **永远返回主模型名** ⇒ **备用模型烧的 token 会静默记到主模型头上**；收益只在额度耗尽那一刻兑现，代价是账目常年失真 ⇒ 这轮不值得<br>📄 `docs/decisions/DEC-044-Task5只做构造收口不做自动兜底.md` · `docs/specs/llm_factory.md`<br>⚠️ **原始计划的另一半**（`model:` 前缀降级链 + `L4` 响应带降级标记 / `L5` 排序）**跟着一起推迟** —— `L3`/`L4`/`L5` 的裁定仍然有效，将来做真兜底时直接用 |
-> | ⬜ **⬅ 下一步** | **Task 6** | **`决策一` 落地** —— 撤掉「请求次数」配额（⭐ **必须最后做**：先撤次数、后接 token ⇒ 中间留一个**谁都不拦**的窗口）。📄 步骤见 `docs/specs/token_tracker.md` ①b Task 6 |
-> | ⬜ | **Task 7** | **`B13` · 实跑核成本可见** —— 起服务看 `/dashboard` · `/agent/token/budget` · `/agent/cost/overview` · `/agent/trace/{thread_id}`（`R4.2`「还剩多少」**依赖 `B10`** ⇒ 现在答得出了） |
+> | ✅ | **Task 6** | **`决策一` 落地**（2026-10-03）—— ⚠️ **不是原计划写的「撤次数 / 降级」**，而是「**次数那套整张删 + `QuotaMiddleware` 原位换成 token 口径**」<br>① 删 `permission.ROLE_QUOTA` / `get_user_quota`（`UserRole`/`get_user_role` 保留）② `QuotaMiddleware` 改判**按用户按天 token**（数据源 `token_tracker.get_token_budget_info`）③ 判定抽成**纯函数** `quota_reject_payload()` / `quota_headers()`（⇐ 不连 DB 就能单测）④ `/debug/quota` 改走同一套 ⑤ **删模块** `api/quota_limiter.py` + 归档 spec ⑥ 新增 `api/test_quota_middleware.py`（9 条）<br>🔴 **顺带把 `R1.3` 做掉** —— 原以为 `B8/B10/B11` 已补上「按用户每天」那一层，**实测没有**<br>📄 `docs/decisions/DEC-046-决策一落地撤次数配额改用token口径.md`<br>📌 判据（可打印）：`venv/bin/python -m pytest api/test_quota_middleware.py -q` ⇒ **9 passed**；<br>`venv/bin/python -m pytest api/ -m "not integration and not needs_db" -q` ⇒ **15 failed / 198 passed**（改动前基线 **15 failed / 189 passed**，**红的清单逐条一致** ⇒ 无回归） |
+> | ⬜ **⬅ 下一步** | **Task 7** | **`B13` · 实跑核成本可见** —— 起服务看 `/dashboard` · `/agent/token/budget` · `/agent/cost/overview` · `/agent/trace/{thread_id}`（`R4.2`「还剩多少」**依赖 `B10`** ⇒ 现在答得出了） |
 >
-> ⚠️ **`决策一`（统一到 token）落代码排在 ①b 最末** —— 必须【新先旧后】（先接 token、再降次数配额），
-> ⛔ 否则中间留一个**谁都不拦**的窗口。
+> ⚠️ **`决策一` 原计划要求「必须最后做、先接 token 再降次数」** —— 那条**顺序陷阱仍然成立**，
+> 但**理由被更正了**（`DEC-046`）：它以为 `B8/B10/B11` 已补上「按用户每天」，**实测没有** ——
+> `B8` 是**会话级**、`B10` 是**全站合计** ⇒ 按原计划撤会开一个「**单用户跨会话无限花**」的洞。
+> ⇒ 最终做法是【**原位换**】：**撤旧与接新在同一处、同一次改完**，⛔ 没有"谁都不拦"的空窗。
 >
 > ✅ **2026-10-01：「卡在门外」已解除** —— 原先 `.claude/worktrees/` 那份副本让**文档链接门变红**。
 > 现已两件事一起解决：① worktree 已移除（`git worktree list` 只剩主工作区）；
@@ -251,7 +256,6 @@ bash scripts/list_endpoints.sh          # 默认 http://127.0.0.1:8000
 | 1 | 🟢 ~~GitHub 账号被封停~~ ⇒ **✅ 已于 2026-09-29 18:11 UTC 恢复** | （原：`git push` / `gh` / CI 全做不了） | **Ciro / GitHub Support 已解除**（工单 **#4789618**）<br>✅ **收尾 6 项（G1–G6）2026-09-30 全部裁定** —— 含 **轮换两把 Key** · **可推** · **节奏改「小批多次」**<br>📄 `fastapi-rag-agent-TODO待办/GitHub账号封停-事件记录-20260924.md` |
 | 2 | 🔴 **Grafana provisioning 缺口** | **上云会"容器起来了但没看板"** | 阶段⑥ **之前必须补**（`DEC-034` §遗留①） |
 | 3 | 🟢 ~~有 commit 未推送~~ ⇒ **✅ 2026-09-30 已推** | （原：本机之外没有副本 —— `CLAUDE.md`「本地 = 不 durable」） | **业务方裁「可以推」⇒ 已按【小批多次】分 3 次推上去**（`db00f56→ba1baca→6d0df39→f3f42e0`）<br>🔎 **判据**：`git ls-remote origin refs/heads/docs/project-side-recon` = 本地 `HEAD`；`git rev-list --count origin/docs/project-side-recon..HEAD` = **0**<br>⚠️ **节奏已改（长期）**：**小批多次**（原「攒着一次推」）⇒ `DEC-039`<br>⚠️ **但那是分支** —— **业务方 2026-09-30 裁「先别合，等下轮」** ⇒ 合进 `main` 要等 **PR #60**<br>📌 **实时数别写在这里**（写死了必过期 —— 09-29 写「8+」实测 15；09-30 写「23」实测 25）：<br>`git rev-list --count origin/main..HEAD` |
-| **4** | 🟡 **有一个【做完但还没开 PR】的任务** | 它在 `main` **之外** —— ⚠️ **本地 = 不 durable**（`CLAUDE.md`） | **`docs/roadmap-task3-status`** —— Task 3 状态 🟡→✅ 的**记录同步**（`f95b35d` + 本次交接提交）<br>🔴 **业务方 2026-10-02 裁「攒着，等下一起开」** ⇒ ⛔ **别自作主张开 PR**<br>📌 实时清单别写死：`git log --oneline origin/main..origin/docs/roadmap-task3-status`<br>✅ **开完 PR 并合并后 ⇒ 删掉本行** |
 
 ---
 
@@ -299,7 +303,7 @@ bash scripts/list_endpoints.sh          # 默认 http://127.0.0.1:8000
 | **后端** | **硬门 A · Agent 端流式** | ⬜ | `后端补齐清单` **B1** |
 | **后端** | **硬门 C · 服务端 cancel（关上游）** | ⬜ | `B2`·`B3` —— ⚠️ **最易假完成** |
 | **后端** | **硬门 D · 触发条件 / 队列 / 续跑** | ⬜ | `B4`·`B5`·`B6` |
-| **后端** | **R1.1–R1.4 四层限额** | 🔵 | `B7`–`B10`；⚠️ **现状：匿名那层是漏的**<br>✅ **2026-10-01：`R1.1` 单次上限【已能拦】** —— 常量收口（`①a`）+ **15 处接线**（`①b` Task 1）<br>✅ **2026-10-01：`R1.2` 会话级【已能拦】** —— `①b` Task 2（`B8`），接在 **7 条真调 LLM 的对话链**上（`DEC-041`）<br>✅ **2026-10-02：`R1.4` 全局日级【已能拦】** —— `①b` Task 3 出判定（`B10`，阈值 `1,000,000`/天 · `DEC-042`）+ Task 4 接线（`B11`，**8 处**）<br>⬜ **仍缺 `R1.3`（用户日级）** ⇒ **现在拦得住「单条多长」「某人某会话今天花了多少」「全站今天花超了」，⛔ 拦不住「某个用户今天花超了」** |
+| **后端** | **R1.1–R1.4 四层限额** | ✅ | `B7`–`B10`；⚠️ **现状：匿名那层仍是漏的**<br>✅ **2026-10-01：`R1.1` 单次上限【已能拦】** —— 常量收口（`①a`）+ **15 处接线**（`①b` Task 1）<br>✅ **2026-10-01：`R1.2` 会话级【已能拦】** —— `①b` Task 2（`B8`），接在 **7 条真调 LLM 的对话链**上（`DEC-041`）<br>✅ **2026-10-02：`R1.4` 全局日级【已能拦】** —— `①b` Task 3 出判定（`B10`，阈值 `1,000,000`/天 · `DEC-042`）+ Task 4 接线（`B11`，**8 处**）<br>✅ **2026-10-03：`R1.3` 用户日级【已能拦】** —— `①b` Task 6（`DEC-046`）：`main.QuotaMiddleware` **原位**从「次数」换成「按用户按天 token」，**全路径**<br>⚠️ **四层齐了，但匿名仍绕过配额那层**（`main.py:314`）—— 那是 `B9`，与四层不是同一件事 |
 | **后端** | **R2 熔断** | 🟡 | **2026-10-02 建（`①b` Task 4 · `B11`）** —— `api/breaker.py` 通用**按 key** 断路器，**已接 8 处**（只有 `global:` 一条 key）<br>⬜ **`model:` 那类还没做**（`L2` 降级链 · `L3` TTL / `L4` 可见标记 / `L5` 排序）<br>⚠️ **2026-10-02（`①b` Task 5 · `DEC-044`）**：`L2` **只做了"构造收口"**（15 个构造点收进 `make_llm()`），**降级链本身【裁定推迟】** ⇒ 本行"还没做"**仍然成立**，且是**有意为之**，⛔ **别当成欠账** |
 | **后端** | 🔴 **`B9-b` 限流分桶加验签** | ✅ | **2026-09-30 已实施** —— 修前"编个 `X-API-Key` 就能拿独立桶"<br>7 条测试（TDD）· CI 已回绿<br>⚠️ **原写「全量 124 passed」但没标前提** —— 那个数**只在 Redis 开着时**成立<br>（本机 15 条红里 **14 条是 `redis.ConnectionError`** + 1 条 MCP）。**本地不依赖 Redis 的口径 = 109**（`①a` 前实测） |
 | **后端** | **R3 结构化错误 + `retry_after`** | ✅ | **`B12` · 2026-10-01 已完成**（`①a` Task 1）—— **落点不是 1 处是 4 处**（`:158` 说反 · `:460/:481/:496` 503 也不准 · `:364` 那处 500 **故意保留**）<br>📄 回归 `api/test_error_contract.py`（5 条）· 判据：`grep -n '"error": "Internal server error"' api/main.py` ⇒ **只剩 1 行** |

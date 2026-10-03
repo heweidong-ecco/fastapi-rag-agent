@@ -30,7 +30,7 @@
 | **`model:` 前缀没实现** | `L2` 要的模型级降级链（`L3` TTL / `L4` 可见标记 / `L5` 人工排序）**都还没做** —— 见 `docs/待办总表.md` §一·附 |
 | ⚠️ **没有"半开 / 探测恢复"** | **这是有意的**，不是漏了 —— 理由见 §⚠️ 第 2 条 |
 | ⚠️ **`benchmark-embedding` 是近似计量** | 见 §⚠️ 第 5 条 |
-| **匿名那层仍是个洞（另一个问题）** | `quota_limiter.py` 对匿名请求**完全绕过**。`B11` 没有解决它，只是**不再让它连带烧钱**（`benchmark-embedding` 现在会问断路器） |
+| **匿名那层仍是个洞（另一个问题）** | 配额那层对匿名请求**完全绕过**（`api/main.py:314` 的 `if not user_name:`）。⚠️ **旧写「`quota_limiter.py` 绕过」—— 那个模块 2026-10-03 已删（`DEC-046`），但这条行为原样保留**。`B11` 没有解决它，只是**不再让它连带烧钱**（`benchmark-embedding` 现在会问断路器） |
 
 ## ⚠️ 看代码会误判的地方
 
@@ -95,7 +95,7 @@
 |---|---|
 | `docs/specs/token_tracker.md` | `check_global_daily_budget()` / `get_global_daily_token_usage()` 的出处 |
 | `docs/specs/token_config.md` | `GLOBAL_DAILY_TOKEN_LIMIT` 的值与改法 |
-| `docs/specs/quota_limiter.md` | ⚠️ **另一套**（按**次数**、且对匿名绕过）—— 别与这里混 |
+| `docs/specs/main.md` · `docs/specs/归档/quota_limiter.md` | ⚠️ **另一层**（配额 —— 且**对匿名绕过**）—— 别与这里混。<br>🔴 **2026-10-03（`DEC-046`）**：配额那层**已原位改成 token 口径**（现役 spec = `main.md`）；`quota_limiter.md` 是**已删模块的归档** |
 | `docs/decisions/DEC-043-断路器设计的三个选择.md` | ⭐ **本模块的形状**：分派不判定 · 未知 key fail-open · 熔断 429 不给 `retry_after` · 接线范围 |
 | `docs/decisions/DEC-042-B10全局日级阈值与fail-open.md` | 阈值 `1,000,000` 与 fail-open 的裁定 |
 | `docs/decisions/DEC-040-额度统一到token一套.md` | `admin` 去掉无限额 |
