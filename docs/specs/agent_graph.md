@@ -2,7 +2,7 @@
 
 | 项 | 内容 |
 |---|---|
-| **状态** | ⚰️ **遗留 / 未经裁决** —— **6 套 Agent 实现之一**<br>✅ 2026-10-01：`llm`（`:21`）接上 `MAX_TOKENS_AGENT`（`B7`）<br>✅ 2026-10-02（`①b` Task 5）：该 `llm`（现于 `:20`）**改走 `llm_factory.make_llm("fast", "agent")`**。⚠️ **模型轴是 `fast`**（不是 chat）—— 这是改动前的实际取值，收口时**原样保留**<br>✅ 2026-10-03（**`②` Task 1 · `B4`**）：审批触发条件**从「任意 tool_calls」改成「工具白名单」**<br>✅ **2026-10-03（`DEC-049`）：`calculator` 的 `eval(expression)` 换成 `safe_math.calculate`** —— 本文件 **185 → 189 行**（多出的行是解释为什么不许改回去的注释）<br>⚠️ **行数口径**：本仓一律用 `scripts/spec_status.sh` 的数（= **真实行数**）。`wc -l` 对本文件**少算 1**（它末行没有换行符）⇒ 两边会差 1，⛔ **不是笔误**<br>⚠️ **`②` Task 2/3（`B5`/`B6`）⛔ 没动过本文件** —— 队列与续跑都落在 `api_v1_agent.py`（见下） |
+| **状态** | ⚰️ **遗留 / 未经裁决** —— **6 套 Agent 实现之一**<br>✅ 2026-10-01：`llm`（`:21`）接上 `MAX_TOKENS_AGENT`（`B7`）<br>✅ 2026-10-02（`①b` Task 5）：该 `llm`（现于 `:20`）**改走 `llm_factory.make_llm("fast", "agent")`**。⚠️ **模型轴是 `fast`**（不是 chat）—— 这是改动前的实际取值，收口时**原样保留**<br>✅ 2026-10-03（**`②` Task 1 · `B4`**）：审批触发条件**从「任意 tool_calls」改成「工具白名单」**<br>✅ **2026-10-03（`DEC-049`）：`calculator` 的 `eval(expression)` 换成 `safe_math.calculate`** —— 本文件 **185 → 189 行**（多出的行是解释为什么不许改回去的注释）<br>🔵 **2026-10-03（`③` Task 4 · `B1`）：`agent_decide` 改成【流式可透传】的** —— 声明 `config: RunnableConfig` + 改用 `llm_with_tools.stream(…, config=config)` 逐块聚合。本文件 **189 → 222 行**（多出的行全是"为什么必须这样写 / 为什么不许改成 `async`"的注释）。📄 `DEC-050`<br>⚠️ **行数口径**：本仓一律用 `scripts/spec_status.sh` 的数（= **真实行数**）。`wc -l` 对本文件**少算 1**（它末行没有换行符）⇒ 两边会差 1，⛔ **不是笔误**<br>⚠️ **`②` Task 2/3（`B5`/`B6`）⛔ 没动过本文件** —— 队列与续跑都落在 `api_v1_agent.py`（见下） |
 | **对外提供** | 路由 `/agent/langgraph_chat` · `/agent/approve` |
 | **谁在用** | `api_v1_agent.py:12`（`from agent_graph import agent_graph`） |
 
@@ -11,6 +11,10 @@
 - 基础 LangGraph Agent：`agent` 决策节点 → `tools` 执行循环
 - 工具：**DuckDuckGo 搜索**（`DuckDuckGoSearchRun()`，`:42`）· 计算器（**求值走 `safe_math`，`:33`**）· 日期
 - **人工审批**：`interrupt_before=["approval"]`（`:183`）+ `/agent/approve` 端点
+- 🔵 **流式（`③` Task 4 · `B1` · 2026-10-03）**：`agent_decide`（`:77`）声明 `config: RunnableConfig`，
+  并用 `.stream(…, config=config)` 逐块聚合 ⇒ `/agent/langgraph_chat/stream` 的
+  `astream(stream_mode="messages")` 才拿得到 **token 级**的块。📄 裁定 ⇒ `DEC-050`；
+  ⚠️ **判据**（可打印）⇒ `api/test_agent_sse.py`（12 例，纯离线，进 CI）
 - 🔵 **审批白名单**（B4）：`SENSITIVE_TOOLS`（`:54`，读 env，默认 `search_tool`）· `needs_approval()`（`:116`）· `validate_approval_config()`（`:59`，启动自检，空名单直接 `raise`）
 
 ## 🟡 做到哪 / 缺什么
@@ -23,6 +27,20 @@
 - ✅ ~~**`B6` 未做**~~ ⇒ **2026-10-03 起【已做】**（`②` Task 3）：`/agent/approve` 加了 `edited_answer`（改写后提交），**续跑形状被 `api/test_approval_resume.py` 钉住**（`invoke(None, config)` = 从 checkpoint 继续）<br>⚠️ **同样不在本模块里** —— 改动落在 `api_v1_agent.py`。⛔ 本模块里**没有**续跑代码
 - ⚠️ **硬门 D 三段齐了（`B4`/`B5`/`B6`），但【没有端到端验收过】** —— `B6` 只钉了接线与语义（假图），**"上下文真的连续"要真 LLM + 真 `MemorySaver` 跑一遍**才算（联网花钱）
 - ⚠️ **DuckDuckGo 本机不通**（`search_tools.py:48` 注明实测 `duckduckgo.com` 完全不通）⇒ 这条链上的搜索会失败
+- 🔴🔴 **`SENSITIVE_TOOLS` 的默认值【匹配不到任何真实工具】⇒ 审批其实【永不触发】**（2026-10-03 实测，`③` Task 4 跑真服务时撞见）。
+  · 真实工具名 = `['calculator', 'date_today', 'duckduckgo_search']`（`t.name`），
+    而默认白名单写的是 **`search_tool`**（那是**变量名**，⛔ 不是工具名）⇒ **交集为空**。
+  · ⚠️ **这是 `.env` 没显式配时的默认路径**；`validate_approval_config()`（`:59`）**只查"非空"，
+    不查"名单里的名字真的存在"** ⇒ **启动自检过得去，功能却从未生效过** ——
+    正是硬门 D 说的那种「**验收时才发现接管从来没发生过**」。
+  · ⛔ **不是 `③` 引入的**（`B4` 那天就在），但 **`③` 的真服务跑把它照出来了**。
+  · 📌 可打印的判据：`{t.name for t in agent_graph.tools} & agent_graph.SENSITIVE_TOOLS == set()` ⇒ 空即中招
+- 🔴 **`tool_execute`（`:85`）的分派名字也对不上** ⇒ **搜索工具永远执行不了**。
+  它判 `if tool_name == "search"`，而真名是 **`duckduckgo_search`** ⇒ 落到 `else`，
+  返回字面量 `"未找到工具: duckduckgo_search"`。
+  · ⚠️ **后果是模型侧可见的**：真服务实测模型会**反复重试搜索**（收到的是"工具不存在"），
+    一轮对话里连调好几次 ⇒ 这正是 `③` Task 4 那个**多轮聚合缺陷**的触发器。
+  · ⛔ 同样**不是 `③` 引入的**。
 
 ## ⚠️ 看代码会误判的地方 ⭐
 
@@ -34,6 +52,9 @@
 | 「`.env` 里设了 `SENSITIVE_TOOLS`」 | ⚠️ **设不设都能跑** —— 不设走**默认值 `search_tool`**（`:51`）。⇒ 想加/减**必须显式改 `.env`**；⚠️ **改成空**会让服务**启动就炸**（`validate_approval_config`，`:55`） |
 | 「审批是"全都接管"」 | 🔴 **不是** —— 硬门 D 要的是「**该被接管时被接管**」。改前"问个日期也停"那条路**验收过不去** |
 | 「搜索工具是真抓取」 | 🔴 **不是** —— 这里是**旧的 DuckDuckGo**；**新一代真抓取**（`search_tools.py` 的 `web_search`）**只接在 MCP 与 learning 版上** |
+| 🔴 **「`agent_decide` 加个 `config` 参数只是顺手接一下」** | ⛔ **它是真流式的【唯一条件】** —— 不声明、或不转发进模型的**流式**调用，`astream(stream_mode="messages")` **只会吐 1 块**（整段，`on_llm_end` 发的）。<br>⚠️ 而**接口看上去完全正常**：照样 `text/event-stream`、照样有 `data:` 帧 —— **前端逐字显示是前端自己切的**。<br>📌 判据（可打印）：`api/test_agent_sse.py::test_graph_streams_one_chunk_per_token`（数**块数**，⛔ 不看 header） |
+| 🔴 **「节点这么重，该改成 `async def` 吧」** | ⛔ **别改** —— 实测（探针⑧）会让**同步的** `graph.invoke()` 直接抛 `TypeError: No synchronous function provided to "agent"`，<br>而非流式路径（`/agent/langgraph_chat` · `api_v1.py` · `api_v1_rag.py`）**都在用它**。<br>✅ **同步节点 + 同步 `.stream(config)` 就能真流式**，⛔ 不需要 async。守卫 ⇒ `test_non_streaming_invoke_still_works` |
+| ⚠️ **「聚合流式块，用 `content += ` 拼起来就行」** | ⛔ **会丢掉 `tool_calls`** —— 它是**碎片化**到达的（name 一块、args 几块）。<br>丢了 ⇒ `should_continue` 判不出 `"approval"` ⇒ **B4 审批静默失效**，而接口返回 `{"status":"answered"}` 一切正常。<br>✅ 必须用 LangChain 自带的 `AIMessageChunk.__add__`（`+`）。守卫 ⇒ `test_agent_decide_preserves_tool_calls` |
 
 ## 关联
 

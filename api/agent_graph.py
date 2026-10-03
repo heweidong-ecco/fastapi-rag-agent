@@ -13,6 +13,7 @@ from llm_factory import make_llm   # ①b Task 5：model / api_key / base_url / 
 from langchain_community.tools import DuckDuckGoSearchRun
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
+from langchain_core.runnables import RunnableConfig   # B1：节点要靠它把回调接进模型调用
 from datetime import datetime
 from safe_math import calculate  # DEC-049：`calculator` 的求值实现 —— ⛔ 别改回 `eval`
 
@@ -74,11 +75,44 @@ class AgentState(TypedDict):
     messages: Annotated[List, operator.add]
 
 # ==================== 定义节点函数 ====================
-def agent_decide(state: AgentState):
+def agent_decide(state: AgentState, config: RunnableConfig):
     """
     决策节点：调用模型，让它决定是回复文本还是调用工具。
+
+    🔴 **B1（2026-10-03）：本节点必须"声明 `config` + 转发给模型的流式调用"** ——
+       这是 `astream(..., stream_mode="messages")` 出不出 token 的**唯一条件**。
+       实测（假模型探针，见 `api/test_agent_sse.py` 文件头）：
+
+       | 写法 | `astream(stream_mode="messages")` |
+       |---|---|
+       | 不接 `config` + `invoke()` | **1 块**（整段，`on_llm_end` 吐的）＝**假流式** |
+       | 接 `config` + `.stream(config)` | **N 块**、时间戳递增 ＝真流式 |
+
+    ⚠️ **别只看"接口返回了 `text/event-stream` 就以为成了"** ——
+       上面那两种写法**接口长得一模一样**，只有数块数才分得出来。
+
+    ⛔ **别把本节点改成 `async def`** —— 实测会让**同步的** `graph.invoke()` 直接抛
+       `TypeError: No synchronous function provided to "agent"`，而非流式路径
+       （`/agent/langgraph_chat` · `api_v1.py` · `api_v1_rag.py`）**都在用它**。
+       同步节点 + 同步 `.stream()` 就能真流式，⛔ 不需要 async。
+
+    ⚠️ **聚合用 `AIMessageChunk.__add__`（LangChain 自带），⛔ 别手拼 content** ——
+       `tool_calls` 是**碎片化**到达的（name 一块、args 几块）。
+       只拼 `content` 会把 `tool_calls` 丢掉 ⇒ `should_continue` 判不出 `"approval"`
+       ⇒ **B4 人工审批静默失效**，而接口返回 `{"status": "answered"}` 一切正常。
+       守卫 ⇒ `api/test_agent_sse.py::test_agent_decide_preserves_tool_calls`
     """
-    response = llm_with_tools.invoke(state["messages"])
+    response = None
+    for chunk in llm_with_tools.stream(state["messages"], config=config):
+        # ⚠️ 用 `+` 合并，⛔ 不是 `response.content += chunk.content`：
+        #    后者会丢掉 `tool_call_chunks`（见上面 ⚠️）。
+        response = chunk if response is None else response + chunk
+    # ⛔ **别在这里加 `if response is None: response = AIMessage(content="")` 兜底** ——
+    #    那是**不可达代码**：模型吐零块时，langchain 的 `BaseChatModel.stream()` **自己会**
+    #    `raise ValueError("No generation chunks were returned")`
+    #    （`langchain_core/language_models/chat_models.py:551`，2026-10-03 实测），
+    #    **永远不会返回一个空迭代器** ⇒ `response` 循环后必非 None。
+    #    守卫 ⇒ `api/test_agent_sse.py::test_empty_stream_neither_writes_none_nor_returns_an_empty_answer`
     # 返回一个AIMessage，LangGraph会自动将它追加到messages中
     return {"messages": [response]}
 

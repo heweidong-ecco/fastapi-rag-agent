@@ -12,7 +12,7 @@
 |---|---|
 | 文档管理 | `/rag/insert` · `/rag/insert_batch` · `/rag/upload_document` · **`DELETE /rag/documents/{doc_id}`** |
 | 检索 | `/rag/pg_search` · `/rag/hybrid_search` · `/rag/rerank_search` · `/rag/rewrite_search` · `/rag/search` · `/rag/jwt_ask` |
-| **流式** | **`/rag/stream_search`** —— **全仓唯一 SSE 端点**（`:687`） |
+| **流式** | **`/rag/stream_search`**（`:687`）—— ⚠️ **"全仓唯一 SSE 端点"这句 2026-10-03 起失效**：Agent 端已有第二条（`POST /agent/langgraph_chat/stream` · `DEC-050`） |
 | WebSocket | `/ws/agent` · `/ws/test` |
 
 ## 🟡 做到哪 / 缺什么

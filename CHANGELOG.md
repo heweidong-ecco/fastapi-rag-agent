@@ -10,6 +10,41 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- 🔵 **Agent 端真流式【第一条】**（2026-10-03 · `③` Task 4 · `B1` · `DEC-050`）—— 新增 **`POST /agent/langgraph_chat/stream`**（SSE）。
+
+  **为什么单独立档**：计划把这件事写成「**加一条 SSE 路由**」，判据是
+  `content-type` 是 `text/event-stream` + `data:` ≥ 2。🔴 **那条判据抓不到假流式** ——
+  后端整段一次性吐出来**也是 2 条 `data:`**，**照样绿**。
+
+  🔴 **真流式的必要条件在图那一侧**：`agent_decide` 必须**声明 `config: RunnableConfig`
+  并把它转发进模型的流式调用**。不这么做 ⇒ `astream(stream_mode="messages")` **只吐 1 块**（整段），
+  ⚠️ **而接口长得一模一样**（照样 `text/event-stream`、照样 `data:` 帧）。
+
+  **怎么改（两处，缺一不可）**：
+  · `api/agent_graph.py`：`agent_decide` 加 `config` 参数 + `.stream(…, config=config)` + **`+` 聚合**（189 → 222 行）
+  · `api/api_v1_agent.py`：新增流式路由（`StreamingResponse` + **`X-Accel-Buffering: no`**）
+  ⚠️ **`X-Accel-Buffering` 不是可选项** —— 少了它 Nginx/Cloudflare 会把整段缓冲住，**又变回假流式**（本仓要上 CF 隧道）。
+  ⚠️ **聚合必须用 `AIMessageChunk.__add__`**，⛔ 不能 `content +=` —— `tool_calls` 是**碎片化**到达的，
+  丢了它 ⇒ **`B4` 人工审批静默失效**，而接口返回 `{"status":"answered"}` 一切正常。
+
+  ⭐ **判据（可打印）**：`api/test_agent_sse.py`（**12 例 · 纯离线 · 进 CI**）——
+  数**块数**（⛔ 不看 header）· 不重复 · `tool_calls` 不丢 · 同步 `invoke()` 没被弄坏 · 空流不写 `None`。
+
+  🔴🔴 **真服务 Step 4 抓到我自己的一个 bug**：结尾的 `summary` 原本是**把流过 `agent` 节点的块攒起来**算的。
+  模型因工具返回"未找到工具"**重试**时节点进**多次** ⇒ 攒出了**上一轮的** `tool_calls`
+  ⇒ `summarize_agent_result` 误报 **`pending_approval`，而图其实跑完了**（前端会**永远等一个不会来的审批**）。
+  ✅ **修法**：从**图的最终状态**取（`await agent_graph.aget_state(config)` ⇒ `summarize_agent_result`），
+  与 `/agent/langgraph_chat` **同一套语义**。
+  **实测**：修前 29 帧 / 搜到 bug；修后 **216 个内容帧 + `status: answered` + `pending_tool_calls: null`**。
+
+  ⚠️ **本次只开了一条流式路由** —— 其余 **29 条仍全非流式**，硬门 A 的缺口**没关掉**。
+  ⚠️ **`B2`（cancel 传播）· `B3`（半截答案）仍未做**；本路由**同样没有 cancel 处理**（客户端断开后图会继续跑完）。
+
+  ⚠️ **顺带照出两个既有 bug（不是 `③` 引入的）**，记在 `docs/specs/agent_graph.md`：
+  ① `SENSITIVE_TOOLS` 默认值 `search_tool` **匹配不到任何真实工具**（真名是 `duckduckgo_search`）⇒ **审批永不触发**，
+  而 `validate_approval_config()` **只查"非空"不查"名字存在"**；
+  ② `tool_execute` 分派 `"search"` 而真名是 `duckduckgo_search` ⇒ **搜索工具永远返回"未找到工具"**（触发模型的搜索重试）。
+
 - 🔴 **`calculator` 的任意代码执行面【已消除】**（2026-10-03 · `DEC-049`）—— **5 处 `eval` 收口到 AST 白名单求值**。
 
   **改的是什么**：`calculator` 工具的 `expression` 参数**是 LLM 生成的**，而 LLM 的输入包含

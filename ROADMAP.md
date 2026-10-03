@@ -52,8 +52,8 @@ bash scripts/list_endpoints.sh          # 默认 http://127.0.0.1:8000
 | 查询改写 / 扩展（LLM） | ✅ | `api/query_rewriter.py`（Redis 缓存 1h） |
 | Cross-Encoder 重排序 | 🟡 | `api/reranker.py:14` **真懒加载** —— ⚠️ **镜像里没装 torch 系**（构建期裁掉，见 `DEC-034`）⇒ **只在开发机跑** |
 | 带引用答案生成 | ✅ | `api/answer_with_citations.py` —— ⚠️ **`citations` 默认 `False`**（`api/schemas.py:16`），不显式打开不会有引用 |
-| **SSE 流式（RAG 端）** | ✅ | `POST /rag/stream_search` —— **全仓唯一 SSE 端点**（`api_v1_rag.py:687`） |
-| **SSE 流式（Agent 端）** | ❌ | **29 个 agent 路由全部非流式**（`StreamingResponse` 0 处）⇒ 硬门 A 缺口<br>⚠️ **2026-10-03 由「28」改成「29」** —— `②` Task 2 加了 `/agent/pending`（它也是非流式的）⇒ **缺口一条没少**。<br>📌 数法：`api_v1_agent.router` 里含 `agent` 的 path 去重 |
+| **SSE 流式（RAG 端）** | ✅ | `POST /rag/stream_search`（`api_v1_rag.py:687`）—— ⚠️ **"全仓唯一 SSE 端点"这句 2026-10-03 起已失效** |
+| **SSE 流式（Agent 端）** | 🔵 | **2026-10-03（`③` Task 4 · `B1`）开了第一条**：`POST /agent/langgraph_chat/stream`（`DEC-050`）⇒ 全仓 SSE 端点 **1 → 2 条**<br>🔴 **但缺口不止"加条路由"** —— 真流式的必要条件在**图那一侧**（`agent_decide` 声明 `config` + 转发 `.stream(config)`），否则**只吐 1 块而接口长得一模一样**<br>⚠️ **仍只有这 1 条是流式的，其余 29 条全非流式** ⇒ **硬门 A 缺口没关掉**<br>📌 数法：`api_v1_agent.router` 里含 `agent` 的 path 去重 |
 | 硬门 B · 引用溯源**界面** | ❌ | 后端（`answer_with_citations.py`）有；**全仓无前端页面** |
 | 硬门 C · **服务端 cancel** | ❌ | 只捕获 `CancelledError`（`api_v1_rag.py:676`），**不关上游 HTTP 流** |
 | 硬门 D · 人工接管 | 🟡 | 地基在（`api/agent_checkpointer.py` + `interrupt_before=["approval"]`）；<br>✅ **2026-10-03（`②` Task 1 · `B4`）：触发条件已从「任意 tool_calls」改成【工具白名单】**（`SENSITIVE_TOOLS`，env · 默认 `search_tool`）—— **问个日期不再进审批**<br>✅ **2026-10-03（`②` Task 2 · `B5`）：待接管队列【已有】** —— `GET /agent/pending` + `api/pending_approvals.py`（⚠️ **进程内存**，重启即空）<br>✅ **2026-10-03（`②` Task 3 · `B6`）：接管后续跑【已有】** —— `/agent/approve` 加 `edited_answer`（改写后提交），续跑形状被 `api/test_approval_resume.py` 钉住<br>⚠️ **三段（什么时候停 / 停在哪看得到 / 批了怎么接着跑）齐了，但【端到端验收还没做】** —— `B6` 只测了接线与语义（假图），**"上下文真的连续"要真 LLM 跑一遍**（联网花钱） |
@@ -80,7 +80,7 @@ bash scripts/list_endpoints.sh          # 默认 http://127.0.0.1:8000
      ✅ ①b 限额与熔断（B8/B10/B11 + 决策一落地）        ← **2026-10-03 收尾**：Task 0 ✅ / Task 1 ✅（B7 接线+S12）/ Task 2 ✅（B8 会话级）/ **Task 3 ✅（B10 全局日级）** / **Task 4 ✅（B11 熔断 —— 接线 8 处，2026-10-02）** / **Task 5 🟡（`L2` · 15 个构造点收进 `make_llm()`；⛔ 自动兜底【裁定推迟】· `DEC-044`）** / **Task 6 ✅（`决策一` 落地 · `DEC-046`）** / **Task 7 ✅（`B13` 实跑核成本可见 · `DEC-047`）**
      🔵 ② 人工接管（B4/B5/B6）                       ← **2026-10-03 开工 · 已收尾**：Task 0 ✅（两条裁定入档）/ **Task 1 ✅（B4 触发条件改白名单）** / **Task 2 ✅（B5 待接管队列 + `GET /agent/pending`）** / **Task 3 ✅（B6 接管后续跑 + `edited_answer`）** ⇒ **4 个 Task 全落地**（⚠️ 端到端验收未做）
      ✅ 🔴 DEC-049（`calculator` 的 `eval` → `safe_math.py`，5 处收口）  ← **2026-10-03** 业务方裁「排在 ③ 之前」
-     ⬜ ③ 流式与取消（B1/B2）
+     🔵 ③ 流式与取消（B1/B2/B3）                     ← **2026-10-03 开工**：**Task 4 ✅（B1 · Agent 端真流式 · `DEC-050`）** / ⬜ Task 5（B2 · cancel 传播，自标「最易假完成」）/ ⬜ Task 6（B3 · 半截答案）
 ⬜ 前端开发                4 个页面 + 硬门 B 界面 + 停止按钮 + 接管队列 + R3.2 熔断卡片
 ⬜ ④ 测内存定机器 → ⑤ 买域名 → ⑥ 上云 → ⑦ 开隧道 → ⑧ 保护/自验/发链接
 ```
@@ -238,7 +238,7 @@ bash scripts/list_endpoints.sh          # 默认 http://127.0.0.1:8000
 > | ✅ | **Task 5** | **`L2` · 只做构造收口（形态甲）**（2026-10-02）—— 15 个 LLM 构造点收进 **`api/llm_factory.py::make_llm()`**，`model`/`max_tokens`/`api_key`/`base_url` **各自只剩一个落点**；**行为零变化**（角色由 `api/test_max_tokens_wiring.py::EXPECTED_ROLES` 钉住）<br>⛔ **自动兜底【裁定不做 · 推迟】** —— 实测 `主.with_fallbacks([备])` **不会炸**，但 `w.model_name` **永远返回主模型名** ⇒ **备用模型烧的 token 会静默记到主模型头上**；收益只在额度耗尽那一刻兑现，代价是账目常年失真 ⇒ 这轮不值得<br>📄 `docs/decisions/DEC-044-Task5只做构造收口不做自动兜底.md` · `docs/specs/llm_factory.md`<br>⚠️ **原始计划的另一半**（`model:` 前缀降级链 + `L4` 响应带降级标记 / `L5` 排序）**跟着一起推迟** —— `L3`/`L4`/`L5` 的裁定仍然有效，将来做真兜底时直接用 |
 > | ✅ | **Task 6** | **`决策一` 落地**（2026-10-03）—— ⚠️ **不是原计划写的「撤次数 / 降级」**，而是「**次数那套整张删 + `QuotaMiddleware` 原位换成 token 口径**」<br>① 删 `permission.ROLE_QUOTA` / `get_user_quota`（`UserRole`/`get_user_role` 保留）② `QuotaMiddleware` 改判**按用户按天 token**（数据源 `token_tracker.get_token_budget_info`）③ 判定抽成**纯函数** `quota_reject_payload()` / `quota_headers()`（⇐ 不连 DB 就能单测）④ `/debug/quota` 改走同一套 ⑤ **删模块** `api/quota_limiter.py` + 归档 spec ⑥ 新增 `api/test_quota_middleware.py`（9 条）<br>🔴 **顺带把 `R1.3` 做掉** —— 原以为 `B8/B10/B11` 已补上「按用户每天」那一层，**实测没有**<br>📄 `docs/decisions/DEC-046-决策一落地撤次数配额改用token口径.md`<br>📌 判据（可打印）：`venv/bin/python -m pytest api/test_quota_middleware.py -q` ⇒ **9 passed**；<br>`venv/bin/python -m pytest api/ -m "not integration and not needs_db" -q` ⇒ **15 failed / 198 passed**（改动前基线 **15 failed / 189 passed**，**红的清单逐条一致** ⇒ 无回归） |
 > | ✅ | **Task 7** | **`B13` · 实跑核成本可见**（2026-10-03 · `①b` **收尾**）—— 起服务逐面看了 `/dashboard` · `/agent/token/budget` · `/agent/cost/overview` · `/agent/trace/{thread_id}`，**四个面都打得开**，但核出**两处"不报错"的错**：<br>🔴 **① `/agent/cost/overview` 的三个总数读的是【进程内存】**（`get_user_summary`）⇒ 重启归零。**实测 admin 库里有 4216 tokens / 6 行，它答 `0`** ⇒ 换新函数 `get_user_overview()`（**读库 · 全时 · 本人**），`by_purpose` 随之从**全站**变**本人**<br>🔴 **② `B10`/`B11` 的全站日级额度【没有任何出口】** —— 超了**所有人**吃 429，界面上却看不到逼近 ⇒ `/agent/token/budget` 补 `global_daily_limit` / `global_used_today` / `global_remaining`，看板加第 5 格「全站预算」<br>✅ **`R4` 判据现在成立**：以前「全站还剩多少」**答不出**，现在答得出（实测 `global_remaining: 999961`，与库里今日 39 tokens 对得上）<br>📄 `docs/decisions/DEC-047-成本可见两处口径修正.md`<br>📌 判据（可打印）：`venv/bin/python -m pytest api/test_cost_visibility.py -q` ⇒ **4 passed**；`POSTGRES_DB=rag_test venv/bin/python -m pytest api/test_cost_visibility_db.py -q` ⇒ **3 passed**；`venv/bin/python -m pytest api/ -m "not integration and not needs_db" -q` ⇒ **217 passed, 3 skipped, 22 deselected, 0 failed** |
-> | ⬜ **⬅ 下一步** | **接手人定** | `①b` 的 8 个 Task（0–7）**全部落地** ⇒ ①b **收尾**。<br>🔵 **两条支线现状（2026-10-03 更正）**：**② 人工接管（B4/B5/B6）【已收尾】** —— Task 0/1/2/3 ✅（`B4`/`B5`/`B6`）⇒ **硬门 D 三段齐了**（⚠️ 端到端验收未做）；**③ 流式与取消（B1/B2）【还没开】** —— 见下方计划表。<br>⚠️ 另有一批**小遗留**（`DEC-047` §遗留）：看板第 2 格仍是内存口径 · `api/tool_visualizer.py` 与 `api/cost_dashboard.py` **无 spec** · `get_intercept_count()` 口径未核 |
+> | ⬜ **⬅ 下一步** | **接手人定** | `①b` 的 8 个 Task（0–7）**全部落地** ⇒ ①b **收尾**。<br>🔵 **两条支线现状（2026-10-03 更正）**：**② 人工接管（B4/B5/B6）【已收尾】** —— Task 0/1/2/3 ✅（`B4`/`B5`/`B6`）⇒ **硬门 D 三段齐了**（⚠️ 端到端验收未做）；**③ 流式与取消【已开工】** —— Task 4（`B1`）✅ 做完（`DEC-050`），Task 5（`B2`）/ Task 6（`B3`）⬜ 未做。<br>⚠️ 另有一批**小遗留**（`DEC-047` §遗留）：看板第 2 格仍是内存口径 · `api/tool_visualizer.py` 与 `api/cost_dashboard.py` **无 spec** · `get_intercept_count()` 口径未核 |
 >
 > ⚠️ **`决策一` 原计划要求「必须最后做、先接 token 再降次数」** —— 那条**顺序陷阱仍然成立**，
 > 但**理由被更正了**（`DEC-046`）：它以为 `B8/B10/B11` 已补上「按用户每天」，**实测没有** ——
@@ -284,6 +284,22 @@ bash scripts/list_endpoints.sh          # 默认 http://127.0.0.1:8000
 > | 📄 | **决策全文** | **`docs/decisions/DEC-049-calculator的eval换成AST白名单求值.md`**（含为什么否掉另外三个方案 —— ⚠️ `eval` + `{"__builtins__": {}}` 那条**实测拦不住** `().__class__.__bases__[0].__subclasses__()`） |
 >
 > **➡️ `DEC-049` 之后再进**：**③ 流式与取消（`B1`/`B2`）** —— 见下方计划表；⚠️ `B2` 自标「最容易假完成」
+>
+> ---
+>
+> ### 🔵 **`③ 流式与取消`（2026-10-03 已开工）· Task 4（`B1`）✅ 做完**
+>
+> | 状态 | Task | 说明 |
+> |---|---|---|
+> | ✅ | **Task 4 · `B1`** | **Agent 端真流式**（2026-10-03 · `DEC-050`）—— 新增 **`POST /agent/langgraph_chat/stream`**（SSE），路由 **29 → 30**；改动**两处，缺一不可**：<br>① `api/agent_graph.py`：`agent_decide` 声明 **`config: RunnableConfig`** + 改用 `.stream(…, config=config)` + **`+` 聚合**（189 → 222 行）<br>② `api/api_v1_agent.py`：`StreamingResponse` + `media_type="text/event-stream"` + **`X-Accel-Buffering: no`** |
+> | 🔴🔴 | **计划没写的那一句** | 计划把它当成"**加一条 SSE 路由**"，判据是 `content-type` + `data:` ≥ 2。**那条判据抓不到假流式** —— 后端整段一次性吐出来**也是 2 条 `data:`**。<br>**真流式的必要条件在图那一侧**：节点必须声明 `config` 并把回调**转发进模型的流式调用**，否则 `astream(stream_mode="messages")` **只吐 1 块**（整段）—— ⚠️ **而接口长得一模一样**（照样 `text/event-stream`、照样 `data:` 帧）。 |
+> | 🔴 | **`Step 4` 真服务跑抓到 bug** | 结尾的 `summary` 原本是**把流过 `agent` 节点的块攒起来**算的。模型因工具返回"未找到工具"**重试**时节点进**多次** ⇒ 攒出了**上一轮的** `tool_calls` ⇒ `summarize_agent_result` 误报 **`pending_approval`，而图其实跑完了**（前端会**永远等一个不会来的审批**）。<br>✅ **修法**：从**图的最终状态**取（`await agent_graph.aget_state(config)` ⇒ `summarize_agent_result`），与 `/agent/langgraph_chat` **同一套语义**。<br>**实测**：修前 29 帧；修后 **216 个内容帧 + `status: answered` + `pending_tool_calls: null`**。⭐ **先 RED 后 GREEN**（`_TwoRoundModel` + `_SpyGraph`）。 |
+> | 📌 | **判据（可打印）** | `venv/bin/python -m pytest api/test_agent_sse.py -q` ⇒ **12 passed**（纯离线 · 进 CI）—— 数**块数**（⛔ 不看 header）· 不重复 · `tool_calls` 不丢 · 同步 `invoke()` 没被弄坏 · 空流不写 `None`；<br>全量 ⇒ **333 passed, 3 skipped, 22 deselected, 0 failed**（本轮之前 321 ⇒ +12，⛔ 无回归） |
+> | ⚠️ | **没做完的** | 🔵 **只开了 1 条流式路由** —— 其余 **29 条仍全非流式**，硬门 A 的缺口**没关掉**；<br>⬜ **`B2`（cancel 传播）· `B3`（半截答案）仍未做** —— 本路由**同样没有 cancel 处理**（客户端断开后图会继续跑完）。 |
+> | 🔴 | **顺带照出 2 个既有 bug** | ⛔ **不是 `③` 引入的**，见 `docs/specs/agent_graph.md` 🟡 节：<br>① `SENSITIVE_TOOLS` 默认值 `search_tool` **匹配不到任何真实工具**（真名 `duckduckgo_search`）⇒ **审批永不触发**，而 `validate_approval_config()` **只查"非空"不查"名字存在"**；<br>② `tool_execute` 分派 `"search"` 而真名是 `duckduckgo_search` ⇒ **搜索工具永远返回"未找到工具"**（这正是模型搜索重试的触发器）。 |
+> | 📄 | **决策全文** | **`docs/decisions/DEC-050-真流式的条件是节点转发config.md`** |
+>
+> **➡️ 下一件事**：**`③` Task 5（`B2` · cancel 传播到上游）** —— 🔴 自标「**最容易假完成**」；⚠️ 本次新加的流式路由**也没有 cancel 处理**
 
 > ### 📌 下次开工前的**自检三问**（都是本会话踩过的）
 > 1. **跑测试用哪条命令？** ⇒ **CI 的同款**：`python -m pytest api/ -m "not integration and not needs_db" -q`
@@ -343,7 +359,7 @@ bash scripts/list_endpoints.sh          # 默认 http://127.0.0.1:8000
 | ② | `.env` 4 个必填键核过 | ✅ | 全在（共 8 个键）。⚠️ **`DASHSCOPE_API_KEY` 不能删** —— chat 额度已耗尽(403)但 **embedding 仍可用**，且是 `validate_config` 必填项 |
 | ② | `build` + `up -d` | ✅ | **三处卡点全解，见 `DEC-034`**：⭐ `aliyun` 源 45 KB/s（主因）⇒ 换 `tsinghua` · pip 回溯 ⇒ 裁 5 包 · 容器名冲突 ⇒ 删旧容器（⛔ 不带 `-v`）。**镜像 6.32 GB → 1.28 GB** |
 | ② | 5 容器 healthy + 能问答 | ✅ | 五条判据全过；④ 用 `/rag/stream_search`。数据完整性：`documents` **77 → 77 一行没少** |
-| **后端** | **硬门 A · Agent 端流式** | ⬜ | `后端补齐清单` **B1** |
+| **后端** | **硬门 A · Agent 端流式** | 🔵 | `后端补齐清单` **B1** —— ✅ **2026-10-03（`③` Task 4）：开了第一条**（`/agent/langgraph_chat/stream` · `DEC-050`）<br>⚠️ **仍只有这 1 条**，其余 29 条全非流式 ⇒ **硬门 A 仍标 🔵，⛔ 不是 ✅**<br>📌 判据（可打印）：`pytest api/test_agent_sse.py -q` ⇒ **12 passed** |
 | **后端** | **硬门 C · 服务端 cancel（关上游）** | ⬜ | `B2`·`B3` —— ⚠️ **最易假完成** |
 | **后端** | **硬门 D · 触发条件 / 队列 / 续跑** | 🟡 | `B4`✅ · `B5`✅ · `B6`✅<br>✅ **2026-10-03：`B4` 触发条件【已改】**（`②` Task 1）—— 从「任意 `tool_calls`」改成**工具白名单** `SENSITIVE_TOOLS`（默认 `search_tool`）⇒ 问个日期不再进审批<br>✅ **2026-10-03：`B5` 待接管队列【已有】**（`②` Task 2）—— `GET /agent/pending` + `api/pending_approvals.py`（⚠️ 内存表，重启即空）<br>✅ **2026-10-03：`B6` 接管后续跑【已有】**（`②` Task 3）—— `/agent/approve` 加 `edited_answer`（改写后提交）<br>⚠️ **三段齐了，但端到端验收未做** ⇒ 硬门 D **仍标 🟡**（`B6` 只测接线与语义）<br>📌 判据（可打印）：`pytest api/test_approval_trigger.py api/test_pending_approvals.py api/test_pending_approvals_wiring.py api/test_approval_resume.py -q` ⇒ **26 passed** |
 | **后端** | **R1.1–R1.4 四层限额** | ✅ | `B7`–`B10`；⚠️ **现状：匿名那层仍是漏的**<br>✅ **2026-10-01：`R1.1` 单次上限【已能拦】** —— 常量收口（`①a`）+ **15 处接线**（`①b` Task 1）<br>✅ **2026-10-01：`R1.2` 会话级【已能拦】** —— `①b` Task 2（`B8`），接在 **7 条真调 LLM 的对话链**上（`DEC-041`）<br>✅ **2026-10-02：`R1.4` 全局日级【已能拦】** —— `①b` Task 3 出判定（`B10`，阈值 `1,000,000`/天 · `DEC-042`）+ Task 4 接线（`B11`，**8 处**）<br>✅ **2026-10-03：`R1.3` 用户日级【已能拦】** —— `①b` Task 6（`DEC-046`）：`main.QuotaMiddleware` **原位**从「次数」换成「按用户按天 token」，**全路径**<br>⚠️ **四层齐了，但匿名仍绕过配额那层**（`main.py:314`）—— 那是 `B9`，与四层不是同一件事 |
