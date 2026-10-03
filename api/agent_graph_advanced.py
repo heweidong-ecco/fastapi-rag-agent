@@ -243,7 +243,7 @@ async def tool_execute(state: AgentState):
         tool_args = tc["args"]
 
         # 记录工具调用开始
-        record_tool_start(tool_name, tool_args, thread_id)
+        record_tool_start(tool_name, tool_args, user_name, thread_id)
 
         # ===== 多级预算检查 =====
         allowed, reason = check_multilevel_budget(
@@ -265,7 +265,7 @@ async def tool_execute(state: AgentState):
         result = await call_mcp_tool_with_cache(tool_name, tool_args)
 
         # 记录工具调用结束（成功状态；原代码在此误记录为“未找到工具”错误）
-        record_tool_end(tool_name, result, thread_id, "success")
+        record_tool_end(tool_name, result, user_name, thread_id, "success")
 
         tool_msg = ToolMessage(content=str(result), tool_call_id=tc["id"], name=tool_name)
         tool_messages.append(tool_msg)
@@ -356,7 +356,7 @@ def build_mcp_agent():
         # 记录决策过程
         if hasattr(response, "tool_calls") and response.tool_calls:
             for tc in response.tool_calls:
-                record_agent_decision(state["thread_id"], {
+                record_agent_decision(user_name, state["thread_id"], {
                     "type": "tool_decision",
                     "tool_name": tc["name"],
                     "arguments": tc["args"],

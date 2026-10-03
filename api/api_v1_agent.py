@@ -61,7 +61,10 @@ from breaker import circuit, global_key
 #    ⛔ 只在**传进图 / 传进待接管队列**时拼 —— 响应里回显的仍是调用方传进来的**原值**。
 from session_key import session_key
 # 记录工具 开始追踪 结束追踪
-from tool_visualizer import start_trace, finish_trace, get_trace, get_all_traces
+from tool_visualizer import (
+    start_trace, finish_trace, get_trace, get_all_traces,
+    get_trace_of_any_owner,     # N4：admin 例外用的旁路（⛔ 普通路径别用）
+)
 # MCP Client 高级 Agent（会话池版）及动态工具列表
 from agent_graph_advanced import mcp_agent, get_mcp_tools
 
@@ -840,8 +843,8 @@ async def mcp_agent_chat(
     ⚠️ 2026-09-20 修：这段 docstring 原先**躺在 `start_trace()` 之后**（函数体第二句），
        是**空操作** —— 函数本身**没有 docstring**。已上移到签名正下方。
     """
-    # 记录工具 开始追踪
-    start_trace(thread_id, question)
+    # 记录工具 开始追踪（⚠️ 带身份 —— 追踪轴也是按人分的，见 `tool_visualizer` 模块头）
+    start_trace(user_name, thread_id, question)
 
     # B8 · 会话级 token 上限（`DEC-041`）
     # ⚠️ 放在 `start_trace` **之后**：超限被拒时，追踪里仍留得下这次尝试的痕迹。
@@ -876,7 +879,7 @@ async def mcp_agent_chat(
     final_message = result["messages"][-1]
 
     # 记录工具 结束追踪
-    finish_trace(thread_id, final_message.content)
+    finish_trace(user_name, thread_id, final_message.content)
 
     # 预算提醒
     warning_info = check_budget_warning(user_name)
@@ -1135,8 +1138,17 @@ async def agent_trace_detail(
     thread_id: str,
     user_name: str = Depends(get_current_user_hybrid),
 ):
-    """获取指定线程的执行轨迹详情"""
-    trace = get_trace(thread_id)
+    """获取**本人**在指定线程上的执行轨迹详情。
+
+    🔴 **2026-10-03（`DEC-056` N4）**：改之前**不判属主** —— 任何登录用户拿一个
+       `thread_id` 就能读到别人的提问原文与工具结果。
+    ⚠️ 非属主与"真不存在"**返回同一个答复**（⛔ 不给"存在但不属于你"这个 oracle）。
+    """
+    trace = get_trace(user_name, thread_id)
+    if trace is None and get_user_role(user_name) == UserRole.ADMIN:
+        # ⚠️ admin 例外**显式一行**（`DEC-056` 决策 2 / 决策 8-3）——
+        #    ⛔ 不是靠"不过滤"顺带实现的。
+        trace = get_trace_of_any_owner(thread_id)
     if trace is None:
         return {"error": f"未找到线程 {thread_id} 的执行轨迹"}
     return {"trace": trace, "requested_by": user_name}
@@ -1145,5 +1157,11 @@ async def agent_trace_detail(
 async def agent_trace_list(
     user_name: str = Depends(get_current_user_hybrid),
 ):
-    """获取所有线程的执行轨迹摘要列表"""
-    return {"traces": get_all_traces(), "requested_by": user_name}
+    """获取执行轨迹摘要列表 —— **默认只有本人的**；admin 看全量。"""
+    return {
+        "traces": get_all_traces(
+            user_name,
+            include_all=get_user_role(user_name) == UserRole.ADMIN,   # ⚠️ admin 例外，显式一行
+        ),
+        "requested_by": user_name,
+    }

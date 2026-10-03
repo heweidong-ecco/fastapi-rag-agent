@@ -10,6 +10,40 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- 🔴 **追踪轴（`/agent/trace*`）的跨用户可见已修**（2026-10-03 · `DEC-056` **决策 9** / 待办 **N4**）——
+  **改之前：任何登录用户一条 GET 就能读到别人的提问原文与工具结果。**
+
+  **三条症状**（都实测过，不是推断）：
+
+  ```bash
+  # 用真实端点跑一遍（改之前）
+  tv.start_trace('default','爱丽丝的私密提问'); tv.finish_trace('default','答案')
+  tv.get_all_traces()                     # ⇒ 不带任何身份就返回了爱丽丝那条（含 user_query[:100]）
+  tv.get_trace('default')['user_query']   # ⇒ 鲍勃拿同一个 thread_id 直接读到
+  tv.start_trace('default','鲍勃的提问')   # ⇒ 爱丽丝那条被顶掉（后问的盖先问的）
+  ```
+
+  **改了什么**：
+  - **键**：`_traces` 由**裸 `thread_id`** 改成 **`session_key(user_name, thread_id)`**
+    （复用丙段那份，⛔ 不另拼）。⚠️ **`AgentTrace.thread_id` 存的仍是【原值】** —— 响应回显的是它。
+  - **读**：`/agent/traces` **默认只给本人**，admin 看全量（**显式一行**）；
+    `/agent/trace/{thread_id}` **判属主**，非属主与"不存在"**答同一个**（⛔ 不给"存在与否"的 oracle）。
+  - **写**：`start_trace` / `finish_trace` / `record_tool_start` / `record_tool_end` /
+    `record_agent_decision` 全部**多一个必填 `user_name`**（无默认值 ⇒ 漏传是 `TypeError`，fail-closed）。
+    ⚠️ **写侧不需要新贯穿** —— `user_name` **本来就在图 state 里**（`agent_graph_advanced.py:238`，预算检查在用）。
+
+  ⚠️ **它与丙段修的不是同一条轴** —— 丙段动的是 **checkpoint**（LangGraph 的 `config`），
+  这条是 `tool_visualizer` 里**另一份进程内存存储**。同型的病、不同的键面。
+  ⚠️ **花费轴不用动**：`check_session_token_budget(user_name, thread_id)` **本来就带 `user_name`**，⛔ 别去"顺手统一"。
+
+  ⚠️ **顺带**：`tool_visualizer.py` 原先**没有 spec**（`DEC-047` §遗留）⇒ 补了
+  `docs/specs/tool_visualizer.md`（它现在是隔离的又一处承重层）。
+
+  ⚠️ **本轮【没有】解决的**：上游 `state.get("user_name", "default_user")` 仍是 fail-open（属 **N5**）·
+  `_traces` **无淘汰**（只增不减）· 只有 `mcp_agent_chat` **一个端点建轨迹**。
+
+  📌 判据：`api/test_trace_isolation.py` ⇒ **13 passed**（全带**正向控制** · **三条证伪**各只杀它该杀的）。
+
 - 🔴 **多用户会话隔离：checkpoint 键拼身份 + `/agent/approve` 归属校验 + `memory_chat` 审批门**（2026-10-03 · `DEC-056` 丙段）——
   **两个用户用同一个 `thread_id="default"`（那是 6 条端点的默认值）时，会话记忆不再互相串。**
 
