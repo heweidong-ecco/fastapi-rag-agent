@@ -10,6 +10,41 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- 🟢 **`/agent/approve` 支持「改写后提交」**（2026-10-03 · `②` Task 3 · `B6`）—— **硬门 D 的最后一段**。
+
+  **改的是什么**：审批只有「批准 / 拒绝」两种。上游 `施工单 §3.1` 的接管页要的是
+  「**改写 / 批准 + 提交续跑**」—— 人能**把答案改一下再放行**。
+
+  **怎么改**：`approve_agent_action` 增加可选参数 **`edited_answer`**（`api/api_v1_agent.py:155`）：
+  · **批准 ∧ 给了改写** ⇒ 先 `update_state` 把它推成一条 **`AIMessage`**，再续跑
+  · **不给** ⇒ 走原来的 `update_state(values=None)`（**行为与改动前一致**）
+  · **拒绝** ⇒ 给了也**忽略**（拒绝的语义是"别做了"）
+
+  🔴 **为什么必须写进 state、不能只当返回值吐出去**：审批之后图**还要去 `tools` → `agent`**
+  ⇒ 只放响应里，**后续节点看不到这个改写** ⇒ **改了等于没改**。
+  ⚠️ **必须是 `AIMessage`** —— 用 `HumanMessage` 会让模型把"人给的结论"当成**用户新提的问题**再答一遍。
+
+  ⭐ **核心判据被测试钉住**：`api/test_approval_resume.py`（**6 条 · 纯离线 · 进 CI**），假图替掉真图：
+  · `invoke` 必须是 **`None`** —— `None` = **从 checkpoint 继续**；喂新消息 = **重开一轮**，
+    ⚠️ **两种的接口返回长得一模一样**（`{"status":"approved","answer":…}`）⇒ 只有钉住调用形状才拦得住
+  · `config` 里的 `thread_id` 必须是**请求里那个** —— `None` 只保证"是续跑"，保证不了"续的是**这一条**"
+  · **拒绝时不许写改写**（**反面**用例：只测"批准时会写"会漏掉它，而那种错不报错）
+  · **没停在审批点不许 `invoke`**
+
+  **判据（可打印）**：
+  ```bash
+  venv/bin/python -m pytest api/test_approval_resume.py -q
+  # ⇒ 6 passed
+  venv/bin/python -m pytest api/ -m "not integration and not needs_db" -q
+  # ⇒ 243 passed, 3 skipped, 22 deselected, 0 failed   （本轮之前 237 ⇒ +6，⛔ 无回归）
+  ```
+
+  ⚠️ **本 Task 只到"接线与语义"** —— 4 条新测试是**先红后绿**（真 TDD），另 2 条是**钉现有行为**的守卫
+  ⇒ 逐条变异自证（`/tmp/prove-resume.py`：**6/6 RED**，还原后 **6 passed**）。
+  🔴 **但"上下文真的连续"没有端到端跑过**（要真 LLM + 真 `MemorySaver`，**联网花钱**）
+  ⇒ **硬门 D 的验收演示仍差这一步**，⛔ 别把"6 passed"读成"硬门 D 已验证"。
+  📄 计划 ⇒ `docs/specs/api_v1_agent.md` 的「实施计划 ② · Task 3」。
+
 - 🟢 **待接管队列：新模块 `api/pending_approvals.py` + 端点 `GET /agent/pending`**（2026-10-03 · `②` Task 2 · `B5`）。
 
   **为什么非要自己记账**：`MemorySaver`（`agent_graph.py`）**只按 `thread_id` 取，没有"列出全部"的 API**
@@ -45,6 +80,8 @@ All notable changes to this project will be documented in this file.
   「28 个 agent 路由全部非流式」同步改）—— **新增这条也是非流式的 ⇒ 硬门 A 缺口一条没少**。
   📄 模块 spec ⇒ `docs/specs/pending_approvals.md` · 计划 ⇒ `docs/specs/api_v1_agent.md` 的「实施计划 ② · Task 2」。
   ⚠️ **`B6`（接管后续跑）仍未做 ⇒ 硬门 D 整体【未完成】。**
+  ➡️ **2026-10-03 更新**：`B6` **已于同日 `②` Task 3 完成**（见本文件顶部那条）⇒ **硬门 D 三段齐了**
+  （⚠️ 但**端到端验收**还没做，见那条的说明）。
 
 - 🟢 **审批触发条件从「任意 `tool_calls`」改成「工具白名单」**（2026-10-03 · `②` Task 1 · `B4`）。
 
@@ -83,7 +120,7 @@ All notable changes to this project will be documented in this file.
   📄 裁定 ⇒ **`docs/decisions/DEC-048-审批触发条件改工具白名单.md`**（四个未定死处：语义 / 哪些工具 / 写在哪 / 空名单怎么办）
   · `fastapi-rag-agent-TODO待办/后端补齐清单-待裁-20260929.md` 的 `B4 · ✍️ 裁` · `决策二`。
   ⚠️ **`B5`（待接管队列）/ `B6`（接管后续跑）仍未做 ⇒ 硬门 D 整体【未完成】。**
-  ➡️ **2026-10-03 更新**：`B5` **已于同日 `②` Task 2 完成**（见本文件顶部那条）· **`B6` 仍未做**。
+  ➡️ **2026-10-03 更新**：`B5` **已于同日 `②` Task 2 完成** · `B6` **已于同日 `②` Task 3 完成**（见本文件顶部两条）⇒ **硬门 D 三段齐了**（⚠️ 端到端验收仍未做）。
 
 - 🟢 **新增复盘 `docs/复盘/2026-10-02-判据写歪了不报错.md`** + 两条规矩落进 `docs/规范/开发规范.md`（2026-10-02）。
 

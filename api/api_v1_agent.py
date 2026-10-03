@@ -11,7 +11,7 @@ from deps import get_current_user_hybrid, get_current_user_jwt, require_admin
 
 from agent_graph import agent_graph
 from pending_approvals import list_pending, register, resolve   # `②` Task 2（B5）：待接管队列
-from langchain_core.messages import HumanMessage, ToolMessage
+from langchain_core.messages import HumanMessage, ToolMessage, AIMessage
 # 多分支路由（意图分类）高级 Agent：定义在 agent_graph_advanced_learning.py
 from agent_graph_advanced_learning import build_advanced_agent
 from plan_execute import plan_task, execute_plan, BudgetExceededError
@@ -152,10 +152,22 @@ async def langgraph_chat(
 async def approve_agent_action(
     thread_id: str,
     approved: bool,
+    edited_answer: str = None,
     user_name: str = Depends(get_current_user_hybrid),
 ):
     """
-    人工审批接口：批准或拒绝 Agent 的工具调用请求。
+    人工审批接口：批准 / 拒绝 / **改写后提交**（`B6`）。
+
+    🔴 **续跑走的是 `agent_graph.invoke(None, config)`** —— `None` = **从 checkpoint 继续**，
+       ⛔ **不是**新开一轮。改成喂新消息 = 上下文断裂，**而接口返回看着一模一样**。
+       守卫 ⇒ `api/test_approval_resume.py`（假图钉住调用形状）。
+
+    `edited_answer`：**人工把答案改过之后再放行**。
+      · 不给 ⇒ 按原样续跑（行为与改动前一致）
+      · 给了 ⇒ 先 `update_state` 把改写推成一条 **`AIMessage`**，再从 checkpoint 续跑
+        ⚠️ **必须进 state、不能只当返回值吐出去** —— 只放响应里，**后续节点看不到这个改写**。
+        ⚠️ 必须是 `AIMessage`，⛔ 不是 `HumanMessage` —— 后者会让模型把"人给的结论"当**新输入**再答一遍。
+      · ⚠️ **只有"批准"时才生效**；拒绝时给了也会被忽略（拒绝的语义是"别做了"）。
     """
     config = {"configurable": {"thread_id": thread_id}}
 
@@ -169,8 +181,15 @@ async def approve_agent_action(
         return {"status": "error", "message": "当前没有等待审批的任务"}
 
     if approved:
-        # 批准：直接执行 None，图会继续前进到 approval 节点，然后去 tools
-        agent_graph.update_state(config, values=None)
+        if edited_answer is not None:
+            # B6：人工改写 ⇒ 推进 messages，**再从 checkpoint 续跑**。
+            # ⚠️ 不能"跳过模型直接把这个答案返回" —— 那样后续节点（`tools`→`agent`）看不到它。
+            agent_graph.update_state(
+                config, values={"messages": [AIMessage(content=edited_answer)]}
+            )
+        else:
+            # 原样放行：`values=None` ⇒ 不改 state，图继续前进到 approval 节点，然后去 tools
+            agent_graph.update_state(config, values=None)
         result = agent_graph.invoke(None, config)
     else:
         # 拒绝：更新 state，添加一条消息，并终止工具调用流程

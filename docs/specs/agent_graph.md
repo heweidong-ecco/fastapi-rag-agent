@@ -2,7 +2,7 @@
 
 | 项 | 内容 |
 |---|---|
-| **状态** | ⚰️ **遗留 / 未经裁决** —— **6 套 Agent 实现之一**<br>✅ 2026-10-01：`llm`（`:21`）接上 `MAX_TOKENS_AGENT`（`B7`）<br>✅ 2026-10-02（`①b` Task 5）：该 `llm`（现于 `:20`）**改走 `llm_factory.make_llm("fast", "agent")`**。⚠️ **模型轴是 `fast`**（不是 chat）—— 这是改动前的实际取值，收口时**原样保留**<br>✅ 2026-10-03（**`②` Task 1 · `B4`**）：审批触发条件**从「任意 tool_calls」改成「工具白名单」** |
+| **状态** | ⚰️ **遗留 / 未经裁决** —— **6 套 Agent 实现之一**<br>✅ 2026-10-01：`llm`（`:21`）接上 `MAX_TOKENS_AGENT`（`B7`）<br>✅ 2026-10-02（`①b` Task 5）：该 `llm`（现于 `:20`）**改走 `llm_factory.make_llm("fast", "agent")`**。⚠️ **模型轴是 `fast`**（不是 chat）—— 这是改动前的实际取值，收口时**原样保留**<br>✅ 2026-10-03（**`②` Task 1 · `B4`**）：审批触发条件**从「任意 tool_calls」改成「工具白名单」**<br>⚠️ **`②` Task 2/3（`B5`/`B6`）⛔ 没动过本文件** —— 队列与续跑都落在 `api_v1_agent.py`（见下） |
 | **对外提供** | 路由 `/agent/langgraph_chat` · `/agent/approve` |
 | **谁在用** | `api_v1_agent.py:12`（`from agent_graph import agent_graph`） |
 
@@ -19,7 +19,8 @@
 - ✅ ~~**触发条件口径是错的**~~ ⇒ **2026-10-03 起【已修】**（B4）：`should_continue`（`:122`）现在是**三条路**（`approval` / `tools` / `END`），只有命中白名单才停
 - ✅ ~~**零测试覆盖**~~ ⇒ **2026-10-03 起有 `api/test_approval_trigger.py`**（7 例，纯离线）。⚠️ **覆盖范围只有审批触发条件** —— **图的其余部分（节点行为 / 状态流转）仍无测试**
 - ✅ ~~**`B5` 未做**~~ ⇒ **2026-10-03 起【已做】**（`②` Task 2）：待接管队列在 **`api/pending_approvals.py`**，出口是 **`GET /agent/pending`**（`api_v1_agent.py`）。📄 见 **`docs/specs/pending_approvals.md`**<br>⚠️ **但队列【不在这个模块里】** —— `agent_graph.py` 只负责"停下来"；"谁停下来了、从哪儿看"是 `api_v1_agent.py` 记账。⛔ 别在本模块找队列
-- ⬜ **`B6` 未做** —— 接管之后**没有"改写后继续跑"**（批完就是终点）
+- ✅ ~~**`B6` 未做**~~ ⇒ **2026-10-03 起【已做】**（`②` Task 3）：`/agent/approve` 加了 `edited_answer`（改写后提交），**续跑形状被 `api/test_approval_resume.py` 钉住**（`invoke(None, config)` = 从 checkpoint 继续）<br>⚠️ **同样不在本模块里** —— 改动落在 `api_v1_agent.py`。⛔ 本模块里**没有**续跑代码
+- ⚠️ **硬门 D 三段齐了（`B4`/`B5`/`B6`），但【没有端到端验收过】** —— `B6` 只钉了接线与语义（假图），**"上下文真的连续"要真 LLM + 真 `MemorySaver` 跑一遍**才算（联网花钱）
 - ⚠️ **DuckDuckGo 本机不通**（`search_tools.py:48` 注明实测 `duckduckgo.com` 完全不通）⇒ 这条链上的搜索会失败
 
 ## ⚠️ 看代码会误判的地方 ⭐
