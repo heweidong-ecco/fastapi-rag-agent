@@ -10,6 +10,7 @@ from exceptions import ErrorCode, AppException
 from deps import get_current_user_hybrid, get_current_user_jwt, require_admin
 
 from agent_graph import agent_graph
+from pending_approvals import list_pending, register, resolve   # `②` Task 2（B5）：待接管队列
 from langchain_core.messages import HumanMessage, ToolMessage
 # 多分支路由（意图分类）高级 Agent：定义在 agent_graph_advanced_learning.py
 from agent_graph_advanced_learning import build_advanced_agent
@@ -128,6 +129,15 @@ async def langgraph_chat(
         config={"configurable": {"thread_id": thread_id}}
     )
     summary = summarize_agent_result(result)
+
+    # B5 · 待接管队列（`②` Task 2）—— `MemorySaver` 反查不出"谁卡住了"，只能在这里记账。
+    # ⚠️ `else` 那支不是可省的：**本轮没卡住 ⇒ 清掉上一次的登记**，
+    #    否则同一个 thread 一旦卡过一次，就会永远留在队列里**变成假待办**。
+    if summary.get("status") == "pending_approval":
+        register(thread_id, user_name, summary.get("pending_tool_calls") or [])
+    else:
+        resolve(thread_id)
+
     return {
         "question": question,
         "thread_id": thread_id,
@@ -148,13 +158,16 @@ async def approve_agent_action(
     人工审批接口：批准或拒绝 Agent 的工具调用请求。
     """
     config = {"configurable": {"thread_id": thread_id}}
-    
+
     # 获取当前图的状态
     current_state = agent_graph.get_state(config)
-    
+
     if current_state.next != ("approval",):
+        # B5：图没停在审批点 ⇒ **注册表里若有这个 thread，那是陈的** ⇒ 顺手清掉。
+        # ⚠️ 这一支也要清 —— 否则"/agent/pending 说有，批的时候说没有"，对不上。
+        resolve(thread_id)
         return {"status": "error", "message": "当前没有等待审批的任务"}
-    
+
     if approved:
         # 批准：直接执行 None，图会继续前进到 approval 节点，然后去 tools
         agent_graph.update_state(config, values=None)
@@ -168,12 +181,32 @@ async def approve_agent_action(
         result = agent_graph.invoke(None, config)
     
     final_message = result["messages"][-1]
+
+    # B5：批完就注销 —— 否则它会**永远留在队列里**（`resolve` 幂等，重复调不抛）。
+    resolve(thread_id)
+
     return {
         "status": "approved" if approved else "rejected",
         "thread_id": thread_id,
         "answer": final_message.content,
         "requested_by": user_name,
     }
+
+
+@router.get("/agent/pending")
+async def list_pending_approvals(
+    user_name: str = Depends(get_current_user_hybrid),
+):
+    """列出**当前等待人工接管**的会话（硬门 D 的入口）。
+
+    🔴 **为什么要有这个端点**：`MemorySaver` **没有"列出全部 thread"的 API**
+    ⇒ 没有它，**接管事件在界面上根本找不到**（硬门 D 判据③ 的反例正是这个）。
+    数据来自 `api/pending_approvals.py`（**进程内存** —— ⚠️ 重启即空，见其 spec）。
+
+    ⚠️ **本端点只读**，不改任何状态；批准/拒绝走 `POST /agent/approve`。
+    """
+    rows = list_pending()
+    return {"count": len(rows), "items": rows, "requested_by": user_name}
 
 # ==================== 高级图LangGraph进阶 接口：包含---条件边、循环、子图  ====================
 
