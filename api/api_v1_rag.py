@@ -563,6 +563,9 @@ async def jwt_ask_question(
 # ⚠️ 2026-10-02 删（Task 5）：同段的 `from config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL_CHAT`
 #    已**不再被引用** —— 两个构造点都改走 `make_llm()`，那三个值由工厂统一读。
 import asyncio
+# `③` Task 5 补（2026-10-03 · 真服务实测）：`finally` 里关上游流要用 `anyio.CancelScope(shield=True)`
+# **护住** —— 否则那一次 `await` 会被反复投递的取消打断。见 `stream_search` 的 `finally`。
+import anyio
 
 # ⚠️ 2026-09-17 重构 ⑥ 切开点 5：惰性单例。
 #    原先此处是【模块层】直接 `llm_stream = ChatOpenAI(...)` ⇒
@@ -749,24 +752,36 @@ async def stream_search(
             print(f"流式生成出错: {e}")
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
         finally:
-            # 🔴🔴 **本任务的核心动作**：客户端断开后**主动关掉上游 HTTP 流**。
-            #    不关 ⇒ 上游继续生成、**继续计费**，而前端看起来一切正常（它只是不显示了）
-            #    —— 硬门 C 标「最容易假完成」就是这个形态。
-            #    ⚠️ 放 `finally` 而不是 `except`：三条出口（正常 / 异常 / 取消）**都要关**，
-            #       其中「取消」那条还包括 2.4 分支的 `GeneratorExit`。
-            if stream is not None:
-                await stream.aclose()
+            # ⚠️ 放 `finally` 而不是 `except`：三条出口（正常 / 异常 / 取消）**都要收尾**，
+            #    其中「取消」那条还包括 2.4 分支的 `GeneratorExit`。
+            #
+            # 🔴🔴 **顺序与关流方式 = 2026-10-03 真服务实测改的**（不是想出来的）：
+            #    `await stream.aclose()` 会被**二次投递的取消**打断 ⇒ 抛 `CancelledError`
+            #    ⇒ 排在它后面的三件收尾**一件都不跑**（实测：计数 `2.0→2.0`、日志没有、
+            #    半截不落盘）。⚠️ **而单测当时全绿** —— 假流的 `aclose()` 不抛。
+            #    卡在哪：**早切**（还没吐字）时生成器没被推进过 ⇒ `aclose()` 不必收尾 ⇒
+            #    不挂起 ⇒ 打不断；**晚切**（用户已经看到字再点停止）才露出来。
+            #    ⇒ 两条一起改：① **同步**收尾提到 `await` 之前 · ② 关流用 shield **护住**。
             if outcome == "cancelled":
                 # 判据①日志有 cancel 事件 · 判据③的**观测对象**（Prometheus，Grafana 可见）
                 track_stream_cancel(ENDPOINT)
                 logger.info(f"[cancel] 客户端断开，已停止生成并关闭上游流 endpoint={ENDPOINT}")
                 # 🔴 `③` Task 6（`B3`）：把已经生成的那半截**补存进历史**（⛔ 不是直接丢）。
-                #    ⚠️ 放**这里**（`finally`）而不是 `except CancelledError` —— 与上面 `aclose()`
+                #    ⚠️ 放**这里**（`finally`）而不是 `except CancelledError` —— 与下面 `aclose()`
                 #       同一个理由：Starlette 2.4 分支抛的是 `GeneratorExit`，**不进那个 `except`**
                 #       ⇒ 写在那儿会**静默不存**。
-                #    ⚠️ `append_chat_history` 是**同步**的（`api/cache.py:39`），正好不该 `await`
-                #       —— 取消传播中再去 await 别的，等于是给取消又开一个口子。
+                #    ⚠️ `append_chat_history` 是**同步**的（`api/cache.py:39`）—— 这正是它
+                #       能排在 `await` 之前的原因：**不 await ⇒ 二次取消打断不了它**。
                 _persist_interrupted_turn(user_name, req.question, collected_parts)
+
+            # 🔴🔴 **本任务的核心动作**：客户端断开后**主动关掉上游 HTTP 流**。
+            #    不关 ⇒ 上游继续生成、**继续计费**，而前端看起来一切正常（它只是不显示了）
+            #    —— 硬门 C 标「最容易假完成」就是这个形态。
+            #    ⚠️ `shield=True` 是**必须**的：取消作用域会**在每个 await 点反复投递**取消，
+            #       不护住 ⇒ "关"这个动作每次都半途而废（实测 `aclose` 就抛在这儿）。
+            if stream is not None:
+                with anyio.CancelScope(shield=True):
+                    await stream.aclose()
 
         # 6. 返回SSE流式响应（禁用缓冲）
     return StreamingResponse(

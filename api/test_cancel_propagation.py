@@ -65,7 +65,7 @@ def _body_chunks(sent):
             if m["type"] == "http.response.body" and m.get("body")]
 
 
-def _drive_asgi_until_disconnect(resp, *, after_chunks):
+def _drive_asgi_until_disconnect(resp, *, after_chunks, expect_raise=False):
     """把 `StreamingResponse` 当 ASGI app 跑，并在**第 `after_chunks` 帧之后**断开客户端。
 
     ⚠️ `spec_version` 必须写 **"2.3"** —— 那是 uvicorn 实测报的版本。
@@ -92,7 +92,14 @@ def _drive_asgi_until_disconnect(resp, *, after_chunks):
             disconnected.set()
 
     async def go():
-        await resp(scope, receive, send)
+        try:
+            await resp(scope, receive, send)
+        except BaseException as e:      # noqa: BLE001 —— 只给"关流自己抛"那个用例用
+            # ⚠️ 默认**照抛**（异常本身就是被测的行为）；只有 `expect_raise` 时才咽下，
+            #    因为那个用例要断言的是"异常之前记账已经落了"，不是"有没有抛"。
+            if not expect_raise:
+                raise
+            sent.append({"type": "test.expect_raise", "error": type(e).__name__})
 
     asyncio.run(go())
     return sent
@@ -125,6 +132,24 @@ class _AsyncSpyStream:
         return self.item_factory()
 
     async def aclose(self):
+        """🔴 **真服务实测（2026-10-03）**：这一句会被**二次投递的取消**打断 ⇒ 抛 `CancelledError`。
+
+        ⚠️ 旧版假流在这里**只是把 `closed` 置真、然后正常返回** —— 于是
+           `finally` 里排在它后面的三件收尾（计数 / 日志 / 半截落盘）**照跑**，
+           单测全绿而真服务全废。所以这里必须能**模拟被打断**。
+        """
+        self.owner.aclose_called = True
+        if getattr(self.owner, "aclose_raises", False):
+            # 关流**自己**就抛（例如上游连接早断了）—— ⛔ 与 `aclose_interrupted` 不是一回事：
+            # 那个是"外层来打断这次 await"，shield 护得住；这个是关流动作本身失败，shield 护不住，
+            # ⇒ 只能靠**顺序**保住记账（收尾写在它前面）。这条正是顺序那一半的判据。
+            raise RuntimeError("上游连接已经断了 ⇒ aclose 自己就抛")
+        if getattr(self.owner, "aclose_interrupted", False):
+            # ⚠️ **不能直接 `raise CancelledError`** —— 那连 shield 也护不住（异常是它自己抛的，
+            #    与"外层把这次 await 打断"不是一回事）⇒ 测出来的是假的。
+            #    真的机制是：这次 await **真的挂起了一次**，取消作用域就在这个挂起点上投递。
+            #    ⇒ 于是"有没有 shield"**决定了**它能不能走完，与线上完全同构。
+            await asyncio.sleep(0)
         self.owner.closed = True
 
 
@@ -156,11 +181,14 @@ class _SpyRagLLM:
     ⚠️ `cap` 是**安全阀** —— 取消没生效时，测试应当**断言失败**，⛔ 不是挂住。
     """
 
-    def __init__(self, cap=40, first_delay=None):
+    def __init__(self, cap=40, first_delay=None, aclose_interrupted=False, aclose_raises=False):
         self.cap = cap
         self.first_delay = first_delay
         self.pulled = 0
         self.closed = False
+        self.aclose_called = False
+        self.aclose_interrupted = aclose_interrupted   # ⇒ 模拟"关流被二次取消打断"（真服务实测）
+        self.aclose_raises = aclose_raises             # ⇒ 模拟"关流动作本身失败"（护不住，只能靠顺序）
         self.astream_calls = []
         self.stream_calls = []  # ⛔ 换异步之后必须保持为空
 
@@ -178,10 +206,12 @@ class _SpyRagLLM:
 class _SpyGraph:
     """假的图：与 `test_agent_sse._FakeGraph` 同款，**额外记「流有没有被关」**。"""
 
-    def __init__(self, cap=40):
+    def __init__(self, cap=40, aclose_interrupted=False):
         self.cap = cap
         self.pulled = 0
         self.closed = False
+        self.aclose_called = False
+        self.aclose_interrupted = aclose_interrupted
         self.aget_state_calls = []
 
     def astream(self, payload, config, stream_mode):
@@ -222,13 +252,15 @@ class _FakeCursor:
         return False
 
 
-def _call_rag_stream(monkeypatch, llm, history=None, **kw):
+def _call_rag_stream(monkeypatch, llm, history=None, get_history=None, **kw):
     """直接调端点函数，把**所有**外部依赖短路 —— 本文件测的是取消，⛔ 不是检索/预算/认证。
 
     ⚠️ 传 `history=[]` ⇒ 把写入历史的调用**记下来**（`B3` 的观测对象）；
        不传 ⇒ 照旧短路掉（其余用例不关心历史）。
+    ⚠️ 传 `get_history=` ⇒ 换成**真的能读回**的假存储（默认读回空）——
+       用于把"落账"与"下一轮读到"**接起来**验（端点 `:628` 那只在前端没传历史时才读）。
     """
-    monkeypatch.setattr(rag_mod, "get_chat_history", lambda user: [])
+    monkeypatch.setattr(rag_mod, "get_chat_history", get_history or (lambda user: []))
     monkeypatch.setattr(rag_mod, "check_session_token_budget", lambda *a, **k: (True, ""))
     monkeypatch.setattr(rag_mod, "circuit", lambda *a, **k: (True, ""))
     monkeypatch.setattr(rag_mod, "get_embedding", lambda text: [0.0] * 8)
@@ -392,6 +424,109 @@ def test_rag_persists_partial_answer_when_cancelled(monkeypatch):
     )
 
 
+def test_rag_bookkeeping_survives_interrupted_aclose(monkeypatch):
+    """🔴🔴 **2026-10-03 真服务实测抓到的**：`await stream.aclose()` **会被二次投递的取消打断**。
+
+    打断之后，`finally` 里排在它后面的三件收尾**一件都不会执行** ——
+    计数不涨、日志没有、半截不落盘。**而单测当时全绿**（假流的 `aclose()` 不抛）。
+
+    ⚠️ 这不是"理论上可能"：容器与宿主机**同一份代码**、同一个问题、同一次真切断，
+       **早切（还没吐块）** 计数 1.0→2.0 ✅、**晚切（已经吐了字再断）** 2.0→2.0 ❌；
+       插桩版本打印出 `DBG aclose 抛了: CancelledError`。
+       卡在哪：早切时生成器**还没被推进过**，`aclose()` 不必真收尾 ⇒ 不挂起 ⇒ 打不断。
+
+    ⇒ 本用例把**"用户已经看到字了才点停止"**这个主场景钉死：三件收尾一件都不能少。
+    """
+    llm = _SpyRagLLM(aclose_interrupted=True)
+    hist = []
+    before = _metric(RAG_ENDPOINT)
+    resp = _call_rag_stream(monkeypatch, llm, history=hist, question="关流被打断也要留痕")
+    with _capture_logs() as lines:
+        sent = _drive_asgi_until_disconnect(resp, after_chunks=DISCONNECT_AFTER)
+
+    assert llm.aclose_called, "前提没成立：压根没去关上游"
+    assert llm.closed, "关流被取消打断后**上游没真的关上** ⇒ 上游可能还在跑、还在烧钱"
+    assert _metric(RAG_ENDPOINT) == before + 1, (
+        "aclose 抛异常 ⇒ 取消没计数（真服务实测就是 2.0→2.0）"
+    )
+    assert any("断开" in line for line in lines), f"日志里没有取消事件：{lines}"
+    seen = _seen_content(sent)
+    assert seen, "根本没流出内容 ⇒ 本断言无意义"
+    assert [h[1] for h in hist] == ["user", "assistant"], f"半截没成对落盘：{hist}"
+    assert hist[1][2] == seen + rag_mod.INTERRUPTED_SUFFIX, (
+        f"落盘的不是客户端看到的那半截：{hist[1][2]!r}"
+    )
+
+
+def test_rag_bookkeeping_lands_even_when_aclose_itself_fails(monkeypatch):
+    """🔴 **钉的是"顺序"那一半 —— shield 护不住这个**。
+
+    上一个用例钉的是"关流被外层打断"（shield 能护）；本用例钉的是**关流动作自己失败**
+    （上游连接早断了 ⇒ `aclose()` 抛 `RuntimeError`）。这种情况 shield 一点用没有，
+    ⇒ **唯一的保障是：三件收尾写在 `await` 之前**。
+
+    ⚠️ 为什么非要单独钉：修法落地后，`shield` 在，**顺序坏了上一个用例照样全绿**
+       （护住的 aclose 正常返回，后面的收尾照跑）—— 于是有人把"关流"挪回最前面
+       （很自然的"收尾动作要放前面才干净"），B3 的承诺就**静默**没了。
+    """
+    llm = _SpyRagLLM(aclose_raises=True)
+    hist = []
+    before = _metric(RAG_ENDPOINT)
+    resp = _call_rag_stream(monkeypatch, llm, history=hist, question="关流自己抛也要留痕")
+    with _capture_logs() as lines:
+        sent = _drive_asgi_until_disconnect(
+            resp, after_chunks=DISCONNECT_AFTER, expect_raise=True
+        )
+
+    assert llm.aclose_called, "前提没成立：压根没去关上游"
+    assert not llm.closed, "假的 aclose 就没走到置位那一步 ⇒ 前提没成立"
+    assert [m for m in sent if m["type"] == "test.expect_raise"], (
+        "关流的异常没传出来 ⇒ 本用例前提没成立"
+    )
+    assert _metric(RAG_ENDPOINT) == before + 1, "关流抛 ⇒ 取消没计数（顺序坏了的典型症状）"
+    assert any("断开" in line for line in lines), f"日志里没有取消事件：{lines}"
+    seen = _seen_content(sent)
+    assert seen, "根本没流出内容 ⇒ 本断言无意义"
+    assert [h[1] for h in hist] == ["user", "assistant"], (
+        f"关流抛 ⇒ 半截没落盘（B3 承诺失效）：{hist}"
+    )
+    assert hist[1][2] == seen + rag_mod.INTERRUPTED_SUFFIX, f"落盘的半截不对：{hist[1][2]!r}"
+
+
+def test_rag_next_turn_prompt_reads_the_interrupted_half_answer(monkeypatch):
+    """`B3` 的**真正目的**：那半截不是留个痕给人看的，是**下一轮 prompt 要读到**。
+
+    ⚠️ 前面几个用例只证到「**落进 Redis 了**」—— 而"落进去"离"下一轮真读到"还差一段：
+       端点**只在前端没传历史时**才去读（`:628`），读了之后拼进 `messages`（`:694`）。
+       本用例把这一段**接起来**：第一轮被切断 ⇒ 第二轮（不带历史）发问 ⇒
+       检查**真喂给 LLM 的 messages** 里有没有那半截 + 中断标记。
+    """
+    store = []                                   # 假存储：(user_name, role, content)
+    llm1 = _SpyRagLLM(cap=40)
+    resp = _call_rag_stream(monkeypatch, llm1, history=store, question="第一问：紫色河马协议")
+    _drive_asgi_until_disconnect(resp, after_chunks=DISCONNECT_AFTER)
+    assert [a[1] for a in store] == ["user", "assistant"], (
+        f"前提没成立：第一轮被切断后历史没落账，后面对不上：{store}"
+    )
+
+    # 第二轮：**不传 conversation_history** ⇒ 走 `:628` 从存储读回
+    llm2 = _SpyRagLLM(cap=2)
+    resp2 = _call_rag_stream(
+        monkeypatch, llm2, question="接着上面说",
+        get_history=lambda user: [{"role": r, "content": c} for _, r, c in store],
+    )
+    _drive_asgi_until_disconnect(resp2, after_chunks=99)   # 正常跑完
+
+    contents = [m["content"] for m in llm2.astream_calls[0]]
+    assert any("第一问：紫色河马协议" in c for c in contents), (
+        f"用户那句提问没进下一轮 prompt ⇒ 用户问'接着上面说'时模型不知道在接什么：{contents}"
+    )
+    assert any(rag_mod.INTERRUPTED_SUFFIX in c for c in contents), (
+        f"半截答案没带中断标记进 prompt ⇒ 模型会把**被截断的回答**当成'上一轮说完了'，"
+        f"行为跟着变（这正是 `INTERRUPTED_SUFFIX` 存在的理由）：{contents}"
+    )
+
+
 def test_rag_full_answer_is_saved_without_interrupt_marker(monkeypatch):
     """⛔ **反面**：正常跑完 ⇒ 存**完整**答案，⛔ **不许**带中断标记。
 
@@ -454,6 +589,20 @@ def test_agent_records_cancel_event(monkeypatch):
 
     assert _metric(AGENT_ENDPOINT) == before + 1
     assert any("cancel" in line.lower() or "断开" in line for line in lines), f"日志里没有取消事件：{lines}"
+
+
+def test_agent_records_cancel_event_when_aclose_interrupted(monkeypatch):
+    """Agent 端**同一条**：关流的 `await` 被打断 ⇒ 计数与日志也必须照记（`B1` 端点同一形状）。"""
+    graph = _SpyGraph(aclose_interrupted=True)
+    before = _metric(AGENT_ENDPOINT)
+    resp = _call_agent_stream(monkeypatch, graph)
+    with _capture_logs() as lines:
+        _drive_asgi_until_disconnect(resp, after_chunks=DISCONNECT_AFTER)
+
+    assert graph.aclose_called, "前提没成立：压根没去关图的流"
+    assert graph.closed, "关流被取消打断后**图的流没真的关上** ⇒ 图会继续跑完"
+    assert _metric(AGENT_ENDPOINT) == before + 1, "aclose 抛异常 ⇒ 取消没计数"
+    assert any("断开" in line for line in lines), f"日志里没有取消事件：{lines}"
 
 
 def test_agent_normal_completion_is_not_counted_as_cancel(monkeypatch):

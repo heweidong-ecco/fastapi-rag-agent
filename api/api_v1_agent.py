@@ -3,6 +3,9 @@ API v1 路由集中定义
 所有 /api/v1 前缀的接口在此管理。
 """
 import asyncio
+# `③` Task 5 补（2026-10-03 · 真服务实测）：`finally` 里关图的流要用 `anyio.CancelScope(shield=True)`
+# **护住** —— 否则那一次 `await` 会被反复投递的取消打断（与 `api_v1_rag.py` 同一处病）。
+import anyio
 import json
 import time
 from fastapi import APIRouter, Depends, Path, Query
@@ -235,14 +238,21 @@ async def langgraph_chat_stream(
             yield "data: [DONE]\n\n"
             return
         finally:
-            # 🔴🔴 **本任务的核心动作**：客户端断开后**关掉图的流**。
-            #    不关 ⇒ 图会**继续跑完**（`DEC-050` §遗留·3 自己点了这条：
-            #    "新的流式路由同样没有 cancel 处理"）—— 继续跑 = 继续调模型 = 继续烧钱。
-            if stream is not None:
-                await stream.aclose()
+            # 🔴🔴 **顺序与关流方式 = 2026-10-03 真服务实测改的**（与 `api_v1_rag.py` 同一处病）：
+            #    `await stream.aclose()` 会被**二次投递的取消**打断 ⇒ 抛 `CancelledError`
+            #    ⇒ 排在它后面的计数与日志**一件都不跑**（实测：计数 `2.0→2.0`、日志没有）。
+            #    ⇒ ① **同步**的收尾提到 `await` 之前 · ② 关流用 shield 护住。
             if outcome == "cancelled":
                 track_stream_cancel(ENDPOINT)
                 logger.info(f"[cancel] 客户端断开，已停止生成并关闭图的流 endpoint={ENDPOINT}")
+
+            # 🔴🔴 **本任务的核心动作**：客户端断开后**关掉图的流**。
+            #    不关 ⇒ 图会**继续跑完**（`DEC-050` §遗留·3 自己点了这条：
+            #    "新的流式路由同样没有 cancel 处理"）—— 继续跑 = 继续调模型 = 继续烧钱。
+            #    ⚠️ `shield=True` **必须**：取消作用域反复投递取消，不护住 ⇒ 关流半途而废。
+            if stream is not None:
+                with anyio.CancelScope(shield=True):
+                    await stream.aclose()
 
         # 🔴🔴 **状态必须取自【图的最终状态】，⛔ 不是"把 `agent` 节点的流式块攒起来"。**
         #
