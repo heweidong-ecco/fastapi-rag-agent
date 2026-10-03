@@ -59,7 +59,7 @@ bash scripts/list_endpoints.sh          # 默认 http://127.0.0.1:8000
 | 硬门 D · 人工接管 | 🟡 | 地基在（`api/agent_checkpointer.py` + `interrupt_before=["approval"]`）；⚠️ **触发条件 = 任意 tool_calls**，且**无「待接管队列」端点** |
 | 认证（API Key + JWT · 三级角色） | ✅ | `api/deps.py` · `api/auth.py` · `api/permission.py` ⚠️ 角色**按名字硬编码** |
 | 限流（频率） | 🟡 | `api/rate_limiter.py` —— ⚠️ **所有匿名共用一个桶**，且 `X-API-Key` 分支**不验签** |
-| 限额 · 四层 | ✅ | **4 层齐了**（`R1.3` 于 **2026-10-03** 补齐 · `①b` Task 6 · `DEC-046`）：<br>✅ `R1.1` 单次上限（常量收口 + **15 处接线**）· ✅ `R1.2` 会话级（`B8`，接在 **7 条对话链**上）<br>✅ `R1.3` **用户日级**（token 口径 · `main.QuotaMiddleware` **全路径** · 2026-10-03）· ✅ `R1.4` 全局日级（`B10` 判定 + **`B11` 接线 8 处**）<br>⚠️ **仍有一层是漏的**：配额那层对**匿名请求完全绕过**（`main.py:314` 的 `if not user_name:`，与上面四层不是同一件事）—— 旧写「`quota_limiter.py` 绕过」，**该模块 2026-10-03 已删**，行为不变<br>📌 **逐层详表见下方「R1.1–R1.4 四层限额」行** |
+| 限额 · 四层 | ✅ | **4 层齐了**（`R1.3` 于 **2026-10-03** 补齐 · `①b` Task 6 · `DEC-046`）：<br>✅ `R1.1` 单次上限（常量收口 + **15 处接线**）· ✅ `R1.2` 会话级（`B8`，接在 **7 条对话链**上）<br>✅ `R1.3` **用户日级**（token 口径 · `main.QuotaMiddleware` **全路径** · 2026-10-03）· ✅ `R1.4` 全局日级（`B10` 判定 + **`B11` 接线 8 处**；⚠️ **2026-10-03 才补上出口** —— 在那之前超了所有人吃 429 却**界面上看不到逼近**，见 `DEC-047`）<br>⚠️ **仍有一层是漏的**：配额那层对**匿名请求完全绕过**（`main.py:314` 的 `if not user_name:`，与上面四层不是同一件事）—— 旧写「`quota_limiter.py` 绕过」，**该模块 2026-10-03 已删**，行为不变<br>📌 **逐层详表见下方「R1.1–R1.4 四层限额」行** |
 | 熔断 | 🟡 | **有（2026-10-02 · `B11`）** —— `api/breaker.py` 的通用**按 key** 断路器；**只接了 `global:` 一条**<br>⚠️ `model:` 那类（`L2` 降级链 / `L3` TTL / `L4` 可见标记 / `L5` 排序）**还没做** |
 | 成本 / token 可见 | ✅ | `api/token_tracker.py`（9 个汇总函数）· Gradio 看板挂在 `/dashboard` |
 | Agent（4 套实现） | ✅ | `agent_graph.py` · `agent_graph_advanced.py` · `agent_graph_advanced_learning.py` · `plan_execute.py` |
@@ -77,7 +77,7 @@ bash scripts/list_endpoints.sh          # 默认 http://127.0.0.1:8000
 ✅ 🔵 B1–B14 / L1–L7 全部裁定 ← 2026-09-30【见下「2026-09-30 做了什么」】
 🔵 后端全部完成            ← 【当前阶段】开工序已定，**已开工**
      ✅ ①a 额度收口（DEC + B12 + token_config）        ← 2026-10-01 做完（见下）
-     🔵 ①b 限额与熔断（B8/B10/B11 + 决策一落地）        ← ⭐ **进行中**：Task 0 ✅ / Task 1 ✅（B7 接线+S12）/ Task 2 ✅（B8 会话级）/ Task 3 ✅（B10 全局日级）/ **Task 4 ✅（B11 熔断 —— 已接线 8 处，2026-10-02）** / **Task 5 ✅（`L2` · 15 个构造点收进 `make_llm()`；⛔ 自动兜底【裁定推迟】· `DEC-044`，2026-10-02）—— 已合入 `main`（PR #67 · `c133c1e`）** / **⬜ Task 6 起待做（`决策一` 落地 → `B13` 实跑核）**
+     ✅ ①b 限额与熔断（B8/B10/B11 + 决策一落地）        ← **2026-10-03 收尾**：Task 0 ✅ / Task 1 ✅（B7 接线+S12）/ Task 2 ✅（B8 会话级）/ **Task 3 ✅（B10 全局日级）** / **Task 4 ✅（B11 熔断 —— 接线 8 处，2026-10-02）** / **Task 5 🟡（`L2` · 15 个构造点收进 `make_llm()`；⛔ 自动兜底【裁定推迟】· `DEC-044`）** / **Task 6 ✅（`决策一` 落地 · `DEC-046`）** / **Task 7 ✅（`B13` 实跑核成本可见 · `DEC-047`）**
      ② 人工接管（B4/B5/B6）· ③ 流式与取消（B1/B2）
 ⬜ 前端开发                4 个页面 + 硬门 B 界面 + 停止按钮 + 接管队列 + R3.2 熔断卡片
 ⬜ ④ 测内存定机器 → ⑤ 买域名 → ⑥ 上云 → ⑦ 开隧道 → ⑧ 保护/自验/发链接
@@ -159,6 +159,13 @@ bash scripts/list_endpoints.sh          # 默认 http://127.0.0.1:8000
 >   ⚠️ **原计划那句"必须最后做"的理由不完整** —— 它说「到这一步，`B8`/`B10`/`B11` 已经在拦了」，
 >   但 `B8` 是**会话级**、`B10` 是**全站合计**，**没有一层是「按用户每天」** ⇒ 直接撤会开洞。
 >   ⇒ **原位换**（撤旧与接新同一处、同一次），**没有空窗**。📄 `DEC-046`
+> * ✅ **成本可见【已实跑核过 + 两处口径修好】（2026-10-03 · `①b` Task 7 · `B13` · `DEC-047`）** ——
+>   `①b` 的**最后一个 Task**。四个面（`/dashboard` · `/agent/token/budget` · `/agent/cost/overview` ·
+>   `/agent/trace/{id}`）都打得开，**但核出两处不报错的错**：
+>   🔴 ① `/agent/cost/overview` 三个总数读的是**进程内存**（重启归零，实测库里有 4216 tokens 它答 `0`）⇒ 换 `get_user_overview()`（读库）；
+>   🔴 ② `B10`/`B11` 的**全站日级额度没有任何出口**（超了所有人吃 429，却看不到逼近）⇒ `/agent/token/budget` + 看板补 `global_*` 三个字段。
+>   ⚠️ **同族的仍在且【有意保留】**：`/agent/token/overview` · `/agent/thread/{id}/overview` · 看板第 2 格 ——
+>   它们是**进程内存**口径（答 `0` 看不出是"真 0"还是"刚重启"）⇒ 见 `DEC-047` §遗留 1。
 
 > ### 📄 `①b` Task 0 + Task 1（**2026-10-01 同日**）
 >
@@ -228,7 +235,8 @@ bash scripts/list_endpoints.sh          # 默认 http://127.0.0.1:8000
 > | ✅ | **Task 4** | **`B11` · 熔断（按 key 断路器）**（2026-10-02）—— 新建 `api/breaker.py`（`circuit()` / `global_key()`）+ `docs/specs/breaker.md`；测试 `test_breaker.py`（9）· `test_breaker_wiring.py`（9）<br>🔴 **接线 8 处**＝与 `B8` 同一批 **7 处 + `benchmark_embedding`**（`api_v1.py:244`）—— 后者是**全仓唯一「匿名可打且真花钱」**的端点（签名没有 `Depends`），而它**接不上 `B8`**（没有 `user_name`/`thread_id`）⇒ **只有全站级能管住它**<br>⭐ **顺带纠正源文档一处误判**：`B11` 要素④原写「Redis 日级 key 的 TTL 未核」—— **日级用量在 PG（`token_usage_logs`），不在 Redis** ⇒ 恢复靠 SQL 的 `created_at >= CURRENT_DATE` 自翻页，**没有 TTL 可核**；补 `test_yesterdays_usage_does_not_count` 真库钉住<br>📌 `L2` **只顺带做了"接口"没做"实现"** —— `circuit()` 换个 key 前缀即可，⛔ 没为它预建任何东西 |
 > | ✅ | **Task 5** | **`L2` · 只做构造收口（形态甲）**（2026-10-02）—— 15 个 LLM 构造点收进 **`api/llm_factory.py::make_llm()`**，`model`/`max_tokens`/`api_key`/`base_url` **各自只剩一个落点**；**行为零变化**（角色由 `api/test_max_tokens_wiring.py::EXPECTED_ROLES` 钉住）<br>⛔ **自动兜底【裁定不做 · 推迟】** —— 实测 `主.with_fallbacks([备])` **不会炸**，但 `w.model_name` **永远返回主模型名** ⇒ **备用模型烧的 token 会静默记到主模型头上**；收益只在额度耗尽那一刻兑现，代价是账目常年失真 ⇒ 这轮不值得<br>📄 `docs/decisions/DEC-044-Task5只做构造收口不做自动兜底.md` · `docs/specs/llm_factory.md`<br>⚠️ **原始计划的另一半**（`model:` 前缀降级链 + `L4` 响应带降级标记 / `L5` 排序）**跟着一起推迟** —— `L3`/`L4`/`L5` 的裁定仍然有效，将来做真兜底时直接用 |
 > | ✅ | **Task 6** | **`决策一` 落地**（2026-10-03）—— ⚠️ **不是原计划写的「撤次数 / 降级」**，而是「**次数那套整张删 + `QuotaMiddleware` 原位换成 token 口径**」<br>① 删 `permission.ROLE_QUOTA` / `get_user_quota`（`UserRole`/`get_user_role` 保留）② `QuotaMiddleware` 改判**按用户按天 token**（数据源 `token_tracker.get_token_budget_info`）③ 判定抽成**纯函数** `quota_reject_payload()` / `quota_headers()`（⇐ 不连 DB 就能单测）④ `/debug/quota` 改走同一套 ⑤ **删模块** `api/quota_limiter.py` + 归档 spec ⑥ 新增 `api/test_quota_middleware.py`（9 条）<br>🔴 **顺带把 `R1.3` 做掉** —— 原以为 `B8/B10/B11` 已补上「按用户每天」那一层，**实测没有**<br>📄 `docs/decisions/DEC-046-决策一落地撤次数配额改用token口径.md`<br>📌 判据（可打印）：`venv/bin/python -m pytest api/test_quota_middleware.py -q` ⇒ **9 passed**；<br>`venv/bin/python -m pytest api/ -m "not integration and not needs_db" -q` ⇒ **15 failed / 198 passed**（改动前基线 **15 failed / 189 passed**，**红的清单逐条一致** ⇒ 无回归） |
-> | ⬜ **⬅ 下一步** | **Task 7** | **`B13` · 实跑核成本可见** —— 起服务看 `/dashboard` · `/agent/token/budget` · `/agent/cost/overview` · `/agent/trace/{thread_id}`（`R4.2`「还剩多少」**依赖 `B10`** ⇒ 现在答得出了） |
+> | ✅ | **Task 7** | **`B13` · 实跑核成本可见**（2026-10-03 · `①b` **收尾**）—— 起服务逐面看了 `/dashboard` · `/agent/token/budget` · `/agent/cost/overview` · `/agent/trace/{thread_id}`，**四个面都打得开**，但核出**两处"不报错"的错**：<br>🔴 **① `/agent/cost/overview` 的三个总数读的是【进程内存】**（`get_user_summary`）⇒ 重启归零。**实测 admin 库里有 4216 tokens / 6 行，它答 `0`** ⇒ 换新函数 `get_user_overview()`（**读库 · 全时 · 本人**），`by_purpose` 随之从**全站**变**本人**<br>🔴 **② `B10`/`B11` 的全站日级额度【没有任何出口】** —— 超了**所有人**吃 429，界面上却看不到逼近 ⇒ `/agent/token/budget` 补 `global_daily_limit` / `global_used_today` / `global_remaining`，看板加第 5 格「全站预算」<br>✅ **`R4` 判据现在成立**：以前「全站还剩多少」**答不出**，现在答得出（实测 `global_remaining: 999961`，与库里今日 39 tokens 对得上）<br>📄 `docs/decisions/DEC-047-成本可见两处口径修正.md`<br>📌 判据（可打印）：`venv/bin/python -m pytest api/test_cost_visibility.py -q` ⇒ **4 passed**；`POSTGRES_DB=rag_test venv/bin/python -m pytest api/test_cost_visibility_db.py -q` ⇒ **3 passed**；`venv/bin/python -m pytest api/ -m "not integration and not needs_db" -q` ⇒ **217 passed, 3 skipped, 22 deselected, 0 failed** |
+> | ⬜ **⬅ 下一步** | **接手人定** | `①b` 的 8 个 Task（0–7）**全部落地** ⇒ ①b **收尾**。`①b` 剩下的两条支线还没开：**② 人工接管（B4/B5/B6）** · **③ 流式与取消（B1/B2）** —— 见下方计划表；<br>⚠️ 另有一批**小遗留**（`DEC-047` §遗留）：看板第 2 格仍是内存口径 · `api/tool_visualizer.py` 与 `api/cost_dashboard.py` **无 spec** · `get_intercept_count()` 口径未核 |
 >
 > ⚠️ **`决策一` 原计划要求「必须最后做、先接 token 再降次数」** —— 那条**顺序陷阱仍然成立**，
 > 但**理由被更正了**（`DEC-046`）：它以为 `B8/B10/B11` 已补上「按用户每天」，**实测没有** ——
@@ -307,7 +315,7 @@ bash scripts/list_endpoints.sh          # 默认 http://127.0.0.1:8000
 | **后端** | **R2 熔断** | 🟡 | **2026-10-02 建（`①b` Task 4 · `B11`）** —— `api/breaker.py` 通用**按 key** 断路器，**已接 8 处**（只有 `global:` 一条 key）<br>⬜ **`model:` 那类还没做**（`L2` 降级链 · `L3` TTL / `L4` 可见标记 / `L5` 排序）<br>⚠️ **2026-10-02（`①b` Task 5 · `DEC-044`）**：`L2` **只做了"构造收口"**（15 个构造点收进 `make_llm()`），**降级链本身【裁定推迟】** ⇒ 本行"还没做"**仍然成立**，且是**有意为之**，⛔ **别当成欠账** |
 | **后端** | 🔴 **`B9-b` 限流分桶加验签** | ✅ | **2026-09-30 已实施** —— 修前"编个 `X-API-Key` 就能拿独立桶"<br>7 条测试（TDD）· CI 已回绿<br>⚠️ **原写「全量 124 passed」但没标前提** —— 那个数**只在 Redis 开着时**成立<br>（本机 15 条红里 **14 条是 `redis.ConnectionError`** + 1 条 MCP）。**本地不依赖 Redis 的口径 = 109**（`①a` 前实测） |
 | **后端** | **R3 结构化错误 + `retry_after`** | ✅ | **`B12` · 2026-10-01 已完成**（`①a` Task 1）—— **落点不是 1 处是 4 处**（`:158` 说反 · `:460/:481/:496` 503 也不准 · `:364` 那处 500 **故意保留**）<br>📄 回归 `api/test_error_contract.py`（5 条）· 判据：`grep -n '"error": "Internal server error"' api/main.py` ⇒ **只剩 1 行** |
-| **后端** | **R4 成本可见（实跑核一遍）** | ⬜ | `B13` |
+| **后端** | **R4 成本可见（实跑核一遍）** | ✅ | **`B13` · 2026-10-03 已实跑核**（`①b` Task 7 · `DEC-047`）—— 四个面都打得开；**但核出两处"不报错"的错**：`/agent/cost/overview` 读的是**进程内存**（重启归零，实测库有 4216 tokens 它答 0）⇒ 换 `get_user_overview()`（读库）· **全站日级额度没有任何出口** ⇒ `/agent/token/budget` + 看板补上 `global_*` 三个字段<br>⚠️ **判据的两半**：R4.1「今天花了多少」一直答得出；**R4.2「还剩多少」以前只有【本人】half、全站那半答不出，现在答得出**<br>📌 判据（可打印）：`venv/bin/python -m pytest api/test_cost_visibility.py -q` ⇒ **4 passed**；`POSTGRES_DB=rag_test venv/bin/python -m pytest api/test_cost_visibility_db.py -q` ⇒ **3 passed** |
 | **后端** | **§8.2 eval 接入 + 额度隔离** | ⬜ | `B14` |
 | ③ | 前端：对话页 / 接管页 / Trace 页（改造）/ Eval 页 | ⬜ | `施工单 §3.1` |
 | ③ | 硬门 B 引用可点开 + 无据拒答 | ⬜ | 前端部分 |

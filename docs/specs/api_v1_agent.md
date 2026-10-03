@@ -5,7 +5,7 @@
 | **状态** | 🟡 **可用，但 28 个路由【全都非流式】** —— `StreamingResponse` / `text/event-stream` / `yield` **全为 0**<br>🔵 **改造中**：本文件下方有 **实施计划 ②**（人工接管）与 **③**（流式与取消） |
 | **对外提供** | 28 个路由（`/agent/langgraph_chat` · `/agent/approve` · `/agent/mcp_chat` · `/agent/advanced_chat` · `/agent/plan_execute` · `/agent/token/*` …）· `summarize_agent_result()` |
 | **谁在用** | 前端（未做）· `test_public_paths.py` 等 |
-| **规模** | 743 行 |
+| **规模** | **835 行**（2026-10-03 重取；Task 7 之前是 743） |
 
 ## ✅ 做了什么
 
@@ -15,6 +15,11 @@
 - **⭐ `summarize_agent_result()`（`:43`）** —— 把图的运行结果翻成 `{"status": "pending_approval"/"answered", …}`，
   并**把模型已写出的文字一并返回**（真实 LLM 常"先说一句再调工具"）
 - **预算**：`check_budget` 依赖（`:423`，抛 `AppException(QUOTA_EXCEEDED)`）· 6 个 `/agent/token/*` 查询路由
+- 🔵 **成本可见两处（`①b` Task 7 · `B13` · 2026-10-03 · `DEC-047`）**：
+  · **`/agent/token/budget`（`:492`）** 补上**全站日级**三个字段（`global_daily_limit` / `global_used_today` / `global_remaining`）——
+  在此之前 `B10`/`B11` 的全站额度**只有入口没有出口**，超了所有人吃 429 却**界面上看不到逼近**；
+  · **`/agent/cost/overview`（`:658`）** 数据源从 **`get_user_summary`（进程内存）** 换成 **`get_user_overview`（读库）**，
+  `by_purpose` 随之从**全站**变**本人**
 - **工具**：`/agent/tool_health` · `/agent/tool_versions` · `/agent/available_tools` · `/agent/mcp_tools_dynamic`
 
 ## 🟡 做到哪 / 缺什么
@@ -22,7 +27,12 @@
 - 🔴 **28 个路由全非流式** ⇒ **硬门 A 的缺口**（见计划 ③ 的 B1）
 - 🔴 **没有「待接管队列」端点** —— 有**单条**状态查询，**没有任何端点能列出"当前有哪些会话在等接管"**（见计划 ② 的 B5）
 - 🔴 **`/agent/approve` 的参数是 query 不是 body**（`:113-115`）⇒ 前端联调会踩
-- ⬜ 零散的 `/agent/token/*` 与 `/agent/cost/*` 有重复嫌疑（**未核**）
+- 🔴 **`/agent/cost/overview` 的三个总数曾经是【进程内存】**（2026-10-03 修，`DEC-047`）——
+  它**不报错、界面照常出数**，只是**重启后答 0**（实测库里有 4216 tokens、它答 0）。
+  ⚠️ **同族的仍在**：`/agent/token/overview` · `/agent/thread/{id}/overview` · 看板第 2 格
+  **都是内存口径**（语义 = "本进程"，**有意保留**，⛔ 别当 bug 删）
+- ⬜ 零散的 `/agent/token/*` 与 `/agent/cost/*` 有重复嫌疑（**未核**；⚠️ `DEC-047` 已把口径说清：
+  `/agent/token/budget` = **今天 + 还剩多少**，`/agent/cost/overview` = **全时一共**，两者**不重复**）
 
 ## ⚠️ 看代码会误判的地方 ⭐
 
@@ -36,12 +46,18 @@
 | 🔴 **「会话上限没拦住 = 没生效」** | ⚠️ **先看 `thread_id` 是不是默认值** —— 会话 key = **`user_name` + `thread_id`**（`DEC-041` 决策二）。<br>4 个端点的 `thread_id` 默认 `"default"` ⇒ **同一个人的**多次默认调用**共用**一个桶（**不同人不会互相踩** —— 这正是决策二加 `user_name` 的原因）。<br>⚠️ 但**换个 `thread_id` 就是换个桶** ⇒ 这是**设计如此**，不是漏拦 |
 | ⚠️ **「`/agent/plan_execute` 一直有 `thread_id`」** | 🔴 **2026-10-01 才补的**（B8）。此前它**没有**这个参数 ⇒ 老客户端不传也能跑（走默认值），**行为不变**；但**新加的这条上限**在它上面用的是 `"default"` 桶 |
 | ⚠️ **「额度是按人算的」** | ⚠️ **两者都是，但维度不同**：`check_budget` = 人 × 日；`check_session_token_budget` = **人 × 会话 × 日**。⛔ 别把其中一个当另一个 |
+| 🔴 **「`/agent/cost/overview` 答 0 ⇒ 没花过钱」** | ⛔ **先想想进程重启过没有** —— **2026-10-03 之前**它读 `get_user_summary` = **进程内存**，**重启即归零、且不报错**。<br>✅ 现在读 **`get_user_overview`（库）**，扛得住重启（`DEC-047`）。<br>⚠️ **但同族的三个仍然是内存**：`/agent/token/overview` · `/agent/thread/{id}/overview` · 看板第 2 格 —— **答 0 是真的 0，还是刚重启，看代码分辨不出来** |
+| 🔴 **「`/agent/cost/overview` 和 `/agent/token/budget` 在报同一件事」** | ⛔ **不是，窗口不同**（`DEC-047` 特意划清的）：<br>`/agent/token/budget` = **今天 + 还剩多少**（`R1.3` 额度口径，**跨天自愈**）<br>`/agent/cost/overview` = **全时累计 + 一共多少**（字段名 `total_*`）。<br>⚠️ 两个口径**方向相反** ⇒ 若把 `overview` 的 SQL 加上 `created_at >= CURRENT_DATE`，它会**静默退化成"今天"**（数值偏小、不报错）。<br>📌 判据（可打印）：`api/test_cost_visibility_db.py::test_overview_window_is_all_time_not_today` |
+| ⚠️ **「`/agent/token/budget` 的数是【本人】的，那就跟全站无关」** | ⚠️ **2026-10-03 起它同时答两层**（`DEC-047`）：本人（`daily_budget`/`used_today`/`remaining`）**和**全站（`global_daily_limit`/`global_used_today`/`global_remaining`）。<br>⚠️ **字段名不带 `global_` 前缀的那三个是本人的** —— ⛔ **别拿未加前缀的 `remaining` 当全站余量**。<br>📌 理由：**"还剩多少"必须能同时看到本人和全站**，否则看到 `999961` 也不知道那是谁的上限 |
+| ⚠️ **「全站额度快满了，接口会给个预警」** | ⛔ **不会** —— 全站额度超了是**所有人吃 429**（`B11` 熔断），**没有"快到阈值了"的软提示**。<br>✅ 现在能**看到逼近**（`global_remaining`），但**得自己去看** —— ⬜ 无主动告警，`DEC-047` §遗留未列，本行仅备查 |
 
 ## 关联
 
 `docs/specs/agent_graph.md`（审批节点的本尊）· `docs/specs/agent_checkpointer.md` ·
 `docs/specs/api_v1_rag.md`（③ 的另一半）· `docs/specs/main.md` ·
-`后端补齐清单` **B1 · B2 · B3 · B4 · B5 · B6**
+`docs/specs/token_tracker.md`（**`get_user_overview` 的本尊** + 内存/库两套口径的说明）·
+**`DEC-047`**（`①b` Task 7：`/agent/token/budget` 补全站字段 · `/agent/cost/overview` 换数据源）·
+`后端补齐清单` **B1 · B2 · B3 · B4 · B5 · B6 · B13**
 
 ---
 

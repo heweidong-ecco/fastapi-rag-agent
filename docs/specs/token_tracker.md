@@ -2,10 +2,10 @@
 
 | 项 | 内容 |
 |---|---|
-| **状态** | 🟡 **可用** —— ⚠️ **2026-10-03 起它不再是"三套口径"之一**（次数那套已删，`DEC-046`）<br>🟢 **①a 已落地（2026-10-01）**：额度常量已收口到 `api/token_config.py`（本文件**只剩同名别名**）· 本文件下方 **实施计划 ①a** 已执行完<br>🔵 **①b（2026-10-02）**：Task 0 ✅ / Task 1 ✅（B7 接线）/ **Task 2 ✅（B8 会话级 · 已接 7 条链）** / **Task 3 ✅（B10 全局日级 · 判定函数）** / **Task 4 ✅（B11 熔断 · 已接 8 处，`B10` 由此生效）** / **Task 5 🟡 部分（`L2`）**（改写后只做构造收口，⛔ 自动兜底【推迟】—— 见该 Task 的修订块） / **Task 6 ✅（`决策一` 落地 · `DEC-046` —— 撤次数配额、原位换 token 口径 = `R1.3`）**<br>⚠️ **`B10` 曾一度"有函数没接线"（2026-10-01 当天）—— 那句话已作废**，2026-10-02 Task 4 接上了 |
-| **对外提供** | `record_usage()` · `record_cost()` · `check_multilevel_budget()` · `check_token_budget_detail()` · `get_token_budget_info()` · 9 个汇总函数<br>🔵 **2026-10-03 起**：`get_token_budget_info()` 还被 **`main.QuotaMiddleware`** 消费（全路径按用户日级 = `R1.3`）—— **它不再只是"记账/看板"用的** |
+| **状态** | 🟡 **可用** —— ⚠️ **2026-10-03 起它不再是"三套口径"之一**（次数那套已删，`DEC-046`）<br>🟢 **①a 已落地（2026-10-01）**：额度常量已收口到 `api/token_config.py`（本文件**只剩同名别名**）· 本文件下方 **实施计划 ①a** 已执行完<br>🔵 **①b（2026-10-02）**：Task 0 ✅ / Task 1 ✅（B7 接线）/ **Task 2 ✅（B8 会话级 · 已接 7 条链）** / **Task 3 ✅（B10 全局日级 · 判定函数）** / **Task 4 ✅（B11 熔断 · 已接 8 处，`B10` 由此生效）** / **Task 5 🟡 部分（`L2`）**（改写后只做构造收口，⛔ 自动兜底【推迟】—— 见该 Task 的修订块） / **Task 6 ✅（`决策一` 落地 · `DEC-046` —— 撤次数配额、原位换 token 口径 = `R1.3`）** / **Task 7 ✅（`B13` 实跑核成本可见 · `DEC-047` —— `①b` 收尾）**<br>⚠️ **`B10` 曾一度"有函数没接线"（2026-10-01 当天）—— 那句话已作废**，2026-10-02 Task 4 接上了 |
+| **对外提供** | `record_usage()` · `record_cost()` · `check_multilevel_budget()` · `check_token_budget_detail()` · `get_token_budget_info()` · **10 个汇总函数**（2026-10-03 起 +`get_user_overview`）<br>🔵 **2026-10-03 起**：`get_token_budget_info()` 还被 **`main.QuotaMiddleware`** 消费（全路径按用户日级 = `R1.3`）—— **它不再只是"记账/看板"用的** |
 | **谁在用** | `permission`（取角色）· `agent_graph_advanced.py:239`（唯一调多级预算的地方）· `cost_dashboard.py` · 各 `api_v1_*.py` |
-| **规模** | 888 行 |
+| **规模** | **962 行**（2026-10-03 重取；Task 7 之前是 888） |
 
 ## ✅ 做了什么
 
@@ -14,7 +14,7 @@
   ① 单次上限（**元**，`MAX_SINGLE_CALL_COST=0.5`，`:646`）
   ② 单线程上限（**元**，`MAX_THREAD_COST=5.0`，`:649`）
   ③ 每日预算（**token**，`ROLE_TOKEN_BUDGET`，`:286`）
-- **9 个汇总函数**：`get_daily_token_usage`(:191) · `get_user_summary`(:240) · `get_purpose_summary`(:247) · `get_thread_summary`(:252) · `get_recent_usage`(:259) · `get_token_budget_info`(:338) · `generate_monthly_report`(:354) · `get_daily_usage_cost`(:583) · `get_intercept_count`(:633)
+- **10 个汇总函数**（⚠️ 行号 2026-10-03 重取）：`get_daily_token_usage`(:193) · `get_user_summary`(:252) · `get_purpose_summary`(:259) · `get_thread_summary`(:264) · ⭐ **`get_user_overview`(:272) ← Task 7 新增** · `get_recent_usage`(:335) · `get_token_budget_info`(:413) · `generate_monthly_report`(:429) · `get_daily_usage_cost`(:658) · `get_intercept_count`(:708)
 - **拦截记录**：`record_intercept`(:607)
 
 ## 🟡 做到哪 / 缺什么
@@ -25,8 +25,11 @@
 - ✅ ~~🔴 **没有「会话级」上限**~~ ⇒ **2026-10-01 有了**（`B8` · `①b` Task 2）：
   `get_session_token_usage` / `check_session_token_budget`，**接在 7 条真调 LLM 的对话链上**（`DEC-041`）。
   ⚠️ **数据源是 `token_usage_logs` 表，⛔ 不是 `_thread_summary`** —— 内存**重启即清零**，拿它当上限等于"重启就能绕开"
-- 🟡 **「全局日级」** ⇒ **2026-10-01 建了函数**（`B10` · `①b` Task 3）：`get_global_daily_token_usage` / `check_global_daily_budget`。
-  🔴 **但⛔ 没有任何调用点** ⇒ **本条不产生任何行为变化**，接线在 `B11`（`①b` Task 4）
+- ✅ ~~🟡 **「全局日级」**~~ ⇒ **建了函数（2026-10-01 · `B10`）+ 接了线（2026-10-02 · `B11`）**：
+  `get_global_daily_token_usage` / `check_global_daily_budget`，**已接进 `breaker.py`**（8 处调用点）。
+  🔴 **2026-10-03（Task 7）又给它补了【出口】** —— 在那之前它**只有入口没有出口**：
+  超了所有人吃 429，**界面上却看不到逼近**（`DEC-047`）。
+  现在 `/agent/token/budget` 与看板第 5 格都报了 `global_used_today` / `global_remaining`
 - ⬜ **零测试覆盖**（`docs/说明/测试.md` §六 **#8**）
 - ⬜ **R2.2 恢复条件未核** —— `EXPIRE 86400` 是首次 INCR 时设的（滚动），**没人实测过 TTL**
 
@@ -36,10 +39,11 @@
 |---|---|
 | 🔴 **「多级预算是硬拦截」** | ⛔ **不是** —— `agent_graph_advanced.py:239` 超预算时是往图里**塞一条 `ToolMessage` 文本提示**，**HTTP 仍是 200**。**前端看不出"被拒了"** |
 | 🔴 **「这个文件管所有配额」** | ⚠️ **2026-10-03 起：是的**（原先"不是"）。<br>**原先**另有 `permission.ROLE_QUOTA` + `quota_limiter.py` 那套「每日**请求次数**」，**与 token 互不知情**（`DEC-029` 实测**差 35 倍**）。<br>⇒ `DEC-046` 把那套**整张删掉**，配额**只剩 token 一套**（金额那套是同一物不同单位，经 `PRICING` 换算）。<br>⚠️ **但它仍不是"所有路径"** —— 挂多级预算的只有 `/agent/mcp_chat` 一条；<br>**全路径那层在 `main.QuotaMiddleware`**（消费本文件的 `get_token_budget_info`）。 |
+| 🔴🔴 **「那三个 `get_*_summary` 是通用查询，哪儿都能用」** | ⛔ **不能当对外展示的数据源** —— `get_user_summary` / `get_purpose_summary` / `get_thread_summary`（`:252/:259/:264`）读的是**进程内存**（`_user_summary` 等三个 `defaultdict`，只在 `record_usage` 里累加、**从不回读 DB**）⇒ **重启归零**。<br>⚠️ 它们**不是坏的** —— 语义本来就是"**本进程**这段时间花了多少"，`:148` 的即时花费告警**正需要**这个。<br>🔴 **坏的是拿它们当展示口径**：`/agent/cost/overview` 原来就这么干，实测 admin 在库里有 **4216 tokens**、它答 **`0`** —— **不报错、界面照常出数**（`DEC-047` · `①b` Task 7 核出来）。<br>✅ 展示走 **`get_user_overview`**（读库）；⚠️ **另一个坑**：`get_purpose_summary()` 还**不收 `user_name`** ⇒ 它一直是**全站**口径。<br>📌 判据（可打印）：`api/test_cost_visibility.py` |
 | ⚠️ **「两个单位混着 ⇒ 是 bug」** | 🟢 **不是** —— 第一二级（元）与第三级（token）**量纲本来就不同**，代码注释 `:665` 明说「**别统一掉**」 |
 | ⚠️ **「`ROLE_TOKEN_BUDGET` 就是最终日限额」** | ⚠️ **只对 `_invoke_llm` 那条链**。**挂多级预算的只有 `/agent/mcp_chat` 一条**（`check_multilevel_budget` 全仓唯一调用点在 `agent_graph_advanced.py:239`）⇒ **其他链全无预算** |
 | ⚠️ **「本文件定义着 `PRICING` / `ROLE_TOKEN_BUDGET` / `MAX_*_COST`」** | 🔴 **2026-10-01 起【只是别名】** —— 真值在 `api/token_config.py`，本文件**顶部 import 进来**（`PRICING is token_config.MODEL_PRICING` → `True`）。⇒ **改价改额度请去 `token_config.py`**，改这里没用（会被 import 覆盖） |
-| 🔴 **「`check_global_daily_budget` 存在 ⇒ 全站额度在管着」** | ⛔ **不是** —— **它没有任何调用点**（2026-10-01 · Task 3 只出函数）。<br>**判据（可打印）**：`grep -rn "check_global_daily_budget" api/ --include="*.py"` ⇒ 只应命中**定义处 + 测试**；命中不到任何 `api_v1_*.py` = **它还没生效**。<br>⚠️ 接线在 `B11`（Task 4）。📌 这是「**常量/函数建好没接上**」那个陷阱的**第三次**（前两次：`B7` 前、`B8` 前） |
+| ✅ ~~🔴 **「`check_global_daily_budget` 存在 ⇒ 全站额度在管着」**~~ | ✅ **2026-10-02 起【是的】—— 这句话已经翻面，⛔ 别照旧理解。**<br>**2026-10-01 当天**确实如原文所说「**没有任何调用点**」（Task 3 只出函数）；**Task 4（`B11`）把它接进了 `breaker.py:75`** ⇒ 现在**真的在管着**。<br>**判据（可打印）**：`grep -rn "check_global_daily_budget" api/ --include="*.py"` ⇒ 应命中 `breaker.py` 的 `:74/:75`（接线）**与** `token_tracker.py:907`（定义）。<br>📌 **保留这一行的理由**：它是「**常量/函数建好没接上**」（本仓第三次：`B7` 前、`B8` 前）的标本 —— 但**标本的意思是"当时没接"，不是"现在没接"**。⚠️ **这类行的有效期很短，读到请先跑判据。** |
 | 🔴 **「`get_global_daily_token_usage` 与 `get_daily_token_usage` 差不多」** | 差的正是**全部**：前者 SQL **⛔ 不许有 `user_name`**（全站），后者**必须有**（单用户）。<br>⚠️ 抄后者改前者时**漏删** `WHERE user_name` ⇒ 函数名还叫「全局」、**返回值正常、只是偏小**、**没有任何报错** ⇒ 本仓**永远不会有全局额度**。<br>⇒ 已用 **AST 静态守卫**钉死（`api/test_global_daily_budget_offline.py` 的**配对**测试：一边必须有、一边必须没有） |
 | ⚠️ **「`GLOBAL_DAILY_TOKEN_LIMIT` = 1,000,000 是个随手写的默认值」** | 🟡 **2026-10-01 起它变成了【裁定值】**（`DEC-042`）—— 业务方在源文档 B10 那个空上填的。⚠️ 但**它仍不在环境变量契约里**（`.env.example` / `docs/契约/环境变量.md` 都无此项），想不改代码调它**得先补契约** |
 
@@ -50,6 +54,7 @@
 `docs/specs/main.md`（**全路径按用户日级** = `R1.3`，消费本文件）·
 `docs/specs/permission.md`（⏳ 待建）·
 `DEC-029`（两套口径，**已由 `DEC-040` 收口**）· **`DEC-046`**（次数那套的删除 + 原位换 token）·
+**`DEC-047`**（`①b` Task 7：**内存 vs 库 = 两个语义** · 全站额度的出口 = `get_user_overview` + 看板第 5 格）·
 `后端补齐清单` **B7/B8/B10/B11/B13**
 
 ---
@@ -674,7 +679,7 @@ git commit -m "refactor(配额): 决策一落地 —— 次数配额降级，统
 
 ---
 
-# 🔵 实施计划 ①b · **限额与熔断**（2026-09-30 立 · **执行中** —— Task 0 ✅ / Task 1 ✅ / Task 2 ✅ / Task 3 ✅ / Task 4 ✅ / **Task 5 🟡 部分** / **Task 6 ✅（2026-10-03）**）
+# ✅ 实施计划 ①b · **限额与熔断**（2026-09-30 立 · **2026-10-03 收尾** —— Task 0 ✅ / Task 1 ✅ / Task 2 ✅ / Task 3 ✅ / Task 4 ✅ / **Task 5 🟡 部分** / **Task 6 ✅** / **Task 7 ✅（`DEC-047`）**）
 
 > **来源**：`后端补齐清单-待裁-20260929.md` 的 **B8 · B10 · B11 · B13 · 决策一（实现）**；
 > 以及 `LLM模型路由与额度策略-待裁-20260930.md` 的 **L2**（十几个 model 顺带）。
@@ -1264,9 +1269,65 @@ venv/bin/python -m pytest api/ -m "not integration and not needs_db" -q
 
 ---
 
-## Task 7 · **B13** · 实跑核一遍成本可见
+## Task 7 · **B13** · 实跑核一遍成本可见 · ✅ **已落地（2026-10-03 · `DEC-047` —— `①b` 收尾）**
 
-- [ ] **不写代码先核**：起服务，依次看 `/dashboard` · `/agent/token/budget` · `/agent/cost/overview` · `/agent/trace/{thread_id}`
-- [ ] 判据（`R4`）：**界面上能直接看到数字；能回答"今天花了多少、还剩多少"**
-- [ ] ⚠️ R4.2 的「还剩多少」**依赖 B10** —— B10 做完它才答得出来。**如果以前答不出而现在答得出，本任务就完成了**
-- [ ] 缺什么再补什么；⛔ **别为了"补齐"而新写一套汇总**（`token_tracker` 已有 9 个）
+> ### 🔴 **四个面都打得开 —— 但核出两处【不报错】的错**
+>
+> 📌 **本 Task 的价值全在"实跑"两个字上**：`B13` 原话就是「**不写代码先核**」。
+> 若是照着代码读一遍，这两处**一处也发现不了** —— 它们**不抛异常、测试全绿、界面照常出数**。
+
+### 📌 修订块（2026-10-03 · 落地版）
+
+> 📄 **决策全文（四处裁定 / 备选 / 反悔成本 / 遗留）⇒ `docs/decisions/DEC-047-成本可见两处口径修正.md`**
+
+**实跑结果（2026-10-03 · 起服务后逐面看）**：
+
+| 面 | 结果 | 判据 |
+|---|---|---|
+| `/dashboard` | ✅ `HTTP 307` → 跟随后 `200`（47468 B） | 页面在，第 5 格「全站预算」已出现 |
+| `/agent/token/budget` | ✅ 用户级 + **全站级**都有数 | 见下 |
+| `/agent/cost/overview` | 🔴 **改前答 0** ⇒ ✅ 改后答 4216 | 见下 |
+| `/agent/trace/{thread_id}` | ✅ `200`（不存在的线程答"未找到"，**不报错**） | ⚠️ 进程内存，设计如此 —— 见 `DEC-047` §遗留 2 |
+
+**核出来的两处错 + 修法**：
+
+| # | 事实 | 修法 | 落点 |
+|---|---|---|---|
+| ① | `/agent/cost/overview` 的三个总数读 **`get_user_summary` = 进程内存** ⇒ **重启归零**。<br>🔴 实测：库里有 **4216 tokens / 6 行**，它答 **`0`**，**不报错**。<br>⚠️ 同一份 JSON 里 `total_*` 是**本人**、`by_purpose` 却是**全站** | 新加 **`get_user_overview()`（读库 · 全时 · 本人）**；端点改读它，`by_purpose` 随之变**本人** | `token_tracker.py:272` · `api_v1_agent.py` |
+| ② | **`B10`/`B11` 的全站日级额度没有任何出口** —— 超了**所有人**吃 429，而**界面上看不到逼近**（`get_global_daily_token_usage()` 原只被 `breaker` 调过） | `/agent/token/budget` 加 `global_daily_limit` / `global_used_today` / `global_remaining`；看板加第 5 格 | `api_v1_agent.py` · `cost_dashboard.py` |
+
+✅ **判据（`R4`）现在成立了**：以前「全站还剩多少」**答不出**，现在答得出（`global_remaining: 999961`）。
+
+⚠️ **三条一起变的行为**（否则下一个人会当成 bug）：
+1. **`by_purpose` 从【全站】变【本人】—— 这是对外可见的行为变化**。外部消费方若有，
+   会**静默拿到更小的数**。本仓 `grep` 结果：**除测试外无消费方**。
+2. **内存那三个 `get_*_summary` 仍然存在、仍有调用点**（`:148` 告警 · `/agent/token/overview` ·
+   `/agent/thread/{id}/overview` · 看板第 2 格）。⛔ **别当残留删掉** —— 语义是"本进程"，只是不能对外展示。
+3. **看板 5 格不是一套口径**（前 4 格 = 本人，第 5 格 = 全站；第 2 格仍是内存）——
+   已在 `get_dashboard_summary` 的 docstring 里列表说明。
+
+**判据（可打印）**：
+
+```bash
+venv/bin/python -m pytest api/test_cost_visibility.py -q          # ⇒ 4 passed（进 CI）
+POSTGRES_DB=rag_test venv/bin/python -m pytest api/test_cost_visibility_db.py -q
+# ⇒ 3 passed（@needs_db · 本机需先停掉占用 qdrant 锁的 uvicorn）
+venv/bin/python -m pytest api/ -m "not integration and not needs_db" -q
+# ⇒ 217 passed, 3 skipped, 22 deselected —— 【0 failed】
+```
+
+⚠️ **`test_cost_visibility_db.py` 是本 Task 补的【真缺口】**：离线那份只做 AST 静态核对，
+**表名/列名打错、SQL 语法错，CI 永远绿**。DB 那份让这条 SQL **至少有一条路径真的执行它**。
+📌 与本仓前科呼应：`docs/复盘/2026-09-17-只读冒烟其实会写库.md` —— **跑它必须带 `POSTGRES_DB=rag_test`**。
+
+**Files（实际）:** `api/token_tracker.py`（+`get_user_overview`）· `api/api_v1_agent.py` ·
+`api/cost_dashboard.py` · `api/test_cost_visibility.py`（新建）·
+`api/test_cost_visibility_db.py`（新建）· `docs/decisions/DEC-047-成本可见两处口径修正.md`（新建）
+
+---
+
+# ✅ 实施计划 ①b · **收尾**
+
+`①b` 的 8 个 Task（0–7）**全部落地**。⬜ **未进 `①b`、但仍挂着的遗留**见
+`DEC-047` §遗留（看板第 2 格仍是内存 · `tool_visualizer.py` / `cost_dashboard.py` 无 spec ·
+`get_intercept_count()` 口径未核）。

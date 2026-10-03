@@ -11,7 +11,12 @@ from datetime import datetime, timedelta
 from db import get_db
 from io import BytesIO
 import base64
-from token_tracker import get_user_summary, get_purpose_summary, get_daily_usage_cost, get_token_budget_info
+from token_tracker import (get_user_summary, get_purpose_summary,
+                           get_daily_usage_cost, get_token_budget_info,
+                           get_global_daily_token_usage)
+# B13（①b Task 7）：全站日级**上限** —— 与 `get_global_daily_token_usage()` 成对用。
+# ⛔ 别在这里写死 1_000_000（改它只该改 `token_config.py` · `DEC-042`）。
+from token_config import GLOBAL_DAILY_TOKEN_LIMIT
 from token_tracker import PRICING
 
 # ==================== 字体配置 ====================
@@ -123,15 +128,31 @@ def create_daily_trend_chart(user_name: str, days: int = 7) -> str:
 
 # ==================== 数据查询 ====================
 def get_dashboard_summary(user_name: str):
+    """看板的 5 格统计。
+
+    ⚠️ **5 格的口径不是同一套，读的时候别串**（2026-10-03 实跑核过）：
+
+    | 格 | 口径 | 数据源 |
+    |---|---|---|
+    | 今日花费 · 今日 Token · 预算/剩余 | **本人 · 今天**（`R1.3`） | 库 |
+    | 调用统计 | 🔴 **全站 · 本进程**（`get_purpose_summary()` 是内存、且不分用户） | 内存 |
+    | 全站预算 | **全站 · 今天**（`R1.4`·`B10`/`B11`） | 库 |
+
+    ⚠️ **第 5 格是 2026-10-03（`①b` Task 7 · `B13`）新加的**：在那之前，
+    全站日级额度（超了**所有人**吃 429）**界面上完全看不到**。
+    """
     info = get_token_budget_info(user_name)
     today_cost = get_daily_usage_cost(user_name)
     purpose = get_purpose_summary()
     total_calls = sum(p.get("calls", 0) for p in purpose.values())
+    global_used = get_global_daily_token_usage()
     return (
         f"💰 今日花费: ¥{today_cost:.4f}",
-        f"📊 总调用次数: {total_calls}",
+        f"📊 总调用次数(本进程·全站): {total_calls}",
         f"💳 预算: {info['daily_budget']} | 剩余: {info['remaining']}",
-        f"📈 今日 Token: {info['used_today']}"
+        f"📈 今日 Token: {info['used_today']}",
+        f"🌐 全站今日 Token: {round(global_used, 2)} / {GLOBAL_DAILY_TOKEN_LIMIT}"
+        f" | 全站剩余: {round(max(0, GLOBAL_DAILY_TOKEN_LIMIT - global_used), 2)}"
     )
 
 def get_model_pricing_table():
@@ -145,10 +166,10 @@ def get_model_pricing_table():
 def refresh(user_name, days):
     pie = create_purpose_pie_chart(user_name)
     trend = create_daily_trend_chart(user_name, int(days))
-    s1, s2, s3, s4 = get_dashboard_summary(user_name)
+    s1, s2, s3, s4, s5 = get_dashboard_summary(user_name)
     pricing_table = get_model_pricing_table()
     return (
-        s1, s2, s3, s4,
+        s1, s2, s3, s4, s5,
         gr.Image(value=None) if pie is None else f"data:image/png;base64,{pie}",
         gr.Image(value=None) if trend is None else f"data:image/png;base64,{trend}",
         pricing_table
@@ -200,14 +221,14 @@ def refresh_with_export(user_name, days):
     # 原有的面板刷新逻辑
     pie = create_purpose_pie_chart(user_name)
     trend = create_daily_trend_chart(user_name, int(days))
-    s1, s2, s3, s4 = get_dashboard_summary(user_name)
+    s1, s2, s3, s4, s5 = get_dashboard_summary(user_name)
     pricing_table = get_model_pricing_table()
-    
+
     # 新增：导出 CSV
     csv_path = export_cost_csv(user_name, int(days))
-    
+
     return (
-        s1, s2, s3, s4,
+        s1, s2, s3, s4, s5,
         gr.Image(value=None) if pie is None else f"data:image/png;base64,{pie}",
         gr.Image(value=None) if trend is None else f"data:image/png;base64,{trend}",
         pricing_table,
@@ -229,6 +250,9 @@ def create_dashboard():
             stat2 = gr.Textbox(label="调用统计", interactive=False)
             stat3 = gr.Textbox(label="预算状态", interactive=False)
             stat4 = gr.Textbox(label="Token 统计", interactive=False)
+            # B13（①b Task 7）：第 5 格 —— 全站日级额度（'R1.4' · B10/B11）。
+            # ⚠️ 前 4 格是**本人**口径，这一格是**全站**，⛔ 别读混。
+            stat5 = gr.Textbox(label="全站预算", interactive=False)
         
         with gr.Row():
             pie_chart = gr.Image(label="用途分布", type="pil", scale=1)
@@ -249,21 +273,21 @@ def create_dashboard():
         refresh_btn.click(
             fn=refresh,
             inputs=[user_input, days_input],
-            outputs=[stat1, stat2, stat3, stat4, pie_chart, trend_chart, pricing_table]
+            outputs=[stat1, stat2, stat3, stat4, stat5, pie_chart, trend_chart, pricing_table]
         )
-        
+
         # 导出按钮事件
         export_btn.click(
             fn=refresh_with_export,
             inputs=[user_input, days_input],
-            outputs=[stat1, stat2, stat3, stat4, pie_chart, trend_chart, pricing_table, csv_file, export_status]
+            outputs=[stat1, stat2, stat3, stat4, stat5, pie_chart, trend_chart, pricing_table, csv_file, export_status]
         )
-        
+
         # 页面加载事件
         dashboard.load(
             fn=refresh,
             inputs=[user_input, days_input],
-            outputs=[stat1, stat2, stat3, stat4, pie_chart, trend_chart, pricing_table]
+            outputs=[stat1, stat2, stat3, stat4, stat5, pie_chart, trend_chart, pricing_table]
         )
 
     return dashboard

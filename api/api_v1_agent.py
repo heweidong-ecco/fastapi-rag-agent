@@ -30,7 +30,13 @@ from token_tracker import (
     TOOL_ESTIMATED_COST, PURPOSE_ESTIMATED_COST,
     get_intercept_count, record_cost,
     check_session_token_budget,       # B8（①b Task 2）：会话级上限
+    get_user_overview,                # B13（①b Task 7）：**读库**的全时总览
+    get_global_daily_token_usage,     # B13（①b Task 7）：全站日级用量（B10 的数）
 )
+# B13（①b Task 7）：全站日级**上限**常量。⚠️ 与 `get_global_daily_token_usage()`
+#    **成对使用** —— 只给"已用"不给"上限"，客户端算不出"全站还剩多少"。
+#    ⛔ 别把 1_000_000 写死在这里（`DEC-042` 裁过这个值，改它只该改 `token_config.py`）。
+from token_config import GLOBAL_DAILY_TOKEN_LIMIT
 # B11（①b Task 4）：全站日级熔断。
 # ⚠️ 与 B8 **并列**，⛔ 别把两者合并成一个函数 —— 维度不同（B8 按会话 / B11 按全站），
 #    合并后一改就会同时动到两层。（`DEC-041` 与 `B11` 各裁各的范围）
@@ -487,11 +493,28 @@ async def check_budget(
 async def agent_token_budget(
     user_name: str = Depends(get_current_user_hybrid),
 ):
-    """查看当前用户的Token预算信息"""
+    """查看当前用户的 Token 预算信息 + **全站**日级额度。
+
+    ⚠️ 2026-10-03（`①b` Task 7 · `B13`）**加了 `global_*` 三个字段** ——
+    在那之前，`B10`/`B11` 的全站日级额度（超了**所有人**吃 429）**没有任何出口**：
+    `get_global_daily_token_usage()` 全仓只被 `breaker` 调过。
+    ⇒ 看不见它逼近，只能等 429。
+
+    ⚠️ **两套口径，别读混**：
+      · `daily_budget` / `used_today` / `remaining` = **本用户**（`R1.3`，`QuotaMiddleware` 用它）
+      · `global_*` = **全站合计**（`R1.4`，`B10`/`B11` 用它）
+      ⛔ 两者不是同一个上限的两半。
+    """
     info = get_token_budget_info(user_name)
+    global_used = get_global_daily_token_usage()
     return {
         "user_name": user_name,
         **info,
+        "global_daily_limit": GLOBAL_DAILY_TOKEN_LIMIT,
+        "global_used_today": round(global_used, 2),
+        # ⚠️ `get_global_daily_token_usage()` 查库失败是 fail-open（返回 0.0）
+        #    ⇒ 那种情况下这里会显示"全站还剩满额"。与同族取舍一致，⛔ 不加特判。
+        "global_remaining": round(max(0, GLOBAL_DAILY_TOKEN_LIMIT - global_used), 2),
         "requested_by": user_name,
     }
 
@@ -637,25 +660,31 @@ async def agent_cost_overview(
     user_name: str = Depends(get_current_user_hybrid),
 ):
     """
-    花费总览：展示当前用户的 Token 消耗和费用概况。
-    这是最直观的“花了多少钱”查询接口。
+    花费总览：展示当前用户的 Token 消耗和费用概况。**读库 · 全时累计**。
+
+    ⚠️ 2026-10-03（`①b` Task 7 · `B13`）**改了口径**，两处都改了：
+
+    | | 改前 | 改后 |
+    |---|---|---|
+    | 数据源 | `get_user_summary` / `get_purpose_summary` —— **进程内存**，重启归零 | `get_user_overview` —— **读 `token_usage_logs`** |
+    | 窗口 | 本进程启动以来 | **全时累计** |
+    | `by_purpose` 范围 | 🔴 **全站**（那两个内存函数都不分用户） | **本人**（与 `total_*` 一致） |
+
+    🔴 **为什么必须改**：改前它自称"最直观的『花了多少钱』查询接口"，
+    但实测 admin 在库里有 **4216 tokens**、它答 `0` —— **不报错、界面照常出数**。
+    📄 实跑记录 ⇒ `docs/specs/token_tracker.md` 的 `①b` Task 7 段。
+
+    ⚠️ **"今天花了多少"不归本接口** —— 那是 `R1.3` 口径，
+       去 `/agent/token/budget`（或看板）。本接口答的是"一共"。
     """
-    user_summary = get_user_summary(user_name)
-    purpose_summary = get_purpose_summary()
+    overview = get_user_overview(user_name)
 
     return {
         "user_name": user_name,
-        "total_cost": round(user_summary.get("total_cost", 0), 4),
-        "total_tokens": user_summary.get("total_tokens", 0),
-        "total_calls": user_summary.get("calls", 0),
-        "by_purpose": {
-            purpose: {
-                "tokens": info["total_tokens"],
-                "cost": round(info["total_cost"], 4),
-                "calls": info["calls"]
-            }
-            for purpose, info in purpose_summary.items()
-        },
+        "total_cost": overview["total_cost"],
+        "total_tokens": overview["total_tokens"],
+        "total_calls": overview["calls"],
+        "by_purpose": overview["by_purpose"],
         "requested_by": user_name,
     }
 # ====  Token统计 历史查询 接口 ====================

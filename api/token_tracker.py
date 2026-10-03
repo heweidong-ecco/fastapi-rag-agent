@@ -239,25 +239,99 @@ def get_user_history(user_name: str, days: int = 30) -> list:
         return []
 
 # ==================== 原有的查询函数（保留内存缓存快速查询） ====================
+# 🔴🔴 下面这三个 `get_*_summary` 读的是【进程内存】（`_user_summary` / `_purpose_summary`
+#     / `_thread_summary`，见本文件 :39/:42/:45），只在 `record_usage` 里累加，
+#     **从不回读数据库** ⇒ **重启即归零**。
+#
+#     ⚠️ 它们【不是没用的】—— `:148` 的即时花费告警要的是"本进程这段时间花了多少"，
+#        那个语义本来就不该查库。
+#     ⛔ 但它们【不能当对外展示的数据源】—— 见 `get_user_overview`。
+#        📌 2026-10-03（`①b` Task 7）实跑核出来的：`/agent/cost/overview` 当时正是
+#           拿它们做数据源，实测 admin 在 `token_usage_logs` 里有 **4216 tokens**，
+#           端点答 `0` —— **不报错、界面照常出数**。
 def get_user_summary(user_name: str = None):
-    """获取用户维度的汇总统计"""
+    """获取用户维度的汇总统计（⚠️ **进程内存**，重启归零 —— 见上）"""
     with _lock:
         if user_name:
             return dict(_user_summary.get(user_name, {}))
         return dict(_user_summary)
 
 def get_purpose_summary():
-    """获取用途维度的汇总统计"""
+    """获取用途维度的汇总统计（⚠️ **进程内存**、且**不分用户** —— 见上）"""
     with _lock:
         return dict(_purpose_summary)
 
 def get_thread_summary(thread_id: str = None):
-    """获取线程维度的汇总统计"""
+    """获取线程维度的汇总统计（⚠️ **进程内存**，重启归零 —— 见上）"""
     with _lock:
         if thread_id:
             return dict(_thread_summary.get(thread_id, {}))
         return dict(_thread_summary)
-    
+
+
+def get_user_overview(user_name: str) -> dict:
+    """某用户的**【全时】**总览：token / 花费 / 调用次数 + 按用途拆分。**读库**。
+
+    🔴 **与上面三个 `get_*_summary` 同名不同命，⛔ 别混**：
+
+    | | `get_user_summary` 那三个 | **本函数** |
+    |---|---|---|
+    | 数据源 | 进程内存（`_user_summary` 等） | **`token_usage_logs` 表** |
+    | 进程重启 | **归零** | **不受影响** |
+    | 服务的场景 | 进程内即时告警 | **对外展示**（`/agent/cost/overview`） |
+
+    ⚠️ **窗口是【全时累计】** —— ⛔ 既不是"今天"、也不是"近 N 天"。
+       "今天花了多少"那类问题由 `get_token_budget_info`（`R1.3` 口径）和
+       `get_daily_usage_cost`（今日花费）回答。
+
+    ⚠️ **按用途拆分也是【本人】的** —— `get_purpose_summary()` 那份是**全站**的
+       （它不收 `user_name`），⛔ 两者数值本来就不该相等。
+
+    ⚠️ 查库失败 ⇒ 返回**全 0**（fail-open，与 `get_daily_token_usage` 同族）；
+       调用方**看不出来**是"真 0"还是"查挂了" —— 与本仓其余 fail-open 同样的取舍。
+    """
+    empty = {"total_tokens": 0, "total_cost": 0.0, "calls": 0, "by_purpose": {}}
+
+    from db import get_db
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT purpose,
+                              COALESCE(SUM(total_tokens), 0),
+                              COALESCE(SUM(cost), 0),
+                              COUNT(*)
+                       FROM token_usage_logs
+                       WHERE user_name = %s
+                       GROUP BY purpose""",
+                    (user_name,)
+                )
+                rows = cur.fetchall()
+    except Exception as e:
+        print(f"[Token] 查询用户总览失败: {e}")
+        return dict(empty)
+
+    by_purpose = {}
+    total_tokens = 0
+    total_cost = 0.0
+    total_calls = 0
+    for purpose, tokens, cost, calls in rows:
+        by_purpose[purpose] = {
+            "tokens": int(tokens),
+            "cost": round(float(cost), 4),
+            "calls": int(calls),
+        }
+        total_tokens += int(tokens)
+        total_cost += float(cost)
+        total_calls += int(calls)
+
+    return {
+        "total_tokens": total_tokens,
+        "total_cost": round(total_cost, 4),
+        "calls": total_calls,
+        "by_purpose": by_purpose,
+    }
+
 def get_recent_usage(limit: int = 20):
     with _lock:
         return [
