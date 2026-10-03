@@ -31,6 +31,9 @@ All notable changes to this project will be documented in this file.
   - 静态 —— `grep -n 'WHERE requested_by' api/api_v1_rag.py | grep -v '#'` ⇒ **3 行**
     （`pg_search` · `jwt_ask` · `ask` —— **正好 = 自己写 SQL 的 3 条读端点**；其余 5 条走共享层）。
     ⚠️ **必须带 `| grep -v '#'`** —— 乙段加的**注释**里也含这个串，不带就会数成 5。
+    🔴 **2026-10-03 同日更正：现在是【2 行】**（该数在 `/rag/ask` 删除前是对的）
+    —— `/rag/ask` 已删（`DEC-057`，见下方 `Removed`）⇒ 自己写 SQL 的读端点由 3 条变 2 条。
+    📌 **本仓判据纪律第 8 条「建了入口就问谁指向它」的镜像**：**数出来的数，删了东西要回头重数**。
   - 全量 —— ⚠️ **2026-10-03 同日更正这个标签**：`-m "not integration and not needs_db"` **⛔ 不是"CI 口径"**，
     它只是 CI 的「**选中哪些测试**」那条命令。**CI 没有 Postgres、也没有 `.env`，本机两样都有** ⇒
     **要 CI 的【结果】，跑 `bash scripts/ci-local.sh`**（本 PR **就栽在这上面**：裸命令跑出 411 全绿，CI 却 **12 failed**）：
@@ -1131,6 +1134,54 @@ All notable changes to this project will be documented in this file.
 - 🟢 **`施工单-本项目.md` 的「进度留痕表」移入 `ROADMAP.md`**（2026-09-29）。
   理由：它与 ROADMAP 的「做到哪了」是**同一件事** ⇒ 两份就是"两处真相"。
   **移入 = 源处删除 + 留指针**（516 → 480 行）。
+
+### Removed
+
+- 🔴 **删除端点 `POST /rag/ask`**（2026-10-03 · 待办总表 **N6** · `DEC-057`）——
+  **它是个自称"模拟类测试"的桩，却在查真库**，这是删它的第一条理由。
+
+  **三条理由（都可打印地核过）**：
+  1. **自述与行为不符** —— `tags=["模拟类测试"]`，但函数体是
+     `SELECT content FROM documents WHERE requested_by = %s LIMIT %s` ⇒ **读的是真数据**。
+     📌 **教训**：`tags` 是**自述**，⛔ 不能当"这条是桩"的判据。
+  2. **结果不可复现** —— 有 `WHERE`、有 `LIMIT`，**唯独没有 `ORDER BY`**
+     ⇒ 同一个问题两次可能拿到不同的行。这正是本仓反复记的「**看着像检索、其实不是**」形态。
+  3. **能力被覆盖 + 无消费者** —— `/rag/pg_search` **同鉴权**（`get_current_user_hybrid`）·
+     **同入参**（`QuestionRequest`），且多了 embedding / `ORDER BY` / 更丰富的输出。
+     清点消费者：仓内**无前端** · 兄弟仓 **0 处**引用 · Postman 集合 **3 处**（同一个请求里的
+     `raw` 重复）· 只有**两份接线守卫测试**提到它。⇒ **`/rag/ask` 唯一独有的是「零成本」**
+     （不调 LLM、不调 embedding），而**这正是它该被删的理由** —— 一个不花钱的端点，
+     提供的却是**不可复现**的结果。
+
+  ⚠️ **删它⛔ 与隔离无关**（别把它读成 `DEC-056` 的一部分）：它**一直有 `WHERE`**——
+  **隔离账上它从来不欠**。`DEC-056` 乙段记的只是「**它的定位已裁待删**」。
+
+  **TDD（先红后绿）**：
+  - **先写** `api/test_removed_endpoints.py`（`test_rag_ask_stays_removed`），**要求回 404**。
+  - **RED 实测** ⇒ `POST /api/v1/rag/ask - 401`（⚠️ **端点还在时它带鉴权 ⇒ 401 而不是 404**）。
+    ⇒ **这条 RED 顺带钉住了判据本身**：**必须断言 404（路由不存在）**，
+    ⛔ 不能写「不是 200」—— 端点回来了但**没带鉴权**时是 401/403，那也是"它回来了"。
+  - **删** ⇒ **GREEN**。
+
+  **判据（可打印）**：
+  - `venv/bin/python -m pytest api/test_removed_endpoints.py -q` ⇒ **1 passed**
+  - `grep -n 'WHERE requested_by' api/api_v1_rag.py | grep -v '#'` ⇒ **2 行**（删前 3）
+  - 两份接线守卫的**反向清单**仍绿 —— `api/test_breaker_wiring.py` ·
+    `api/test_session_budget_wiring.py`（已由 4 条改 3 条，**用例名**同步由 `four` 改 `three`）
+  - 全量 CI 口径 —— `venv/bin/python -m pytest api/ -q -m "not integration and not needs_db"` ⇒ **412 passed**
+
+  **改了 7 处**（⚠️ **原文只清点了 6 处** —— 第 7 处是删完才发现的）：
+  ① `api/api_v1_rag.py`（端点 → 墓碑注释）② `api/test_breaker_wiring.py` 的 `NON_SPENDING`
+  ③ `api/test_session_budget_wiring.py` 的 `NON_LLM`（+ 同文件说明表）④ Postman 集合
+  （**整文件夹删：149 删 / 0 增**）⑤ `docs/契约/接口契约.md:200` ⑥ `ROADMAP.md:427`（**保留原文 + 加一行「已删」**）
+  ⑦ 🔴 **`docs/specs/api_v1_rag.md` 里成片的计数** —— `HTTP 14 → 13` · `模拟 3 → 2` ·
+  引号 `12 → 11` · `WHERE 5 → 4`（其中**注释 2 处**）· 真 SQL `3 → 2 处` · 自己写 SQL 的 `3 → 2 条`。
+  ⇒ **判据纪律第 8 条的镜像**：**删了东西，要回头把"数出来的数"全部重数**
+  （该 spec 里 `grep -c` 的示范值就是这一类 —— 已在文中写明"⛔ 别照抄本文里的数字"）。
+
+  **⛔ 不动的**：`DEC-034` · `DEC-041` · `docs/复盘/2026-09-29-*` · `docs/历史/修复记录-2026-08.md`
+  —— **历史记录原样留**，只在 `DEC-057` 里记「已删」。
+  📄 全文（含消费者清点 · 7 处改动 · 2 处活口径同步 · **反悔成本**）⇒ `docs/decisions/DEC-057-删除-rag-ask.md`
 
 ### Fixed
 

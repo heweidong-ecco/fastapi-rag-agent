@@ -962,33 +962,16 @@ async def test_websocket(websocket: WebSocket):
 
 # ==================== 测试 接口 ===================
 # ==================== 模拟类 ====================
-# 原有同步接口（需API Key）
-@router.post(
-    "/rag/ask",
-    summary="原有同步接口（需API Key）",
-    tags=["模拟类测试"]
-)
-async def ask_question(
-    req: QuestionRequest,
-    user_name: str = Depends(get_current_user_hybrid)
-):
-    start = time.time()
-    # 同步检索（使用数据库）
-    with get_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT content FROM documents WHERE requested_by = %s  LIMIT %s   -- 只检索当前用户的文档",
-                (user_name, req.top_k))
-            rows = cur.fetchall()
-    docs = [r[0] for r in rows]
-    duration = time.time() - start
-    return {
-        "question": req.question,
-        "requested_by":user_name,
-        "docs": docs,
-        "elapsed": f"{duration:.3f}秒",
-        "requested_by": user_name  # 记录是谁调用的
-    }
+# ⚠️ 2026-10-03 **删**（`DEC-057`）：此处原有 `POST /rag/ask` —— 同步函数名 `ask_question`。
+#    删的理由（三条，都可打印地核过）：
+#      ① 它是 `tags=["模拟类测试"]` 的**桩**，却**读真库**（`SELECT content FROM documents …`）；
+#      ② 它的 `LIMIT` **没有配套的 `ORDER BY`** ⇒ **结果不可复现**（同一问题两次可能不同）——
+#         这正是本仓反复记的那种「看着像检索、其实不是」的形态；
+#      ③ 能力被 `/rag/pg_search` **覆盖**（**同鉴权** `get_current_user_hybrid` · **同入参**
+#         `QuestionRequest`，且多了 embedding / `ORDER BY` / 更丰富的输出），而全仓**无消费者**。
+#    ⛔ **别照抄这个形状再加回来** —— `api/test_removed_endpoints.py` 会红。
+#    📌 顺带消灭了它响应体里那个 **重复的 `"requested_by"` 键**（本仓一处已登记的 dead code）。
+#    📄 全文（含消费者清点 · 7 处改动 · 2 处活口径同步 · 反悔成本）⇒ `docs/decisions/DEC-057-删除-rag-ask.md`
 
 # ==================== 模拟RAG异步函数 ====================
 async def async_search(query: str) -> list:
