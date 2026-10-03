@@ -87,7 +87,7 @@ docs/specs/<模块名>.md
 > 已写好的 8 份里有现成范例：
 > * `reranker.md` —— 看着完整，**实际容器里跑不了**（镜像裁了 torch）
 > * `hybrid_search.md` —— 看着是 RRF 实现，**实际是第二份**，且**测试测的是第三份副本**
-> * `quota_limiter.md` —— 看着有限额，**实际匿名完全绕过**
+> * `main.md` —— 看着「配额中间件在管」，**实际它对匿名请求完全绕过**（`if not user_name:` 直接放行）<br>⚠️ 原范例是 `quota_limiter.md`，**那个模块 2026-10-03 已删**（`DEC-046`）⇒ 换成 `main.md`（**同一条行为仍在**）
 > * `api_v1_rag.md` —— 看着 15 条正经端点，**实际 3 条是模拟测试**
 > * `embedding_client.md` —— 看着配置齐全就能跑，**实际模块级 `OpenAI()` 会炸 import 链**
 

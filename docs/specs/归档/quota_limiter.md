@@ -1,8 +1,23 @@
-# `api/quota_limiter.py`
+> ## ⚰️ **本 spec 已归档（2026-10-03）—— 它描述的模块【已删除】**
+>
+> **`api/quota_limiter.py` 不再存在。** 本文件保留**只为查历史**，⛔ **别当成现状读**。
+>
+> * **为什么删**：它是「每日**请求次数**」那套配额的 Redis 计数器。
+>   `DEC-040` 裁「额度统一到 token 一套」，`DEC-046` 落地时裁「**撤点后它零调用者 ⇒ 同批删掉**」。
+> * **那一层【没有消失】** —— 它在 `QuotaMiddleware` **原位**换成了「按用户按天的 **token** 上限」。
+>   ⇒ 现役的 spec 是 **`docs/specs/main.md`**（那一层）+ **`docs/specs/token_tracker.md`**（取数）。
+> * 📄 **裁定全文** ⇒ `docs/decisions/DEC-046-决策一落地撤次数配额改用token口径.md`
+>
+> ⚠️ **下面正文里写的「额度来自 `permission.ROLE_QUOTA`」「`main.py:222` 是 `if user_name:`」等
+> 行号与常量名，全部是【删除前】的实况，现已失效。**
+
+---
+
+# `api/quota_limiter.py`（⚰️ 已删除 · 2026-10-03）
 
 | 项 | 内容 |
 |---|---|
-| **状态** | 🟡 **可用，但匿名请求完全绕过它** |
+| **状态** | ⚰️ **已删除**（2026-10-03 · `DEC-046`）—— 原为「🟡 可用，但匿名请求完全绕过它」 |
 | **对外提供** | `QuotaLimiter.increment_and_check()` · `get_remaining()` · `get_quota_info()` |
 | **谁在用** | `main.py` 的 `QuotaMiddleware`（`:187-268`） |
 

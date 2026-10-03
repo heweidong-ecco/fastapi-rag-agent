@@ -2,8 +2,8 @@
 
 | 项 | 内容 |
 |---|---|
-| **状态** | 🟡 **可用，但它是【三套额度口径】的其中一套** —— 见下 ⚠️<br>🟢 **①a 已落地（2026-10-01）**：额度常量已收口到 `api/token_config.py`（本文件**只剩同名别名**）· 本文件下方 **实施计划 ①a** 已执行完<br>🔵 **①b（2026-10-02）**：Task 0 ✅ / Task 1 ✅（B7 接线）/ **Task 2 ✅（B8 会话级 · 已接 7 条链）** / **Task 3 ✅（B10 全局日级 · 判定函数）** / **Task 4 ✅（B11 熔断 · 已接 8 处，`B10` 由此生效）** / **Task 5 🟡 部分（`L2`）**（改写后只做构造收口，⛔ 自动兜底【推迟】—— 见该 Task 的修订块） / ⬜ **Task 6 起待做**<br>⚠️ **`B10` 曾一度"有函数没接线"（2026-10-01 当天）—— 那句话已作废**，2026-10-02 Task 4 接上了 |
-| **对外提供** | `record_usage()` · `record_cost()` · `check_multilevel_budget()` · `check_token_budget_detail()` · `get_token_budget_info()` · 9 个汇总函数 |
+| **状态** | 🟡 **可用** —— ⚠️ **2026-10-03 起它不再是"三套口径"之一**（次数那套已删，`DEC-046`）<br>🟢 **①a 已落地（2026-10-01）**：额度常量已收口到 `api/token_config.py`（本文件**只剩同名别名**）· 本文件下方 **实施计划 ①a** 已执行完<br>🔵 **①b（2026-10-02）**：Task 0 ✅ / Task 1 ✅（B7 接线）/ **Task 2 ✅（B8 会话级 · 已接 7 条链）** / **Task 3 ✅（B10 全局日级 · 判定函数）** / **Task 4 ✅（B11 熔断 · 已接 8 处，`B10` 由此生效）** / **Task 5 🟡 部分（`L2`）**（改写后只做构造收口，⛔ 自动兜底【推迟】—— 见该 Task 的修订块） / **Task 6 ✅（`决策一` 落地 · `DEC-046` —— 撤次数配额、原位换 token 口径 = `R1.3`）**<br>⚠️ **`B10` 曾一度"有函数没接线"（2026-10-01 当天）—— 那句话已作废**，2026-10-02 Task 4 接上了 |
+| **对外提供** | `record_usage()` · `record_cost()` · `check_multilevel_budget()` · `check_token_budget_detail()` · `get_token_budget_info()` · 9 个汇总函数<br>🔵 **2026-10-03 起**：`get_token_budget_info()` 还被 **`main.QuotaMiddleware`** 消费（全路径按用户日级 = `R1.3`）—— **它不再只是"记账/看板"用的** |
 | **谁在用** | `permission`（取角色）· `agent_graph_advanced.py:239`（唯一调多级预算的地方）· `cost_dashboard.py` · 各 `api_v1_*.py` |
 | **规模** | 888 行 |
 
@@ -19,7 +19,8 @@
 
 ## 🟡 做到哪 / 缺什么
 
-- 🔴 **额度常量散在 4 个文件 6 处**（本文件的 `ROLE_TOKEN_BUDGET` / `MAX_THREAD_COST` / `MAX_SINGLE_CALL_COST` / `PRICING`、`permission.ROLE_QUOTA`、`plan_execute.PLAN_TOTAL_BUDGET_SECONDS`）
+- 🟡 **额度常量散在 3 个文件 5 处**（本文件的 `ROLE_TOKEN_BUDGET` / `MAX_THREAD_COST` / `MAX_SINGLE_CALL_COST` / `PRICING`、`plan_execute.PLAN_TOTAL_BUDGET_SECONDS`）
+  —— 原为「4 个文件 6 处」，**2026-10-03 少了 `permission.ROLE_QUOTA`**（`DEC-046` 删掉）
 - ✅ ~~🔴 **`"admin": float("inf")`**~~ ⇒ **2026-10-01 已去**（`DEC-040`）：现在是有限值 = `premium` = 100000/天。<br>⚠️ **但"全局日级"仍是另一个东西**（B10，在 `①b`）—— per-user 检查**永远看不到「大家加起来超了」**
 - ✅ ~~🔴 **没有「会话级」上限**~~ ⇒ **2026-10-01 有了**（`B8` · `①b` Task 2）：
   `get_session_token_usage` / `check_session_token_budget`，**接在 7 条真调 LLM 的对话链上**（`DEC-041`）。
@@ -34,7 +35,7 @@
 | 看代码会以为 | 实际 |
 |---|---|
 | 🔴 **「多级预算是硬拦截」** | ⛔ **不是** —— `agent_graph_advanced.py:239` 超预算时是往图里**塞一条 `ToolMessage` 文本提示**，**HTTP 仍是 200**。**前端看不出"被拒了"** |
-| 🔴 **「这个文件管所有配额」** | ⛔ **不是** —— 另有 `permission.ROLE_QUOTA`（**请求次数**）与 `quota_limiter.py`（**每日次数**）。**三套口径并存**，`DEC-029` 实测**差 35 倍** |
+| 🔴 **「这个文件管所有配额」** | ⚠️ **2026-10-03 起：是的**（原先"不是"）。<br>**原先**另有 `permission.ROLE_QUOTA` + `quota_limiter.py` 那套「每日**请求次数**」，**与 token 互不知情**（`DEC-029` 实测**差 35 倍**）。<br>⇒ `DEC-046` 把那套**整张删掉**，配额**只剩 token 一套**（金额那套是同一物不同单位，经 `PRICING` 换算）。<br>⚠️ **但它仍不是"所有路径"** —— 挂多级预算的只有 `/agent/mcp_chat` 一条；<br>**全路径那层在 `main.QuotaMiddleware`**（消费本文件的 `get_token_budget_info`）。 |
 | ⚠️ **「两个单位混着 ⇒ 是 bug」** | 🟢 **不是** —— 第一二级（元）与第三级（token）**量纲本来就不同**，代码注释 `:665` 明说「**别统一掉**」 |
 | ⚠️ **「`ROLE_TOKEN_BUDGET` 就是最终日限额」** | ⚠️ **只对 `_invoke_llm` 那条链**。**挂多级预算的只有 `/agent/mcp_chat` 一条**（`check_multilevel_budget` 全仓唯一调用点在 `agent_graph_advanced.py:239`）⇒ **其他链全无预算** |
 | ⚠️ **「本文件定义着 `PRICING` / `ROLE_TOKEN_BUDGET` / `MAX_*_COST`」** | 🔴 **2026-10-01 起【只是别名】** —— 真值在 `api/token_config.py`，本文件**顶部 import 进来**（`PRICING is token_config.MODEL_PRICING` → `True`）。⇒ **改价改额度请去 `token_config.py`**，改这里没用（会被 import 覆盖） |
@@ -44,9 +45,12 @@
 
 ## 关联
 
-`docs/specs/token_config.md`（**常量的真身**）· `docs/specs/quota_limiter.md`（**次数**那套）·
+`docs/specs/token_config.md`（**常量的真身**）·
+`docs/specs/归档/quota_limiter.md`（⚰️ **原先的「次数」那套 —— 2026-10-03 已删**）·
+`docs/specs/main.md`（**全路径按用户日级** = `R1.3`，消费本文件）·
 `docs/specs/permission.md`（⏳ 待建）·
-`DEC-029`（两套口径，**已由 `DEC-040` 收口**）· `后端补齐清单` **B7/B8/B10/B11/B13**
+`DEC-029`（两套口径，**已由 `DEC-040` 收口**）· **`DEC-046`**（次数那套的删除 + 原位换 token）·
+`后端补齐清单` **B7/B8/B10/B11/B13**
 
 ---
 
@@ -101,6 +105,11 @@
 ---
 
 ## Task 0 · 建 `DEC-040`（`决策一` 的决策记录）
+
+> 🔴 **2026-10-03 更正**：本节表格里写的「② `ROLE_QUOTA` **降级为接口权重**（不删）」
+> 与「`get_role_request_weight()`」**都【从未存在过】** —— `DEC-046` 裁定 **直接删**。
+> ⚠️ 也就是说 `DEC-040` 当时在这两点上**自相矛盾**（§② 说"不删"、§遗留 1 说"未定"），
+> 落地时才判清。⇒ **别照本节的 ② 读**。📄 `docs/decisions/DEC-046-*.md`
 
 **Files:**
 - Create: `docs/decisions/DEC-040-额度统一到token一套.md`
@@ -370,6 +379,9 @@ python -m pytest api/test_token_config.py -q     # → ModuleNotFoundError: toke
 
 - [ ] **Step 3: 建 `api/token_config.py`**
 
+> ⚠️ **下面的清单是【2026-10-01 建文件当时】的实况** —— 现在 `permission.ROLE_QUOTA` **已删**
+> （`DEC-046` · 2026-10-03）⇒ 现值是 **3 个文件 5 处**。实际文件里已补了这条更正说明。
+
 ```python
 """额度配置的【唯一落点】（B7 · 2026-10-01 落盘）。
 
@@ -449,7 +461,7 @@ python -m pytest api/test_token_config.py -q     # 计划时估计 3 条；实�
 - [ ] **Step 5: 写 `docs/specs/token_config.md`**
 
 ⛔ **不写会被 `pre-commit-gates.py` 硬拦**（"新增模块必须同时建 spec"）。
-按 `docs/specs/quota_limiter.md` 的格式写四节，**重点写「⚠️ 看代码会误判的地方」**：
+按 `docs/specs/归档/quota_limiter.md` 的格式写四节，**重点写「⚠️ 看代码会误判的地方」**：
 
 必须写进去的一条：**「本模块只集中常量，⛔ 不做运行时路由/热加载」** ——
 看代码的人容易以为"集中了就动态了"，**那两件事不是一回事**。
@@ -512,6 +524,18 @@ git commit -m "feat(额度): B7 —— 建 token_config.py 把散在 4 文件的
 ---
 
 ## （原 Task 3 · 已移出 —— 保留在此只作查阅，**执行请去 ①b**）
+
+> ### 🔴 **2026-10-03：本节【已作废】，⛔ 别照它执行**
+>
+> 它通篇假设「`ROLE_QUOTA` **降级成字符串哨兵**（`"deprecated-见-DEC-040"`）」，**`DEC-046` 推翻了这个做法** ——
+> 实际是**直接删**（连 `get_user_quota` 一起），判定改为**原位置换成 token 口径**。
+> ⚠️ **下面那个 Step 1 的测试代码是【错的示范】**：`from permission import get_user_quota, ROLE_QUOTA`
+> 现在是 **ImportError**（两个名字都已不存在）。
+> ✅ **真实落地的步骤、代码与判据 ⇒ 本文末 `①b` 的 「Task 6 · 📌 修订块」** ·
+> 📄 **裁定全文 ⇒ `docs/decisions/DEC-046-决策一落地撤次数配额改用token口径.md`**
+>
+> **保留本节的理由**：里面的「**顺序陷阱**」那段（上面 Task 3 那节）**仍然完全有效**，
+> 而且 `DEC-046` 又**发现了它的一个变体**（原以为 `B8/B10/B11` 已补上"按用户每天"那一层 —— **没有**）。
 
 ### 原 Task 3 · **`决策一` 落地** · 次数配额降级 + admin 去 `inf`
 
@@ -619,7 +643,7 @@ python -m pytest api/ -m "not integration and not needs_db" -q
 
 - [ ] **Step 7: 更新文档 + 提交**
 
-要同步的三处：`docs/specs/quota_limiter.md`（它写着"额度来自 `permission.ROLE_QUOTA`"）·
+要同步的三处：`docs/specs/归档/quota_limiter.md`（它写着"额度来自 `permission.ROLE_QUOTA`"）·
 `docs/specs/token_tracker.md`（本文件的 ⚠️ 节）· `CHANGELOG.md`
 
 ```bash
@@ -650,7 +674,7 @@ git commit -m "refactor(配额): 决策一落地 —— 次数配额降级，统
 
 ---
 
-# 🔵 实施计划 ①b · **限额与熔断**（2026-09-30 立 · **执行中** —— Task 0 ✅ / Task 1 ✅ / Task 2 ✅ / Task 3 ✅ / Task 4 ✅ / **Task 5 🟡 部分** / **Task 6 起待做**）
+# 🔵 实施计划 ①b · **限额与熔断**（2026-09-30 立 · **执行中** —— Task 0 ✅ / Task 1 ✅ / Task 2 ✅ / Task 3 ✅ / Task 4 ✅ / **Task 5 🟡 部分** / **Task 6 ✅（2026-10-03）**）
 
 > **来源**：`后端补齐清单-待裁-20260929.md` 的 **B8 · B10 · B11 · B13 · 决策一（实现）**；
 > 以及 `LLM模型路由与额度策略-待裁-20260930.md` 的 **L2**（十几个 model 顺带）。
@@ -658,7 +682,8 @@ git commit -m "refactor(配额): 决策一落地 —— 次数配额降级，统
 > **本计划【会改行为】** —— 这是它与 ①a 最大的区别。
 
 **目标**：让 token 那套配额**真的能拦住东西** —— 会话级、全局日级、触顶熔断；
-然后把旧的「请求次数」配额**最后**降级掉。
+然后把旧的「请求次数」配额**最后**处置掉
+（⚠️ **原文写「降级」，实际是「删掉 + 原位换 token」** —— 见 Task 6 修订块 · `DEC-046`）。
 
 **架构**：**新增一层「查询 + 判定」**，全部**查库**（`token_usage_logs`），⛔ **不复用 `_thread_summary`**（理由见 Task 2）。
 熔断做成**按 key 的通用断路器**（Redis 标记 + **TTL 分两种**：额度耗尽=永久 / 临时故障=数小时，见 Task 0 `L3`）—— 这一套同时覆盖
@@ -1110,8 +1135,9 @@ PG 方言/时区下的**边界**行为、生产数据量下的表现，**都没�
   —— 🔴 **没有 TTL 可核**：日级用量在 **PG**（`token_usage_logs`），恢复靠 SQL 自己翻页，
   **整个机制里没有「到期释放」这回事**。⇒ 详见 `docs/specs/breaker.md` §⚠️ 第 1 条。
   ✅ 替代的实测：`test_yesterdays_usage_does_not_count`（塞一条**昨天**的记录，断言它不进今日合计）。
-  ⚠️ **它顺带要求核掉的 `quota_limiter` 那条** —— **2026-10-02 已补核**，见 `docs/specs/quota_limiter.md`
+  ⚠️ **它顺带要求核掉的 `quota_limiter` 那条** —— **2026-10-02 已补核**，见 `docs/specs/归档/quota_limiter.md`
   （那条是**另一套机制**：`quota_limiter.py` 确实用 Redis + `EXPIRE 86400`）。
+  🔴 **2026-10-03**：那个模块**已随 `DEC-046` 删除** ⇒ 上句是**历史结论**，⛔ 别再当现状读。
 
 - ✅ **Step 6：跑了 + 建了 spec + 已提交**（`docs/specs/breaker.md` ·
   落主干的那条 commit 是 **`0f9a67a`**，PR **#65**）
@@ -1178,15 +1204,63 @@ PG 方言/时区下的**边界**行为、生产数据量下的表现，**都没�
 
 ---
 
-## Task 6 · **`决策一` 落地** · 撤掉「请求次数」配额（⭐ **必须最后做**）
+## Task 6 · **`决策一` 落地** · 撤掉「请求次数」配额 · ✅ **已落地（2026-10-03 · `DEC-046`）**
 
-**Files:** `api/permission.py` · `api/main.py`（`QuotaMiddleware`）· `api/api_v1.py:221` · `api/api_v1_rag.py:25` · `api/test_plan_execute_tools.py:498`
+> ### 🔴 **本节是【原始计划】—— 其中一句是错的，⛔ 先读下面的修订块**
+>
+> 原计划（下一段）写「**到这一步，B8/B10/B11 已经在拦了，撤掉次数才是安全的**」。
+> **2026-10-03 核过：这句不完整。**
+> `B8` 是**会话级**（按 `(user, thread_id)`）· `B10` 是**全站合计**（`SUM` 无 `user_name`），
+> **没有一层是「按用户每天」** ⇒ 直接撤次数会开一个「**单用户跨会话无限花**」的洞。
+> 📌 这正是 `①a` **自己那个「顺序陷阱」的同类病**，只是换了个方向。
 
-> ⚠️ **为什么必须最后**：见 ①a 里 Task 3 那节的「**顺序陷阱**」——
-> **先撤次数、后接 token ⇒ 中间有一段"谁都不拦"的窗口。**
-> **到这一步，B8/B10/B11 已经在拦了，撤掉次数才是安全的。**
+### 📌 修订块（2026-10-03 · 落地版）
 
-具体步骤与代码：**见 ①a 里「（原 Task 3 · 已移出）」那一节，照它执行**，⛔ 但**顺序放在这里**。
+> 📄 **决策全文（含三处裁定 / 备选 / 反悔成本）⇒ `docs/decisions/DEC-046-决策一落地撤次数配额改用token口径.md`**
+
+**实际做的是「原位置换」，⛔ 不是「把这一层删掉」**：
+在 `QuotaMiddleware` **同一个位置**，把「按用户按天的**次数**上限」换成「按用户按天的 **token** 上限」。
+⇒ **覆盖范围不变**（仍是「所有非公开路径 + 按用户 + 按天」），**顺带把 `R1.3` 做掉**。
+
+| # | 做了什么 | 落点 |
+|---|---|---|
+| ① | **删** `ROLE_QUOTA` + `get_user_quota()`（`UserRole` / `get_user_role` **保留**） | `api/permission.py` |
+| ② | `QuotaMiddleware` 改判 **token 日预算**（数据源 `token_tracker.get_token_budget_info`） | `api/main.py:287` |
+| ③ | 抽两个**纯函数** `quota_reject_payload(info)` / `quota_headers(info)` + `_next_day_reset_ts()` | 同上 `:238` / `:245` / `:273` |
+| ④ | `/debug/quota/{user_name}` 改走同一套（字段名不变、**单位变**） | `api/api_v1.py:220` |
+| ⑤ | 删未使用的 `get_user_quota` / `UserRole` import | `api/api_v1_rag.py:39` · `api/api_v1.py` |
+| ⑥ | **删模块** `api/quota_limiter.py`（撤点后零调用者）+ **归档 spec** | `api/` · `docs/specs/归档/quota_limiter.md` |
+| ⑦ | 重写那条会红的测试（**保留** `_MEASURED_PLAN_EXECUTE_TOKENS = 3346` 这个实测数） | `api/test_plan_execute_tools.py` |
+| ⑧ | **新增** `api/test_quota_middleware.py`（9 条 · **不连 DB/Redis**） | `api/` |
+
+⛔ **原计划里的两条描述【作废】**：
+* 「`ROLE_QUOTA` **降级为接口权重**」—— `DEC-046` 裁**直接删**（全仓没有任何代码读"权重"）；
+* 「**整段撤掉计数**，只保留'身份解析 + 响应头'」—— 改成**原位换 token 判定**（理由见上）。
+
+⚠️ **三条一起变的行为**（否则下一个人会当成 bug）：
+1. **`X-Quota-*` 头名没变、语义从「次数」变成「token」**（`X-Quota-Reset` 仍是次日 0 点的时间戳）；
+2. **每请求新增一次 DB 查询**（原先次数那套是 Redis `INCR`）—— 口径不同，无法共用计数器；
+3. **仍是 fail-open**（查库失败 ⇒ 放行）—— 与 `B8`/`B10` 同取向，⛔ 别"顺手统一"成鉴权的 fail-closed。
+
+**判据（可打印）**：
+
+```bash
+venv/bin/python -m pytest api/test_quota_middleware.py -q      # ⇒ 9 passed
+grep -rn "ROLE_QUOTA" api/*.py | grep -v "^api/test_"          # ⇒ 只应命中【注释/历史说明】
+venv/bin/python -m pytest api/ -m "not integration and not needs_db" -q
+# ⇒ 15 failed / 198 passed；与改动前基线（189 passed）**逐条 diff 红的清单 = 完全一致** ⇒ 无回归
+```
+
+⚠️ **那 15 条红与本次改动无关** —— 全是本机没开 Redis（14 条 `redis.ConnectionError`）+ 1 条 MCP。
+
+> 📌 **两处由测试自己抓出来的错**（本仓「判据写歪了不报错」的又一例）：
+> ① 守卫用例第一版用**文本匹配** `"ROLE_QUOTA" in 源码` ⇒ 把**正当的历史注释**也判成违规
+> ⇒ 改用 **AST**（禁的是**引用**，不是**提及**）；
+> ② 自证用例抓出扫描器**漏了 `ast.alias`** —— `import` 走的**不是 `ast.Name`**，
+> 漏掉这一支 ⇒ **最典型的引用形态完全测不出来**。
+
+**Files（实际）:** `api/permission.py` · `api/main.py` · `api/api_v1.py` · `api/api_v1_rag.py` ·
+`api/quota_limiter.py`（删）· `api/test_plan_execute_tools.py` · `api/test_quota_middleware.py`（新建）
 
 ---
 

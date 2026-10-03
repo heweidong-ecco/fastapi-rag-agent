@@ -74,6 +74,45 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- 🔴 **`决策一` 落地 —— 撤掉「每日请求次数」配额，原位置换成 **token** 口径（= `R1.3`）**（2026-10-03 · `①b` Task 6 · `DEC-046`）。
+
+  本仓曾同时存在**两套互不知情的额度口径**（`DEC-029` 实测**差 35 倍**：`plan_execute` 一次 ~3346 token ⇒ 按次数能跑 100 次、按 token 只能跑 ~3 次）。本次按 `DEC-040`「统一到 token 一套」把**次数那套整张删掉**：
+
+  | # | 改动 | 落点 |
+  |---|---|---|
+  | ① | **删** `ROLE_QUOTA` + `get_user_quota()`（保留 `UserRole` / `get_user_role`） | `api/permission.py` |
+  | ② | `QuotaMiddleware` 改判 **token 日预算**（数据源 `token_tracker.get_token_budget_info`）—— ⚠️ **原位置换，不是删掉这一层** | `api/main.py` |
+  | ③ | 判定抽成**纯函数** `quota_reject_payload()` / `quota_headers()`（⇒ 不连 DB 就能单测） | 同上 |
+  | ④ | `/debug/quota/{user_name}` 改走同一套 | `api/api_v1.py` |
+  | ⑤ | **删模块** `api/quota_limiter.py`（撤掉调用点后零调用者）+ 归档其 spec | `api/` · `docs/specs/` |
+  | ⑥ | 重写那条会红的测试，**保留**「FREE 对 `plan_execute` ≈ 3 次」这个实测数 | `api/test_plan_execute_tools.py` |
+
+  🔴 **为什么不直接撤掉那一层**：次数配额是当时**唯一**覆盖「**所有**非公开路径 + 按用户 + 按天」的一层。
+  会话级 `B8` 按 `(user, thread_id)` 计、**换个 `thread_id` 就重置**；全局日级 `B10` 是**全站合计**、
+  **看不到「某一个人」**；`check_token_budget`（按用户按天）只接了 3 处。
+  ⇒ 直接撤会开一个「**单用户跨会话无限花**」的洞。所以在**原位**换成 token 口径 ⇒ **覆盖范围不变**，
+  **顺带把 `ROADMAP` 里 ⬜ 的 `R1.3` 做掉**（`DEC-046`）。
+
+  ⚠️ **三条必须知道的行为变化**：
+  1. **`X-Quota-*` 头名没变、语义变了** —— `X-Quota-Limit` 现在是**每天的 token 预算**，⛔ 不再指次数。
+  2. **新增每请求一次 DB 查询**（原先次数那套是 Redis `INCR`）—— 用 DB 换掉 Redis 是有意的：
+     次数与 token **口径不同，无法用同一个计数器表达**。
+  3. **这一层是 fail-open**（查库失败 ⇒ 放行），与 `B8`/`B10` **同取向**；⛔ 别"顺手统一"成鉴权的 fail-closed。
+
+  **判据（可打印）**：
+
+  ```bash
+  venv/bin/python -m pytest api/test_quota_middleware.py -q          # ⇒ 9 passed
+  grep -rn "ROLE_QUOTA" api/*.py | grep -v "^api/test_"              # ⇒ 只应命中【注释/历史说明】
+  venv/bin/python -m pytest api/ -m "not integration and not needs_db" -q
+  # ⇒ 15 failed / 198 passed；与改动前基线（189 passed）**逐条 diff 红的清单 = 完全一致** ⇒ 无回归
+  ```
+
+  ⚠️ **15 条红与本次改动无关** —— 全是本机没开 Redis（14 条 `redis.ConnectionError`）+ 1 条 MCP，
+  与改动前**逐条相同**（用 `git worktree` 挂到 `39707f4` 量基线，⛔ 未改工作区）。
+  📌 顺带记：新加的守卫用例**第一版判据写歪**（文本匹配把历史注释也判违规）⇒ 改 AST 后，
+  自证用例又抓出扫描器**漏了 `ast.alias`**（`import` 不是 `ast.Name`）。两次都由测试自己发现。
+
 - 🔴 **LLM 端点固定为 DeepSeek** —— `config.py` 的默认值与 key 兜底**一起去百炼**（2026-10-02 · 业务方：「现在不用百炼的了…llm 就用 env 的 deepseek api」）。
 
   **`.env` 早就切了**（`DEC-017`）⇒ **运行时零改动**。改的是**代码侧两处还停在百炼的东西**：

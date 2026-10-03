@@ -496,36 +496,35 @@ _MEASURED_PLAN_EXECUTE_TOKENS = 3346
 
 
 def test_free_users_real_daily_limit_on_plan_execute_is_known():
-    """钉住 FREE 用户对 `plan_execute` 的**真实**每日上限 —— 以及「**哪套配额在生效**」。
+    """钉住 FREE 用户对 `plan_execute` 的**真实**每日上限（**token 口径**）。
 
-    🔴 本仓有**两套互不知情的配额**，口径不同：
+    ## 历史：这条用例原本是「两套口径」的证据（`DEC-029`）—— ⚠️ 别整条删，那是个宝贵事实
 
-      | 口径 | 出处 | FREE 限额 |
-      |---|---|---|
-      | **请求次数** | `permission.ROLE_QUOTA`（中间件用） | **100/天** |
-      | **Token** | `token_tracker.ROLE_TOKEN_BUDGET`（`_invoke_llm` 用） | **10_000/天** |
+    2026-09-21 实测时，本仓有**两套互不知情的配额**：
 
-    **两者都在拦**，而 `plan_execute` 一次请求实测要花 **~3346 tokens**
-    ⇒ **实际生效的是 token 那套**，**次数配额（100）根本用不完**。
+      | 口径 | 出处 | FREE 限额 | 对 `plan_execute` 的真实约束 |
+      |---|---|---|---|
+      | **请求次数** | `permission.ROLE_QUOTA`（中间件用） | **100/天** | ❌ **形同虚设** |
+      | **Token** | `token_config.ROLE_DAILY_TOKEN` | **10_000/天** | ✅ **真正在拦的是它** |
 
-    ⚠️ **「FREE 每天约 3 次」这个数【没有任何人选择过】** ——
-       它是两个独立系统的**意外交集**。本用例把它变成**已知且被测的**。
+    `plan_execute` 一次实测要花 **~3346 tokens** ⇒ **次数配额（100）根本用不完**
+    ⇒ 两套口径**差约 35 倍**。这正是 `DEC-040` 裁「**统一到 token 一套**」的起因。
 
-    📌 **谁改了 `ROLE_TOKEN_BUDGET`、或让 `plan_execute` 变贵/变便宜，这条会红** ——
-       提醒去**重新测一次**并更新记录（`DEC-029`）。
+    🔴 2026-10-03（`DEC-046`）：**次数那套已整张删掉** ⇒ 本用例只留 token 口径。
+       ⚠️ **「FREE 每天约 3 次」这个数【没有任何人选择过】** ——
+          它是「日预算 ÷ 单次成本」算出来的**副作用**。本用例把它变成**已知且被测的**。
+
+    📌 **谁改了 `ROLE_DAILY_TOKEN['free']`、或让 `plan_execute` 变贵/变便宜，这条会红** ——
+       提醒去**重新实测单次消耗**并更新记录。
        ⭐ **这不是"防改动"，是"防不知情"。**
     """
-    from permission import UserRole, ROLE_QUOTA
     from token_tracker import ROLE_TOKEN_BUDGET
 
-    by_requests = ROLE_QUOTA[UserRole.FREE]                      # 次数口径
-    by_tokens = ROLE_TOKEN_BUDGET["free"] / _MEASURED_PLAN_EXECUTE_TOKENS  # token 口径
+    by_tokens = ROLE_TOKEN_BUDGET["free"] / _MEASURED_PLAN_EXECUTE_TOKENS
 
-    assert by_tokens < by_requests, (
-        "对 plan_execute 而言，【token 口径本该比次数口径严】—— 现在不是了。\n"
-        "⇒ 是不是有人把 `ROLE_TOKEN_BUDGET['free']` 调大了、或单次成本降下来了？\n"
-        "⇒ 请**重新实测单次 token 消耗**，并更新本用例与 DEC-029。"
-    )
+    # 历史对照（**这条口径已不存在**，留着只为说明「3 次」有多意外）：
+    #   旧「请求次数」口径 FREE = 100/天 ⇒ 按次数能跑 100 次，按 token 只能跑 ~3 次。
+    _OLD_REQUEST_COUNT_FREE = 100
 
     assert 2 <= by_tokens <= 5, (
         f"FREE 用户每天实际能跑 **{by_tokens:.1f}** 次 plan_execute —— 与记录（**3.0**）不符。\n"
