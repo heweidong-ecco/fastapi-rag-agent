@@ -10,6 +10,21 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- 🟢 **栈式 PR 的收尾规矩进仓**（2026-10-03）—— `#71`（`②` 人工接管）**squash 合入后**收尾 `#72`
+  （`DEC-049` 插单，**stack 在 `#71` 的分支上**）**实测出三条坑**，落进 `docs/规范/开发规范.md` **§2.7**
+  （与 **§2.6「删已合并分支」同族** —— 都是 **squash 之后的收尾**）。
+
+  | # | 坑 | ✅ 做法 |
+  |---|---|---|
+  | **1** | **GitHub 不会**自动把子 PR 的基分支改指 `main` | 显式 `gh pr edit <n> --base main`<br>⚠️ 它**只在基分支被【删掉】时**才自动改指 —— **「父 PR 合了」不算** |
+  | **2** | ⛔ **别用 `git merge origin/main` 收尾** —— 实测在 **6 个文件**上冲突（`CHANGELOG` · `ROADMAP` · `DEC-048` · `agent_graph.md` · `待办总表` · `测试.md`）<br>**根因**：merge 的 3-way 基是**旧 main** ⇒ **父 PR 的改动在两边都成了「新增」** | `git rebase --onto origin/main <父分支的原 tip sha>`<br>—— 只把子 PR 那**一条** patch 重放到新 main 上。**实测零冲突**，且 **rebase 前后树哈希一致**（`1a08df4…`）⇒ **内容一条没丢**（验证方式就是比树哈希，见 §2.6 判据 3）<br>⇒ 然后 `git push --force-with-lease` |
+  | **3** | ⛔ **`gh pr edit --base` 不触发 CI** —— 发的是 `pull_request` 的 **`edited`**，**不在默认活动类型里**（默认只有 `opened`/`synchronize`/`reopened`）⇒ `main` 有 required checks ⇒ PR 卡 **`BLOCKED`**，而 `gh pr checks` 报 **「no checks reported」**（⛔ 别误判成「CI 挂了」） | `gh pr close <n>` + `gh pr reopen <n>`（发 `reopened`，在默认类型里）<br>⛔ **不用**往分支塞空提交 —— **no-op push 不产生 `synchronize`** |
+
+  ⚠️ **一条要主动更正的话**：`#72` 的 PR 正文里我写过「等 `#71` 合进 `main` 后 GitHub 会**自动**把这个 PR 的基分支改指 `main`」
+  —— **实测是错的**（就是坑 1）。⇒ **主干 commit 正文已换成更正后的表述**，⛔ 那句话不留着。
+  📌 **同批收尾两件**：`feat/task1-approval-trigger` **已删**（本地 + 远端，删前按 §2.6 三条判据核过：无独有内容）；
+  `#72` 已 squash 合入 `main`（`dcea785`）。
+
 - 🔴 **`calculator` 的任意代码执行面【已消除】**（2026-10-03 · `DEC-049`）—— **5 处 `eval` 收口到 AST 白名单求值**。
 
   **改的是什么**：`calculator` 工具的 `expression` 参数**是 LLM 生成的**，而 LLM 的输入包含

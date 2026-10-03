@@ -285,6 +285,18 @@ bash scripts/list_endpoints.sh          # 默认 http://127.0.0.1:8000
 >
 > **➡️ `DEC-049` 之后再进**：**③ 流式与取消（`B1`/`B2`）** —— 见下方计划表；⚠️ `B2` 自标「最容易假完成」
 
+> ### 🔴 **栈式 PR 收尾 —— 三条坑**（2026-10-03 · `#71`→`#72` **实测**）
+>
+> 全文 ⇒ **`docs/规范/开发规范.md` §2.7**（与 §2.6「删已合并分支」同族 —— 都是 squash 之后的收尾）。
+>
+> | # | 坑 | ✅ 做法 |
+> |---|---|---|
+> | 1 | **GitHub 不会**自动把子 PR 的基分支改指 `main` | 显式 `gh pr edit <n> --base main`（⛔ 它**只在基分支被【删掉】时**才自动改指） |
+> | 2 | ⛔ **别用 `git merge origin/main`** 收尾（实测 **6 个文件**冲突） | `git rebase --onto origin/main <父分支的原 tip sha>` ⇒ `git push --force-with-lease` |
+> | 3 | ⛔ **`gh pr edit --base` 不触发 CI** ⇒ PR 卡 `BLOCKED`，而 `gh pr checks` 报 **"no checks reported"** | `gh pr close <n>` + `gh pr reopen <n>`（⛔ 别塞空提交 —— no-op push 不产生 `synchronize`） |
+>
+> ⚠️ **收尾后按内容核**，⛔ 别只看 `state` —— `git cat-file -t <squash sha>:<新文件>` 读**树**。
+
 > ### 📌 下次开工前的**自检三问**（都是本会话踩过的）
 > 1. **跑测试用哪条命令？** ⇒ **CI 的同款**：`python -m pytest api/ -m "not integration and not needs_db" -q`
 >    （⛔ 别拿"全量"顶替 —— 本会话因这个红过 CI，见 `docs/复盘/2026-09-30-本地绿当成了不依赖.md`）
