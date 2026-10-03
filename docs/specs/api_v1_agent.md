@@ -2,7 +2,7 @@
 
 | 项 | 内容 |
 |---|---|
-| **状态** | 🟡 **可用；流式【有了第一条】**（`③` Task 4 · `B1` · 2026-10-03）—— ⚠️ **但只有 `/agent/langgraph_chat/stream` 这一条**，其余 **29 条仍全非流式**<br>🔵 **改造中**：本文件下方有 **实施计划 ②**（人工接管 · **已完成**）与 **③**（流式与取消 · **进行中，还剩 `B2`/`B3`**）<br>✅ **2026-10-03（`②` Task 2 · `B5`）**：新增 **`GET /agent/pending`** ⇒ 路由 **28 → 29**<br>✅ **2026-10-03（`②` Task 3 · `B6`）**：`POST /agent/approve` 增加可选参数 **`edited_answer`** ⇒ **硬门 D 三段齐了**<br>🔵 **2026-10-03（`③` Task 4 · `B1`）**：新增 **`POST /agent/langgraph_chat/stream`**（SSE）⇒ 路由 **29 → 30**。📄 `DEC-050` |
+| **状态** | 🟡 **可用；流式【有了第一条】**（`③` Task 4 · `B1` · 2026-10-03）—— ⚠️ **但只有 `/agent/langgraph_chat/stream` 这一条**，其余 **29 条仍全非流式**<br>🔵 **改造中**：本文件下方有 **实施计划 ②**（人工接管 · **已完成**）与 **③**（流式与取消 · **进行中，还剩 `B2`/`B3`**）<br>✅ **2026-10-03（`②` Task 2 · `B5`）**：新增 **`GET /agent/pending`** ⇒ 路由 **28 → 29**<br>✅ **2026-10-03（`②` Task 3 · `B6`）**：`POST /agent/approve` 增加可选参数 **`edited_answer`** ⇒ **硬门 D 三段齐了**<br>🔵 **2026-10-03（`③` Task 4 · `B1`）**：新增 **`POST /agent/langgraph_chat/stream`**（SSE）⇒ 路由 **29 → 30**。📄 `DEC-050`<br>✅ **2026-10-03（`③` Task 5 · `B2`）**：新加的这条流式路由**补上了 cancel 传播**（关图的流 + 记数）—— `DEC-050` §遗留·3 自己点的那个洞**已堵**。📄 `DEC-052` |
 | **对外提供** | 30 个路由（`/agent/langgraph_chat` · **`/agent/langgraph_chat/stream`** · `/agent/approve` · `/agent/pending` · `/agent/mcp_chat` · `/agent/advanced_chat` · `/agent/plan_execute` · `/agent/token/*` …）· `summarize_agent_result()` |
 | **谁在用** | 前端（未做）· `test_public_paths.py` 等 |
 | **规模** | **1007 行**（`scripts/spec_status.sh` 口径 = **本仓口径**；`wc -l` 报 **1006** —— 本文件**末行没有换行符** ⇒ 少算 1，⛔ **不是笔误**，同 `agent_graph.py`）<br>⚠️ **别抄这个数** —— 它当天已被重取过**五次**：743 → 835 → 875 → 894 → **1006/1007** |
@@ -45,7 +45,9 @@
 - 🔵 ~~**29 个路由全非流式** ⇒ **硬门 A 的缺口**~~ ⇒ **2026-10-03 起缺口【开了一条】**（`③` Task 4 · `B1`）：
   新增 `/agent/langgraph_chat/stream`。⚠️ **但只有这一条** —— **其余 29 条仍全非流式**，
   硬门 A 要的是"**该流的流**"，⛔ **不是"流了一条就算完"**。📄 `DEC-050`
-  · ⚠️ **`B2`（cancel 传播到上游）· `B3`（半截答案怎么处理）【仍未做】** —— 见下方实施计划 ③ 的 Task 5 / 6
+  · ✅ ~~⚠️ **`B2`（cancel 传播到上游）**~~ ⇒ **2026-10-03（`③` Task 5）【已做】** ——
+  客户端断开 ⇒ 关掉图的流（`aclose()`）+ 记 `stream_cancelled_total`。📄 `DEC-052`
+  · ⬜ **`B3`（半截答案怎么处理）【仍未做】** —— 见下方实施计划 ③ 的 Task 6
 - ✅ ~~🔴 **没有「待接管队列」端点**~~ ⇒ **2026-10-03 起【有了】**（`②` Task 2 · `B5`）：`GET /agent/pending`。
   ⚠️ **但队列背后是【进程内存】**（`api/pending_approvals.py`）⇒ **重启即空** —— 见其 spec 里那条"已知限制"
 - ✅ ~~**`B6`（接管后续跑）未做**~~ ⇒ **2026-10-03 起【已做】**（`②` Task 3）：`edited_answer` 改写后提交 + 续跑形状被 `test_approval_resume.py` 钉住。
@@ -64,6 +66,9 @@
 | 看代码会以为 | 实际 |
 |---|---|
 | 🔴🔴 **「`/agent/langgraph_chat/stream` 的结尾那个 `summary`，把流过 `agent` 节点的块攒起来算就行」** | ⛔ **不行，会算错**（2026-10-03 **真服务**撞见，`③` Task 4）。<br>**攒块 = 跨多轮累积** —— 模型因工具返回"未找到工具"而**重试**时，`agent` 节点会进**多次** ⇒ 攒出来的东西带着**上一轮的** `tool_calls` ⇒ `summarize_agent_result` 报 **`pending_approval`，而图其实已经跑完**（前端会**永远等一个不会来的审批**）。<br>⚠️ 实测症状：`tool_calls` 的 name 被**拼接**成 `"date_todayduckduckgo_search"`。<br>🔴 **2026-10-03（`DEC-051`）**：那次"反复重试"的**根因已修**（`tool_execute` 原来是按字面量 `"search"` 分派、真名是 `duckduckgo_search`）⇒ ⚠️ **但本行仍照旧成立** —— 只要端点还在拿流式块猜，**任何**多轮场景都会重演。<br>✅ **正确做法：从图的最终状态取** —— `await agent_graph.aget_state(config)` ⇒ `summarize_agent_result(state.values)`，与 `/agent/langgraph_chat` **完全同一套语义**。<br>📌 判据（可打印）：`api/test_agent_sse.py::test_status_comes_from_final_state_not_from_streamed_chunks`（`_TwoRoundModel` 逼出第二轮） |
+| 🔴 **「这条流式端点没有 cancel 处理」** | ✅ **2026-10-03（`③` Task 5 · `B2`）起【有了】** —— 客户端断开后**关掉图的流**（`finally: await stream.aclose()`，`:241`），并记 `stream_cancelled_total{endpoint="agent_langgraph_chat_stream"}`。<br>⚠️ **不关的代价是"图继续跑完"** = 继续调模型 = **继续烧钱**，而前端看起来一切正常（它只是不显示了）。<br>⚠️ **本轮之前这里确实是空的** —— 而且 `DEC-050` §遗留·3 **自己点了名**。<br>📌 判据（可打印）：`api/test_cancel_propagation.py` ⇒ **10 passed**；真服务 = 计数 +1 且日志有 `[cancel]` 行 |
+| 🔴 **「客户端断开得靠 `request.is_disconnected()` 自己轮询」** | ⛔ **不用，那是框架给的**（uvicorn 报 `spec_version 2.3` ⇒ Starlette 监听 `http.disconnect` 后**取消生成器**）。<br>⇒ 真正的缺口只有「**停下并关掉上游**」这一件；**自己加轮询 = 多余，且会掩盖真缺口**（`DEC-052`） |
+| 🔴 **「中间件日志里那个秒数 = 这条流的生成耗时」** | ⛔ **不是** —— 它记到**响应开始返回**为止。实测：`(0.019s)` 的那条客户端收了 **27KB**、`(0.004s)` 的那条 **3 秒后**才 cancel。<br>⇒ ⛔ 别拿它当"生成提前停了"的证据（第一版就这么误读过 · `DEC-052`） |
 | 🔴 **「`status=answered` 就是拿到最终答案了」** | ⚠️ **要看 `status`** —— 返回 `pending_approval` 时 `answer` 里是**模型"先说的一句"**，**工具还没执行**。`summarize_agent_result` 的 docstring（`:55-80`）专门讲了这点：**不能加 `and not content`**，否则这种形态会被**误报成 `answered`**。⚠️ **该 docstring 还写了这条判据"依赖什么、什么时候会失效"**（B4 后理由变了）—— 改图的路由时**要回去重看** |
 | ⚠️ ~~🔴 **「审批已经能用了，硬门 D 算完成」**~~ | ✅ **2026-10-03（`②` Task 1 · `B4`）改了口径**：**触发条件不再是「任意 `tool_calls`」**，而是**工具白名单**（`agent_graph.py` 的 `SENSITIVE_TOOLS`）⇒ **问个日期不再进审批**。<br>🔴 **但白名单里的名字当时写错了**（`search_tool` 是**变量名**）⇒ **交集恒空 ⇒ 审批其实【永不触发】**，**直到 2026-10-03 才由 `DEC-051` 修掉**。⇒ ⚠️ **"改了口径"与"口径真的生效"是两件事** —— 前者当天就成立了，后者晚了三天。<br>✅ **2026-10-03（`②` Task 2/3）：`B5` 队列 与 `B6` 续跑都【已做】** ⇒ **三段（什么时候停 / 停在哪看得到 / 批了怎么接着跑）齐了**。<br>⚠️ **但"齐了"≠"验收过"**：`B6` 只钉了**接线与语义**（`invoke(None)` + `edited_answer` 进 `AIMessage`），<br>**"上下文真的连续"没有端到端跑过**（要真 LLM + 真 `MemorySaver`，**联网花钱**）⇒ 验收演示时**要补那一步**。<br>⚠️ **本条 2026-10-03 之前写的是旧口径**，⛔ 别照旧理解 |
 | ⚠️ **「`/agent/approve` 收 JSON body」** | ⛔ **不是** —— `thread_id` / `approved` / **`edited_answer`** **都是 query 参数**（`:152-155`） |
@@ -740,33 +745,38 @@ curl -N -s -X POST "http://127.0.0.1:8000/api/v1/agent/langgraph_chat/stream?que
 - [x] Step 5 建/更 `docs/specs/api_v1_agent.md`（本文件）的状态行 → 提交
   · 同时更了 `docs/specs/agent_graph.md`（另一半）· 落 `DEC-050`
 
-## Task 5 · **B2** · 服务端 cancel **传播到上游**（🔴🔴 自标「最容易假完成」）
+## Task 5 · **B2** · 服务端 cancel **传播到上游**（🔴🔴 自标「最容易假完成」）· ✅ **2026-10-03 已做**
 
-**Files:** Modify `api/api_v1_rag.py:572`（`stream_search`）+ Agent 流式端点 · Test `api/test_cancel_propagation.py`
+**Files:** `api/api_v1_rag.py`（`stream_search`）+ `api/api_v1_agent.py`（流式端点）+ `api/metrics.py` ·
+Test `api/test_cancel_propagation.py`（10 例 · 纯离线 · 进 CI）
 
-**要补三件**：① 检测客户端断开（`request.is_disconnected()`）② **主动关上游 HTTP 流**（生成器 `close()` / 放进 `with` / `async` 客户端 `aclose()`）③ **`finally` 兜底**
+**计划要补三件**：① 检测客户端断开（`request.is_disconnected()`）② **主动关上游 HTTP 流** ③ **`finally` 兜底**
+
+> ### ⚠️ 执行下来：**①不用补 · ②③照做 · 而计划里的验收判据【落空了】**
+>
+> | 计划 | 实际 |
+> |---|---|
+> | ① `is_disconnected()` | ⛔ **不用写** —— uvicorn 报 `spec_version 2.3` ⇒ **Starlette 已经替我们监听 `http.disconnect` 并取消生成器**。真正的缺口**只有②**（`DEC-052` §①不用补） |
+> | ② 关上游 | ✅ 上游改 `astream`（同步 `for` 会**阻塞事件循环**，取消得等下一块）+ `finally: await stream.aclose()` |
+> | ③ `finally` 兜底 | ✅ 且**必须**放 `finally` —— Starlette 有**两条**关闭路径（2.3 抛 `CancelledError` / 2.4 抛 **`GeneratorExit`**），后者**不是** `CancelledError` 子类 ⇒ 只写 `except` 会**静默不记** |
+> | 🔴 判据 ③「**token 计数停止增长**」 | ⛔ **该计数在流式路径上不存在**（`grep -ci token api/metrics.py` = 0；PG 记账**只在生成结束后整笔写**）⇒ **判据无法证伪 = 任何实现都能通过**。<br>✅ 换成：① 日志有 `[cancel]` ② `stream_cancelled_total{endpoint}` **+1** ③ `outcome == "cancelled"`（**循环没跑完** ⇒ 比"计数涨了"更接近"上游真停了"） |
 
 > ### ✅ 验收口径（**业务方 2026-09-30 已裁：先以本机证据为准**）
-> **判据 = 日志有 cancel 事件 + token 计数在该时间点【停止增长】**。
-> ⚠️ **已知代价**：**证明不了"上游计费真的停"** —— 本机没有 DashScope 侧账单。
+> ⚠️ **已知代价仍然成立**：**证明不了"上游计费真的停"** —— 本机没有 DashScope 侧账单。
 > ⇒ **接受它**；上云后（阶段⑦/⑧）若有机会再补真链路，但**不作为本轮验收前提**。
+> ⛔ 因此本轮**不许**把"我们关了流"说成"账单停了"（`DEC-052` §遗留·2）。
 
-- [ ] Step 1 写测试：**cancel 后计数必须停止**
-```python
-def test_token_counter_stops_after_cancel(...):
-    """🔴 判据③（`通用/四硬门 §3-C`）：**token 计数在该时间点停止增长**。
-
-    ⚠️ "前端停了"证明不了任何事 —— 那可能只是**前端不再显示**，而后端还在烧钱。
-       本用例断言的是**服务端计数**。
-    """
-```
-- [ ] Step 2 跑 → 失败（**现状**：`api_v1_rag.py` 全文 `is_disconnected` / `finally` / `aclose` **均为 0 命中**）
-- [ ] Step 3 实现三件（⚠️ **`finally` 是兜底，不是全部** —— 只在 `except` 里写兜底是本仓栽过的形态，见 `search_tools.py:16` 的注释：「**那次调用返回的是 200，兜底永远不触发**」）
-- [ ] Step 4 ⭐ **判据（本机）**：真服务流式途中 Ctrl-C / 关连接，然后
-```bash
-# ① 后端日志里出现 cancel 事件；② 之后 /agent/token/recent 的计数不再增长
-```
-- [ ] Step 5 提交，并在 `docs/specs/api_v1_rag.md` 里把「不关上游 HTTP 流」那条**划掉**
+- [x] Step 1 写测试 —— ⛔ **⾏不通**：计划里的 `test_token_counter_stops_after_cancel` **写不出来**
+      （被测对象不存在，见上表）。改写为 `api/test_cancel_propagation.py`（10 例）——
+      **钉在 ASGI 层**：把 `StreamingResponse` 当 ASGI app 跑（`spec_version="2.3"`，与 uvicorn 实测一致），
+      `receive` 在第 N 帧后回 `http.disconnect` ⇒ 与真服务器**走同一段取消代码**
+- [x] Step 2 跑 → **红**（⚠️ 第一版假上游写成 `async def` + `yield`，**假绿** —— `asyncio.run()` 收尾的
+      `shutdown_asyncgens()` 会替我们把它关掉 ⇒ 改成**手写迭代器**，`closed` 为真**只能**是我们调的 `aclose()`）
+- [x] Step 3 实现（⚠️ `finally` 是**主路**不是兜底 —— 三条出口都要关流）
+- [x] Step 4 ⭐ **真服务（本机）**：`curl --max-time` 切断，两条端点各验一遍
+      —— ✅ 计数 1.0 → **2.0**（rag）/ **→ 1.0**（agent）+ 各有 `[cancel]` 日志行
+      ⚠️ **两个坑记在 `DEC-052`**：中间件时长**不是**生成时长 · 本机**有语义缓存**（换问句才能测）
+- [x] Step 5 提交，并在 `docs/specs/api_v1_rag.md` 里把「不关上游 HTTP 流」那条**划掉**（本文件同改）
 
 ## Task 6 · **B3** · 先核：中断时"已生成的那半截"怎么处理
 

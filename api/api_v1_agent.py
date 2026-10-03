@@ -7,6 +7,8 @@ import json
 import time
 from fastapi import APIRouter, Depends, Path, Query
 from fastapi.responses import StreamingResponse   # B1：Agent 端 SSE
+from loguru import logger                          # `③` Task 5：取消事件要落到日志（判据①）
+from metrics import track_stream_cancel            # `③` Task 5：取消事件进 Prometheus（判据③的观测对象）
 from exceptions import ErrorCode, AppException
 from deps import get_current_user_hybrid, get_current_user_jwt, require_admin
 
@@ -192,13 +194,22 @@ async def langgraph_chat_stream(
     if not ok:
         raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
 
+    ENDPOINT = "agent_langgraph_chat_stream"   # Prometheus 的 label（`③` Task 5）
+
     async def generate():
+        stream = None
+        # ⚠️ 默认按「被取消」算 —— 只有跑到收尾才改成 `"done"`（理由同 `/rag/stream_search`：
+        #    Starlette 2.3 抛 `CancelledError`、2.4 抛 `GeneratorExit`，两条都要记到）。
+        outcome = "cancelled"
         try:
-            async for chunk, meta in agent_graph.astream(
+            # ⚠️ 必须**绑成变量**：`finally` 里要 `aclose()` 它。
+            #    ⛔ 别退回"在 `async for` 里内联调用" —— 那样拿不到这个流的句柄，关不掉。
+            stream = agent_graph.astream(
                 {"messages": [HumanMessage(content=question)]},
                 config={"configurable": {"thread_id": thread_id}},
                 stream_mode="messages",
-            ):
+            )
+            async for chunk, meta in stream:
                 # ⚠️ 只转发 `agent` 节点出的块。图里还有 `tools` / `approval` 节点，
                 #    不加这道过滤，它们吐的消息会**混进正文**
                 #    （实测：`tools` 节点的 `ToolMessage` 内容会作为一块出现）。
@@ -210,12 +221,28 @@ async def langgraph_chat_stream(
                 #    不过滤 ⇒ 前端收到一串空白帧。
                 if chunk.content:
                     yield f"data: {json.dumps({'content': chunk.content}, ensure_ascii=False)}\n\n"
+            outcome = "done"
+        except asyncio.CancelledError:
+            # 客户端断开（`③` Task 5 · `B2`）—— ⛔ **不许吞**：吞掉外层会以为这是"正常结束"。
+            # ⚠️ 也**不许在这里 yield**：接收方已经走了，发出去只会让帧层面分不清
+            #    「已取消」与「正常收尾」（`/rag/stream_search` 那边的实测同款）。
+            raise
         except Exception as e:
+            outcome = "error"
             # 兜底：⛔ 别让异常**静默**变成"流自然结束" —— 那前端看到的是
             # "答案说了一半就没了"，而**没有任何错误信号**。
             yield f"data: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
             yield "data: [DONE]\n\n"
             return
+        finally:
+            # 🔴🔴 **本任务的核心动作**：客户端断开后**关掉图的流**。
+            #    不关 ⇒ 图会**继续跑完**（`DEC-050` §遗留·3 自己点了这条：
+            #    "新的流式路由同样没有 cancel 处理"）—— 继续跑 = 继续调模型 = 继续烧钱。
+            if stream is not None:
+                await stream.aclose()
+            if outcome == "cancelled":
+                track_stream_cancel(ENDPOINT)
+                logger.info(f"[cancel] 客户端断开，已停止生成并关闭图的流 endpoint={ENDPOINT}")
 
         # 🔴🔴 **状态必须取自【图的最终状态】，⛔ 不是"把 `agent` 节点的流式块攒起来"。**
         #

@@ -53,6 +53,8 @@ from chunker import split_text_with_filter
 from document_parser import parse_document
 
 from cache import get_chat_history, append_chat_history
+from loguru import logger                          # `③` Task 5：取消事件要落到日志（判据①）
+from metrics import track_stream_cancel            # `③` Task 5：取消事件进 Prometheus（判据③的观测对象）
 
 from agent_graph import agent_graph
 
@@ -673,19 +675,30 @@ async def stream_search(
     ])
     
     # 4. 流式生成器
+    ENDPOINT = "rag_stream_search"    # Prometheus 的 label（`③` Task 5），⛔ 别与函数名混用
+
     async def generate():
         collected_parts = []          # 用于拼凑完整回答
+        stream = None
+        # ⚠️ 默认按「被取消」算 —— 只有跑到收尾才改成 `"done"`。
+        #    这样 Starlette 的两条分支**都能记到**：2.3（uvicorn 实测值）抛 `CancelledError`，
+        #    2.4 走 `except OSError` ⇒ 生成器被 `aclose()` ⇒ 抛 `GeneratorExit`。
+        outcome = "cancelled"
         try:
-            # 调用流式LLM
-            stream = get_llm_stream().stream(messages)
-            for chunk in stream:
+            # 🔴 上游必须是**异步**的（`③` Task 5 · `B2`）：
+            #    同步 `for chunk in stream` 会**阻塞事件循环**，取消得等"下一块到达"才送得进来
+            #    ⇒ 上游卡住时，最坏要等一整个 chunk 的时间才停得下来。
+            stream = get_llm_stream().astream(messages)
+            async for chunk in stream:
                 if chunk.content:
                     collected_parts.append(chunk.content)
                     # SSE格式：data: 内容\n\n 直接发送纯文本，前端逐字显示
                     yield f"data: {json.dumps({'content': chunk.content})}\n\n"
-                    # 关键：让出控制权，不做任何阻塞性等待
-                    await asyncio.sleep(0.01)  # 小延迟，让前端能平滑渲染
-            
+                    # ⚠️ 这一行**不再是「让出控制权」**（`async for` 本身就是 await 点）——
+                    #    现在它只剩「限速」这一个作用。留着是为了本轮**不改节奏**。
+                    await asyncio.sleep(0.01)
+
+            outcome = "done"
             # 发送结束信号
             yield "data: [DONE]\n\n"
             # ---- 在这里记录对话历史 ----
@@ -698,15 +711,31 @@ async def stream_search(
             # 如果有引用，在结束后发送来源列表
             if req.citations and sources_list:
                 yield f"data: {json.dumps({'sources': sources_list})}\n\n"
-        except asyncio.CancelledError: 
+        except asyncio.CancelledError:
             # 精确捕获：客户端主动断开连接
-            print("客户端断开连接，停止生成")
-            yield "data: [DONE]\n\n"
+            # ⛔ **不许在这里 yield**（旧实现在此处 `yield "data: [DONE]"`）：
+            #    接收方已经走了、发出去也没人收 —— 而且**实测真会发出去一帧**
+            #    （`api/test_cancel_propagation.py::test_rag_sends_nothing_after_disconnect`）
+            #    ⇒ 让「已取消」与「正常收尾」在**帧层面长得一模一样**。
+            #    照原样抛出去：吞掉它会让外层以为这是「正常结束」。
+            raise
         except Exception as e:
+            outcome = "error"
             # 兜底：其他未知错误
-            # 客户端断开连接，优雅退出
             print(f"流式生成出错: {e}")
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
+        finally:
+            # 🔴🔴 **本任务的核心动作**：客户端断开后**主动关掉上游 HTTP 流**。
+            #    不关 ⇒ 上游继续生成、**继续计费**，而前端看起来一切正常（它只是不显示了）
+            #    —— 硬门 C 标「最容易假完成」就是这个形态。
+            #    ⚠️ 放 `finally` 而不是 `except`：三条出口（正常 / 异常 / 取消）**都要关**，
+            #       其中「取消」那条还包括 2.4 分支的 `GeneratorExit`。
+            if stream is not None:
+                await stream.aclose()
+            if outcome == "cancelled":
+                # 判据①日志有 cancel 事件 · 判据③的**观测对象**（Prometheus，Grafana 可见）
+                track_stream_cancel(ENDPOINT)
+                logger.info(f"[cancel] 客户端断开，已停止生成并关闭上游流 endpoint={ENDPOINT}")
 
         # 6. 返回SSE流式响应（禁用缓冲）
     return StreamingResponse(
