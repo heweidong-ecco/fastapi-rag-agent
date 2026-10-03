@@ -858,9 +858,10 @@ async def mcp_agent_chat(
 
     # 🅾 丙段断言点：**checkpoint 键**拼身份（⛔ 不是裸 `thread_id`）。
     # ⚠️ 但下面 state 里的 `thread_id` **保持原值** —— 它喂的是【追踪/花费】那条轴
-    #    （`agent_graph_advanced.py:239/334/359` → `record_tool_*`），
-    #    那条轴的**读**端点 `/agent/trace/{thread_id}`（`:1029`）用的也是原值。
+    #    （`agent_graph_advanced.py:246/268` → `record_tool_*`），
+    #    那条轴的**读**端点 `/agent/trace/{thread_id}`（`:1133`）用的也是原值。
     #    ⛔ 两条轴别混：混了就得连追踪的读写一起改（那是另一件事，不是丙段）。
+    #    🔴 **那条轴本身有跨用户可见的洞** ⇒ 已立账 `docs/待办总表.md` 的 **N4**。
     sess = session_key(user_name, thread_id)
 
     result = await mcp_agent.ainvoke(
