@@ -34,6 +34,7 @@ from schemas import (
 )
 from deps import get_current_user_hybrid, get_current_user_jwt, require_admin
 from db import get_db, insert_document,insert_batch_documents
+from db import search_similar  # 🔴 2026-10-03 乙段（DEC-056）：stream_search 改走共享层
 from embedding_client import get_embedding
 
 from permission import get_user_role, UserRole  # ⚠️ 2026-10-03 删 `get_user_quota`（本文件从未使用；该函数已随 DEC-046 一起删）
@@ -547,7 +548,15 @@ async def jwt_ask_question(
     start = time.time()
     with get_db() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT content FROM documents LIMIT %s", (req.top_k,))
+            # 🔴 2026-10-03 乙段（`DEC-056` §1.2 第 7 条）：补上 `WHERE requested_by`。
+            #    原先 **零 `WHERE`** ⇒ 查全库。实测：isolation_b 打自己的 JWT
+            #    却拿回了 20 篇 admin 的文档（`api/test_isolation.py`）。
+            #    ⚠️ **只加过滤，⛔ 不改检索语义** —— 它「拿到 question 却不拿它做检索」
+            #       （无 embedding、无 `ORDER BY`）是**另一条账**，不在隔离收口内。
+            cur.execute(
+                "SELECT content FROM documents WHERE requested_by = %s LIMIT %s",
+                (user_name, req.top_k),
+            )
             rows = cur.fetchall()
     docs = [r[0] for r in rows]
     duration = time.time() - start
@@ -642,16 +651,14 @@ async def stream_search(
     # 1. 向量检索（这部分不是流式的，一次性查完）
     # 构建当前输入的这条的历史对话，真停止按钮的调用（使它支持历史补偿）
     query_embedding = get_embedding(req.question)
-    with get_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT id, content, source, 1 - (embedding <=> %s::vector) AS similarity
-                FROM documents
-                ORDER BY embedding <=> %s::vector
-                LIMIT %s;
-            """, (query_embedding, query_embedding, req.top_k))
-            results = cur.fetchall()
-    
+    # 🔴 2026-10-03 乙段（`DEC-056` §1.2 第 8 条）：改用**共享层**，⛔ 不再自己写 SQL。
+    #    原先这段 SQL **零 `WHERE`** ⇒ 查全库。实测（`api/test_isolation.py`）：
+    #    isolation_b 的检索上下文里**逐字**出现了 isolation_a 的文档。
+    #    `search_similar` 已带 `WHERE requested_by = %s`，且**返回同样的 4 列**
+    #    （id, content, source, similarity）⇒ 下面 `r[0..3]` 的映射不用改。
+    #    ⚠️ 身份是端点传下去的 —— 这就是「共享层承重」（`DEC-056` 决策 5）。
+    results = search_similar(query_embedding, req.top_k, user_id=user_name)
+
     # 2. 构建上下文列表（用于可能的引用模式）
     contexts = []
     for r in results:

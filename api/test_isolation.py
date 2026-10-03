@@ -132,7 +132,12 @@ def test_rerank_search_requires_identity():
 
 
 def test_hybrid_search_with_rewrite_requires_identity():
-    """带查询改写的入口 —— 走这条的是 `jwt_ask` / `stream_search`（`DEC-056` §1.2 那两条无 WHERE 的）。"""
+    """带查询改写的入口 —— 端点里走这条的是 **`/rag/rewrite_search`**（`rewrite_search_api`）。
+
+    🔴 2026-10-03 更正：本行原先写「走这条的是 `jwt_ask` / `stream_search`」—— **说反了**。
+    那两条**自己写 SQL**，⛔ 从不经过 `hybrid_search_with_rewrite`（这正是乙段要单独修它们的原因）。
+    判据（可打印）：`grep -rn 'hybrid_search_with_rewrite' api/*.py` ⇒ 调用点只有 `api_v1_rag.py:472`。
+    """
     from hybrid_search import hybrid_search_with_rewrite
 
     _assert_identity_is_required(hybrid_search_with_rewrite, "hybrid_search_with_rewrite")
@@ -440,8 +445,151 @@ def test_retrieval_endpoint_rejects_missing_identity(probe_api_keys):
 
 
 # ===========================================================================
-# ⑤ ⬜ **仍未覆盖**（乙段）
+# ⑤ 乙段 —— 自己写 SQL 的那两条（`DEC-056` §1.2 第 7 / 8 条）
 # ===========================================================================
 #
-# `/rag/jwt_ask` 与 `/rag/stream_search` **自己写 SQL**，⛔ 不走共享层 ⇒ 上面 ③④ **都碰不到**。
-# ⚠️ **别把本文件全绿当成"隔离做完了"**：`DEC-056` §1.2 那 7 条里，本段只修了走共享层的 4 条。
+# ⚠️ 这两条与 ③④ 是**两种形态**：它们⛔ **不走共享层**，SQL 就写在端点上
+#    ⇒ `search_similar` 那些判据**碰不到它们** —— 这正是它们能一直漏着的原因。
+#    ⇒ 各配一条**端点级**用例，否则「共享层过滤对了」与「端点照旧查全库」可以同时为真。
+#
+# ⚠️ 只把**外部依赖**（embedding / LLM / Redis / 预算）换假的，**DB 与 HTTP 栈全是真的**。
+
+
+class _CapturingLLM:
+    """假的 LLM 流：只把端点**送进 prompt 的 messages 记下来**，⛔ 一个 chunk 都不吐。
+
+    观测对象就是它 —— `stream_search` 把检索到的上下文拼进 **system prompt**
+    （`api_v1_rag.py` 的 `context_text`）。⇒ 「谁进了上下文」= 「谁被检索到了」。
+    """
+
+    def __init__(self):
+        self.astream_calls = []
+
+    def astream(self, messages):
+        self.astream_calls.append(messages)
+        return _empty_astream()
+
+
+async def _empty_astream():
+    return
+    yield  # 空的一行，但它把本函数变成 async generator（`async for` 需要）
+
+
+def _system_prompt_of(llm) -> str:
+    """取最后一次调用里 role=system 的内容 —— ⛔ **不含 user 那条问题**。
+
+    ⚠️ 为什么不直接搜整个 messages：`req.question` 也在里面。拿问题当关键字搜会
+       **永远命中** ⇒ 用例假红。必须只取 system。
+    """
+    assert llm.astream_calls, "端点没有走到 LLM ⇒ 这条用例什么都没证"
+    return "\n".join(
+        m["content"] for m in llm.astream_calls[-1] if m.get("role") == "system"
+    )
+
+
+def _stub_rag_externals(monkeypatch, rag_mod, llm):
+    """把**外部依赖**换假的：embedding · LLM · Redis 历史 · 会话预算 · 全站熔断。"""
+    monkeypatch.setattr(
+        rag_mod, "get_embedding", lambda text, model=None: _probe_vector(0.11)
+    )
+    monkeypatch.setattr(rag_mod, "get_llm_stream", lambda: llm)
+    monkeypatch.setattr(rag_mod, "get_chat_history", lambda user: [])
+    monkeypatch.setattr(rag_mod, "append_chat_history", lambda *a, **k: None)
+    monkeypatch.setattr(rag_mod, "check_session_token_budget", lambda *a, **k: (True, ""))
+    monkeypatch.setattr(rag_mod, "circuit", lambda *a, **k: (True, ""))
+
+
+@pytest.mark.needs_db
+def test_stream_search_endpoint_does_not_leak_across_users(probe_api_keys, monkeypatch):
+    """`/rag/stream_search` —— isolation_b 的上下文里⛔ 不许出现 isolation_a 的文档。
+
+    ✅ **为什么这条能可靠地红**（⛔ 与下面 `jwt_ask` 那条不同）：
+       探针向量 = 查询向量（都是 `_probe_vector(0.11)`）⇒ 余弦相似度 = **1.0 = 最大值**
+       ⇒ 两篇探针文档**必然**排在 top-k 前面 ⇒ 未过滤时 A 的文档**一定**进上下文。
+       ⚠️ 这个「一定」是它可靠的**根据**，⛔ 不是习惯 —— 下面 `jwt_ask` 那条就**没有**这个性质。
+    """
+    import api_v1_rag as rag_mod
+
+    llm = _CapturingLLM()
+    _stub_rag_externals(monkeypatch, rag_mod, llm)
+
+    from fastapi.testclient import TestClient
+    from main import app
+
+    client = TestClient(app)
+
+    def _stream(key: str):
+        return client.post(
+            "/api/v1/rag/stream_search",
+            json={"question": "隔离测试查询", "top_k": 5},
+            headers={"X-API-Key": key},
+        )
+
+    r_b = _stream(probe_api_keys["isolation_b"])
+    assert r_b.status_code == 200, r_b.text
+    prompt_b = _system_prompt_of(llm)
+    assert _PROBE_A not in prompt_b, (
+        "isolation_b 的检索上下文里混进了 isolation_a 的文档 ⇒ 这条端点仍然查全库"
+    )
+    assert _PROBE_B in prompt_b, (
+        "连自己的文档都没进上下文 —— 上面那条断言证明不了任何东西（用例是空的）"
+    )
+
+    # 🔴 正向控制：isolation_a 打自己的 key ⇒ 必须拿得到 A 的、且看不到 B 的
+    llm.astream_calls.clear()
+    r_a = _stream(probe_api_keys["isolation_a"])
+    assert r_a.status_code == 200, r_a.text
+    prompt_a = _system_prompt_of(llm)
+    assert _PROBE_A in prompt_a
+    assert _PROBE_B not in prompt_a
+
+
+@pytest.mark.needs_db
+def test_jwt_ask_endpoint_does_not_leak_across_users(probe_api_keys):
+    """`/rag/jwt_ask` —— JWT 身份 ⇒ 只拿得到自己的文档。
+
+    ⚠️ **这条的泄漏判据是【条数】，⛔ 不是【内容】。** 为什么：
+
+       那条 SQL **没有 `ORDER BY`** ⇒ 未加过滤时返回哪 20 篇取决于**物理顺序**，
+       而探针文档是刚插进去的、排在物理序**末尾** ⇒ A 的文档**很可能根本不在**
+       那 20 篇里。⇒ 只断言「内容里没有 A」**会在修之前就是绿的**（假绿）。
+
+       ⇒ 换成本条：`rag_test` 里 isolation_b **只拥有 1 篇**（就是探针那篇），
+         而用户能问的最大 `top_k` 是 **20**（`schemas.py` 的 `le=20`）、库里 200+ 篇。
+         **未加 WHERE ⇒ 它拿回 20 篇；加了 ⇒ 拿回 1 篇。** 与物理顺序无关。
+    """
+    from config import JWT_SECRET_KEY
+    from jwt_handler import create_access_token
+
+    assert JWT_SECRET_KEY, "JWT_SECRET_KEY 未设置，无法自签 token"
+
+    from fastapi.testclient import TestClient
+    from main import app
+
+    client = TestClient(app)
+
+    def _ask(user: str):
+        # ⚠️ 本条端点是 `get_current_user_jwt` ⇒ 走**自签 JWT**，⛔ 不是 X-API-Key
+        return client.post(
+            "/api/v1/rag/jwt_ask",
+            json={"question": "隔离测试查询", "top_k": 20},
+            headers={"Authorization": f"Bearer {create_access_token(user)}"},
+        )
+
+    r_b = _ask("isolation_b")
+    assert r_b.status_code == 200, r_b.text
+    docs_b = r_b.json()["docs"]
+
+    assert len(docs_b) == 1, (
+        f"isolation_b 拿回了 {len(docs_b)} 篇 —— 它自己只有 1 篇 ⇒ 这条端点零 WHERE"
+    )
+    assert _PROBE_B in docs_b[0], "拿回来的不是自己的那篇 —— 上面那条断言证明不了什么"
+    assert _PROBE_A not in docs_b[0]
+
+    # 正向控制：admin 有 200+ 篇 ⇒ 它必须**拿满** top_k（证明端点本身是活的，
+    # 不是"整体坏掉返回空"让上面那条碰巧成立）
+    r_admin = _ask("admin")
+    assert r_admin.status_code == 200, r_admin.text
+    assert len(r_admin.json()["docs"]) == 20, (
+        f"admin 只拿到 {len(r_admin.json()['docs'])} 篇 ⇒ 端点整体不对劲，用例是空的"
+    )

@@ -10,6 +10,46 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- 🔴 **多用户检索隔离【收官】：最后 2 条端点收口 ⇒ 8 条检索路径全部按身份过滤**（2026-10-03 · `DEC-056` **乙段**）——
+  **甲段（共享层承重）一次修好 4 条，但那 2 条【自己写 SQL】⇒ 改共享层根本碰不到它们。**
+
+  **改之前的实测**（不是推断 —— `api/test_isolation.py` 的红就是它俩自己说出来的）：
+  - **`/rag/jwt_ask`** —— `isolation_b` 打**自己的** JWT，拿回了 **20 篇 `admin` 的文档**（`SELECT content FROM documents LIMIT %s`，**零 `WHERE`**）。
+  - **`/rag/stream_search`** —— `isolation_b` 的检索上下文（喂给 LLM 的 system prompt）里
+    **逐字**出现了 `isolation_a` 的文档（同上，内联裸 SQL，**零 `WHERE`**）。
+
+  **改了什么**（两条走的是**不同的**修法，因为它们的形状不同）：
+  - **`stream_search` → 改走共享层**：删掉它那段自己写的裸 SQL，换成
+    `search_similar(query_embedding, req.top_k, user_id=user_name)`。
+    ⚠️ 这是**正确的**修法而不是"照抄旁边那条" —— 共享层**已带 `WHERE`**，且**返回同样的 4 列**
+    （`id` / `content` / `source` / `similarity`）⇒ 下游映射一行都不用改。
+  - **`jwt_ask` → 只加 `WHERE`**（最小收口）。⚠️ **⛔ 没动它的检索语义** —— 见下方「没解决的」。
+
+  **判据（都可打印）**：
+  - 用例 —— `POSTGRES_DB=rag_test venv/bin/python -m pytest api/test_isolation.py -q -m needs_db` ⇒ **10 passed**
+    （该文件合计 **19 条**：离线 9 + `needs_db` 10）
+  - 静态 —— `grep -n 'WHERE requested_by' api/api_v1_rag.py | grep -v '#'` ⇒ **3 行**
+    （`pg_search` · `jwt_ask` · `ask` —— **正好 = 自己写 SQL 的 3 条读端点**；其余 5 条走共享层）。
+    ⚠️ **必须带 `| grep -v '#'`** —— 乙段加的**注释**里也含这个串，不带就会数成 5。
+  - 全量 CI 口径 —— `venv/bin/python -m pytest api/ -q -m "not integration and not needs_db"` ⇒
+    **411 passed, 3 skipped, 32 deselected**（deselected 30 → 32 就是这 +2 条 `needs_db` 用例）
+  - **证伪**：分别**退回**那两处修改 ⇒ **各恰好 1 条红**（`stream_search` 退回时 `jwt_ask` 仍绿，反之亦然）；
+    还原用 `cp` 备份并核 `sha256`（⛔ **不用 `git checkout`** —— 它恢复 HEAD，会抹掉未提交的编辑）。
+
+  ⚠️ **乙段【没有】解决的**（⛔ 别读成"都好了"）：
+  - **`/rag/jwt_ask` 拿到 `question` 却不拿它做检索**（无 embedding、无 `ORDER BY`）——
+    「**承诺检索**」与「**实际不检索**」的矛盾。**不在隔离收口内**，已单独立账。
+  - **`/rag/ask` 的定位** —— 它是 `tags=["模拟类测试"]` 的桩，却**读真库**，且 `LIMIT` 无 `ORDER BY`
+    ⇒ **结果不可复现**。**业务方已裁：删，但排在乙段之后**（单独一个任务，不动本轮改动）。
+  - **检索侧不给 admin 例外** —— 这**跟的是实现**（6 条已收口路径本来就是 0/6 给例外），
+    ⇒ `DEC-056` §七 **裁决 2 的文字已按实现更正**（⛔ 不是改代码去迁就文字）。
+
+  ⚠️ **顺带核出 3 处账实不符**（都以函数名为准，行号会漂）：
+  ① `DEC-056` §1.2 第 2 行的端点名写错（写成 `WS /ws/agent`，**实际是 `/rag/ask`** ——
+  `WS /ws/agent` 整条**不碰 `documents`**，且**无鉴权**、身份写死 `"unknown"`）；
+ ② `docs/specs/api_v1_rag.md` 有**同一处**错标（已一并更正）；
+  ③ 该 spec 里的 **LLM 记账**那一行把 `/rag/jwt_ask` 列了进去 —— 它**一处 LLM 都不调**。
+
 - 🔴 **追踪轴（`/agent/trace*`）的跨用户可见已修**（2026-10-03 · `DEC-056` **决策 9** / 待办 **N4**）——
   **改之前：任何登录用户一条 GET 就能读到别人的提问原文与工具结果。**
 
@@ -78,8 +118,9 @@ All notable changes to this project will be documented in this file.
   `AGENT_CHECKPOINT_BACKEND=sqlite` 重启后（图在盘、队列在内存）会答「没有待审批任务」，**而改动前能批**。
   ⚠️ 那类会话**本来就是孤儿** ⇒ 这与「从静默错误地跑」改成「响亮地拒绝」，⛔ 不是新增的坏。
 
-  ⛔ **丙段【没有】解决的**（别读成全好了）：**追踪轴仍按裸 `thread_id`**（`/agent/trace/{thread_id}`
-  能看到同 thread 下别人的轨迹）· `add_memory` / `search_memory` 仍是朴素拼接 · 乙段两条未动。
+  ⛔ **丙段【没有】解决的**（别读成全好了）：~~**追踪轴仍按裸 `thread_id`**~~ ⇒ ✅ **同日 `N4` 已修** ·
+  ~~`add_memory` / `search_memory` 仍是朴素拼接~~ ⇒ ⬜ **仍待（`N5`，随记忆系统下次动它一起做）** ·
+  ~~乙段两条未动~~ ⇒ ✅ **同日乙段已收口**。
 
   ⭐ **判据（可打印）**：
   `venv/bin/python -m pytest api/test_session_key.py api/test_session_isolation.py api/test_approve_ownership.py api/test_memory_chat_approval.py -q -p no:warnings` ⇒ **29 passed**
@@ -104,9 +145,11 @@ All notable changes to this project will be documented in this file.
   - `_require_identity()` 挡在**取连接之前** —— 否则"传 None ⇒ 不过滤 ⇒ 返回全库"那条路还在
 
   **一次修好 4 条**：`/rag/hybrid_search` · `/rag/rerank_search` · `/rag/rewrite_search` · `/rag/search`。
-  ⚠️ **代价（产品面，知道再选）**：4 条端点的**召回会降**（此前能捞到别人的文档）。
-  ⛔ **未做（乙段）**：`/rag/jwt_ask`（`:550`）与 `/rag/stream_search`（`:647`）**仍查全库** ——
-  它们的收口同属召回下降，语义要与业务方定。
+  ⚠️ ~~**代价（产品面，知道再选）**：4 条端点的**召回会降**（此前能捞到别人的文档）~~ ——
+  🔴 **2026-10-03 更正（乙段顺带核出）：这句写过头了。** 非 admin 用户在那 4 条路径上
+  **本来就只有 0 篇自己的文档** ⇒ 收口是**消除不一致**，⛔ 不是新加一道限制。
+  ✅ ~~**未做（乙段）**：`/rag/jwt_ask`（`:550`）与 `/rag/stream_search`（`:647`）**仍查全库**~~
+  ⇒ **2026-10-03 乙段已收口**（见本文件顶部那条）—— **8 条检索路径全部按身份过滤**。
 
   ⚠️ **连带改了一处打分判据（`DEC-056` 决策 7，本 Agent 拍的板，已标"请业务方过目"）**：
   BM25 的**入选判据**由「分数为正」改成「实词有重合」。根因：`rank_bm25` 的 idf =
