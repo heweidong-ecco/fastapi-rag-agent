@@ -15,6 +15,28 @@
 | **流式** | **`/rag/stream_search`**（`:687`）—— ⚠️ **"全仓唯一 SSE 端点"这句 2026-10-03 起失效**：Agent 端已有第二条（`POST /agent/langgraph_chat/stream` · `DEC-050`） |
 | WebSocket | `/ws/agent` · `/ws/test` |
 
+## 🔴 2026-10-03 · 多用户隔离（`DEC-056` 甲段）
+
+**「谁能看见谁的文档」开始收口。** 做法是**共享层承重**（决策 5）——过滤写在
+`db.search_similar` / `bm25_index.bm25_search`，⛔ 不是每个端点各写一遍。
+
+| 端点 | 现状 | 怎么过滤的 |
+|---|---|---|
+| `/rag/pg_search`（`:412`） | ✅ **本来就对** | 自己写 SQL，一直有 `WHERE requested_by = %s` |
+| `/rag/hybrid_search`（`:441`） | ✅ **甲段已收口** | `hybrid_search(…, user_id=user_name)` → 共享层 |
+| `/rag/rerank_search`（`:456`） | ✅ **甲段已收口** | `rerank_search(…, user_id=user_name)` → 共享层 |
+| `/rag/rewrite_search`（`:471`） | ✅ **甲段已收口** | `hybrid_search_with_rewrite(…, user_id=user_name)` → 共享层 |
+| `/rag/search`（`:526`） | ✅ **甲段已收口** | `pipeline.search_async(…, user_id=user_name)` → `db.search_similar` |
+| `/ws/agent`（`:973`） | ✅ **本来就对** | 自己写 SQL，`WHERE requested_by = %s` |
+| 🔴 `/rag/jwt_ask`（`:550`） | ⛔ **仍查全库** | `SELECT content FROM documents LIMIT %s` —— **没有 WHERE**（乙段） |
+| 🔴 `/rag/stream_search`（`:647`） | ⛔ **仍查全库** | 内联裸 SQL —— **没有 WHERE**（乙段） |
+
+⚠️ **甲段只动「检索」** —— 写入侧（`/rag/insert` · `/rag/insert_batch` · `/rag/upload_document`）
+本来就把 `user_name` 写进 `requested_by`，**不属于 fail-open 那一类**。
+（`DELETE /rag/documents/{doc_id}` 的**归属校验**是另一件事，记在 `DEC-056` §遗留。）
+
+📌 **判据（可打印）**：`api/test_isolation.py`
+
 ## 🟡 做到哪 / 缺什么
 
 - ✅ ~~**硬门 C（服务端 cancel）没做** —— 只有 `except asyncio.CancelledError`（旧 `:676`），**不关上游 HTTP 流**~~
@@ -34,12 +56,18 @@
   `api/test_cancel_propagation.py`（**13 例**）覆盖 **`/rag/stream_search` 的取消路径**
   （关流 `DEC-052` + 半截答案 `DEC-053`）。
   ⚠️ **但只盖了取消这一条路** —— 检索 / 引用 / 历史落库**仍然零覆盖**
+- 🔴 **隔离：4 条收口 / 2 条没做**（`DEC-056` 甲段，2026-10-03）—— 见上方专节。
+  `api/test_isolation.py` **8 条用例守着**（已做过证伪：拿掉 `WHERE` ⇒ 4 条变红）。
+  ⛔ **`/rag/jwt_ask` · `/rag/stream_search` 仍读全库**（乙段，产品语义要与业务方定 —— 收口后召回会降）
 
 ## ⚠️ 看代码会误判的地方 ⭐
 
 | 看代码会以为 | 实际 |
 |---|---|
 | 「15 条端点都是正经功能」 | 🔴 **其中 3 条是"模拟类测试"**：<br>· `/rag/ask`（`:832`）—— 是 **`tags=["模拟类测试"]` 的桩**，**直接 SQL 取 `documents` 原始行返回，没有 `answer` 字段**<br>· `/rag/async_ask` · `/rag/parallel_ask` —— **返回假文档**（`asyncio.sleep(2)` 后返回 3 条硬编码串） |
+| 🔴🔴 **「响应体里有 `"requested_by": user_name` ⇒ 这个端点按人筛过了」** | ⛔ **那只是个【回显】** —— 它告诉调用方"你是谁"，**与 SQL 里有没有 `WHERE` 毫无关系**。<br>📌 **两条可打印的计数**（2026-10-03 实测）：`grep -c '"requested_by"' api/api_v1_rag.py` ⇒ **12**；`grep -c 'WHERE requested_by' api/api_v1_rag.py` ⇒ **2**（`:412` · `:973`，**都是甲段之前就有的**）。<br>⇒ 带引号的 12 处**没有一处在 SQL 里过滤**；`/rag/jwt_ask` 的响应里就有一个（`:558`），**而它恰恰是查全库的**。<br>⇒ **本仓最容易踩的误读。** 判据只有一条：**去那条端点的 SQL 里找 `WHERE requested_by`** —— ⛔ 别看响应字段（`DEC-056` §1.2） |
+| 🔴 **「2026-10-03 修过隔离了 ⇒ 检索都隔离了」** | ⛔ **不是** —— 甲段只收口 **4 条**；**`/rag/jwt_ask`（`:550`）与 `/rag/stream_search`（`:647`）今天照样能读到别人的文档**（乙段）。<br>⇒ 判据：`api/test_isolation.py` **只覆盖那 4 条**，另两条**本文件一条用例都没有** |
+| 🔴 **「`user_id` 是拿来在【本文件】过滤的」** | ⛔ **本文件一行 SQL 都没改** —— 它**只把 `user_name` 往共享层传**（`:441` `:456` `:471` `:526`）。真正的 `WHERE` 在 `db.search_similar` / `bm25_index.bm25_search`（`DEC-056` 决策 5：共享层承重）。<br>⇒ **要改过滤改那两个；要改"谁能调"改本文件的调用点** |
 | 「`/rag/stream_search` 带真中断」 | ✅ **2026-10-03 起【成立】**（`③` Task 5 · `B2`）—— 客户端断开 ⇒ 取消传给生成器 ⇒ 关上游流。⚠️ 之前写这句是**错的**（`CLAUDE.md`/`README` 都写过）。<br>⚠️ **但"真中断"≠"账单停了"** —— 本机看不到上游出账（`DEC-052` §遗留·2）。<br>🔴 **2026-10-03 更正**：这句**只在"早切"（还没吐字就断）时成立** —— 见下一行 |
 | 🔴🔴 **「`finally` 里 `await stream.aclose()` 就等于"把上游关了"」** | ⛔ **不够** —— **二次投递的取消**会在下一个真实挂起点重投：`aclose()` 一挂起 ⇒ 抛 `CancelledError` ⇒ **`finally` 剩余部分整体作废**。<br>⚠️ **真服务实测（2026-10-03）**：「晚切」时计数 `2.0→2.0` ❌、**无 `[cancel]` 日志** ❌、半截 **0 条** ❌ —— 而**单测当时 13 条全绿**（假流的 `aclose()` 不抛）。<br>⚠️ **早切测不出来**：生成器**还没被推进过** ⇒ `aclose()` 不必真收尾 ⇒ **不挂起 ⇒ 打不断**。**只有「用户已经看到字再点停止」才露出来**（而那才是主场景）。<br>✅ **两条一起**（缺一不可）：① **同步**收尾（计数/日志/落盘）提到**任何 `await` 之前** · ② 关流包 `anyio.CancelScope(shield=True)`。<br>📌 判据（可打印）：`api/test_cancel_propagation.py` ⇒ **17 passed**；两条修法**各有一条用例独立钉住**（`…survives_interrupted_aclose` 钉 shield · `…lands_even_when_aclose_itself_fails` 钉顺序 —— 实测把关流挪回前面 ⇒ **只有后者变红**）<br>📄 `DEC-054` · 复盘 `docs/复盘/2026-10-03-单测全绿而真服务全废.md` |
 | 🔴 **「自己去 `request.is_disconnected()` 轮询才知道客户端断了」** | ⛔ **不用，那是框架给的** —— uvicorn 报 `spec_version 2.3` ⇒ Starlette 已监听 `http.disconnect` 并**取消生成器**。<br>⇒ 真正的缺口只有「**停下并关掉上游**」这一件。**自己加轮询 = 多余，且会掩盖真缺口**（`DEC-052`） |
@@ -55,6 +83,7 @@
 
 ## 关联
 
+`docs/decisions/DEC-056-多用户资源隔离的现状审计与分阶段收口.md` ·
 `后端补齐清单` **B1/B2/B3** · `docs/decisions/DEC-052-取消传播的观测对象与上游改异步.md` ·
 `docs/decisions/DEC-053-中断后的半截答案存进历史并打标记.md` ·
 `docs/decisions/DEC-054-取消路径的收尾顺序与关流护盾.md` ·

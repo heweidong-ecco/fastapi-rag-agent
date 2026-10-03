@@ -10,6 +10,44 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- ✅ **多用户检索隔离：4 条端点按身份过滤（甲段底座）**（2026-10-03 · `DEC-056` 甲段）——
+  **同一份 `documents` 表里，A 检索不到 B 的文档**。此前是**潜伏**（真库 84 篇 `requested_by`
+  100% 是 `admin`），但**代码默认 fail-open**：全仓 7 条检索路径只有 2 条自己写了 `WHERE`。
+
+  **做法：过滤写在【共享层】，⛔ 不是每个端点各写一遍**（`DEC-056` 决策 5 —— 「承重」）：
+
+  - `db.search_similar` / `db.bm25_search`(+async) 加 `WHERE requested_by = %s`
+  - `bm25_index` 的**缓存按 `user_id` 分桶**，语料在 **SQL 层**就过滤
+    （⛔ 不是"检索出来再筛掉" —— 后者别人的文档**仍参与 IDF 统计**，是另一条渗漏）
+  - `hybrid_search` / `rerank_search` / `hybrid_search_with_rewrite` / `search_async`
+    加 **【必填】`*, user_id`** —— ⛔ **不给默认值**：有默认值 = "可以忘记传" = 还是 fail-open，
+    漏传即 `TypeError`（`DEC-056` §六 ③）
+  - `_require_identity()` 挡在**取连接之前** —— 否则"传 None ⇒ 不过滤 ⇒ 返回全库"那条路还在
+
+  **一次修好 4 条**：`/rag/hybrid_search` · `/rag/rerank_search` · `/rag/rewrite_search` · `/rag/search`。
+  ⚠️ **代价（产品面，知道再选）**：4 条端点的**召回会降**（此前能捞到别人的文档）。
+  ⛔ **未做（乙段）**：`/rag/jwt_ask`（`:550`）与 `/rag/stream_search`（`:647`）**仍查全库** ——
+  它们的收口同属召回下降，语义要与业务方定。
+
+  ⚠️ **连带改了一处打分判据（`DEC-056` 决策 7，本 Agent 拍的板，已标"请业务方过目"）**：
+  BM25 的**入选判据**由「分数为正」改成「实词有重合」。根因：`rank_bm25` 的 idf =
+  `log(N-n+0.5) - log(n+0.5)`，**词出现在超过一半文档里就是负的**；语料**按人切**后小用户（1 篇）
+  必然触发 ⇒ 原判据**恒假** ⇒ 关键词检索对小用户**整个失效**（hybrid 退化成纯向量）。
+  实测：1 篇时 `idf=-0.27 / score=-0.82`；5 篇时 `idf=+1.10 / score=+2.18`。
+  ⚠️ 这是**独立的打分数义变更**，由隔离连带触发 —— 若业务方认为该拆成单独的 DEC，拆即可。
+
+  **探针身份**（`DEC-056` §七 裁决：身份进真库长期留 · 文档自造自清）：`.env` 加 3 把明文 key
+  （⛔ **未入库** —— 本仓密钥红线），`permission.py` 加注释说明 `isolation_a/b`（FREE）、
+  `isolation_c`（PREMIUM）—— ⛔ 别当成真业务角色；探针**文档**由测试幂等建、自己清。
+
+  ⭐ **判据（可打印）**：
+  `venv/bin/python -m pytest api/test_isolation.py -q -m "not needs_db" -p no:warnings` ⇒ **8 passed**
+  · `POSTGRES_DB=rag_test venv/bin/python -m pytest api/test_isolation.py -q -m needs_db` ⇒ 带库那 4 条。
+  ⚠️ **已做过证伪**（TDD 的红是红过的）：临时拿掉 `WHERE` ⇒ **4 条变红**
+  （向量路径 1 条 + 端点 3 条），BM25 那几条**正确地不红**，按 md5 复原。
+  全量 **369 passed / 3 skipped**（与改之前**一字不差**）· 带库 **398 passed**。
+  📄 `docs/decisions/DEC-056-多用户资源隔离的现状审计与分阶段收口.md`
+
 - ✅ **中断后那半截答案【存进历史】并打中断标记**（2026-10-03 · `③` Task 6 · `B3` · `DEC-053`）——
   计划写的是「**不写代码先核**」，核出来的东西比判据假设的大一圈：
 

@@ -200,10 +200,13 @@ def offline_retrieval(monkeypatch):
     """
     import rag_pipeline
 
-    async def fake_similar(_embedding, top_k=3):
+    # 🔴 2026-10-03：两个假函数加 `*, user_id`（`DEC-056`）—— `search_async` 现在把它
+    #    透传下来。⚠️ 这里**不校验** `user_id`：本文件测的是「mode 路由」，
+    #    隔离的判据在 `api/test_isolation.py`（⛔ 别在这儿重复一遍）。
+    async def fake_similar(_embedding, top_k=3, *, user_id):
         return list(VECTOR_DOCS)
 
-    async def fake_bm25(_query, top_k=10):
+    async def fake_bm25(_query, top_k=10, *, user_id):
         return list(BM25_DOCS)
 
     async def fake_rerank(_query, docs, top_k=3):

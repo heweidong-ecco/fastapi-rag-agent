@@ -437,8 +437,8 @@ async def hybrid_search_api(
     req: QuestionRequest,
     user_name: str = Depends(get_current_user_hybrid),
 ):
-    """混合检索：向量 + BM25 关键词"""
-    docs = hybrid_search(req.question, req.top_k)
+    """混合检索：向量 + BM25 关键词（**只在该用户自己的文档内**）"""
+    docs = hybrid_search(req.question, req.top_k, user_id=user_name)
     return {
         "question": req.question,
         "method": "hybrid (vector + bm25)",
@@ -452,8 +452,8 @@ async def rerank_search_api(
     req: QuestionRequest,
     user_name: str = Depends(get_current_user_hybrid),
 ):
-    """带重排序的混合检索"""
-    docs = rerank_search(req.question, req.top_k)
+    """带重排序的混合检索（**只在该用户自己的文档内**）"""
+    docs = rerank_search(req.question, req.top_k, user_id=user_name)
     return {
         "question": req.question,
         "method": "hybrid + RRF + Cross-Encoder Rerank",
@@ -467,8 +467,8 @@ async def rewrite_search_api(
     req: QuestionRequest,
     user_name: str = Depends(get_current_user_hybrid),
 ):
-    """带查询改写的混合检索"""
-    docs = hybrid_search_with_rewrite(req.question, req.top_k)
+    """带查询改写的混合检索（**只在该用户自己的文档内**）"""
+    docs = hybrid_search_with_rewrite(req.question, req.top_k, user_id=user_name)
     return {
         "question": req.question,
         "method": "query rewrite + hybrid search + RRF",
@@ -523,6 +523,7 @@ async def unified_search(
         generate_answer=req.generate_answer,
         strict_mode=req.strict_mode,
         citations=req.citations,
+        user_id=user_name,   # 🔴 2026-10-03 加（DEC-056）—— 检索只在该用户自己的文档内
     )
 
     # 添加用户信息
