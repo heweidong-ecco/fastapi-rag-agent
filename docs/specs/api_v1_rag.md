@@ -2,7 +2,7 @@
 
 | 项 | 内容 |
 |---|---|
-| **状态** | 🟡 **部分可用** —— 有 3 条是"模拟类测试"<br>✅ **2026-10-03（`③` Task 5 · `B2`）**：`/rag/stream_search` 的**取消传播做完了** —— 上游改 `astream`、`finally` 里 `aclose()` 关流、取消时记 `stream_cancelled_total`（`DEC-052`）。⚠️ **"上游真停"仍只有代码内证据**（本机无出账）<br>✅ 2026-10-01：两处 `ChatOpenAI`（现 `:578` 流式答案 · `:751` WS agent）接上 `MAX_TOKENS_ANSWER`（`B7`）<br>✅ 2026-10-02（`①b` Task 5）：那两处**改走 `llm_factory.make_llm("chat", "answer")`** ⇒ **本文件已不再 import `ChatOpenAI` / `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL_CHAT`**。<br>⚠️ **`get_llm_stream()` 的惰性没变**（`make_llm` 自己把 langchain 的 import 关在函数内）· ⚠️ `temperature=0.3` + `streaming=True` 是**本处特有的逐点调参**，仍写在调用点上 |
+| **状态** | 🟡 **部分可用** —— 有 3 条是"模拟类测试"<br>✅ **2026-10-03（`③` Task 5 · `B2`）**：`/rag/stream_search` 的**取消传播做完了** —— 上游改 `astream`、`finally` 里 `aclose()` 关流、取消时记 `stream_cancelled_total`（`DEC-052`）。⚠️ **"上游真停"仍只有代码内证据**（本机无出账）<br>✅ **2026-10-03（`③` Task 6 · `B3`）**：中断后**那半截答案存进历史**（提问 + 半截 + `INTERRUPTED_SUFFIX` 标记，落 `finally` —— `DEC-053`）<br>🔴 **未修**：**本文件的 LLM 调用一处都不记账**（`grep -c record_usage api/api_v1_rag.py` ⇒ **0**）⇒ 见下方「做到哪」与 `DEC-053` §遗留·2<br>✅ 2026-10-01：两处 `ChatOpenAI`（现 `:578` 流式答案 · `:751` WS agent）接上 `MAX_TOKENS_ANSWER`（`B7`）<br>✅ 2026-10-02（`①b` Task 5）：那两处**改走 `llm_factory.make_llm("chat", "answer")`** ⇒ **本文件已不再 import `ChatOpenAI` / `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL_CHAT`**。<br>⚠️ **`get_llm_stream()` 的惰性没变**（`make_llm` 自己把 langchain 的 import 关在函数内）· ⚠️ `temperature=0.3` + `streaming=True` 是**本处特有的逐点调参**，仍写在调用点上 |
 | **对外提供** | **15 条 HTTP**（文档管理 4 · 检索 6 · 流式 1 · 模拟 3）· **2 条 WebSocket** |
 | **谁在用** | 全部对外检索入口 |
 
@@ -22,8 +22,17 @@
   取消记 `stream_cancelled_total`（`:735-738`）。📄 `DEC-052`
   ⚠️ **仍未证的是"上游计费真停"** —— 本机没有 DashScope 出账，⛔ 别把"我们关了流"说成"账单停了"
 - ⬜ **无停止按钮**（前端不存在）
+- ✅ ~~**中断后那半截答案【直接丢】**（`DEC-052` §遗留·3 点的名）~~ ⇒ **2026-10-03（`③` Task 6 · `B3`）已改**：
+  取消时**存**「提问 + 半截 + 中断标记」（`_persist_interrupted_turn`，`:594-608`；调用点 `:769`），落点是 `finally`。
+  📄 `DEC-053`。⚠️ **`except Exception` 那条路仍然丢提问**（**有意**，见该 DEC §遗留·1）
+- 🔴 **本文件的 LLM 调用【一处都不记账】** —— `grep -c record_usage api/api_v1_rag.py` ⇒ **0**
+  （`/rag/stream_search` · `/rag/search?generate_answer=true` · `/rag/jwt_ask` · `/ws/agent` 四条都是）。
+  真库佐证：`token_usage_logs` 里非 embedding 行**全库只有 6 行**，全是 2026-09-20 的 agent graph 运行。
+  ⚠️ **取消场景补不了**（`llm_factory` 没开 `stream_usage` ⇒ 提前 `aclose()` 就永远收不到 usage 帧）
+  ⇒ 已立进 `docs/待办总表.md`，**范围是成功路径**（`DEC-053` §遗留·2）
 - 🟡 ~~零测试覆盖本文件（`docs/说明/测试.md` §六）~~ ⇒ **2026-10-03 起有了第一条**：
-  `api/test_cancel_propagation.py`（10 例）覆盖 **`/rag/stream_search` 的取消路径**（`DEC-052`）。
+  `api/test_cancel_propagation.py`（**13 例**）覆盖 **`/rag/stream_search` 的取消路径**
+  （关流 `DEC-052` + 半截答案 `DEC-053`）。
   ⚠️ **但只盖了取消这一条路** —— 检索 / 引用 / 历史落库**仍然零覆盖**
 
 ## ⚠️ 看代码会误判的地方 ⭐
@@ -35,6 +44,8 @@
 | 🔴 **「自己去 `request.is_disconnected()` 轮询才知道客户端断了」** | ⛔ **不用，那是框架给的** —— uvicorn 报 `spec_version 2.3` ⇒ Starlette 已监听 `http.disconnect` 并**取消生成器**。<br>⇒ 真正的缺口只有「**停下并关掉上游**」这一件。**自己加轮询 = 多余，且会掩盖真缺口**（`DEC-052`） |
 | 🔴 **「中间件日志里那个秒数 = 生成耗时」** | ⛔ **不是** —— 它记到**响应开始返回**为止。实测：`(0.019s)` 的那条客户端收了 **27KB**、`(0.004s)` 的那条 **3 秒后**才 cancel。<br>⇒ ⛔ **别拿它当"生成提前停了"的证据**（第一版就这么误读过 · `DEC-052` §真服务实测） |
 | 🔴 **「换两个字问同一个问题就能测取消」** | ⛔ **会被语义缓存吃掉** —— 问句只差"基线/切断"⇒ 当成同一个问题、`0.006s` 返回全量 ⇒ **根本没在生成，取消测不出来**。<br>⇒ 测取消**必须换语义上不同的问句** |
+| 🔴 **「历史里那条助手消息是完整回答」** | ⛔ **可能是半截**（`③` Task 6 · `B3` 起）—— 被中断的那轮存进去的答案**尾部带 `INTERRUPTED_SUFFIX`**（"…（本次回答被中断，以上为已生成部分）"）。<br>⇒ **读历史的人（人 / 模型 / 另一个脚本）必须看这个尾巴**，⛔ 别把半截当结论。⚠️ 这个尾巴是**故意**进 prompt 的：不标 ⇒ 模型会把断掉的话当成自己说完了（`DEC-053`） |
+| 🔴 **「取消后用户那问句也没了，是设计如此」** | ⛔ **不是设计，是碰巧** —— 改动前 `append_chat_history(user, …)` 与答案写在同一段收尾代码里，取消先 `raise` ⇒ **两个一起丢**。<br>⇒ **2026-10-03（`B3`）已让取消路径成对写**（`DEC-053`）。⚠️ **`except Exception` 那条路【仍然丢】**（**有意留着**，属另一件事） |
 | 「`/rag/search` 是纯检索」 | 🟡 **它能生成答案** —— 传 `generate_answer: true` 即可（**默认 `False`**，`api/schemas.py:14`） |
 | 「检索都走 `rag_pipeline`」 | 🔴 **`/rag/stream_search` 是内联裸 SQL**（`:581-590`）—— **不走 pipeline / hybrid_search / BM25 / reranker** ⇒ **与 `/rag/search` 召回不同源** |
 | 🔴 **「本文件的端点都接了会话上限」** | ⛔ **不是** —— **只有 2 条接**（B8 · 2026-10-01）：`/rag/stream_search` 与 `/ws/agent`。<br>**`/rag/ask` · `/rag/jwt_ask` · `/rag/async_ask` · `/rag/parallel_ask` 【故意不接】** —— 它们**不调 LLM**（前两条只 `SELECT documents`，后两条是 mock）⇒ 接上去会让**没花钱的接口占额度**。<br>⚠️ 这条有**双向守卫**：`api/test_session_budget_wiring.py` 既查该接的接了，也查**不该接的没接** |
@@ -44,5 +55,6 @@
 ## 关联
 
 `后端补齐清单` **B1/B2/B3** · `docs/decisions/DEC-052-取消传播的观测对象与上游改异步.md` ·
+`docs/decisions/DEC-053-中断后的半截答案存进历史并打标记.md` ·
 `docs/契约/接口契约.md` §四 · `docs/原理/架构.md` §3.2 ·
 `docs/复盘/2026-09-29-结果为空就断言能力不存在.md`

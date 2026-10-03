@@ -104,9 +104,10 @@ def _drive_asgi_until_disconnect(resp, *, after_chunks):
 class _AsyncSpyStream:
     """**故意不是 async generator** —— 否则会被 `shutdown_asyncgens()` 关掉，测不出真因。"""
 
-    def __init__(self, owner, item_factory):
+    def __init__(self, owner, item_factory, first_delay=None):
         self.owner = owner
         self.item_factory = item_factory
+        self.first_delay = first_delay
         self.i = 0
 
     def __aiter__(self):
@@ -117,7 +118,10 @@ class _AsyncSpyStream:
             raise StopAsyncIteration
         self.i += 1
         self.owner.pulled += 1
-        await asyncio.sleep(0.01)  # 给取消一个**真的 await 点**（没有它就取消不进来）
+        # ⚠️ 第一块的等待时长可调：`B3` 要测「**一块都还没生成**就断了」，
+        #    而那是**竞态** —— 首块等太短，断开还没送到，测试就变成掷骰子。
+        delay = self.first_delay if self.i == 1 and self.first_delay else 0.01
+        await asyncio.sleep(delay)  # 给取消一个**真的 await 点**（没有它就取消不进来）
         return self.item_factory()
 
     async def aclose(self):
@@ -152,8 +156,9 @@ class _SpyRagLLM:
     ⚠️ `cap` 是**安全阀** —— 取消没生效时，测试应当**断言失败**，⛔ 不是挂住。
     """
 
-    def __init__(self, cap=40):
+    def __init__(self, cap=40, first_delay=None):
         self.cap = cap
+        self.first_delay = first_delay
         self.pulled = 0
         self.closed = False
         self.astream_calls = []
@@ -161,7 +166,9 @@ class _SpyRagLLM:
 
     def astream(self, messages):
         self.astream_calls.append(messages)
-        return _AsyncSpyStream(self, lambda: AIMessageChunk(content="字"))
+        return _AsyncSpyStream(
+            self, lambda: AIMessageChunk(content="字"), first_delay=self.first_delay
+        )
 
     def stream(self, messages):
         self.stream_calls.append(messages)
@@ -215,15 +222,24 @@ class _FakeCursor:
         return False
 
 
-def _call_rag_stream(monkeypatch, llm, **kw):
-    """直接调端点函数，把**所有**外部依赖短路 —— 本文件测的是取消，⛔ 不是检索/预算/认证。"""
+def _call_rag_stream(monkeypatch, llm, history=None, **kw):
+    """直接调端点函数，把**所有**外部依赖短路 —— 本文件测的是取消，⛔ 不是检索/预算/认证。
+
+    ⚠️ 传 `history=[]` ⇒ 把写入历史的调用**记下来**（`B3` 的观测对象）；
+       不传 ⇒ 照旧短路掉（其余用例不关心历史）。
+    """
     monkeypatch.setattr(rag_mod, "get_chat_history", lambda user: [])
     monkeypatch.setattr(rag_mod, "check_session_token_budget", lambda *a, **k: (True, ""))
     monkeypatch.setattr(rag_mod, "circuit", lambda *a, **k: (True, ""))
     monkeypatch.setattr(rag_mod, "get_embedding", lambda text: [0.0] * 8)
     monkeypatch.setattr(rag_mod, "get_llm_stream", lambda: llm)
     monkeypatch.setattr(rag_mod, "get_db", lambda: _FakeConn())
-    monkeypatch.setattr(rag_mod, "append_chat_history", lambda *a, **k: None)
+    if history is None:
+        monkeypatch.setattr(rag_mod, "append_chat_history", lambda *a, **k: None)
+    else:
+        monkeypatch.setattr(
+            rag_mod, "append_chat_history", lambda *a, **k: history.append(a)
+        )
     kw.setdefault("thread_id", "t-cancel")
     kw.setdefault("user_name", "tester")
     req = QuestionRequest(question=kw.pop("question", "你好"))
@@ -333,6 +349,76 @@ def test_rag_normal_completion_is_not_counted_as_cancel(monkeypatch):
     assert bodies[-1].strip() == b"data: [DONE]", f"正常收尾的末帧不对：{bodies[-1]!r}"
     assert llm.closed, "正常跑完也要关流（否则连接泄漏）"
     assert _metric(RAG_ENDPOINT) == before, "正常收尾被记成了取消"
+
+
+# ============ RAG 端 · `③` Task 6（`B3`）：中断时那半截答案怎么办 ============
+#
+# 核出来的事实（`docs/decisions/DEC-053`）：取消时 `collected_parts` 是**直接丢**的，
+# 而且不是"决定"，是"碰巧" —— `append_chat_history` 写在循环之后，取消在它之前 `raise`。
+# ⇒ 这里把「丢」改成「存」，并把**存的形态**钉死。
+
+
+def _seen_content(sent):
+    """客户端**真的收到**的内容 —— 用于核对"存进历史的就是这一段"（⛔ 不是"存了点什么"）。"""
+    parts = []
+    for b in _body_chunks(sent):
+        text = b.decode()
+        if not text.startswith("data: {"):
+            continue  # `data: [DONE]` 之类
+        parts.append(json.loads(text[len("data: "):])["content"])
+    return "".join(parts)
+
+
+def test_rag_persists_partial_answer_when_cancelled(monkeypatch):
+    """🔴 `B3` 核心：客户端断开后，**已经生成的那半截要进历史**（⛔ 不是直接丢）。
+
+    ⚠️ 为什么非存不可：`api_v1_rag.py:667` 那行注释早就写了这个意图 ——
+       「如果有停止当前消息先放历史……真停止按钮的调用（**使它支持历史补偿**）」。
+       取消时丢掉 ⇒ 用户那问句**也一起丢**（它跟答案写在同一段代码里）。
+    """
+    llm = _SpyRagLLM()
+    hist = []
+    resp = _call_rag_stream(monkeypatch, llm, history=hist, question="中断也要留痕")
+    sent = _drive_asgi_until_disconnect(resp, after_chunks=DISCONNECT_AFTER)
+
+    seen = _seen_content(sent)
+    assert seen, "根本没流出内容 ⇒ 本断言无意义"
+    assert [h[1] for h in hist] == ["user", "assistant"], (
+        f"中断后历史应**成对**写入 user+assistant，实际 {hist}"
+    )
+    assert hist[0][2] == "中断也要留痕", f"用户那问句没存对：{hist[0]}"
+    assert hist[1][2] == seen + rag_mod.INTERRUPTED_SUFFIX, (
+        f"存进历史的不是客户端看到的那半截（或缺中断标记）：{hist[1][2]!r}"
+    )
+
+
+def test_rag_full_answer_is_saved_without_interrupt_marker(monkeypatch):
+    """⛔ **反面**：正常跑完 ⇒ 存**完整**答案，⛔ **不许**带中断标记。
+
+    否则下一轮 prompt 会把一个好好的回答当成"被截断的"，模型的行为跟着变。
+    """
+    llm = _SpyRagLLM(cap=3)
+    hist = []
+    resp = _call_rag_stream(monkeypatch, llm, history=hist, question="完整的一问")
+    _drive_asgi_until_disconnect(resp, after_chunks=99)  # 永不触发断开
+
+    assert [h[1] for h in hist] == ["user", "assistant"], f"正常收尾的历史不对：{hist}"
+    assert hist[1][2] == "字" * 3, f"正常收尾存的不是完整答案：{hist[1][2]!r}"
+    assert rag_mod.INTERRUPTED_SUFFIX not in hist[1][2], "完整答案被误标成了中断"
+
+
+def test_rag_cancel_before_any_chunk_saves_nothing(monkeypatch):
+    """边界：**一块都没生成**就断了 ⇒ 什么都不写。
+
+    写一条空的助手消息只会污染下一轮 prompt（模型看到"回答是空的"）。
+    ⚠️ 首块延迟调大是为了让"断开送到"与"首块产出"的**竞态**稳定倒向我们要测的那一边。
+    """
+    llm = _SpyRagLLM(first_delay=0.3)
+    hist = []
+    resp = _call_rag_stream(monkeypatch, llm, history=hist, question="还没开始就断了")
+    _drive_asgi_until_disconnect(resp, after_chunks=0)
+
+    assert hist == [], f"没生成任何内容却写了历史：{hist}"
 
 
 # ==================== Agent 端（`/agent/langgraph_chat/stream`） ====================

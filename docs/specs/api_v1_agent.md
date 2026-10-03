@@ -47,7 +47,8 @@
   硬门 A 要的是"**该流的流**"，⛔ **不是"流了一条就算完"**。📄 `DEC-050`
   · ✅ ~~⚠️ **`B2`（cancel 传播到上游）**~~ ⇒ **2026-10-03（`③` Task 5）【已做】** ——
   客户端断开 ⇒ 关掉图的流（`aclose()`）+ 记 `stream_cancelled_total`。📄 `DEC-052`
-  · ⬜ **`B3`（半截答案怎么处理）【仍未做】** —— 见下方实施计划 ③ 的 Task 6
+  · ✅ ~~**`B3`（半截答案怎么处理）【仍未做】**~~ ⇒ **2026-10-03（`③` Task 6）已裁**：「**存**」，
+    提问 + 半截 + 中断标记（`DEC-053`）。⚠️ **Agent 端这边不用改** —— 它的半路状态由 checkpointer 持有
 - ✅ ~~🔴 **没有「待接管队列」端点**~~ ⇒ **2026-10-03 起【有了】**（`②` Task 2 · `B5`）：`GET /agent/pending`。
   ⚠️ **但队列背后是【进程内存】**（`api/pending_approvals.py`）⇒ **重启即空** —— 见其 spec 里那条"已知限制"
 - ✅ ~~**`B6`（接管后续跑）未做**~~ ⇒ **2026-10-03 起【已做】**（`②` Task 3）：`edited_answer` 改写后提交 + 续跑形状被 `test_approval_resume.py` 钉住。
@@ -66,7 +67,7 @@
 | 看代码会以为 | 实际 |
 |---|---|
 | 🔴🔴 **「`/agent/langgraph_chat/stream` 的结尾那个 `summary`，把流过 `agent` 节点的块攒起来算就行」** | ⛔ **不行，会算错**（2026-10-03 **真服务**撞见，`③` Task 4）。<br>**攒块 = 跨多轮累积** —— 模型因工具返回"未找到工具"而**重试**时，`agent` 节点会进**多次** ⇒ 攒出来的东西带着**上一轮的** `tool_calls` ⇒ `summarize_agent_result` 报 **`pending_approval`，而图其实已经跑完**（前端会**永远等一个不会来的审批**）。<br>⚠️ 实测症状：`tool_calls` 的 name 被**拼接**成 `"date_todayduckduckgo_search"`。<br>🔴 **2026-10-03（`DEC-051`）**：那次"反复重试"的**根因已修**（`tool_execute` 原来是按字面量 `"search"` 分派、真名是 `duckduckgo_search`）⇒ ⚠️ **但本行仍照旧成立** —— 只要端点还在拿流式块猜，**任何**多轮场景都会重演。<br>✅ **正确做法：从图的最终状态取** —— `await agent_graph.aget_state(config)` ⇒ `summarize_agent_result(state.values)`，与 `/agent/langgraph_chat` **完全同一套语义**。<br>📌 判据（可打印）：`api/test_agent_sse.py::test_status_comes_from_final_state_not_from_streamed_chunks`（`_TwoRoundModel` 逼出第二轮） |
-| 🔴 **「这条流式端点没有 cancel 处理」** | ✅ **2026-10-03（`③` Task 5 · `B2`）起【有了】** —— 客户端断开后**关掉图的流**（`finally: await stream.aclose()`，`:241`），并记 `stream_cancelled_total{endpoint="agent_langgraph_chat_stream"}`。<br>⚠️ **不关的代价是"图继续跑完"** = 继续调模型 = **继续烧钱**，而前端看起来一切正常（它只是不显示了）。<br>⚠️ **本轮之前这里确实是空的** —— 而且 `DEC-050` §遗留·3 **自己点了名**。<br>📌 判据（可打印）：`api/test_cancel_propagation.py` ⇒ **10 passed**；真服务 = 计数 +1 且日志有 `[cancel]` 行 |
+| 🔴 **「这条流式端点没有 cancel 处理」** | ✅ **2026-10-03（`③` Task 5 · `B2`）起【有了】** —— 客户端断开后**关掉图的流**（`finally: await stream.aclose()`，`:241`），并记 `stream_cancelled_total{endpoint="agent_langgraph_chat_stream"}`。<br>⚠️ **不关的代价是"图继续跑完"** = 继续调模型 = **继续烧钱**，而前端看起来一切正常（它只是不显示了）。<br>⚠️ **本轮之前这里确实是空的** —— 而且 `DEC-050` §遗留·3 **自己点了名**。<br>📌 判据（可打印）：`api/test_cancel_propagation.py` ⇒ **13 passed**（`B2` 10 条 + `B3` 3 条）；真服务 = 计数 +1 且日志有 `[cancel]` 行 |
 | 🔴 **「客户端断开得靠 `request.is_disconnected()` 自己轮询」** | ⛔ **不用，那是框架给的**（uvicorn 报 `spec_version 2.3` ⇒ Starlette 监听 `http.disconnect` 后**取消生成器**）。<br>⇒ 真正的缺口只有「**停下并关掉上游**」这一件；**自己加轮询 = 多余，且会掩盖真缺口**（`DEC-052`） |
 | 🔴 **「中间件日志里那个秒数 = 这条流的生成耗时」** | ⛔ **不是** —— 它记到**响应开始返回**为止。实测：`(0.019s)` 的那条客户端收了 **27KB**、`(0.004s)` 的那条 **3 秒后**才 cancel。<br>⇒ ⛔ 别拿它当"生成提前停了"的证据（第一版就这么误读过 · `DEC-052`） |
 | 🔴 **「`status=answered` 就是拿到最终答案了」** | ⚠️ **要看 `status`** —— 返回 `pending_approval` 时 `answer` 里是**模型"先说的一句"**，**工具还没执行**。`summarize_agent_result` 的 docstring（`:55-80`）专门讲了这点：**不能加 `and not content`**，否则这种形态会被**误报成 `answered`**。⚠️ **该 docstring 还写了这条判据"依赖什么、什么时候会失效"**（B4 后理由变了）—— 改图的路由时**要回去重看** |
@@ -778,9 +779,35 @@ Test `api/test_cancel_propagation.py`（10 例 · 纯离线 · 进 CI）
       ⚠️ **两个坑记在 `DEC-052`**：中间件时长**不是**生成时长 · 本机**有语义缓存**（换问句才能测）
 - [x] Step 5 提交，并在 `docs/specs/api_v1_rag.md` 里把「不关上游 HTTP 流」那条**划掉**（本文件同改）
 
-## Task 6 · **B3** · 先核：中断时"已生成的那半截"怎么处理
+## Task 6 · **B3** · ✅ **2026-10-03 已做**（「先核」核出了别的东西）
 
-- [ ] **不写代码先核**：`stream_search` 里**到底有没有**「半截答案落库 / 已用 token 记账」
-- [ ] 已有线索（**未下结论**）：`api_v1_rag.py:676` 只有 `print` + `yield "data: [DONE]"`
-- [ ] 判据：cancel 后 **①** 已产生的 token **有记账**（否则账单对不上）**②** 半截答案**处理方式是明确的**（存 / 弃，二者都要有说法）
-- [ ] 核完把结论写进本 spec，**再决定补不补**
+**核的结果（判据两条都没过，①的根因比判据假设的大一圈）：**
+
+| 判据 | 核出来什么 |
+|---|---|
+| **①** cancel 后已产生的 token **有记账** | ❌ **落空，且不是"取消时没记"** —— `grep -c record_usage api/api_v1_rag.py` ⇒ **0**、`api/rag_pipeline.py` ⇒ **0** ⇒ **RAG 侧四条调 LLM 的路径从来不记账**（成功也不记）。真库佐证：非 embedding 行**全库只有 6 行**，全是 2026-09-20 的 agent graph 运行 |
+| **②** 半截答案处理方式**明确** | ⚠️ 现状是**丢**，但**不是决定、是碰巧** —— `append_chat_history` 写在循环之后，取消在它之前 `raise`；⚠️ **用户那句提问跟着一起丢** |
+
+⚠️ **还有一条技术上绕不过去的**：取消瞬间的 token 数**协议上拿不到** ——
+`api/llm_factory.py` 没开 `stream_usage`，usage 只在**最后一帧**回来，而我们提前 `aclose()` ⇒
+那一帧**永远不会到**。⇒ 硬补只能估算 = **往账本写假数**，比空着更坏。
+
+**决策（`DEC-053`）**：**存**，不是丢 ——
+① 作者原意就是存（`api_v1_rag.py:667` 注释写着"**使它支持历史补偿**"）；
+② 存的形态 = 提问 + 半截 + `INTERRUPTED_SUFFIX` 标记（**成对写**，标记**必须**有，否则下一轮 prompt 会把断话当说完）；
+③ 落点是 **`finally`**（⛔ 不是 `except CancelledError` —— 2.4 分支抛 `GeneratorExit`，同 `DEC-052`）；
+④ 一块都没生成 ⇒ **什么都不写**。
+
+**Agent 端这边【不用改】** —— 它的"半路状态"由 langgraph 的 checkpointer（`MemorySaver`，
+`api/agent_graph.py:250`）持有，取消时**已经落在里面**了；RAG 端什么都没有 ⇒ 两端本来就不对称。
+⚠️ **`MemorySaver` 是【进程内存】** ⇒ 与我们自己的 `pending_approvals` 同一个限制：**重启即空**。
+
+- [x] Step 1~3 测试先红后绿（`api/test_cancel_propagation.py` 10 → **13 例**）
+      —— ⚠️ 第三条（"一块都没生成就不写"）**红不出来**（改动前它本来就过）⇒ 它是**反面守卫**，防"修过头"
+- [x] Step 4 ⛔ **没起 Docker 真服务**（用户本轮手动关了 `rag-api`）—— ⚠️ **这次是能省的**：
+      本任务的判据落在**进程内**，而测试走的是**真 ASGI 断开**（与 `B2` 同一段取消代码），
+      `B2` 那轮必须真服务是因为要证「Prometheus 计数在真 uvicorn 下也涨」，这一轮没有同类的"跨进程"观测对象。
+      ⚠️ **仍未端到端验的是**：「**下一轮 prompt 真的读到了那半截**」——
+      那要真 LLM + 真 Redis 续问一轮（本机 `MemorySaver`/Redis 都在，**是可做的，只是本轮没做**）
+
+- [x] Step 5 写进 `DEC-053` + `docs/specs/api_v1_rag.md`（本文件同改）

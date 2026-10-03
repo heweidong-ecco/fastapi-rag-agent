@@ -584,6 +584,30 @@ def get_llm_stream():
         )
     return _llm_stream
 
+
+# 🔴 `③` Task 6（`B3`）：中断后存进历史的那半截答案**必须带这个尾巴**。
+#    理由：历史会被**原样拼进下一轮的 prompt**（`:669-670`）——
+#    不带标记 ⇒ 模型会把一段**被截断的回答**当成"上一轮我说完了"，行为跟着变。
+INTERRUPTED_SUFFIX = "…（本次回答被中断，以上为已生成部分）"
+
+
+def _persist_interrupted_turn(user_name: str, question: str, collected_parts: list):
+    """客户端中断后，把**已经生成的那半截**补存进对话历史（`③` Task 6 · `B3`）。
+
+    ⚠️ 为什么不是"直接丢"：丢的话**用户那句提问也一起丢**（它和答案写在同一个
+       收尾段里）⇒ 用户下一轮问"接着上面说"，历史里**没有任何痕迹**。
+       代码原作者的意图写在本文件 `:691` 的注释里（"使它支持历史补偿"）。
+
+    ⚠️ **一块都没生成就不写** —— 写一条空的助手消息只会污染下一轮 prompt。
+    """
+    answer = "".join(collected_parts).strip()
+    if not answer:
+        return
+    # 成对写：只写答案不写提问 ⇒ 历史里出现一条**没有来由**的助手消息
+    append_chat_history(user_name, "user", question)
+    append_chat_history(user_name, "assistant", answer + INTERRUPTED_SUFFIX)
+
+
 @router.post("/rag/stream_search")
 async def stream_search(
     req: QuestionRequest,
@@ -736,6 +760,13 @@ async def stream_search(
                 # 判据①日志有 cancel 事件 · 判据③的**观测对象**（Prometheus，Grafana 可见）
                 track_stream_cancel(ENDPOINT)
                 logger.info(f"[cancel] 客户端断开，已停止生成并关闭上游流 endpoint={ENDPOINT}")
+                # 🔴 `③` Task 6（`B3`）：把已经生成的那半截**补存进历史**（⛔ 不是直接丢）。
+                #    ⚠️ 放**这里**（`finally`）而不是 `except CancelledError` —— 与上面 `aclose()`
+                #       同一个理由：Starlette 2.4 分支抛的是 `GeneratorExit`，**不进那个 `except`**
+                #       ⇒ 写在那儿会**静默不存**。
+                #    ⚠️ `append_chat_history` 是**同步**的（`api/cache.py:39`），正好不该 `await`
+                #       —— 取消传播中再去 await 别的，等于是给取消又开一个口子。
+                _persist_interrupted_turn(user_name, req.question, collected_parts)
 
         # 6. 返回SSE流式响应（禁用缓冲）
     return StreamingResponse(

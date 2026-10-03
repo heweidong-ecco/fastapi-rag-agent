@@ -10,6 +10,41 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- ✅ **中断后那半截答案【存进历史】并打中断标记**（2026-10-03 · `③` Task 6 · `B3` · `DEC-053`）——
+  计划写的是「**不写代码先核**」，核出来的东西比判据假设的大一圈：
+
+  - **判据①「cancel 后已产生的 token 有记账」落空 —— 而且不是"取消时没记"**：
+    `grep -c record_usage api/api_v1_rag.py` ⇒ **0**、`api/rag_pipeline.py` ⇒ **0**
+    ⇒ **RAG 侧四条真调 LLM 的路径从来不记账**（`/rag/stream_search` · `/rag/search?generate_answer=true`
+    · `/rag/jwt_ask` · `/ws/agent`），**成功路径也不记**。真库佐证：`token_usage_logs` 里
+    **非 embedding 行全库只有 6 行**，全是 2026-09-20 的 agent graph 运行。
+    ⚠️ **还有一条技术上绕不过去的**：取消瞬间的 token 数**协议上拿不到** ——
+    `llm_factory` 没开 `stream_usage`，usage 只在**最后一帧**回来，而我们提前 `aclose()` ⇒
+    那一帧**永远不会到** ⇒ 硬补只能估算 = **往账本写假数**，比空着更坏。
+  - **判据②「半截答案处理方式明确」—— 现状是"丢"，但那是碰巧、不是决定**：
+    `append_chat_history` 写在循环之后，取消在它之前 `raise` ⇒ 一行都不跑；
+    ⚠️ **用户那句提问跟着一起丢**（它和答案写在同一个收尾段里）。
+
+  **决策：存，不是丢。** ① 作者原意就是存（`api_v1_rag.py:691` 注释写着"**使它支持历史补偿**"）；
+  ② 形态 = **提问 + 半截 + `INTERRUPTED_SUFFIX` 标记**（成对写；标记**必须**有 ——
+  历史会被原样拼进下一轮 prompt，不标 ⇒ 模型会把**断掉的话**当成"我上一轮说完了"）；
+  ③ 落点 **`finally`**（⛔ 不是 `except CancelledError` —— 2.4 分支抛 `GeneratorExit`，同 `DEC-052` 的理由）；
+  ④ **一块都没生成 ⇒ 什么都不写**（写空助手消息只会污染下一轮 prompt）。
+
+  ⚠️ **Agent 端不用改** —— 它的半路状态由 langgraph checkpointer（`MemorySaver`）持有，
+  取消时**已经在里面**；RAG 端什么都没有 ⇒ 两端本就不对称。
+
+  ⭐ **判据（可打印）**：`api/test_cancel_propagation.py` **10 → 13 例**
+  （`test_rag_persists_partial_answer_when_cancelled` 断言"存的就是客户端真收到的那段 + 标记" ·
+  反面 `…_full_answer_is_saved_without_interrupt_marker` · 边界 `…_cancel_before_any_chunk_saves_nothing`）
+  · 全量 **353 → 356 passed**（⛔ 零回归）· `bash scripts/ci-local.sh` **退出码 0**。
+  ⚠️ **第三条红不出来**（改动前它本来就过）—— 它是**反面守卫**，防"修过头"。
+  ⚠️ **本轮没起 Docker 真服务**（用户手动关了 `rag-api`）：判据落在进程内，且测试走的是**真 ASGI 断开**
+  （与 `B2` 同一段取消代码）；`B2` 那轮必须真服务是要证"计数在真 uvicorn 下也涨"，这一轮没有同类观测对象。
+  ⚠️ **仍未端到端验**：「**下一轮 prompt 真的读到了那半截**」。
+  📄 全文 ⇒ `docs/decisions/DEC-053-中断后的半截答案存进历史并打标记.md`（含 §遗留：
+  `except Exception` 那条路仍丢提问 · **RAG 侧零 LLM 记账**是独立缺陷、已立进 `docs/待办总表.md`）
+
 - ✅ **服务端 cancel 传播到上游 —— 两条流式端点**（2026-10-03 · `③` Task 5 · `B2` · `DEC-052`）——
   客户端断开后**真的停掉并关掉上游**，⛔ 不是"前端不显示了"（后者后端仍在烧钱）。
 
@@ -38,7 +73,8 @@ All notable changes to this project will be documented in this file.
   同一个问题、`0.006s` 返回全量 ⇒ **测取消必须换语义上不同的问句**）。
 
   ⛔ **不声明"上游计费停了"** —— 本机没有 DashScope 出账。只声明「**我们把上游的流关掉了**」。
-  ⚠️ **`B3`（半截答案）未做** ⇒ 取消时那半截现在是**直接丢**（不落库、不记账）。
+  ⚠️ **`B3`（半截答案）当时未做** ⇒ 那半截**直接丢**（不落库、不记账）。
+  🔴 **2026-10-03 当天已补**（`③` Task 6 · `DEC-053`）⇒ **改存进历史 + 打中断标记**；见本文件上一条。
 
   ⭐ **判据（可打印）**：`api/test_cancel_propagation.py`（**10 例** · 纯离线 · 驱动**真 ASGI 取消路径**）·
   全量 **343 → 353 passed**（+10，⛔ 零回归）· `bash scripts/ci-local.sh` **退出码 0** ·
