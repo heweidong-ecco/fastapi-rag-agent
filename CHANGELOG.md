@@ -74,6 +74,47 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- 🔴 **`B13` 实跑核出两处口径错 —— `/agent/cost/overview` 换数据源 + 补上「全站还剩多少」的出口**（2026-10-03 · `①b` Task 7 · `DEC-047`）。
+
+  `B13` 的原话是「**先实跑核一遍，缺了再补**」。跑完**四个面都打得开**，但核出两处
+  **不报错、测试全绿、界面照常出数**的错 —— 本仓反复栽的那一类。
+
+  | # | 核出来的事实 | 危险在哪 |
+  |---|---|---|
+  | **一** | `/agent/cost/overview` 的三个总数读的是 **`get_user_summary` / `get_purpose_summary`（进程内存）** ⇒ **重启归零**。<br>🔴 **实测**：admin 在 `token_usage_logs` 里有 **4216 tokens / 6 行**，端点答 **`0`** | docstring 自称「**最直观的"花了多少钱"查询接口**」⇒ **重启一次就答 0**，**不报错**。<br>⚠️ 同一份响应里 `total_*` 是**本人**、`by_purpose` 是**全站**，字段名看不出区别 |
+  | **二** | `B10`/`B11` 的**全站日级额度**（超了 `1_000_000` ⇒ 所有人吃 429）**没有任何出口** | `B13` 判据里「R4.2『还剩多少』依赖 `B10`」指的就是它 ⇒ **用户级答得出、全站级答不出** |
+
+  | # | 改动 | 落点 |
+  |---|---|---|
+  | ① | 新增 `get_user_overview(user_name)` —— **读库 · 全时 · 本人**（含按用途拆分） | `api/token_tracker.py` |
+  | ② | `/agent/cost/overview` 改读它；`by_purpose` 随之从**全站**变**本人** | `api/api_v1_agent.py` |
+  | ③ | `/agent/token/budget` 加 `global_daily_limit` / `global_used_today` / `global_remaining` | 同上 |
+  | ④ | 看板加第 5 格「全站预算」；「调用统计」那格**改标签写实话**（仍是内存口径） | `api/cost_dashboard.py` |
+  | ⑤ | 回归 `api/test_cost_visibility.py`（4 条 · 进 CI）+ `api/test_cost_visibility_db.py`（3 条 · `@needs_db`） | `api/` |
+
+  ⚠️ **内存那三个 `get_*_summary` 仍然存在、仍有调用点**（`:148` 告警 · 看板「调用统计」）——
+  它们的语义是"本进程"，**只是不能当对外展示的数据源**，⛔ 别当残留删掉。见 `DEC-047` §⚠️ 四条。
+
+  📌 判据（可打印）：
+
+  ```bash
+  venv/bin/python -m pytest api/test_cost_visibility.py -q                          # ⇒ 4 passed
+  POSTGRES_DB=rag_test venv/bin/python -m pytest api/test_cost_visibility_db.py -q  # ⇒ 3 passed
+  venv/bin/python -m pytest api/ -m "not integration and not needs_db" -q
+  # ⇒ 217 passed, 3 skipped, 22 deselected —— 【0 failed】（⚠️ 前提：Redis 开着）
+
+  # 实跑 ①：/agent/cost/overview 的 total_tokens 必须等于库里的数（admin ⇒ 4216）
+  curl -s /api/v1/agent/cost/overview -H "Authorization: Bearer $TOKEN"
+  # ⇒ {"total_cost":0.0136,"total_tokens":4216,"total_calls":6,…}   ← 与库里 admin|4216|6 逐字相同
+  # 实跑 ②：全站那个数以前【问不到】，现在问得到，且与库对得上
+  curl -s /api/v1/agent/token/budget -H "Authorization: Bearer $TOKEN"
+  # ⇒ {…,"global_daily_limit":1000000,"global_used_today":39,"global_remaining":999961,…}
+  #    库里今日全站 = 39 tokens（`… WHERE created_at >= CURRENT_DATE`）⇒ 对得上
+  ```
+
+  ⚠️ **`by_purpose` 从「全站」变「本人」是对外可见的行为变化** —— 若有外部消费方依赖旧语义，
+  它会**静默拿到更小的数**（本仓 `grep` 结果：除测试外无消费方）。
+
 - 🔴 **`决策一` 落地 —— 撤掉「每日请求次数」配额，原位置换成 **token** 口径（= `R1.3`）**（2026-10-03 · `①b` Task 6 · `DEC-046`）。
 
   本仓曾同时存在**两套互不知情的额度口径**（`DEC-029` 实测**差 35 倍**：`plan_execute` 一次 ~3346 token ⇒ 按次数能跑 100 次、按 token 只能跑 ~3 次）。本次按 `DEC-040`「统一到 token 一套」把**次数那套整张删掉**：
