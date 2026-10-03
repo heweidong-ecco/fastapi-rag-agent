@@ -10,6 +10,64 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- 🔴 **`calculator` 的任意代码执行面【已消除】**（2026-10-03 · `DEC-049`）—— **5 处 `eval` 收口到 AST 白名单求值**。
+
+  **改的是什么**：`calculator` 工具的 `expression` 参数**是 LLM 生成的**，而 LLM 的输入包含
+  **用户提问 / 检索到的 RAG 文档 / `search_tool` 搜回来的网页** ——
+  而它的实现一直是 `str(eval(expression))`。
+
+  🔴 **改前实测（不是推演）**：
+  ```
+  calculator("__import__('os').system('touch /tmp/pwned_by_eval')")
+  ⇒ 返回 '0'，且 /tmp/pwned_by_eval **被创建了**
+  ```
+  ⚠️ **比"能执行命令"更糟的一点**：它**返回 `'0'`**
+  ⇒ 模型收到的是一条**正常的"答案是 0"**，**没有任何异常信号**。
+  ⚠️ 且同一份代码**被复制了 5 次** ⇒ 修一处不够。
+
+  **怎么改**：新建 **`api/safe_math.py`**（235 行，**只用标准库**）——
+  先 `ast.parse(..., mode="eval")`，**只放行** `+ - * / // % **`、一元 `+ -`、括号、`int`/`float` 字面量；
+  名单外的节点（名字 / 调用 / 属性访问 / 下标 / 比较 / 推导式 / f-string / 字符串…）**一律拒**。
+  **5 处调用点全部收口**：`agent_graph.py` · `agent_checkpointer.py` ·
+  `agent_graph_advanced_learning.py` · `simple_tools_impl.py`（→ MCP 也露出来那条）·
+  `tools_with_cache.py`（⚰️ 生产不可达，**收了** —— 本仓的拷贝文化是真的，留一处就是留第 6 份的样板）。
+
+  🔴 **顺手把 DoS 面一起堵了**（三道闸，缺一不可）：
+  · **表达式长度 ≤ 200**
+  · **指数 ≤ 1000 且预判结果位宽** —— `9**9**9` 右结合 ⇒ 指数 **387420489**，
+    ⚠️ **必须在算之前拦**（算完再查就已经卡死了）
+  · **结果 ≤ 4096 位** —— 挡 `10**1000*10**1000*…` 那类"指数合规但结果爆掉"
+
+  **判据（可打印）**：
+  ```bash
+  venv/bin/python -m pytest api/test_safe_math.py api/test_safe_math_wiring.py -q
+  # ⇒ 78 passed
+  venv/bin/python -m pytest api/ -m "not integration and not needs_db" -q
+  # ⇒ 321 passed, 3 skipped, 22 deselected, 0 failed   （本轮之前 243 ⇒ +78，⛔ 无回归）
+  ```
+
+  ⭐ **测试分两类，覆盖的不是一回事**：
+  · `api/test_safe_math.py`（55 条）= **求值器本身**（算术不回归 / 27 种逃逸形状 / 三道闸 / 错误契约）
+  · `api/test_safe_math_wiring.py`（23 条）= **"接线真的改过去了吗"** ——
+    ⚠️ 判据是**副作用**：喂 `touch <tmp>/pwned` 之后**那个文件必须不存在**。
+    ⛔ **只断言"返回了 `计算错误:`"是不够的**（`DEC-049 §丙` 那套"看着修了"的实现也会返回错误字符串）。
+  **变异自证**：`/tmp/prove-safe-math.py` ⇒ **6/6 RED**（拆掉长度闸 / bool 特判 / 位宽闸 /
+  字面量类型检查 / `calculate` 兜底 / 往调用点塞回裸 `eval`），还原后 **78 passed**。
+  ⚠️ **有一条【故意不做】的变异**：拆「指数预判」那道闸 —— 拆掉之后求值会真去算 `9**387420489`，
+  **机器直接卡死**（这正是那道闸存在的理由）⇒ 改用 `test_the_right_gate_fires` **断言"是哪道闸拦的"**间接守。
+
+  ⚠️ **两处行为变更（明说）**：
+  1. **错误文案变了**：`eval("abc")` 原给模型 `计算错误: name 'abc' is not defined`，
+     现为 `计算错误: 不支持的语法: Name（只认数字与 + - * // % ** 组成的算式）`。
+     **判断：是改善**（新文案说得清"能算什么"），但它是**对外行为**。
+     ✅ **`1/0` 那条没变** —— 仍是 `计算错误: division by zero`（`api/test_impl_modules.py` 与给模型的提示都依赖它）。
+  2. **可接受的算式变窄了**：`'a'*3` / `len([1,2])` 这类**以前"能算"**（虽然没人这么用），现在被拒。
+
+  ⚠️ **不在本次范围**：`api/code_executor_impl.py`（`subprocess.run` + `exec(create_safe_globals())`）
+  是**另一类**风险，**业务方 2026-10-03 裁「单列」** ⇒ ⛔ **别因为收口了 `eval` 就以为它也没事**。
+  📄 裁定 / 备选 / 反悔成本 / 遗留 ⇒ `docs/decisions/DEC-049-calculator的eval换成AST白名单求值.md`
+  · 模块 spec ⇒ **`docs/specs/safe_math.md`**（新建）
+
 - 🟢 **`/agent/approve` 支持「改写后提交」**（2026-10-03 · `②` Task 3 · `B6`）—— **硬门 D 的最后一段**。
 
   **改的是什么**：审批只有「批准 / 拒绝」两种。上游 `施工单 §3.1` 的接管页要的是
@@ -109,6 +167,9 @@ All notable changes to this project will be documented in this file.
 
   ⚠️ **发现一个尚未裁决的问题**（写进 spec，⛔ 未改行为）：`calculator` 用的是 **`eval(expression)`**
   = 任意代码执行，而它的输入**来自 LLM、LLM 的输入来自用户** —— 它**不在白名单里**，即**无人值守直接跑**。
+
+  ➡️ **2026-10-03 更新：已结** —— 业务方同日裁定「**AST 白名单求值 + 5 处收口**」（**不是**"加进白名单"），
+  落成 **`DEC-049`**（见本文件顶部那条）。
 
   **判据（可打印）**：
   ```bash
@@ -2441,6 +2502,10 @@ All notable changes to this project will be documented in this file.
 
   **✅ 已核实：实现逐字等价 ⇒ 行为不变。** 本文件自带的 `calculator`/`date_today` 与 `simple_tools` 那两份，
   代码**逐字相同**（都是 `str(eval(expr))` + 同样的 `except`）⇒ 派生只改变"是哪个对象"，不改变行为。
+
+  ➡️ **2026-10-03 更新（`DEC-049`）**：上面那句 `都是 str(eval(expr))` **已经不是事实了** ——
+  5 份 `eval` 已于同日全部收口到 `api/safe_math.py`（AST 白名单求值）。
+  ⚠️ **本次派生当时"逐字等价"的结论不变**（那是当时的事实），只是**那两份实现后来一起换了**。
 
   ⚠️ **但这是一次【工具 schema 变更】，按本仓 PR 纪律显式声明**：LLM 现在看到的
   `calculator` / `date_today` 描述来自 `simple_tools`，**docstring 更详细**

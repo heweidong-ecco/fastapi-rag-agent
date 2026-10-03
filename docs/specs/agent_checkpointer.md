@@ -2,7 +2,7 @@
 
 | 项 | 内容 |
 |---|---|
-| **状态** | 🟡 **地基在，但零测试 · 且有一处忽略配置**<br>✅ 2026-10-01：`llm`（`:21`）接上 `MAX_TOKENS_AGENT`（`B7`）<br>✅ 2026-10-02（`①b` Task 5）：该 `llm`（现于 `:20`）**改走 `llm_factory.make_llm("fast", "agent")`** —— `model`/`api_key`/`base_url`/`max_tokens` 不再写在本地。⚠️ `:40` 的 `bind_tools` 与 `:56` 的 `model_name`（**记账**）是**返回值必须是裸 `ChatOpenAI`** 的原因之一 |
+| **状态** | 🟡 **地基在，但零测试 · 且有一处忽略配置**（**118 → 117 行**，2026-10-03 `DEC-049`）<br>⚠️ **行数口径**：用 `scripts/spec_status.sh` 的数（= **真实行数**）。`wc -l` 对本文件**少算 1**（末行没有换行符）⇒ 两边会差 1，⛔ **不是笔误**<br>✅ 2026-10-01：`llm`（`:21`）接上 `MAX_TOKENS_AGENT`（`B7`）<br>✅ 2026-10-02（`①b` Task 5）：该 `llm`（现于 `:21`）**改走 `llm_factory.make_llm("fast", "agent")`** —— `model`/`api_key`/`base_url`/`max_tokens` 不再写在本地。⚠️ `:39` 的 `bind_tools` 与 `:55` 的 `model_name`（**记账**）是**返回值必须是裸 `ChatOpenAI`** 的原因之一<br>✅ **2026-10-03（`DEC-049`）：`calculator` 的 `eval(expression)` 换成 `safe_math.calculate`**（`:28`；新增 import 在 `:17`）。⚠️ **本模块的 `calculator` 是活的** —— 走 `/agent/memory_chat` 那条链 |
 | **对外提供** | `build_checkpointer_agent()` · `checkpointer_agent` |
 | **谁在用** | `api_v1_agent.py:17` → 路由 **`/agent/memory_chat`** |
 
@@ -27,7 +27,7 @@
 
 | 看代码会以为 | 实际 |
 |---|---|
-| 「支持 Redis 后端」 | 🔴 **`:108-112` 把 `redis_url` 注释掉了，直接回落 `MemorySaver()`** ⇒ **写 `redis` 也拿不到 Redis 持久化**（进程重启即丢） |
+| 「支持 Redis 后端」 | 🔴 **`:105-108` 把 `redis_url` 注释掉了，直接回落 `MemorySaver()`** ⇒ **写 `redis` 也拿不到 Redis 持久化**（进程重启即丢） |
 | 「有检查点 ⇒ 对话能跨重启」 | 🔴 **默认 `memory` 是【内存态】** ⇒ **重启即丢**；只有显式设 `AGENT_CHECKPOINT_BACKEND=sqlite` 才落盘 |
 | 「成本记账是准的」 | 🟡 **Token 口径准，金额【2026-10-01 起也准了】** —— 模型名已改为从对象取，且 `MODEL_PRICING` 已补 DeepSeek 条目（`🅗 S4`+`S5`）<br>⚠️ **但仍是"近似"** —— 单价**不区分缓存命中**（拿不到命中/未命中拆分）⇒ 按未命中价记 ⇒ **偏高估** |
 
