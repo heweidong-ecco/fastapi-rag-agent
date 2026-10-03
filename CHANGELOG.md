@@ -10,6 +10,44 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- 🟢 **审批触发条件从「任意 `tool_calls`」改成「工具白名单」**（2026-10-03 · `②` Task 1 · `B4`）。
+
+  **改的是什么**：`api/agent_graph.py` 的 `should_continue` 原先**只要模型产生任意 `tool_calls` 就进审批**
+  ⇒ **问一句"今天几号"也会停下来等人批**。硬门 D 要的是「**该被接管时被接管**」，⛔ 不是「全都接管」
+  —— 那条路**验收过不去**。
+
+  **怎么改**：新增 `SENSITIVE_TOOLS`（读 env · 默认 `search_tool`）· `needs_approval()`（判定）·
+  `validate_approval_config()`（**启动自检**）；`should_continue` **从两条路变三条**：
+
+  | 末条消息 | 改前 | 改后 |
+  |---|---|---|
+  | 没有 `tool_calls` | `END` | `END` |
+  | 有 `tool_calls`（**非敏感**，如 `calculator`/`date_today`） | 🔴 **`approval`**（无谓地停） | ✅ **`tools`**（直接跑完） |
+  | 有 `tool_calls`（**命中白名单**） | `approval` | `approval` |
+
+  🔴 **白名单第一版 = `{search_tool}` 一个**（业务方 2026-10-03 裁）—— 它会**把问题外发到第三方**；
+  `calculator`/`date_today` 是**本地纯函数**，不进白名单。⚠️ 位置 = **`.env` 的 `SENSITIVE_TOOLS`**。
+
+  ⚠️ **顺手修了三处"改完就成假话"的注释与文档** —— 本仓纪律是「**改口径立刻全仓搜那个词**」：
+  ① `api_v1_agent.py:66` 的 `summarize_agent_result` docstring（🔴 **判据的【理由】变了，结论没变**：
+  改前是"有 tool_calls ⇒ 一定停在审批"，改后是"非敏感的 tool_calls 不会出现在返回态里" ⇒
+  重写了它**为什么还成立**、以及**什么时候会失效**）② `api/test_agent_repairs.py:533` 的同款旧注释
+  ③ `docs/specs/agent_graph.md` 与 `docs/specs/api_v1_agent.md` 的 ⚠️ 表。
+
+  ⚠️ **发现一个尚未裁决的问题**（写进 spec，⛔ 未改行为）：`calculator` 用的是 **`eval(expression)`**
+  = 任意代码执行，而它的输入**来自 LLM、LLM 的输入来自用户** —— 它**不在白名单里**，即**无人值守直接跑**。
+
+  **判据（可打印）**：
+  ```bash
+  venv/bin/python -m pytest api/test_approval_trigger.py -q     # ⇒ 7 passed
+  venv/bin/python -m pytest api/ -m "not integration and not needs_db" -q
+  # ⇒ 224 passed, 3 skipped, 22 deselected, 0 failed   （改动前 217 passed ⇒ +7 = 新用例，⛔ 无回归）
+  ```
+
+  📄 裁定 ⇒ **`docs/decisions/DEC-048-审批触发条件改工具白名单.md`**（四个未定死处：语义 / 哪些工具 / 写在哪 / 空名单怎么办）
+  · `fastapi-rag-agent-TODO待办/后端补齐清单-待裁-20260929.md` 的 `B4 · ✍️ 裁` · `决策二`。
+  ⚠️ **`B5`（待接管队列）/ `B6`（接管后续跑）仍未做 ⇒ 硬门 D 整体【未完成】。**
+
 - 🟢 **新增复盘 `docs/复盘/2026-10-02-判据写歪了不报错.md`** + 两条规矩落进 `docs/规范/开发规范.md`（2026-10-02）。
 
   **起因**：当天两次自核，**判据都是我自己写的，两次都歪**——

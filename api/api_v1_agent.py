@@ -63,7 +63,14 @@ def summarize_agent_result(result: dict) -> dict:
       实测复现:POST /agent/langgraph_chat?question=请计算6*7 → `{"answer": ""}`。
 
     ⚠️ 判据是「**最后一条消息带 `tool_calls`**」—— 只看这一条。
-      · 图的接线是 `agent → (approval) → tools`，**只要有 tool_calls 就一定停在审批点**。
+      · **这条判据为什么成立**（🔴 B4 之后**理由变了**，⛔ 别照旧理解）：
+        图带 `interrupt_before=["approval"]` ⇒ 停在审批点时，末条消息**必带** tool_calls。
+        而**非敏感**的 tool_calls（`calculator` / `date_today`）**不会出现在本函数的输入里** ——
+        它们直接跑 `tools → agent → … → END`，**从不停在图中间**。
+        ⇒ 「末条带 tool_calls」在这里**仍然等价于**「停在审批点」。
+      · ⚠️ **但等价性依赖上面那一句**：若将来有**别的**路径把"跑了一半的图"喂进本函数
+        （流式返回 / 调试端点 / 某个非敏感工具提前返回），这条判据就会**误报 `pending_approval`**。
+        ⇒ **改图的路由时，回来重看这里。**
       · **不能**再加 `and not content`：真实 LLM 常见"既写文字又调工具"
         （"我来帮你算一下。" + tool_calls），那种形态同样在等审批，
         加了这个条件就会误报 `answered` ⇒ 调用方照样不知道要去 `/agent/approve`

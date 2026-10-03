@@ -41,6 +41,29 @@ tools = [search_tool, calculator, date_today]
 # 将工具绑定到模型，这样模型就知道可以调用哪些工具
 llm_with_tools = llm.bind_tools(tools)
 
+# ==================== 审批白名单（B4）====================
+# 🔴 改前：**只要产生任意 tool_calls 就进审批** ⇒ 问一句"今天几号"也会停下来等人批。
+#    硬门 D 要的是「**该被接管时被接管**」，⛔ 不是「全都接管」。
+# ⚠️ 它是**白名单**：没登记的工具**默认不敏感** ⇒ **新加的工具默认不过审批**。
+#    要它过，就把名字加进 `.env` 的 `SENSITIVE_TOOLS`（逗号分隔）。
+# 📄 裁定 ⇒ `fastapi-rag-agent-TODO待办/后端补齐清单-待裁-20260929.md` B4 · 📌 判据 ⇒ `api/test_approval_trigger.py`
+SENSITIVE_TOOLS: frozenset[str] = frozenset(
+    n.strip() for n in os.getenv("SENSITIVE_TOOLS", "search_tool").split(",") if n.strip()
+)
+
+
+def validate_approval_config() -> None:
+    """启动自检：白名单**不许为空**。
+
+    🔴 空 ⇒ 审批**永不触发** ⇒ 硬门 D 名存实亡 —— 而且**不会有任何报错**，
+       要等人验收时才发现「接管从来没发生过」。⇒ 让它在**启动时就报**。
+    """
+    if not SENSITIVE_TOOLS:
+        raise EnvironmentError(
+            "SENSITIVE_TOOLS 为空 —— 人工审批将永不触发（硬门 D 名存实亡）。"
+            " 请在 .env 里写明需要审批的工具名（逗号分隔），例如 SENSITIVE_TOOLS=search_tool"
+        )
+
 # ==================== 定义 Agent 的状态 ====================
 class AgentState(TypedDict):
     # 对话历史消息列表。operator.add 表示新消息会被追加到末尾，而不是覆盖。
@@ -86,16 +109,30 @@ def tool_execute(state: AgentState):
 
     return {"messages": tool_messages}
 
+def needs_approval(tool_calls: list) -> bool:
+    """这轮 tool_calls 里**有没有**需要人工审批的（B4）。
+
+    ⚠️ 判据是「**有任何一个**」⇒ 混合调用（本地工具 + search_tool）**整体**审批，
+       ⛔ 不能"挑着执行"—— 那等于给敏感调用开了个绕过口子。
+    """
+    names = {tc.get("name") for tc in tool_calls or []}
+    return bool(names & SENSITIVE_TOOLS)
+
+
 def should_continue(state: AgentState):
     """
-    路由函数：检查最后一条消息是否包含tool_calls。
-    如果包含，说明模型想调用工具，路由到"tools"节点。
-    如果不包含，说明模型给出了最终答案，路由到END结束。
+    路由函数（B4 起是**三条**路，⛔ 不再是两条）：
+      * 没有 tool_calls         ⇒ END（模型给出了最终答案）
+      * 有 tool_calls **且含敏感** ⇒ "approval"（停下来等人批）
+      * 只有**非敏感** tool_calls ⇒ "tools"（直接执行，⛔ 不再无谓地等人）
     """
     last_message = state["messages"][-1]
-    if hasattr(last_message, "tool_calls") and last_message.tool_calls:
-        return "tools"
-    return END
+    tool_calls = getattr(last_message, "tool_calls", None) or []
+    if not tool_calls:
+        return END
+    if needs_approval(tool_calls):
+        return "approval"
+    return "tools"
 
 #  新增部分 人工审批节点
 def human_approval(state: AgentState):
@@ -119,15 +156,14 @@ def build_agent_graph():
 
     # 设置图的入口点
     workflow.set_entry_point("agent")
-    # 关键修改：从 "agent" 节点出发，不再直接去 "tools"
-    # 而是先去 "approval" 审批节点
-    # 添加条件边：从"agent"节点出发，根据should_continue函数决定下一步
+    # 条件边：从 "agent" 出发，由 should_continue 决定去哪（B4 起是三条路）
     workflow.add_conditional_edges(
         "agent",
         should_continue,
         {
-            "tools": "approval",  # 改动如果需要调用工具，去"tools"节点,改为去审批节点
-            END: END              # 如果结束，直接终止
+            "approval": "approval",  # 含**敏感**工具 ⇒ 进审批节点（interrupt_before 在此暂停）
+            "tools": "tools",        # 只有**本地**工具 ⇒ 直接执行，无人值守也能跑完
+            END: END                 # 模型给了最终答案 ⇒ 结束
         }
     )
 
@@ -141,6 +177,9 @@ def build_agent_graph():
     memory = MemorySaver()  # 用于持久化状态
     # 关键：interrupt_before=["approval"] 告诉 LangGraph 在进入审批节点前暂停
     return workflow.compile(checkpointer=memory, interrupt_before=["approval"])
+
+# 启动自检：白名单为空 ⇒ 直接起不来（⛔ 别让它"静默地永不触发"，那是验收时才发现的失败）
+validate_approval_config()
 
 # 创建全局 graph 实例
 agent_graph = build_agent_graph()
