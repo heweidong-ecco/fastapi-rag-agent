@@ -10,6 +10,40 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- ⭐ **三家隔离用户的语料与会话【常驻】真库**（2026-10-04 · `DEC-071`）—— `testdata/isolation-seed/` + `scripts/seed_isolation_docs.sh`（documents 轴）+ `scripts/seed_isolation_threads.sh`（`thread_id` 轴）。
+
+  业务方原话：「**调用接口模拟真实用户的操作，写入数据库和向量数据库，没有真实写入以后
+  怎么用作判断和测试**。我要：**真库里有三家各自的文档、肉眼可查**……」
+
+  **做了什么**：9 篇语料（三家 × 3 篇 × 约 1000 字）→ 经 `POST /api/v1/rag/upload_document`
+  （带各自 `X-API-Key`）→ 真 embedding → 真写 `documents` + pgvector。
+  实测落库 **`isolation_a` 6 chunk · `isolation_b` 6 · `isolation_c` 5**，归属零污染、向量零缺失。
+
+  ⚠️ **它与 `DEC-056` 的口径相反，但两者并存** —— 那边是「探针文档每次跑完就删、且只在 `rag_test` 跑」，
+  本份要的恰好是**留下来的那一类**。⛔ 本轮**没动 `test_isolation.py` 一行**。
+
+  **`thread_id` 轴**：三家各跑 **2 轮**真对话 ⟶ 真库留下带 `thread_id` 的记账
+  （`cost_records` 12 + `token_usage_logs` 12 · 越界 0 · 三家当日合计 **10,374 token**：a 3,329 / b 3,824 / c 3,221）。
+  ⭐ **第 2 轮是活体隔离证据**：A 答「晨光咖啡烘焙」· B 答「萌宠家宠物寄养中心」· C 答「恒远工业阀门」，无一串号。
+
+  🔴 **更正（2026-10-04 同日）**：本条目**一度写的是「自定义 `thread_id` 落进真库做不到」—— 那是错的**。
+  我核的是 `/agent/advanced_chat`（走**不记账**的 `agent_graph_advanced_learning`），
+  而**会记账的 `agent_graph_advanced.py` 是给 `/agent/mcp_chat` 用的** ——
+  `api_v1_agent.py:1306` 把调用方的 `thread_id` 原值注入 state ⇒ `agent_graph_advanced.py:360` 原样落库。
+  ⇒ 五个维度（**用户隔离 / 安全 / role / tag / thread_id**）**全部验成**。📄 五条链路对照 ⇒ `DEC-071` §三。
+
+  🔴 **顺带发现一个计费口子**（**挂待裁，本份不修**）：`api/agent_graph_advanced_learning.py`（449 行）
+  **零命中** `record_usage`/`check_budget`，却有 **5 处 `make_llm()` · 5 处 LLM 调用点** ⇒
+  `POST /agent/advanced_chat`（+ `/stream`）**既不查预算、也不记账** ⇒ **任何用户（含 `FREE`）= 无限免费**。
+  📄 已登记 `docs/待办总表.md` §二 第 6 行 · `DEC-071` §三·补
+
+  **判据（可打印）**：
+  ```bash
+  bash scripts/seed_isolation_docs.sh --check      # documents 轴：三家计数 / 污染 0 / 空向量 0 / source 清单 / 交叉检索
+  bash scripts/seed_isolation_threads.sh --check   # thread_id 轴：三家各 4 条 / 越界 0 / 两表各 12
+  grep -c 'record_usage\|check_budget' api/agent_graph_advanced_learning.py   # ⇒ 0（那个计费口子）
+  ```
+
 - ⭐ **新增 `scripts/check_remote_sync.sh` —— 把「同源的两个输入不能互相作证」从文字判据落成动作**（2026-10-04 · `DEC-069`）。
 
   `docs/复盘/2026-09-20-同源的两个输入不能互相作证.md` 记的是：我用
