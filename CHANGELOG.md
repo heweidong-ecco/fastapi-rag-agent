@@ -1549,6 +1549,26 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- ⚠️ **`DEC-065` 收口后的两处过期指路 —— 计数写死 + 指针指向已闭合的条目**（2026-10-04）。
+
+  **① `docs/文档地图.md` 把 DEC 份数写死**（`:69` 写 `61` 份 · `:183` 写 `61` 且区间写 `DEC-001–061`）。
+  实测 **65**（`ls -1 docs/decisions/*.md | wc -l`）—— 🔴 **同一行连着两天错、共三次**
+  （45 ⇒ 47 ⇒ 61 ⇒ 65）。⚠️ **该行自己早就写着「份数别写死 ⇒ 用命令」**，却仍留着数字。
+  ⇒ **删掉数字本身**，两处都改成"跑命令拿"（那个硬编码区间一并去掉）。
+
+  **② `scripts/route-auth-baseline.txt` 的表头指向已闭合的 `S1`/`S2`/`S14`** ——
+  那三条**当天已随 `DEC-065` 做完**（`docs/待办总表.md` 🅗 有记录），指针失效。
+  ⇒ 表头改为指向 `/api/v1/`（现仅剩的一条，**建议留公开 · 尚未正式裁定**）。
+  ⚠️ **表头是 `--write-baseline` 的【模板】生成的**（`scripts/check_route_auth.py:127`）
+  ⇒ **模板与产物两处一起改**，改完**重跑 `--write-baseline` 让产物由模板再生**（⛔ 不是手改产物）。
+
+  **判据（可打印）**：
+  ```bash
+  ls -1 docs/decisions/*.md | wc -l                                        # ⇒ 65（⛔ 文档里不再出现这个数）
+  venv/bin/python scripts/check_route_auth.py --baseline                   # ⇒ 58 条路由 · 无鉴权 1 条 · 与基线一致
+  venv/bin/python -m pytest api/ -q -m "not integration and not needs_db"  # ⇒ 518 passed, 3 skipped, 31 deselected
+  ```
+
 - 🔴 **本 PR 自己新加的 `api/test_removed_endpoints.py` 是红的 —— 它用了 `with TestClient(app) as`**（2026-10-03）。
 
   **现象**：`bash scripts/ci-local.sh` ⇒ **1 failed, 411 passed**，红的就这一条

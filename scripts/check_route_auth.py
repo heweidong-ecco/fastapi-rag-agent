@@ -124,7 +124,10 @@ def main() -> int:
         BASELINE.write_text(
             "# 无鉴权路由基线（scripts/check_route_auth.py --write-baseline 生成）\n"
             "# 每一行 = 一条「不在 PUBLIC_PATHS、且没有鉴权依赖」的路由。\n"
-            "# ⚠️ 这份基线【不是「允许清单」】—— 它是「已知的债」，见 docs/待办总表.md 🅗 的 S1/S2/S14。\n"
+            "# ⚠️ 这份基线【不是「允许清单」】—— 它是「已知的债」，见 docs/待办总表.md 🅗。\n"
+            "# 🔴 2026-10-04（DEC-065）后本表只剩 /api/v1/（main.py 根路径，一个 ping）；\n"
+            "#    表里原先指的 S1/S2/S14 三条【已闭合】⇒ ⛔ 别再去表里找它们。\n"
+            "#    这一条的建议是【留公开】，但仍未正式裁定 ⇒ 见 docs/specs/api_v1.md 末节。\n"
             "# ⛔ 变多 = 新引入了没鉴权的路由 ⇒ 该拦；变少 = 修好了 ⇒ 重新生成基线。\n"
             + "\n".join(sorted(paths)) + "\n",
             encoding="utf-8",
