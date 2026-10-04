@@ -2,10 +2,10 @@
 
 | 项 | 内容 |
 |---|---|
-| **状态** | 🟡 **可用，且是生产链** —— 但 🔴 **有两处实锤缺陷**（见下）<br>✅ **2026-10-01 改完**：`B7` + `S12` 都已落在它的 `llm`（`:50`）上 —— 见「✅ 做了什么」末条<br>✅ **2026-10-02（`①b` Task 5）**：该 `llm` **改走 `llm_factory.make_llm("chat", "agent")`** —— `model`/`api_key`/`base_url`/`max_tokens` 不再写在本地。<br>⚠️ **`timeout` / `max_retries` 没丢**：它们走 `make_llm` 的 `**extra` **逐点透传**（这是本仓第一处用到 `**extra` 的地方）。<br>⚠️ **`llm.bind_tools(...)` 照旧能用**（那句在 `get_llm_with_mcp_tools()` 里，现于 `:295`；`llm_with_tools` 是 `:354` 拿到它的）—— 这正是「工厂返回值必须是裸 `ChatOpenAI`」那条约束的来由之一 |
+| **状态** | 🟡 **可用，且是生产链** —— 但 🔴 **有两处实锤缺陷**（见下）<br>✅ **2026-10-01 改完**：`B7` + `S12` 都已落在它的 `llm`（`:50`）上 —— 见「✅ 做了什么」末条<br>✅ **2026-10-02（`①b` Task 5）**：该 `llm` **改走 `llm_factory.make_llm("chat", "agent")`** —— `model`/`api_key`/`base_url`/`max_tokens` 不再写在本地。<br>⚠️ **`timeout` / `max_retries` 没丢**：它们走 `make_llm` 的 `**extra` **逐点透传**（这是本仓第一处用到 `**extra` 的地方）。<br>⚠️ **`llm.bind_tools(...)` 照旧能用**（那句在 `get_llm_with_mcp_tools()` 里，现于 `:295`；`llm_with_tools` 是 `:354` 拿到它的）—— 这正是「工厂返回值必须是裸 `ChatOpenAI`」那条约束的来由之一<br>🔵 **2026-10-04（`B1`）：两个节点改【真流式】** —— `chat_node`（`:315`）与 `agent_decide`（`:369`）都声明 `config: RunnableConfig` + 换 `async for chunk in llm.astream(…, config=config)` 逐块 `+` 聚合。⚠️ **本图的两个节点本来就是 `async`** ⇒ **走 `astream`**，⛔ 别照抄 `agent_graph.py` / `agent_checkpointer.py` 那两处（那两处是**同步**节点，改成同步会**阻塞事件循环**）。新增模块级 `STREAMABLE_NODES = frozenset({"agent", "chat"})`（`:304`）—— ⛔ **`tools` 不在里面**（它不调 LLM，且它返回的 `ToolMessage` 会被当成"新消息"发出去）。<br>⚠️ **`+` 聚合在本图是【必须】的**：`tool_calls` 碎片化到达，只拼 `content` 会丢掉它们 ⇒ `should_continue` 判不出 `"tools"` ⇒ **工具永远不会被执行**，而接口一切正常。📌 守卫 `api/test_agent_stream_chains.py::test_real_chain_c_nodes_stream_one_chunk_per_token` |
 | **对外提供** | `build_mcp_agent()`（返回编译好的图，`:288`）· `mcp_session()` · `get_mcp_tools()` · `call_mcp_tool_with_cache()` |
-| **谁在用** | `api_v1_agent.py:450` 的 `POST /agent/mcp_chat`（**三代 Agent**） |
-| **规模** | 421 行（`wc -l api/agent_graph_advanced.py`）—— 2026-10-01 因 `B7`+`S12` 的注释与参数 +14 行 |
+| **谁在用** | `api_v1_agent.py:450` 的 `POST /agent/mcp_chat`（**三代 Agent**）· 🆕 `POST /agent/mcp_chat/stream`（`B1`） |
+| **规模** | **453 行**（`scripts/spec_status.sh` 与 `wc -l` **一致** —— 本文件末行有换行符；⚠️ 与 `agent_graph.py` / `agent_checkpointer.py` **不同**）<br>沿革：2026-10-01 因 `B7`+`S12` 的注释与参数 +14 行 → 421 · 🔵 **2026-10-04（`B1`）两个节点改真流式 + `STREAMABLE_NODES`** ⇒ 421 → **453**（多出的行是"为什么 `tools` 不进白名单"与"`+` 聚合必须保 `tool_calls`"的注释） |
 
 ## ✅ 做了什么
 

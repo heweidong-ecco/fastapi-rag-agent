@@ -7,7 +7,7 @@ import time
 import uuid
 from typing import Literal
 from fastapi import APIRouter, Depends, Path, Query
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import JSONResponse
 
 from config import ACCESS_TOKEN_EXPIRE_MINUTES
 # ①b Task 5：LLM 的唯一构造落点（`model` / `api_key` / `base_url` / `max_tokens` 都收在那一处）。
@@ -54,8 +54,6 @@ from chunker import split_text_with_filter
 from document_parser import parse_document
 
 from cache import get_chat_history, append_chat_history
-from loguru import logger                          # `③` Task 5：取消事件要落到日志（判据①）
-from metrics import track_stream_cancel            # `③` Task 5：取消事件进 Prometheus（判据③的观测对象）
 
 from agent_graph import agent_graph
 
@@ -573,9 +571,12 @@ async def jwt_ask_question(
 # ⚠️ 2026-10-02 删（Task 5）：同段的 `from config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL_CHAT`
 #    已**不再被引用** —— 两个构造点都改走 `make_llm()`，那三个值由工厂统一读。
 import asyncio
-# `③` Task 5 补（2026-10-03 · 真服务实测）：`finally` 里关上游流要用 `anyio.CancelScope(shield=True)`
-# **护住** —— 否则那一次 `await` 会被反复投递的取消打断。见 `stream_search` 的 `finally`。
-import anyio
+# ⚠️ 2026-10-04 删（`B1` 剩余 4 条链 · 批 3）：`anyio` / `track_stream_cancel` / `logger` /
+#    `StreamingResponse` 四个 import **已从本文件移除** —— 它们此前**只被** `stream_search`
+#    那段内联生成器用到，而那段整块搬进了 `api/sse.py`（`shield=True` 关流 · 计数 · 日志
+#    · `StreamingResponse` 三件都在那边，**只是一份**）。留着就是没人用的 import。
+# 🔴 本仓所有流式端点共用 `api/sse.py` 的那副骨架（含 5 条实测约束的顺序）。
+from sse import DONE_FRAME, llm_chunk_text, sse_frame, sse_response, sse_stream
 
 # ⚠️ 2026-09-17 重构 ⑥ 切开点 5：惰性单例。
 #    原先此处是【模块层】直接 `llm_stream = ChatOpenAI(...)` ⇒
@@ -712,95 +713,68 @@ async def stream_search(
     # 4. 流式生成器
     ENDPOINT = "rag_stream_search"    # Prometheus 的 label（`③` Task 5），⛔ 别与函数名混用
 
-    async def generate():
-        collected_parts = []          # 用于拼凑完整回答
-        stream = None
-        # ⚠️ 默认按「被取消」算 —— 只有跑到收尾才改成 `"done"`。
-        #    这样 Starlette 的两条分支**都能记到**：2.3（uvicorn 实测值）抛 `CancelledError`，
-        #    2.4 走 `except OSError` ⇒ 生成器被 `aclose()` ⇒ 抛 `GeneratorExit`。
-        outcome = "cancelled"
-        try:
-            # 🔴 上游必须是**异步**的（`③` Task 5 · `B2`）：
-            #    同步 `for chunk in stream` 会**阻塞事件循环**，取消得等"下一块到达"才送得进来
-            #    ⇒ 上游卡住时，最坏要等一整个 chunk 的时间才停得下来。
-            stream = get_llm_stream().astream(messages)
-            async for chunk in stream:
-                if chunk.content:
-                    collected_parts.append(chunk.content)
-                    # SSE格式：data: 内容\n\n 直接发送纯文本，前端逐字显示
-                    yield f"data: {json.dumps({'content': chunk.content})}\n\n"
-                    # ⚠️ 这一行**不再是「让出控制权」**（`async for` 本身就是 await 点）——
-                    #    现在它只剩「限速」这一个作用。留着是为了本轮**不改节奏**。
-                    await asyncio.sleep(0.01)
+    # 🔴 2026-10-04（`B1` 剩余 4 条链 · 批 3）：**内联生成器整个换成 `sse.sse_stream` 骨架**。
+    #    这段原来有 ~80 行 `try / except / except / finally`，与 `/agent/langgraph_chat/stream`
+    #    **逐字重复**（那 5 条实测约束因此被抄了两遍）。现在只有 `api/sse.py` 一份。
+    #    ⚠️ **等价不是"看起来一样"** —— 下面两处**很反直觉的旧契约**是本端点特有的，
+    #    ⛔ **别在"抽公共层"时顺手修正**（前端的适配是照着它们写的）：
+    #      ① `[DONE]` 在 `sources` **之前**（见 `_complete`）；
+    #      ② 错误路径**没有** `[DONE]`（见 `_on_error`）。
+    #    判据：`api/test_cancel_propagation.py` **全绿，且一行断言都没改**。
+    async def _complete(collected):
+        """收尾尾巴（正常跑完才进）—— ⚠️ **帧序是有讲究的，⛔ 别整理成"先 sources 再 `[DONE]`"**。
 
-            outcome = "done"
-            # 发送结束信号
-            yield "data: [DONE]\n\n"
-            # ---- 在这里记录对话历史 ----
-            # 生成完成后，将本轮问答自动存入 Redis
-            full_answer = "".join(collected_parts)
-            # 记录用户问题
-            append_chat_history(user_name, "user", req.question)
-            # 记录助手完整回答
-            append_chat_history(user_name, "assistant", full_answer)
-            # 如果有引用，在结束后发送来源列表
-            if req.citations and sources_list:
-                yield f"data: {json.dumps({'sources': sources_list})}\n\n"
-        except asyncio.CancelledError:
-            # 精确捕获：客户端主动断开连接
-            # ⛔ **不许在这里 yield**（旧实现在此处 `yield "data: [DONE]"`）：
-            #    接收方已经走了、发出去也没人收 —— 而且**实测真会发出去一帧**
-            #    （`api/test_cancel_propagation.py::test_rag_sends_nothing_after_disconnect`）
-            #    ⇒ 让「已取消」与「正常收尾」在**帧层面长得一模一样**。
-            #    照原样抛出去：吞掉它会让外层以为这是「正常结束」。
-            raise
-        except Exception as e:
-            outcome = "error"
-            # 兜底：其他未知错误
-            print(f"流式生成出错: {e}")
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
-        finally:
-            # ⚠️ 放 `finally` 而不是 `except`：三条出口（正常 / 异常 / 取消）**都要收尾**，
-            #    其中「取消」那条还包括 2.4 分支的 `GeneratorExit`。
-            #
-            # 🔴🔴 **顺序与关流方式 = 2026-10-03 真服务实测改的**（不是想出来的）：
-            #    `await stream.aclose()` 会被**二次投递的取消**打断 ⇒ 抛 `CancelledError`
-            #    ⇒ 排在它后面的三件收尾**一件都不跑**（实测：计数 `2.0→2.0`、日志没有、
-            #    半截不落盘）。⚠️ **而单测当时全绿** —— 假流的 `aclose()` 不抛。
-            #    卡在哪：**早切**（还没吐字）时生成器没被推进过 ⇒ `aclose()` 不必收尾 ⇒
-            #    不挂起 ⇒ 打不断；**晚切**（用户已经看到字再点停止）才露出来。
-            #    ⇒ 两条一起改：① **同步**收尾提到 `await` 之前 · ② 关流用 shield **护住**。
-            if outcome == "cancelled":
-                # 判据①日志有 cancel 事件 · 判据③的**观测对象**（Prometheus，Grafana 可见）
-                track_stream_cancel(ENDPOINT)
-                logger.info(f"[cancel] 客户端断开，已停止生成并关闭上游流 endpoint={ENDPOINT}")
-                # 🔴 `③` Task 6（`B3`）：把已经生成的那半截**补存进历史**（⛔ 不是直接丢）。
-                #    ⚠️ 放**这里**（`finally`）而不是 `except CancelledError` —— 与下面 `aclose()`
-                #       同一个理由：Starlette 2.4 分支抛的是 `GeneratorExit`，**不进那个 `except`**
-                #       ⇒ 写在那儿会**静默不存**。
-                #    ⚠️ `append_chat_history` 是**同步**的（`api/cache.py:39`）—— 这正是它
-                #       能排在 `await` 之前的原因：**不 await ⇒ 二次取消打断不了它**。
-                _persist_interrupted_turn(user_name, req.question, collected_parts)
+        ⚠️ `[DONE]` 排在 `sources` **之前**不是笔误，是本端点一直以来的线上契约（前端已按此适配）。
+           抽公共层**不是**顺手改行为的理由 —— 所以骨架**不替我们补 `[DONE]`**，
+           整条尾巴交给本函数自己产（见 `api/sse.py` 的「②」）。
+        """
+        # 发送结束信号
+        yield DONE_FRAME
+        # ---- 在这里记录对话历史 ----
+        # 生成完成后，将本轮问答自动存入 Redis
+        full_answer = "".join(collected)
+        append_chat_history(user_name, "user", req.question)       # 记录用户问题
+        append_chat_history(user_name, "assistant", full_answer)   # 记录助手完整回答
+        # 如果有引用，在结束后发送来源列表
+        if req.citations and sources_list:
+            yield sse_frame({"sources": sources_list}, ensure_ascii=True)
 
-            # 🔴🔴 **本任务的核心动作**：客户端断开后**主动关掉上游 HTTP 流**。
-            #    不关 ⇒ 上游继续生成、**继续计费**，而前端看起来一切正常（它只是不显示了）
-            #    —— 硬门 C 标「最容易假完成」就是这个形态。
-            #    ⚠️ `shield=True` 是**必须**的：取消作用域会**在每个 await 点反复投递**取消，
-            #       不护住 ⇒ "关"这个动作每次都半途而废（实测 `aclose` 就抛在这儿）。
-            if stream is not None:
-                with anyio.CancelScope(shield=True):
-                    await stream.aclose()
+    async def _on_error(exc, collected):
+        """🔴 **错误路径的旧行为：只有 error 帧、没有 `[DONE]`** —— 显式覆盖骨架的默认尾巴。
 
-        # 6. 返回SSE流式响应（禁用缓冲）
-    return StreamingResponse(
-        generate(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no"  # 禁用Nginx缓冲（如果有）
-        }
-    )
+        ⚠️ 骨架的默认是"error 帧 + `[DONE]`"（= `/agent/*` 四条链的现状）。本端点**故意不要**它：
+           **`[DONE]` 会被读成"正常收尾"**，而本端点今天靠"**没有** `[DONE]`"分辨出错
+           ⇒ 加上它会把"出错"变得**像正常结束**。
+        """
+        # 兜底：其他未知错误
+        print(f"流式生成出错: {exc}")
+        yield sse_frame({"error": str(exc)}, ensure_ascii=True)
+
+    return sse_response(sse_stream(
+        # 🔴 上游必须是**异步**的（`③` Task 5 · `B2`）：
+        #    同步 `for chunk in stream` 会**阻塞事件循环**，取消得等"下一块到达"才送得进来
+        #    ⇒ 上游卡住时，最坏要等一整个 chunk 的时间才停得下来。
+        lambda: get_llm_stream().astream(messages),
+        endpoint=ENDPOINT,
+        # ⚠️ 这是**裸 LLM**（不是图）⇒ 用 `llm_chunk_text`。空 `content` 由它一并挡掉
+        #    （不过滤 ⇒ 前端收到一串空白帧）。
+        extract=llm_chunk_text,
+        on_complete=_complete,
+        # 🔴 `③` Task 6（`B3`）：取消时把**已经生成的那半截**补存进历史（⛔ 不是直接丢）。
+        #    ⚠️ 它**必须是同步的**（`append_chat_history` 是同步函数，`api/cache.py:39`）——
+        #       骨架会在 `await aclose()` **之前**调它，这正是"晚切也存得下"的原因（`DEC-054`）。
+        #    ⚠️ 骨架的 `logger.info` 与这里的 `print` 不冲突：前者进日志文件，后者仍在 stdout。
+        on_cancel=lambda collected: _persist_interrupted_turn(user_name, req.question, collected),
+        on_error=_on_error,
+        # 🔴 **`ensure_ascii=True` 不是可有可无的**：本端点三帧一直用**默认的 `True`**
+        #    （中文变 `\uXXXX`），而骨架的默认是 `False`（中文原样）⇒ 不显式传，**线上字节就变了**。
+        #    ⚠️ 两种编码 **JSON 解码后值相同**（前端走 `JSON.parse`，功能无感）——
+        #    但它会让"逐帧等价"从"字面为真"变成"差不多"⇒ 本轮保持原字节，统一与否另案裁。
+        ensure_ascii=True,
+        # ⚠️ 旧实现在每次 `yield` 后有 `await asyncio.sleep(0.01)` **限速** —— 本轮**不改节奏**，
+        #    照旧传下去。⛔ 别因为"抽公共"就悄悄删掉它。
+        chunk_delay=0.01,
+    ))
 
 # ==================== WebSocket 端点 ====================
 # 模拟: 客户端发送用户问题，服务端模拟 Agent 的思考-行动-观察循环

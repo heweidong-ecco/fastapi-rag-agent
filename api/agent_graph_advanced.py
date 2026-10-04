@@ -13,6 +13,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from llm_factory import make_llm   # ①b Task 5：model / api_key / base_url / max_tokens 的唯一落点
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage,SystemMessage
+from langchain_core.runnables import RunnableConfig   # B1：节点要靠它把回调接进模型调用
 from datetime import datetime
 from token_tracker import record_usage
 # 新增 预估消耗的前置检查
@@ -294,13 +295,31 @@ async def get_llm_with_mcp_tools():
         })
     return llm.bind_tools(langchain_tools)
 
+# ==================== 流式白名单（B1 · 2026-10-04）====================
+# 🔴 **`B1`：可流节点名单放在【图模块里】，⛔ 端点不许自己抄一份字面量**（理由见
+#    `api/agent_graph.py` 同名常量处 —— 一个名字两个来源必然漂移，而漂移是**静默**的）。
+# ⚠️ 必须放在**模块级**（⛔ 不能放进 `build_mcp_agent()`）：端点是按
+#    `agent_graph_advanced.STREAMABLE_NODES` 取的，函数体里的是局部名，外面拿不到。
+# ⛔ `tools` **不在**里面：它不调 LLM（无字可流），且会把 `ToolMessage` 当"新消息"发出来。
+STREAMABLE_NODES = frozenset({
+    "agent",   # 决策节点：答案 + `tool_calls`（`DEC-050` 那个「多轮」场景的主角）
+    "chat",    # 兜底对话节点：**最终答案就是它生成的** ⇒ 不流它，流式端点等于白开
+})
+
+
 # ==================== 构建图 ====================
 def build_mcp_agent():
     workflow = StateGraph(AgentState)
 
     # ==================== chat_node：兜底对话节点 ====================
-    async def chat_node(state: AgentState):
-        """处理不需要工具调用的直接对话，或工具调用完成后的最终总结"""
+    async def chat_node(state: AgentState, config: RunnableConfig):
+        """处理不需要工具调用的直接对话，或工具调用完成后的最终总结
+
+        🔴 **`B1`（2026-10-04）：改真流式** —— 本节点是 `async`，所以走 `astream` 并把
+           `config` 转发下去（`DEC-050`：声明 `config` + 转发，是出不出 token 的**唯一条件**）。
+           ⛔ **别照抄** `agent_graph.py` / `agent_checkpointer.py` 那两处 —— 那两处是**同步**
+           节点、用同步 `.stream()`；这里改成同步会阻塞事件循环。
+        """
         # 构建带记忆注入的 system prompt
         system_prompt = "你是一个智能助理，请直接回答用户的问题。"
         # 导入长期记忆mem0模块
@@ -317,8 +336,15 @@ def build_mcp_agent():
             }
 
         messages = [SystemMessage(content=system_prompt)] + state["messages"]
-        response = llm.invoke(messages)
-        
+        # 🔴 B1：真流式（`astream` + 转发 `config`）。 ⚠️ 用 `+` 聚合（`AIMessageChunk.__add__`），
+        #    ⛔ 不是 `content +=` —— 那会丢掉碎片化的 `tool_calls`。
+        # 🔴 **必须遍历【所有】块**，⛔ 不许跳过 `content` 为空的块：provider 把
+        #    `usage_metadata` 挂在**最后一块**（`content=''`）上（实测，`探针-流式与记账.py`）
+        #    ⇒ 跳过它，**下面那段记账静默失效**，而接口一切正常。
+        response = None
+        async for chunk in llm.astream(messages, config=config):
+            response = chunk if response is None else response + chunk
+
         # 新增 统计 Token 消耗
         if hasattr(response, "usage_metadata"):
             usage = response.usage_metadata
@@ -340,7 +366,14 @@ def build_mcp_agent():
         }
     # ==================== agent_decide 节点（保持原有逻辑） ====================
     # 定义 agent_decide 节点（异步版本，动态绑定工具）
-    async def agent_decide(state: AgentState):
+    async def agent_decide(state: AgentState, config: RunnableConfig):
+        """决策节点（`B1` · 2026-10-04 改真流式）。
+
+        ⚠️ 与 `chat_node` 同一条：**async 节点用 `astream` + 转发 `config`**。
+        ⚠️ **`+` 聚合在这里是【必须】的，不是风格问题**：`tool_calls` 是碎片化到达的，
+           只拼 `content` 会把它们丢掉 ⇒ `should_continue` 判不出 `"tools"`
+           ⇒ 直接跳去 `chat` 出最终答案，**工具永远不会被执行**，而接口一切正常。
+        """
         # ⚠️ 预算检查必须在 invoke() **之前** —— 放在之后钱已经花了，只能丢弃结果、拦不住
         #    （2026-09-16 上移；见 docs/decisions/DEC-002）
         # 预估本次调用消耗（经验值：决策通常消耗200-500 tokens）
@@ -352,7 +385,10 @@ def build_mcp_agent():
             }
 
         llm_with_tools = await get_llm_with_mcp_tools()
-        response = llm_with_tools.invoke(state["messages"])
+        # 🔴 B1：真流式 —— 同 `chat_node`（`astream` + `config`，`+` 聚合遍历所有块）。
+        response = None
+        async for chunk in llm_with_tools.astream(state["messages"], config=config):
+            response = chunk if response is None else response + chunk
         # 记录决策过程
         if hasattr(response, "tool_calls") and response.tool_calls:
             for tc in response.tool_calls:

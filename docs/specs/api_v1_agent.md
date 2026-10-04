@@ -2,17 +2,20 @@
 
 | 项 | 内容 |
 |---|---|
-| **状态** | 🟡 **可用；流式【有了第一条】**（`③` Task 4 · `B1` · 2026-10-03）—— ⚠️ **但只有 `/agent/langgraph_chat/stream` 这一条**，其余 **29 条仍全非流式**<br>🔵 **改造中**：本文件下方有 **实施计划 ②**（人工接管 · **已完成**）与 **③**（流式与取消 · **进行中，还剩 `B2`/`B3`**）<br>✅ **2026-10-03（`②` Task 2 · `B5`）**：新增 **`GET /agent/pending`** ⇒ 路由 **28 → 29**<br>✅ **2026-10-03（`②` Task 3 · `B6`）**：`POST /agent/approve` 增加可选参数 **`edited_answer`** ⇒ **硬门 D 三段齐了**<br>🔵 **2026-10-03（`③` Task 4 · `B1`）**：新增 **`POST /agent/langgraph_chat/stream`**（SSE）⇒ 路由 **29 → 30**。📄 `DEC-050`<br>✅ **2026-10-03（`③` Task 5 · `B2`）**：新加的这条流式路由**补上了 cancel 传播**（关图的流 + 记数）—— `DEC-050` §遗留·3 自己点的那个洞**已堵**。📄 `DEC-052`<br>🔴 **2026-10-03（`DEC-056` 丙段）· 三条口径变了**：<br>① **进图的 checkpoint 键**由裸 `thread_id` 改成 **`session_key(user_name, thread_id)`**（4 张图 · 7 处）；⚠️ **响应仍回显原值**<br>② **`/agent/approve` 加了归属校验**（**本人或 admin**）+ **按登记表里的 `graph` 字段路由**；⛔ 它**不再**直接吃 `agent_graph` 写死<br>③ **`/agent/memory_chat` 接上审批门**（`interrupt_before=["approval"]`）⇒ **`DEC-051` §遗留·2 关闭** |
-| **对外提供** | 30 个路由（`/agent/langgraph_chat` · **`/agent/langgraph_chat/stream`** · `/agent/approve` · `/agent/pending` · `/agent/mcp_chat` · `/agent/advanced_chat` · `/agent/plan_execute` · `/agent/token/*` …）· `summarize_agent_result()` |
-| **谁在用** | 前端（未做）· `test_public_paths.py` 等 |
-| **规模** | **1007 行**（`scripts/spec_status.sh` 口径 = **本仓口径**；`wc -l` 报 **1006** —— 本文件**末行没有换行符** ⇒ 少算 1，⛔ **不是笔误**，同 `agent_graph.py`）<br>⚠️ **别抄这个数** —— 它当天已被重取过**五次**：743 → 835 → 875 → 894 → **1006/1007** |
+| **状态** | 🟢 **可用；流式【5 条 · 对话链全齐】**（`③` Task 4 · `B1` · 2026-10-03 第一条 ⇒ **2026-10-04 补足剩余 4 条**）—— 5 条"会逐字生成答案"的链**全部**有 SSE 版本<br>⚠️ **其余 29 条（查询 / 管理 / 记账类）仍全非流式** —— 它们产出的**不是逐字生成的文本**（token 用量 / 工具健康 / 预算 / 轨迹 / 记忆增删），**流式对它们没有意义**。⛔ **这一条是【本批的判断】，没走业务裁定**（硬门 A 要的是"**该流的流**"）<br>✅ **改造收口**：本文件下方有 **实施计划 ②**（人工接管 · **已完成**）与 **③**（流式与取消 · **已完成** —— `B1`/`B2`/`B3` 全部落地，`B1` 的最后 4 条链于 **2026-10-04** 补齐）<br>✅ **2026-10-03（`②` Task 2 · `B5`）**：新增 **`GET /agent/pending`** ⇒ 路由 **28 → 29**<br>✅ **2026-10-03（`②` Task 3 · `B6`）**：`POST /agent/approve` 增加可选参数 **`edited_answer`** ⇒ **硬门 D 三段齐了**<br>🔵 **2026-10-03（`③` Task 4 · `B1`）**：新增 **`POST /agent/langgraph_chat/stream`**（SSE）⇒ 路由 **29 → 30**。📄 `DEC-050`<br>✅ **2026-10-03（`③` Task 5 · `B2`）**：新加的这条流式路由**补上了 cancel 传播**（关图的流 + 记数）—— `DEC-050` §遗留·3 自己点的那个洞**已堵**。📄 `DEC-052`<br>🔴 **2026-10-03（`DEC-056` 丙段）· 三条口径变了**：<br>① **进图的 checkpoint 键**由裸 `thread_id` 改成 **`session_key(user_name, thread_id)`**（4 张图 · 7 处）；⚠️ **响应仍回显原值**<br>② **`/agent/approve` 加了归属校验**（**本人或 admin**）+ **按登记表里的 `graph` 字段路由**；⛔ 它**不再**直接吃 `agent_graph` 写死<br>③ **`/agent/memory_chat` 接上审批门**（`interrupt_before=["approval"]`）⇒ **`DEC-051` §遗留·2 关闭**<br>🔵 **2026-10-04（`B1` 剩余 4 条链）· 一次加 4 条流式路由** ⇒ 路由 **30 → 34**：`advanced_chat/stream`（`:473`）· `plan_execute/stream`（`:685`）· `memory_chat/stream`（`:843`）· `mcp_chat/stream`（`:1198`）。<br>· 同时**把原有的 `langgraph_chat/stream`（`:181`）一起改成走新共享层 `api/sse.py`** ⇒ 本文件里**不再有自己的 SSE 生成器**（逐帧等价，`test_agent_sse.py` + `test_cancel_propagation.py` 全绿且未改）。<br>· ⚠️ **每条都必须保留那两道前置闸**（`check_session_token_budget` `B8` + `circuit(global_key())` `B11`）—— 有两个 AST 守卫挖的是**端点函数体内部**（`api/test_session_budget_wiring.py:65` · `api/test_breaker_wiring.py:44`）⇒ **闸必须在函数体里，⛔ 不能挪进共享层**。<br>· 🔴 **链 D（`plan_execute/stream`）与 A/B/C **形态不同**：`plan_task` 是**同步函数**（跑在 `asyncio.to_thread` 里）⇒ 靠 **`_ThreadTokenBridge`**（`:562`）把 token 从线程送回事件循环；且**它只流"规划段"**，之后是**一长段静默**（`execute_plan` 不流）—— ⛔ 别当成 bug。<br>📌 守卫 `api/test_agent_stream_chains.py`（**39 条**）· 骨架 ⇒ `docs/specs/sse.md` |
+| **对外提供** | **34 个路由**（含 **5 条 SSE**：`/agent/langgraph_chat/stream` · `/agent/advanced_chat/stream` · `/agent/plan_execute/stream` · `/agent/memory_chat/stream` · `/agent/mcp_chat/stream`；其余 `/agent/approve` · `/agent/pending` · `/agent/token/*` · `/agent/cost/*` …）· `summarize_agent_result()`（`:82`） |
+| **谁在用** | 前端（未做）· `test_public_paths.py` 等 · 🆕 `api/test_agent_stream_chains.py`（**39 条**，覆盖 4 条新链） |
+| **规模** | **1553 行**（`scripts/spec_status.sh` 口径 = **本仓口径**；`wc -l` 报 **1552** —— 本文件**末行没有换行符** ⇒ 少算 1，⛔ **不是笔误**，同 `agent_graph.py`）<br>⚠️ **别抄这个数** —— 它当天已被重取过**六次**：743 → 835 → 875 → 894 → 1006/1007 → **1552/1553**（本次 +546 行 = 4 条新端点 + `_ThreadTokenBridge` + 两条旧端点的接线改写） |
 
 ## ✅ 做了什么
 
-- **对话链**：`langgraph_chat`(:84) · `advanced_chat`(:154) · `plan_execute`(:183) · `memory_chat`(:227) · `mcp_chat`(:450)
+- **对话链**：`langgraph_chat`(:130) · `advanced_chat`(:432) · `plan_execute`(:633) · `memory_chat`(:789) · `mcp_chat`(:1133)
   · 🔵 **B8（2026-10-01）**：这 5 条**全部接上会话级 token 上限**（`check_session_token_budget`），触顶抛 `QUOTA_EXCEEDED`
-- **人工审批**：`POST /agent/approve`（`:151`）—— 批准 / 拒绝 / **改写后提交**，靠 `agent_graph` 的 `interrupt_before`
-  · 🔵 **改写后提交（`②` Task 3 · `B6` · 2026-10-03）**：可选参数 **`edited_answer`（`:155`）**。
+  · 🔵 **`B1` 剩余 4 条链（2026-10-04）**：同一批端点**各配一条 SSE 版** ⇒ `.../stream`（`:473` / `:685` / `:843` / `:1198`），
+    与 `langgraph_chat/stream`（`:181`）**共用 `api/sse.py`**。⚠️ **四条链的"可流节点名单"各不相同**，
+    且**住在各自的图模块里**（`STREAMABLE_NODES`）—— ⛔ 端点不许抄字面量（`DEC-051` 的教训：一个名字两个来源必然**静默**漂移）
+- **人工审批**：`POST /agent/approve`（`:300`）—— 批准 / 拒绝 / **改写后提交**，靠 `agent_graph` 的 `interrupt_before`
+  · 🔵 **改写后提交（`②` Task 3 · `B6` · 2026-10-03）**：可选参数 **`edited_answer`（`:304`）**。
     **批准 ∧ 给了改写** ⇒ 先 `update_state` 把它推成一条 **`AIMessage`**，再 `invoke(None, config)` 续跑；
     **不给** ⇒ 走原来的 `update_state(values=None)`（行为与改动前一致）；**拒绝** ⇒ 给了也忽略。
   · ⭐ **续跑形状被测试钉住**：`api/test_approval_resume.py`（6 条 · **纯离线 · 进 CI**）——
@@ -20,31 +23,42 @@
 - 🔵 **待接管队列（`②` Task 2 · `B5` · 2026-10-03）**：新增 **`GET /agent/pending`** —— 列出**当前在等接管的会话**
   （事实来源 = 新模块 **`api/pending_approvals.py`**，⛔ **不是从 checkpoint 反查** —— `MemorySaver` **没有"列出全部 thread"的 API**）。
   `langgraph_chat` 在拿到 `summary` 后**登记 / 注销**，`approve_agent_action` 在**每条 return 前**注销。
-- **⭐ `summarize_agent_result()`（`:43`）** —— 把图的运行结果翻成 `{"status": "pending_approval"/"answered", …}`，
+- **⭐ `summarize_agent_result()`（`:82`）** —— 把图的运行结果翻成 `{"status": "pending_approval"/"answered", …}`，
   并**把模型已写出的文字一并返回**（真实 LLM 常"先说一句再调工具"）
-- **预算**：`check_budget` 依赖（`:423`，抛 `AppException(QUOTA_EXCEEDED)`）· 6 个 `/agent/token/*` 查询路由
+- **预算**：`check_budget` 依赖（`:1089`，抛 `AppException(QUOTA_EXCEEDED)`）· 6 个 `/agent/token/*` 查询路由
 - 🔵 **成本可见两处（`①b` Task 7 · `B13` · 2026-10-03 · `DEC-047`）**：
-  · **`/agent/token/budget`（`:492`）** 补上**全站日级**三个字段（`global_daily_limit` / `global_used_today` / `global_remaining`）——
+  · **`/agent/token/budget`（`:1102`）** 补上**全站日级**三个字段（`global_daily_limit` / `global_used_today` / `global_remaining`）——
   在此之前 `B10`/`B11` 的全站额度**只有入口没有出口**，超了所有人吃 429 却**界面上看不到逼近**；
-  · **`/agent/cost/overview`（`:658`）** 数据源从 **`get_user_summary`（进程内存）** 换成 **`get_user_overview`（读库）**，
+  · **`/agent/cost/overview`（`:1360`）** 数据源从 **`get_user_summary`（进程内存）** 换成 **`get_user_overview`（读库）**，
   `by_purpose` 随之从**全站**变**本人**
-- 🔵 **Agent 端 SSE（`③` Task 4 · `B1` · 2026-10-03 · `DEC-050`）**：新增 **`POST /agent/langgraph_chat/stream`**
-  （紧跟在 `/agent/langgraph_chat` 之后）—— **本文件的第一条、也是目前唯一一条真流式路由**。
-  · **帧格式**：逐 token 一个 `data: {"content": "..."}`，最后一个是 `data: {…summary}`（含 `thread_id`/`status`/`answer`），
+- 🔵 **Agent 端 SSE —— 5 条（`③` Task 4 · `B1` · 2026-10-03 起；2026-10-04 补足 4 条 · `DEC-050`）**：
+  `POST /agent/{langgraph_chat, advanced_chat, plan_execute, memory_chat, mcp_chat}/stream`
+  · **帧格式**（A/B/C 三条一致）：逐 token 一个 `data: {"content": "..."}`，最后一个是 `data: {…summary}`（含 `thread_id`/`status`/`answer`），
     再 `data: [DONE]`；出错则 `data: {"error": "..."}` + `[DONE]`。
-  · **它真流式靠的是 `agent_graph.py` 那一侧**（`agent_decide` 声明 `config` + 转发 `.stream(config)`）——
-    ⛔ **本文件这边只负责"转发"**，接线错了接口**照样长得像流式**。📄 见 `docs/specs/agent_graph.md`
-  · ⚠️ **三条接线必须一致**：`stream_mode="messages"` · `meta["langgraph_node"] == "agent"` · **两条前置闸**
-    （`check_session_token_budget` `B8` + `circuit(global_key())` `B11`）与 `/agent/langgraph_chat` **同源**
-  · ⭐ **判据**（可打印）：`api/test_agent_sse.py`（12 例 · **纯离线 · 进 CI**）
-  · ⚠️ **`X-Accel-Buffering: no` 是必须的** —— 少了它，Nginx / Cloudflare 会把整段缓冲住 ⇒ **又变回假流式**（本仓要上 Cloudflare 隧道）
+    ⚠️ **链 D 是唯一例外**：流里是**正在生成的 JSON 片段**（`plan_task` 的输出被提示词要求是严格 JSON）⇒
+    **⛔ 前端不许把流到的文本直接渲染成计划**，只当"规划中"指示器；**终稿只看最后一帧**。
+  · **它真流式靠的是【图模块】那一侧**（节点声明 `config` + 转发 `.stream/.astream(config)`）——
+    ⛔ **本文件这边只负责"转发"**，接线错了接口**照样长得像流式**。📄 见 `docs/specs/agent_graph.md` 等 4 份
+  · ⚠️ **每条链的接线各不相同，别互相照抄**：链 A 必须 **`subgraphs=True`**（5 个子图，不开**一个字都流不出来**）；
+    链 C 的两个节点是 **`async`** ⇒ 图侧用 `astream`；A/B 的节点是**同步**的 ⇒ `stream`；
+    链 D **不是图**（同步函数 + `asyncio.to_thread`）⇒ 靠 `_ThreadTokenBridge`（`:562`）。
+  · ⚠️ **两条前置闸**（`check_session_token_budget` `B8` + `circuit(global_key())` `B11`）与各自**非流式版本同源**，
+    且**必须在端点函数体里** —— 两个 AST 守卫挖的就是函数体内部（见 `sse.md`）。
+  · ⭐ **判据**（可打印 · 全离线 · 进 CI）：`api/test_agent_sse.py`（12 例）· `api/test_cancel_propagation.py` ·
+    🆕 `api/test_agent_stream_chains.py`（**39 例** · 覆盖 4 条新链：逐 token / `aget_state` 汇总 / 断连关上游 / A 链白名单）
+  · ⚠️ **`X-Accel-Buffering: no` 是必须的** —— 少了它，Nginx / Cloudflare 会把整段缓冲住 ⇒ **又变回假流式**（本仓要上 Cloudflare 隧道）。
+    ✅ 现在它在共享层 `api/sse.py` 的 `SSE_HEADERS` 里，**5 条一起有**
 - **工具**：`/agent/tool_health` · `/agent/tool_versions` · `/agent/available_tools` · `/agent/mcp_tools_dynamic`
 
 ## 🟡 做到哪 / 缺什么
 
-- 🔵 ~~**29 个路由全非流式** ⇒ **硬门 A 的缺口**~~ ⇒ **2026-10-03 起缺口【开了一条】**（`③` Task 4 · `B1`）：
-  新增 `/agent/langgraph_chat/stream`。⚠️ **但只有这一条** —— **其余 29 条仍全非流式**，
-  硬门 A 要的是"**该流的流**"，⛔ **不是"流了一条就算完"**。📄 `DEC-050`
+- ✅ ~~**29 个路由全非流式** ⇒ **硬门 A 的缺口**~~ ⇒ **2026-10-04 起【对话链全部补齐】**（`③` Task 4 · `B1`）：
+  5 条"会逐字生成答案"的链**全部**有 SSE 版（`/agent/langgraph_chat/stream` 于 2026-10-03，
+  其余 4 条于 2026-10-04）。⚠️ **剩下的 29 条是非流式，但它们不是"缺口"** ——
+  它们是**查询 / 管理 / 记账类**（token 用量 · 工具健康 · 预算 · 轨迹 · 记忆增删），
+  **产出的不是逐字生成的文本** ⇒ 流式无意义。⛔ **这句是【本批的判断】，没走业务裁定**（若业务方认为还有该流的，这条要改）。
+  ⚠️ **别只看条数**：`grep -c '^@router' api/api_v1_agent.py` ⇒ **34**，其中 **5** 条带 `/stream`。
+  硬门 A 要的是"**该流的流**"，⛔ **不是"流了几条算完"**。📄 `DEC-050`
   · ✅ ~~⚠️ **`B2`（cancel 传播到上游）**~~ ⇒ **2026-10-03（`③` Task 5）【已做】** ——
   客户端断开 ⇒ 关掉图的流（`aclose()`）+ 记 `stream_cancelled_total`。📄 `DEC-052`
   · ✅ ~~**`B3`（半截答案怎么处理）【仍未做】**~~ ⇒ **2026-10-03（`③` Task 6）已裁**：「**存**」，
@@ -531,7 +545,7 @@ async def list_pending_approvals(
     return {"count": len(rows), "items": rows, "requested_by": user_name}
 ```
 
-在 `langgraph_chat`（`:84`）里，拿到 `summary` **之后**：
+在 `langgraph_chat`（`:130`）里，拿到 `summary` **之后**：
 
 ```python
     if summary.get("status") == "pending_approval":
@@ -695,13 +709,15 @@ git commit -m "feat(硬门D): B6 —— 接管后续跑可带人工改写，并�
 
 ---
 
-# 🔵 实施计划 ③ · **流式与取消**（2026-09-30 立 · **2026-10-03 执行中**）
+# 🔵 实施计划 ③ · **流式与取消**（2026-09-30 立 · **2026-10-03 执行 · 2026-10-04 收口**）
 
 > **来源**：`后端补齐清单-待裁-20260929.md` 的 **B1 · B2 · B3**。
-> **业务方已裁**：**B1 范围 = 只做 `/agent/langgraph_chat`**；**B2 验收 = 先以本机证据为准**。
+> **业务方已裁**：~~**B1 范围 = 只做 `/agent/langgraph_chat`**~~；**B2 验收 = 先以本机证据为准**。
+> 🔴 **2026-10-04 该范围【扩大】**：业务方当天裁「**剩余 4 条链本轮一起做**」（含 `plan_execute`，不延后）
+> ⇒ `B1` 的完成口径从「**1 条**」变成「**5 条对话链全齐**」。见下方 **Task 7**。
 > ⚠️ **排最后** —— B2 自标「**最容易假完成**」，且它的落点**依赖 B1 做完**。
 >
-> 📌 **进度**：**Task 4（`B1`）✅ 做完** · **Task 5（`B2`）⬜ 未做** · **Task 6（`B3`）⬜ 未做**
+> 📌 **进度**：**Task 4（`B1` 第 1 条）✅** · **Task 5（`B2`）✅** · **Task 6（`B3`）✅** · 🆕 **Task 7（`B1` 剩余 4 条）✅ 2026-10-04**
 
 ## Task 4 · **B1** · Agent 端 SSE（**范围：只 `/agent/langgraph_chat`**）· ✅ **2026-10-03 完成**
 
@@ -710,9 +726,13 @@ git commit -m "feat(硬门D): B6 —— 接管后续跑可带人工改写，并�
 **Interfaces:** `POST /agent/langgraph_chat/stream` —— `media_type="text/event-stream"`
 
 > ### ⛔ **一条硬约束（本次核查发现⑥）**
-> **不能照抄 `api_v1_rag.py:655-662` 的写法** —— 那里 `.stream()` 是**同步迭代**，
-> 在 async 生成器里 `for` **会阻塞事件循环**（`:662` 的 `await asyncio.sleep(0.01)` 是唯一让出点）。
+> **不能照抄 `api_v1_rag.py` 当时的写法** —— 那里 `.stream()` 是**同步迭代**，
+> 在 async 生成器里 `for` **会阻塞事件循环**（当时靠每次 `yield` 后的 `await asyncio.sleep(0.01)` 让出）。
 > ⇒ Agent 端要用 **`astream`** 之类的异步迭代。
+> 🔴 **2026-10-04 现状（`B1` 剩余 4 条链）**：RAG 那处**已换成 `get_llm_stream().astream(messages)`**
+> （`api_v1_rag.py:757`），**原 `:655-662` 那个反面例子已经不存在了** ——
+> ⚠️ 所以**这条注释现在指不到现场**，改指 `api/sse.py` 与 `docs/specs/sse.md` 的约束③。
+> （`chunk_delay=0.01` 的限速**保留着**，⛔ 别删。）
 
 > ### 🔴🔴 **计划没覆盖的那一句（实际做的时候才发现它才是难点）**
 > 计划把这件事当成"**服务端加条 SSE 路由**"。**真正决定成不成的在图的另一侧**：
@@ -819,3 +839,54 @@ Test `api/test_cancel_propagation.py`（10 例 · 纯离线 · 进 CI）
       那要真 LLM + 真 Redis 续问一轮（本机 `MemorySaver`/Redis 都在，**是可做的，只是本轮没做**）
 
 - [x] Step 5 写进 `DEC-053` + `docs/specs/api_v1_rag.md`（本文件同改）
+
+## Task 7 · **`B1` 剩余 4 条链** · ✅ **2026-10-04 完成**（业务方当天裁「本轮一起做」）
+
+**Files:** `api/api_v1_agent.py`（+4 路由 · 抽走自己的 SSE 生成器）· `api/api_v1_rag.py`（同改）·
+**新建** `api/sse.py` + `docs/specs/sse.md` · **新建** `api/test_agent_stream_chains.py` ·
+图侧 4 个模块（见下表）· `api/plan_execute.py`
+
+**Interfaces:** `POST /agent/{advanced_chat, plan_execute, memory_chat, mcp_chat}/stream` —— 均 `text/event-stream`
+
+> ### 🔴 **落地形状：抽共享层，⛔ 不是复制第 5、6 份内联生成器**（业务方 2026-10-04 裁）
+> `api/sse.py` 收的是 **5 条实测出来的顺序约束**（同步收尾排在 `await` 前 / shield 关上游 /
+> ⛔ 不吞 `CancelledError` / `X-Accel-Buffering: no` / 汇总只从图状态取），
+> **⛔ 不是"重复代码"** —— 判据见 `docs/specs/sse.md` 的 ①~⑨ 表。
+
+**四条链**（⚠️ **每条形态都不同，⛔ 别互相照抄**）：
+
+| 链 | 端点 | 图 / 实现 | 改了哪个模块 | 形态 |
+|---|---|---|---|---|
+| A | `advanced_chat/stream`（`:473`） | `advanced_agent` | `agent_graph_advanced_learning.py`（**4 个节点**） | 同步节点 · 🔴 **必须 `subgraphs=True`** |
+| B | `memory_chat/stream`（`:843`） | `checkpointer_agent` | `agent_checkpointer.py`（1 个） | 同步节点 · 带 `interrupt_before` |
+| C | `mcp_chat/stream`（`:1198`） | `mcp_agent` | `agent_graph_advanced.py`（2 个） | ⚠️ **节点是 `async`** ⇒ 用 `astream` |
+| D | `plan_execute/stream`（`:685`） | **不是图** —— `plan_task()` 同步函数 | `plan_execute.py`（`_invoke_llm` 加 `on_token`） | 🔴 **线程 → 事件循环**，见下 |
+
+- [x] Step 1 **Step 0 三个 spike 先跑**（仓规：「**写不出命令的，就是还没核过**」）
+      ⇒ ①子图节点名 ②`usage_metadata` 还在不在（**真打 API**）③规划段流出的是什么
+      ⚠️ ②的结论**与预想相反**（usage 挂在**最后一块**上）⇒ 换来一条实现约束：**聚合必须遍历所有块**。
+      🔴 **附带撞出一个既有 bug**（`agent_checkpointer.py:83` 的 `hasattr(response, "usage")` **恒为 False**
+      ⇒ 链 B 的记账**从来没执行过**）—— ⛔ **本轮不修**（修了=开始拦人=行为变更，要单独裁）。
+      勘察 ⇒ `fastapi-rag-agent-TODO待办/硬门A-Agent端流式勘察-20261003.md` §8.5
+- [x] Step 2 建 `api/sse.py` + spec + `api/test_sse_layer.py`（**15 例**）
+- [x] Step 3 两条既有点端改用它 ⇒ ⭐ **判据 = 两份既有用例"全绿且 diff 为空"**
+      （`api/test_agent_sse.py` + `api/test_cancel_propagation.py`，44 passed）—— ⛔ **没有新加断言**
+- [x] Step 4 改节点（A 4 个 · B 1 个 · C 2 个）—— **每个只加 `config` 形参 + 换流式 + `+` 聚合**
+      ⚠️ **⛔ 没有把任何同步节点改成 `async def`**（`DEC-050`：同步 `graph.invoke()` 会当场 `TypeError`）
+- [x] Step 5 四条新路由（**两条前置闸照抄，⛔ 不挪进共享层** —— 两个 AST 守卫挖的是函数体内部）
+      · 🔴 **链 D 的桥**：`_ThreadTokenBridge`（`:562`）—— `plan_task` 跑在 `asyncio.to_thread` 里，
+      token 靠 `loop.call_soon_threadsafe(queue.put_nowait, …)` 回主循环；`aclose()` **协作式**
+      （置标志 + 排空 + 取消任务），⛔ **不 `await thread.join()`**（线程杀不掉）。
+      ⚠️ **它用 `extract=None`**（桥吐出来的**就是文本**）—— 同族的 `graph_message_text` 会 `ValueError`。
+      ⚠️ **链 D 只流「规划段」** ⇒ 之后是**一长段静默**（`execute_plan` 不流），然后才是末帧 —— ⛔ **不是 bug**。
+- [x] Step 6 新测试 `api/test_agent_stream_chains.py`（**39 例**，夹具**复用**既有两份，⛔ 不新造一套）
+      四条链各测：①**逐 token 出帧** ②**汇总来自 `aget_state`**（⛔ 不是攒块）③**断连 ⇒ 关上游 + 计数 + 日志**
+      + A 链**额外**：`supervisor`/`calc_execute` 的字**一帧都不许漏**（那条 ⭐ 表的红线）
+      + D 链**额外**：`_invoke_llm` 换流式后**仍然记账**（⛔ 不能拿"接口正常"代替）
+- [x] Step 7 文档收口（本文件 · `sse.md` · `api_v1_rag.md` · 4 份图 spec · `ROADMAP` · `待办总表` ·
+      `接口契约` · Postman · `CHANGELOG` · `DEC-059`）
+
+⚠️ **本批唯一一处"改了线上字面"**：Agent 链取消时那句日志从
+**「已停止生成并关闭图的流」** 变成共享层的 **「已停止生成并关闭上游流」**
+—— ⛔ **没有测试断言这句**，且**它只在日志里**（前端/接口看不到）。
+📌 **它是"两条链各自措辞"被共享层统一后的必然结果**，有意为之 ⇒ 记在 `DEC-059`。

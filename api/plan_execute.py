@@ -128,7 +128,8 @@ class BudgetExceededError(Exception):
     """Token 预算不足 —— 由 `_invoke_llm` 抛出，端点层捕获后转成 QUOTA_EXCEEDED。"""
 
 
-def _invoke_llm(llm, messages, purpose: str, user_name: str = "unknown") -> object:
+def _invoke_llm(llm, messages, purpose: str, user_name: str = "unknown",
+                on_token=None) -> object:
     """**统一的 LLM 调用入口**：先查预算 → 调用 → 再记【真实用量】。
 
     🔴 2026-09-21 新增（§十四 · ③-b）。**此前 `plan_execute` 完全不查预算、不记账** ——
@@ -138,12 +139,32 @@ def _invoke_llm(llm, messages, purpose: str, user_name: str = "unknown") -> obje
     📌 **照抄 2 代 `/agent/mcp_chat` 的模式**（`agent_graph_advanced.py:303/315`），**不另起炉灶**：
        同样是 `check_token_budget` → 调用 → 从 `usage_metadata` 取真实 token → `record_usage`。
        这里只是把它包成**一个入口**，免得在四个调用点各抄一遍。
+
+    🔴 2026-10-04（`B1`）新增 `on_token`：**在别的线程里**逐块回调（链 D 的真流式）。
+       默认 `None` ⇒ 行为与改动前**逐字一致**（`llm.invoke`，不回调）。
+       ⚠️ 传了它之后就换 `llm.stream(...)` 并**逐块回调 + `+` 聚合**——
+          ⛔ **聚合循环必须遍历【所有】块**，不许跳过 `content` 为空的块：
+          实测本仓 provider 把 `usage_metadata` 挂在**最后一块**（`content=''`）上
+          ⇒ 跳过它，**下面的 `record_usage` 就静默不执行了**，而接口一切正常。
+          📄 判据（可打印）⇒ `fastapi-rag-agent-TODO待办/探针-流式与记账.py`
     """
     allowed, reason = check_budget_before_call(user_name, purpose=purpose)
     if not allowed:
         raise BudgetExceededError(reason)
 
-    response = llm.invoke(messages)
+    if on_token is None:
+        response = llm.invoke(messages)
+    else:
+        # 🔴 `llm.stream(...)` 是**同步**迭代器（本文件跑在 `asyncio.to_thread` 的工作线程里）
+        #    ⇒ ⛔ 别在这里写 `async for`（那是"在同步函数里 await"，直接是语法错误）。
+        response = None
+        for chunk in llm.stream(messages):
+            # ⚠️ `+` 聚合（`AIMessageChunk.__add__`），⛔ 不是 `content +=` —— 那会丢掉
+            #    碎片化的 `tool_calls` 与最终块上的 `usage_metadata`。
+            response = chunk if response is None else response + chunk
+            # 发帧侧按 `if chunk.content` 过滤**可以**（聚合已经完成，见上面 ⚠️）。
+            if chunk.content:
+                on_token(chunk.content)
 
     # ⚠️ 有 `usage_metadata` 才记账 —— 没有就**如实不记**，不编一个数字进去
     usage = getattr(response, "usage_metadata", None) or {}
@@ -184,7 +205,8 @@ def _tool_arg_field(tool_name: str):
         return fields[0] if len(fields) == 1 else None
     return None
 
-def plan_task(user_goal: str, user_name: str = "unknown") -> List[Dict]:
+def plan_task(user_goal: str, user_name: str = "unknown",
+              on_token=None) -> List[Dict]:
     """
     将用户的复杂目标分解为有序的步骤清单。
 
@@ -194,6 +216,14 @@ def plan_task(user_goal: str, user_name: str = "unknown") -> List[Dict]:
         {"step": 2, "action": "计算同比增幅", "tool": "calculator", "input": "(120-100)/100"},
         ...
     ]
+
+    🔴 2026-10-04（`B1`）：`on_token` 透传给 `_invoke_llm` —— `/agent/plan_execute/stream`
+       靠它把**规划段**的 token 逐块送出来。默认 `None` ⇒ 行为与改动前一致。
+
+    ⚠️ **流出去的是【正在生成的 JSON 片段】，⛔ 不是人读终稿**（业务方 2026-10-04 裁定"甲"）。
+       理由：本函数要求严格 JSON 输出、下游 `json.loads` ⇒ 前端**只能**把它当"规划中"
+       指示器，终稿看**最后一帧汇总**。⛔ **别把流到的 JSON 直接渲染成计划**。
+       判据/上下文 ⇒ `docs/decisions/DEC-0xx`（本批）· `docs/specs/plan_execute.md`
     """
     system_prompt = """你是一个专业的任务规划助手。你的职责是将用户的目标分解为可执行的步骤清单。
 
@@ -227,6 +257,7 @@ __TOOL_LIST__
          HumanMessage(content=f"用户目标：{user_goal}\n\n请为此目标制定详细的步骤计划：")],
         purpose="plan_execute.plan",
         user_name=user_name,
+        on_token=on_token,      # 🔴 B1：规划段真流式（默认 None ⇒ 行为不变）
     )
 
     # 解析LLM返回的JSON

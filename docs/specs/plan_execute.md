@@ -2,10 +2,10 @@
 
 | 项 | 内容 |
 |---|---|
-| **状态** | 🟡 **可用** —— 规划 + 逐步**真调用工具**；有超时、有总预算、有重规划、有降级<br>🔴 **但查出 1 处真缺陷 + 5 处"看代码会误判"**（见下）<br>✅ 2026-10-01：三个 `_llm`（`:93` / `:251` / `:461`）接上 `MAX_TOKENS_AGENT`（`B7`）<br>✅ 2026-10-02（`①b` Task 5）：三个 `_llm` **改走 `llm_factory.make_llm("chat", "agent")`**（现于 `:92` / `:248` / `:455`）—— `model`/`api_key`/`base_url`/`max_tokens` 不再写在本地。<br>⚠️ **超时/重试没丢**：`timeout` / `max_retries` 走 `make_llm` 的 `**extra` **逐点透传**，**值一字符未变**（30/20/15 + `max_retries=1`）。<br>⚠️ `executor_llm` 的 `temperature=0.1` 是**本文件特有的**逐点调参，仍写在调用点上 |
-| **对外提供** | `plan_task` · `execute_plan` · `execute_plan_with_replan` · `BudgetExceededError` · 三个计算属性常量（`PLANNER_LLM_TIMEOUT` 等） |
-| **谁在用** | `api_v1_agent.py:16` 的 `POST /agent/plan_execute`（**唯一生产入口**）· `api/test_plan_execute_tools.py`（22 条） |
-| **规模** | 597 行（`wc -l`）· ⚠️ **文件内注释极厚**（绝大部分"为什么"已写在里面） |
+| **状态** | 🟡 **可用** —— 规划 + 逐步**真调用工具**；有超时、有总预算、有重规划、有降级<br>🔴 **但查出 1 处真缺陷 + 5 处"看代码会误判"**（见下）<br>🔵 **2026-10-04（`B1` 剩余 4 条链）：`_invoke_llm` / `plan_task` 各加一个 `on_token` 形参** —— 给 `/agent/plan_execute/stream` 用。<br>· ⚠️ **默认 `None` ⇒ 行为一字符不变**（`on_token is None` 时仍走 `llm.invoke`，`:155`）。<br>· ⚠️ **⛔ 它只让「规划段」能流** —— `execute_plan` / `generate_dynamic_input` / 质量检查**都还是非流式**（业务方 2026-10-04 裁「只流规划段」）⇒ **规划段之后是一长段静默**。<br>· 🔴 **流出的是【正在生成的 JSON 片段】**（提示词要求严格 JSON）⇒ ⛔ 前端别把流到的文本直接渲染成计划，只当"规划中"指示器。<br>· ⭐ **一条实现约束**：聚合循环**必须遍历【所有】块**（含 `content` 为空的）—— provider 把 `usage_metadata` 挂在**最后一块**上，跳过它**账就没了**（实测，探针 `探针-流式与记账.py`）。<br>· 📄 端点在 `docs/specs/api_v1_agent.md` Task 7 · 桥在 `_ThreadTokenBridge`<br>✅ 2026-10-01：三个 `_llm` 接上 `MAX_TOKENS_AGENT`（`B7`）<br>✅ 2026-10-02（`①b` Task 5）：三个 `_llm` **改走 `llm_factory.make_llm("chat", "agent")`**（现于 `:92` / `:279` / `:486`）—— `model`/`api_key`/`base_url`/`max_tokens` 不再写在本地。<br>⚠️ **超时/重试没丢**：`timeout` / `max_retries` 走 `make_llm` 的 `**extra` **逐点透传**，**值一字符未变**（30/20/15 + `LLM_MAX_RETRIES`）。<br>⚠️ `executor_llm` 的 `temperature=0.1` 是**本文件特有的**逐点调参，仍写在调用点上<br>⚠️ **行号口径**：本 spec 的行号为 **2026-10-04 之后**的实测值（`grep -n` 复核）；批 4 之后**执行段整体下移 ~28 行**，⛔ 别拿旧行号去找 |
+| **对外提供** | `plan_task(goal, user_name=…, on_token=None)` · `execute_plan` · `execute_plan_with_replan` · `BudgetExceededError` · 三个计算属性常量（`PLANNER_LLM_TIMEOUT` 等） |
+| **谁在用** | `api_v1_agent.py` 的 `POST /agent/plan_execute`（`:633` · **唯一生产入口**）· 🆕 `POST /agent/plan_execute/stream`（`:685`，经 `_ThreadTokenBridge`）· `api/test_plan_execute_tools.py`（22 条）· 🆕 `api/test_agent_stream_chains.py` |
+| **规模** | **620 行**（`wc -l` 与 `scripts/spec_status.sh` **一致** —— 本文件末行有换行符；⚠️ 2026-10-04 由 597 增到 620）· ⚠️ **文件内注释极厚**（绝大部分"为什么"已写在里面） |
 
 > ⚠️ **本 spec 不复述文件里已有的注释** —— 那会变成"两处真相"。**这里只写【代码与注释里都没有的】**。
 
@@ -14,45 +14,48 @@
 - **两段式**：`plan_task`（规划，`llm` = `planner_llm`）→ `execute_plan_with_replan`（逐步执行 + 重规划）
 - **⭐ 执行层是真调用**（2026-09-21 重写，§十四·N15）：从 `TOOL_HANDLERS` 取真 handler，
   入参字段名从 `args_schema` **派生**。⚠️ 真调 **四** 个工具：`calculator` / `date_today` / `web_search` / `execute_python`
-- **预算与记账**：`_invoke_llm()`（`:133`）是**统一入口** —— 查预算 → 调 → 记**真实** `usage_metadata`
-- **可算的最坏时长**：单次超时 `30/20/15`（`:70-72`）· `max_retries=1`（`:76`）· 总预算 `120s`（`:88`）
-- **降级**：同一工具连败 3 次 ⇒ 进 `failed_tools` ⇒ 后续走降级分支（**且保留真实失败原因**，`:311-314`）
-- **防 ```` ``` ```` 围栏**：`_strip_code_fence()`（`:400`）—— 否则 `execute_python` 直接语法错
+- **预算与记账**：`_invoke_llm()`（`:131`）是**统一入口** —— 查预算 → 调 → 记**真实** `usage_metadata`
+  · 🔵 **`B1`（2026-10-04）**：它多了一个 `on_token` 形参（`:132`）—— **给了就改走 `.stream()` 逐块回调**（`:155-168`）
+- **可算的最坏时长**：单次超时 `30/20/15`（`:69-71`）· `max_retries=LLM_MAX_RETRIES`（`:96`）· 总预算 `120s`（`:87`）
+- **降级**：同一工具连败 3 次 ⇒ 进 `failed_tools` ⇒ 后续走降级分支（**且保留真实失败原因**，`:340-342`）
+- **防 ```` ``` ```` 围栏**：`_strip_code_fence()`（`:428`）—— 否则 `execute_python` 直接语法错
 
 ## 🟡 做到哪 / 缺什么
 
-- 🔴 **`:355` 的重规划调用漏传 `user_name`** —— 见 ⚠️①（**本 spec 新查出**）
+- 🔴 **`:383` 的重规划调用漏传 `user_name`** —— 见 ⚠️①（**本 spec 新查出**）
 - ⚠️ **重规划那条路的 `user_name` 没有测试覆盖** —— `test_plan_execute_tools.py:221` 的 stub 是
   `lambda ctx: [...]`（**只接一个参数**）⇒ **它根本发现不了漏传**
-- ⚠️ `max_replans = 5`（`:273`）**写死在函数里**，⛔ 不是模块级常量、也不是 env
-  ⇒ 与三个超时常量（`:70-72`）**做法不一致**
+- ⚠️ `max_replans = 5`（`:301`）**写死在函数里**，⛔ 不是模块级常量、也不是 env
+  ⇒ 与三个超时常量（`:69-71`）**做法不一致**
 - ⬜ **`_tool_arg_field` 只支持【单一入参】的工具** ⇒ 执行层**实际可用工具比注册表少**（见 ⚠️③）
 
 ## ⚠️ 看代码会误判的地方 ⭐
 
 | 看代码会以为 | 实际 |
 |---|---|
-| 🔴 **① 「重规划也会算到发起人头上」** | ⛔ **不会** —— `:355` 是 **`plan_task(replan_context)`，漏传了 `user_name`** ⇒ 走默认 `"unknown"`。<br>**后果两条**：<br>· `check_budget_before_call("unknown")` ⇒ **不受该用户的预算约束**<br>· `record_usage(user_name="unknown")` ⇒ **算不到他头上**（`token_usage_logs` 里是 `unknown`）<br>⚠️ **最多 5 次重规划**（`:273`）⇒ **最多 5 次"白跑且不记账"的规划调用**。<br>🔴 **它和 `:514-523` 记录的是同一类缺陷** —— 那里（`dynamic_input`）漏传已修，**并在注释里写了教训「改完要按行号核，别只看替换成功了几处」**。<br>📌 **教训写了，但这个文件里的另一处漏了。** 修的时候**要把 `plan_task(` 全搜一遍**（只有 2 个调用点）。 |
-| 🔴 **② 「成败判定靠返回值/异常」** | ⛔ **靠【中文子串匹配】** —— `:334` `if "执行失败（已重试" in step_result` · `:530` `if "执行失败" in step_result`。<br>⚠️ 判据与 `:560` 那句**格式化文案**是**耦合**的：改一个字的措辞 ⇒ **失败判定静默失效**（看起来在重试、其实没有）。<br>⚠️ 更险：**工具的返回内容里恰好出现「执行失败」四个字**，也会被判成失败。<br>📌 与文件自己强调的「失败一律**抛异常**不吞成字符串」（`:575-578`）**方向相反** —— 异常是给**上游两条路**用的，而**这两处判定却回去看字符串**。 |
-| ⚠️ **③ 「`failed_tools` 把这个工具拉黑了」** | ⛔ **只在【这一次】计划里** —— `failed_tools` / `tool_failure_counts` 都是 `execute_plan_with_replan` 的**局部变量**（`:270-271`）⇒ **不跨请求、不过期**。<br>📌 **这正是 `B11` / `L2` 要做的"模型级黑名单"缺的那一半**（那个需要**跨请求**的状态）。 |
-| ⚠️ **④ 「注册表里 4 个工具都能被执行层用」** | ⚠️ **要看入参是不是单一字段** —— `_tool_arg_field` 只认**恰好一个**字段的工具；否则 `execute_single_step` 抛 `ValueError`（`:587-591`）。<br>⇒ **执行层的可用工具 ⊆ 注册表**。 |
-| ⚠️ **⑤ 「`execute_plan` 和 `execute_plan_with_replan` 是两个入口」** | ⛔ **不是** —— `execute_plan` 只是**一层别名**（`:394-398`，函数体就一行 `return execute_plan_with_replan(...)`）。 |
+| 🔴 **① 「重规划也会算到发起人头上」** | ⛔ **不会** —— `:383` 是 **`plan_task(replan_context)`，漏传了 `user_name`** ⇒ 走默认 `"unknown"`。<br>**后果两条**：<br>· `check_budget_before_call("unknown")` ⇒ **不受该用户的预算约束**<br>· `record_usage(user_name="unknown")` ⇒ **算不到他头上**（`token_usage_logs` 里是 `unknown`）<br>⚠️ **最多 5 次重规划**（`:301`）⇒ **最多 5 次"白跑且不记账"的规划调用**。<br>🔴 **它和 `:551` 附近记录的是同一类缺陷** —— 那里（`dynamic_input`）漏传已修，**并在注释里写了教训「改完要按行号核，别只看替换成功了几处」**。<br>📌 **教训写了，但这个文件里的另一处漏了。** 修的时候**要把 `plan_task(` 全搜一遍**（只有 2 个调用点）。<br>⚠️ **`B1`（2026-10-04）之后多了一个要一起看的地方**：`plan_task(` 现在还有**第 3 个**调用点 —— **端点里的 `/agent/plan_execute/stream`**（走 `asyncio.to_thread`，**那个是传了 `user_name` 的**）⇒ 全搜时应看到 **3 处**。 |
+| 🔴 **② 「成败判定靠返回值/异常」** | ⛔ **靠【中文子串匹配】** —— `:362` `if "执行失败（已重试" in step_result` · `:557` `if "执行失败" in step_result`。<br>⚠️ 判据与 `:587` 那句**格式化文案**是**耦合**的：改一个字的措辞 ⇒ **失败判定静默失效**（看起来在重试、其实没有）。<br>⚠️ 更险：**工具的返回内容里恰好出现「执行失败」四个字**，也会被判成失败。<br>📌 与文件自己强调的「失败一律**抛异常**不吞成字符串」**方向相反** —— 异常是给**上游两条路**用的，而**这两处判定却回去看字符串**。 |
+| ⚠️ **③ 「`failed_tools` 把这个工具拉黑了」** | ⛔ **只在【这一次】计划里** —— `failed_tools` / `tool_failure_counts` 都是 `execute_plan_with_replan` 的**局部变量**（`:298-299`）⇒ **不跨请求、不过期**。<br>📌 **这正是 `B11` / `L2` 要做的"模型级黑名单"缺的那一半**（那个需要**跨请求**的状态）。 |
+| ⚠️ **④ 「注册表里 4 个工具都能被执行层用」** | ⚠️ **要看入参是不是单一字段** —— `_tool_arg_field` 只认**恰好一个**字段的工具；否则 `execute_single_step` 抛 `ValueError`（`:611` / `:615`）。<br>⇒ **执行层的可用工具 ⊆ 注册表**。 |
+| ⚠️ **⑤ 「`execute_plan` 和 `execute_plan_with_replan` 是两个入口」** | ⛔ **不是** —— `execute_plan` 只是**一层别名**（`:422-426`，函数体就一行 `return execute_plan_with_replan(...)`）。 |
 | ⚠️ **⑥ 「这个文件里为什么这么做，看注释」** | ✅ **大部分确实在注释里**（这是它的优点）。⚠️ **但也意味着**：**结论与代码在同一处** ⇒ 改了代码容易忘记同步注释，**而注释比代码更容易被当真**。<br>📌 本 spec 只收**注释里没有的**；**注释里有的别在这里再抄一遍**（本仓「一份内容只在一处」）。 |
 
 ## 关联
 
 | 文档 | 说明 |
 |---|---|
-| `docs/specs/api_v1_agent.md` | **唯一生产入口** `POST /agent/plan_execute`（含 `asyncio.to_thread` 与 `BudgetExceededError` 的接法） |
-| `docs/specs/token_tracker.md` | `check_budget_before_call` / `record_usage` 的本尊；✅ **`B7` 的 3 处已在 2026-10-01 接完**（原 `:93/251/461`），2026-10-02 起**又收进 `api/llm_factory.py`** |
+| `docs/specs/api_v1_agent.md` | **唯一生产入口** `POST /agent/plan_execute`（`:633`，含 `asyncio.to_thread` 与 `BudgetExceededError` 的接法）· 🆕 **流式版** `POST /agent/plan_execute/stream`（`:685`）—— 见该 spec 的 **Task 7** |
+| `docs/specs/sse.md` | 🆕 **本链流的骨架** —— ⚠️ 但本链的用法有个**独有之处**：`extract=None`（桥吐出来的**就是文本**，⛔ 不是图的消息块） |
+| `docs/specs/token_tracker.md` | `check_budget_before_call` / `record_usage` 的本尊；✅ **`B7` 的 3 处已在 2026-10-01 接完**（现于 `:92` / `:279` / `:486`），2026-10-02 起**又收进 `api/llm_factory.py`** |
 | `docs/specs/main.md` | ⚠️ **中间件抛的异常接不住**（`:186` 那条警告）—— 本文件在**路由层**抛，安全 |
 | `后端补齐清单` **B7** | ✅ 三个 `ChatOpenAI` **已接 `MAX_TOKENS_AGENT`**（2026-10-01）· **2026-10-02 起收进 `llm_factory`** |
-| `docs/复盘/2026-09-21-拿动作成功当结果正确.md` | ⚠️ `:311-314` 那次修复的出处；**⚠️① 是同族的漏网** |
+| `fastapi-rag-agent-TODO待办/探针-流式与记账.py` | 🆕 ⚠️ **`B1` 的依据**：链路改 `.stream()` 后 `usage_metadata` **还在不在**（🔴 会花钱）—— 结论：在，但**挂在最后一块**上 |
+| `docs/复盘/2026-09-21-拿动作成功当结果正确.md` | ⚠️ `:340-342` 那次修复的出处；**⚠️① 是同族的漏网** |
 
 > ### ✅ 要不要做 —— **2026-09-30 业务方全部同意（三条都做）**
 >
 > | # | 事 | 裁定 | 怎么做（落点） |
 > |---|---|---|---|
-> | **1** | 🔴 **修 `:355` 的漏传** + 加一条**能发现它**的测试 | ✅ **修** | `:355` → `plan_task(replan_context, user_name)`<br>⚠️ **测试的 stub 必须收 `user_name`** —— 现有那条是 `lambda ctx: …`，**只接一个参数 ⇒ 发现不了漏传**（这正是它漏到现在的原因）<br>📌 **顺带**：把 `plan_task(` 的两个调用点**一起核**（就是上面那条教训说的） |
-> | **2** | ⚠️ **「成败判定」从中文子串匹配换成结构化返回** | ✅ **换** | `:334` `if "执行失败（已重试" in step_result` · `:530` `if "执行失败" in step_result`<br>⇒ 改成让 `execute_step_with_retry` **返回结构化结果**（成功/失败 + 原因），调用方看字段<br>⚠️ **`execute_step_with_quality_check` 的返回类型会变** ⇒ 它的调用点（`:331`）与测试要一起改 |
-> | **3** | ⚠️ **`max_replans` 提成模块级常量** | ✅ **提** | `:273` 的 `max_replans = 5` → 模块级 `MAX_REPLANS = 5`（与 `PLANNER_LLM_TIMEOUT` 那一批放一起，`:70-88` 附近）<br>⬜ **要不要顺带支持 env？** —— 那三个超时**都不是 env**（是硬编码常量）⇒ **建议保持一致：也硬编码** |
+> | **1** | 🔴 **修 `:383` 的漏传** + 加一条**能发现它**的测试 | ✅ **修** | `:383` → `plan_task(replan_context, user_name)`<br>⚠️ **测试的 stub 必须收 `user_name`** —— 现有那条是 `lambda ctx: …`，**只接一个参数 ⇒ 发现不了漏传**（这正是它漏到现在的原因）<br>📌 **顺带**：把 `plan_task(` 的调用点**一起核**（就是上面那条教训说的）—— ⚠️ **全仓一共 3 处**：`:383`（**漏传，就是本条**）· `api_v1_agent.py:669`（非流式端点，**传了**）· `api_v1_agent.py:745`（流式端点，**传了**）。 |
+> | **2** | ⚠️ **「成败判定」从中文子串匹配换成结构化返回** | ✅ **换** | `:362` `if "执行失败（已重试" in step_result` · `:557` `if "执行失败" in step_result`<br>⇒ 改成让 `execute_step_with_retry` **返回结构化结果**（成功/失败 + 原因），调用方看字段<br>⚠️ **`execute_step_with_quality_check` 的返回类型会变** ⇒ 它的调用点（`:359`）与测试要一起改 |
+> | **3** | ⚠️ **`max_replans` 提成模块级常量** | ✅ **提** | `:301` 的 `max_replans = 5` → 模块级 `MAX_REPLANS = 5`（与 `PLANNER_LLM_TIMEOUT` 那一批放一起，`:69-87` 附近）<br>⬜ **要不要顺带支持 env？** —— 那三个超时**都不是 env**（是硬编码常量）⇒ **建议保持一致：也硬编码** |
