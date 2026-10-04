@@ -287,7 +287,13 @@ def _call_rag_stream(monkeypatch, llm, history=None, get_history=None, **kw):
         )
     kw.setdefault("thread_id", "t-cancel")
     kw.setdefault("user_name", "tester")
-    req = QuestionRequest(question=kw.pop("question", "你好"))
+    # ⚠️ `citations` 默认 `False` = **旧行为**（⛔ 不是本次新增的行为）。
+    #    开这个口子只为下面那条「帧序」用例 —— 不开引用模式 ⇒ `sources` 帧**根本不发**
+    #    （发出条件是 `req.citations and sources_list`，`api_v1_rag.py:739`）。
+    req = QuestionRequest(
+        question=kw.pop("question", "你好"),
+        citations=kw.pop("citations", False),
+    )
     return asyncio.run(rag_mod.stream_search(req, **kw))
 
 
@@ -567,6 +573,39 @@ def test_rag_cancel_before_any_chunk_saves_nothing(monkeypatch):
     _drive_asgi_until_disconnect(resp, after_chunks=0)
 
     assert hist == [], f"没生成任何内容却写了历史：{hist}"
+
+
+def test_rag_emits_sources_frame_after_done(monkeypatch):
+    """🔴 **帧序是线上契约，⛔ 不是笔误**：`[DONE]` 必须排在 `sources` **之前**。
+
+    ⚠️ 为什么值得一条用例：常规顺序是「sources 在前」，所以将来任何人「顺手整理一下收尾顺序」
+       都**看不出问题** —— 而前端是照**当前这个反直觉顺序**适配的。
+       此前它的载体**只有** `api/api_v1_rag.py:725-732` 那段注释
+       （`grep '"sources"' api/test_*.py` **零命中**）⇒ 改坏了不会有任何东西红。
+    ⚠️ **反证**（做过）：把 `_complete` 里两帧对调 ⇒ 本用例**必红**，报出 done/src 两个下标。
+    ⚠️ 本用例只跑**正常收尾**（`after_chunks=99` ⇒ 永不断开），⛔ 与取消路径无关。
+    """
+    llm = _SpyRagLLM(cap=3)
+    # ⚠️ 必须让检索**有结果**：`sources` 帧的发出条件是 `req.citations and sources_list`
+    #    ⇒ 空结果这一帧根本不发，用例会**因为错误的理由**通过（`src_at is not None` 会先拦住它）。
+    monkeypatch.setattr(
+        rag_mod, "search_similar",
+        lambda *a, **k: [(1, "上下文正文", "doc.md", 0.91)],
+    )
+    resp = _call_rag_stream(monkeypatch, llm, citations=True)
+    sent = _drive_asgi_until_disconnect(resp, after_chunks=99)
+
+    texts = [b.decode() for b in _body_chunks(sent)]
+    done_at = next((i for i, t in enumerate(texts) if t.startswith("data: [DONE]")), None)
+    src_at = next((i for i, t in enumerate(texts) if '"sources"' in t), None)
+
+    assert src_at is not None, f"压根没发 sources 帧 ⇒ 本断言无意义：{texts}"
+    assert done_at is not None, f"没发 [DONE] 帧：{texts}"
+    assert src_at > done_at, (
+        f"帧序变了：`sources` 必须在 `[DONE]` **之后**（前端按此适配）—— "
+        f"现在 [DONE] 在第 {done_at} 帧、sources 在第 {src_at} 帧"
+    )
+    assert src_at == len(texts) - 1, f"`sources` 必须是最后一帧：{texts}"
 
 
 # ==================== Agent 端（`/agent/langgraph_chat/stream`） ====================
