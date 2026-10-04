@@ -677,6 +677,84 @@ def test_react_subgraph_sets_final_output(monkeypatch):
     )
 
 
+def test_react_subgraph_aggregates_fragmented_tool_calls(monkeypatch):
+    """🔴 **碎片化的 `tool_calls` 必须被 `+` 聚合还原** —— 否则工具**永远不会被执行**。
+
+    ⚠️ 为什么这是**真形态**：流式下 `tool_calls` 是**碎片化到达**的 ——
+       实测（`langchain-core 0.3.86`）：
+
+       | 块 | 内容 | `.tool_calls` |
+       |---|---|---|
+       | 前一块 | `name` + `id`，args 只有前半截 | `[{'name': …, 'args': {}, 'id': …}]`（**args 是空的**） |
+       | 后一块 | `name=None`、`id=None`，args 续上后半截 | **`[]`**（整块进了 `invalid_tool_calls`） |
+       | `前 + 后` | —— | `[{'name': …, 'args': {完整}, 'id': …}]` ✅ |
+
+       ⇒ **`tool_calls` 只在【聚合后】才成立**。聚合若退化成"只留最后一块"或"只拼 `content`"，
+       它会**静默变空** ⇒ 本子图的 `should_continue` 判不出 `"tools"` ⇒ 直接走 `summarize`
+       ⇒ **照样写出一个看着正常的 `final_output`**，而工具**一次都没跑**。
+       ⛔ 判据**不能**是"接口返回正常" —— 那正是上面这段说的静默失效。
+
+    ⚠️ 本用例是**反证式**的（做过，非声称）：把 `agent_decide` 里的
+       `response = chunk if response is None else response + chunk` 改成 `response = chunk`
+       ⇒ **必红**（那正是"碎片丢掉"的状态）。
+    """
+    from langchain_core.messages import AIMessageChunk, HumanMessage, ToolMessage
+
+    import agent_graph_advanced_learning as L
+
+    # ⛔ 故意用**不存在**的工具名：走 `未找到工具: …` 分支 ⇒ 不联网、不执行任何真工具。
+    #    本用例要测的是「**有没有路由到 `tools`**」，⛔ 不是"工具执行得对不对"。
+    _TOOL = "no_such_tool_for_this_test"
+    _ANSWER = "答案是 42。"
+
+    class _Bound:
+        def __init__(self):
+            self.calls = 0
+
+        def stream(self, messages, config=None):
+            self.calls += 1
+            if self.calls == 1:
+                # 照抄真 provider 的碎片形态：**两块**才拼得出一个 `tool_calls`。
+                yield AIMessageChunk(content="", tool_call_chunks=[
+                    {"name": _TOOL, "args": '{"url":', "id": "c1", "index": 0},
+                ])
+                yield AIMessageChunk(content="", tool_call_chunks=[
+                    {"name": None, "args": ' "https://example.com"}', "id": None, "index": 0},
+                ])
+            else:
+                yield AIMessageChunk(content=_ANSWER)
+
+    class _FakeLLM:
+        def __init__(self, **kwargs):
+            pass
+
+        def bind_tools(self, tools):
+            return _Bound()
+
+    # ⚠️ 同 `test_react_subgraph_sets_final_output`：必须挡 `L.make_llm`（模块内的名字绑定），
+    #    挡 `llm_factory.make_llm` **不管用**。
+    monkeypatch.setattr(L, "make_llm", lambda *a, **k: _FakeLLM())
+    # ⚠️ 也必须挡掉记忆注入那条路 —— 否则会去连 DashScope 做 embedding
+    #    （本机有真 key 所以"绿"，CI 是 dummy key ⇒ 401 ⇒ CI 红）。
+    monkeypatch.setattr(L, "inject_memories_to_prompt", lambda prompt, state: prompt)
+
+    graph = L.create_react_subgraph()
+    out = graph.invoke({"messages": [HumanMessage(content="抓一下 example.com")]})
+
+    tool_msgs = [m for m in out["messages"] if isinstance(m, ToolMessage)]
+    assert tool_msgs, (
+        "聚合丢了碎片化的 tool_calls ⇒ should_continue 判不出 tools ⇒ 工具一次都没跑，"
+        f"而 final_output 照样有值：{[type(m).__name__ for m in out['messages']]}"
+    )
+    # ⚠️ 下面两条**比"有 ToolMessage"更强**：`name` 与 `id` **都在前一块**上，
+    #    能对上 ⇒ 证明 `+` 真的**跨块合并**了，⛔ 不是"某一块的 `tool_calls` 恰好还在"。
+    assert tool_msgs[0].name == _TOOL
+    assert tool_msgs[0].tool_call_id == "c1"
+    assert out.get("final_output") == _ANSWER, (
+        f"工具跑完后应回到 agent 拿到终稿，实际：{out.get('final_output')!r}"
+    )
+
+
 def test_mcp_tools_dynamic_handles_list_tools_result(client, auth_headers, monkeypatch):
     """`/agent/mcp_tools_dynamic` 也必须解 `.tools` —— 与 bug 7 是**同一个 bug 的第二个入口**。
 
