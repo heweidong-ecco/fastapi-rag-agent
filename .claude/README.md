@@ -114,6 +114,7 @@
 | `bash scripts/list_endpoints.sh` | 要知道**有哪些接口** | 它需要服务在跑 |
 | `bash scripts/backup.sh` | 要备份数据库 | **不该每次提交都跑** |
 | `bash scripts/impact.sh <关键词>` | 改代码前看**影响面** | 按需 |
+| **`bash scripts/check_remote_sync.sh`** 🆕 | **推完 / 收工前**核「本地是不是真跟远端一致」 | **需要网络** ⇒ 在 CI 里三方恒等，**跑了等于没跑**（`DEC-069` §四）。⚠️ 退出码 **`3` = 未知**，⛔ 不是通过 |
 
 ---
 

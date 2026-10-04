@@ -21,7 +21,15 @@ allowed-tools: Bash, Read, Edit, Write, Glob, Grep
 git status --short
 git log --oneline origin/main..HEAD
 git diff --stat origin/main..HEAD
+bash scripts/check_remote_sync.sh     # ⭐ 「本地是不是真跟远端一致」—— 见铁律 1·补
 ```
+
+> ⚠️ **上面那三条都是【本地】的账，证明不了"远端也是这个样"** ——
+> `origin/main` 是**本地视图**，**上一次 `fetch` 失败时它不会自己声明**。
+> ⇒ 真要判"推没推上去"，跑 **`bash scripts/check_remote_sync.sh`**
+> （三方比对：本地 / 本地视图 / **远端真值**）。
+> 🔴 **它的退出码 `3` = 取不到真值（未知），⛔ 不是通过** —— 别当 0 读。
+> 📄 出处：`docs/复盘/2026-09-20-同源的两个输入不能互相作证.md` · `DEC-069`
 
 ### 铁律 2 · **数字不要写死 —— 写成命令**
 

@@ -50,6 +50,14 @@ jobs:
       - name: 编译检查 api/ 下全部 Python 文件
         run: python -m compileall api/ -q
 
+      # ⚠️ **只跑 `--self-test`，⛔ 不跑真正的三方比对** —— 本步【不连网、不需凭据】。
+      # 为什么真正的比对不能在这里跑：CI 里"本地"就是刚 checkout 的那份 ⇒ 三方恒等 ⇒ 跑了等于没跑
+      # （`DEC-069` §四）。而 self-test 只验**裁决逻辑**（8 个分支各走一遍），与网络无关。
+      # 📌 加它的理由：那条裁决里最要紧的一支是「取不到真值 ⇒ 未知，⛔ 不是通过」，
+      #    而"守卫必须能测出自己会红"是本仓已记两次的教训（`DEC-061` / `DEC-066`）。
+      - name: 「本地 / 视图 / 远端真值」裁决逻辑自测（⛔ 不连网）
+        run: bash scripts/check_remote_sync.sh --self-test
+
   offline-tests:
     name: 离线测试（api/ 全套 · 减 integration/needs_db · redis）
     runs-on: ubuntu-latest
