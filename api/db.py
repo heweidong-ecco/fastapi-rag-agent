@@ -173,7 +173,13 @@ def create_table():
         print("❌ 数据库初始化失败：", e)
         raise
 def insert_document(content: str, source: str, embedding: list, requested_by: str = "anonymous"):
-    """插入一条文档块及其向量"""
+    """插入一条文档块及其向量。
+
+    🔴 2026-10-04（`DEC-063`）：**插入后自己清 BM25 缓存** —— 不变量放在这一层，
+       调用方就不必记得再补一句（`/rag/upload_document` 正是漏了那一句，
+       而它调的又恰好是这里 ⇒ 上传的新文档在 BM25 召回里"不存在"，直到重启）。
+       ⚠️ 清缓存是**惰性**的（只是把桶丢掉，重建发生在下次搜索）⇒ 逐条调用不会造成 N 次重建。
+    """
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -181,9 +187,16 @@ def insert_document(content: str, source: str, embedding: list, requested_by: st
                 (content, source, embedding, requested_by)
             )
             conn.commit()
+    invalidate_bm25_cache()
 
 def insert_batch_documents(docs: list[tuple[str, str, list,]]):
-    """批量插入文档块。docs: [(content, source, embedding), ...]"""
+    """批量插入文档块。docs: [(content, source, embedding), ...]
+
+    ⚠️ 本函数**当前全仓无调用方**（`grep -rn 'insert_batch_documents' api/` 只剩定义与 import）。
+       这里仍按同一条不变量清缓存（`DEC-063`）：守卫 `api/test_bm25_cache_invalidation_wiring.py`
+       是按「**凡写 documents 就清缓存**」统一判的，⛔ 不给死代码开例外 ——
+       开了例外，将来它被启用时就正好少了这一句。
+    """
     with get_db() as conn:
         with conn.cursor() as cur:
             execute_values(
@@ -193,6 +206,7 @@ def insert_batch_documents(docs: list[tuple[str, str, list,]]):
                 template="(%s, %s, %s::vector)"
             )
             conn.commit()
+    invalidate_bm25_cache()
 
 def _require_identity(user_id, where: str) -> None:
     """fail-closed：没有身份 ⇒ **抛错**，⛔ 不是"当成匿名、查全库"（`DEC-056` §六 ③）。
