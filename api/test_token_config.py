@@ -22,6 +22,67 @@ def test_single_call_cap_does_not_depend_on_role():
     assert not hasattr(token_config, "ROLE_MAX_TOKENS")
 
 
+# ==================== 兜底额度必须是【最低档】，⛔ 不是最高档（丁 · 2026-10-04） ====================
+
+def test_every_role_has_a_registered_budget():
+    """推导型守卫：`permission.UserRole` 里**每一个**角色都必须登记在 `ROLE_DAILY_TOKEN`。
+
+    **为什么**：`get_user_token_budget()` 是
+    `ROLE_TOKEN_BUDGET.get(role, DEFAULT_DAILY_TOKEN_BUDGET)` ——
+    **角色没登记 = 静默落进兜底**（⛔ 不报错、不告警）。
+    ⇒ 本条的判据是**推导的**（从 enum 推出名单），⛔ 不是"记住 free/premium/admin 三个名字"
+      —— 名单型守卫只钉住"当时知道的那几个"，新增角色时**它不会响**。
+
+    ⚠️ **坦白一句**：本条**从建立起就是绿的**（三个角色当天都登记了）。
+       它钉的是**不变量**，⛔ 不是"修了某个 bug" —— 别把它读成"抓到过什么"。
+    """
+    from permission import UserRole
+    for role in UserRole:
+        assert role.value in token_config.ROLE_DAILY_TOKEN, (
+            f"🔴 角色 {role.value!r} 没有在 token_config.ROLE_DAILY_TOKEN 里登记 "
+            f"⇒ 它会静默落进兜底值 {token_config.DEFAULT_DAILY_TOKEN_BUDGET}"
+        )
+
+
+def test_unregistered_role_falls_back_to_the_LOWEST_tier_not_the_highest():
+    """🔴 兜底额度必须 ≤ **现存最低档** —— 本仓取向是 fail-closed，这条是它的下限。
+
+    **改前的事实**（2026-10-04 实测）：兜底值是 `100_000`，**等于 `premium`（最高档）**
+    ⇒ 角色名拼错 / 新角色忘了登记，用户**静默拿到最高额度**，且**没有任何东西会响**。
+
+    ⚠️ 判据是**推导的**（⛔ 不是把 `10_000` 写死）：`兜底 ≤ min(各档)`。
+    ⇒ 将来真加了比 `free` 还便宜的一档，兜底**必须跟着降**，否则本条转红。
+    """
+    lowest = min(token_config.ROLE_DAILY_TOKEN.values())
+    assert token_config.DEFAULT_DAILY_TOKEN_BUDGET <= lowest, (
+        f"🔴 未登记角色的兜底日预算 ({token_config.DEFAULT_DAILY_TOKEN_BUDGET}) "
+        f"高于现存最低档 ({lowest}) ⇒ 角色名打错就静默拿到**更多**额度（fail-open）。"
+    )
+
+
+def test_an_unregistered_role_actually_gets_the_lowest_budget(monkeypatch):
+    """走**真函数**（⛔ 不只看常量）：一个**没登记**的角色 ⇒ 落兜底，且兜底 = 最低档。
+
+    ⚠️ 为什么必须走 `get_user_token_budget()`：**常量改成 10_000、函数仍读别处**
+       是另一类假完成（同 `test_rate_limiter_actually_reads_token_config` 记的那个形状）。
+
+    ⚠️ 为什么**不能**拿 `get_user_token_budget("__no_such_user__")` 来测：
+       `get_user_role()` 对未知用户名返回 `FREE` —— 而 `free` **是登记过的**
+       ⇒ 那条会走**正常路径**，⛔ **根本碰不到兜底**，改前也是绿的（= 一条测不出东西的用例）。
+       ⇒ 必须**强行**让取角色那步返回一个不存在的角色。
+    """
+    import permission
+    import token_tracker
+
+    monkeypatch.setattr(permission, "get_user_role", lambda _user: "unregistered_role")
+
+    budget = token_tracker.get_user_token_budget("anyone")
+    lowest = min(token_config.ROLE_DAILY_TOKEN.values())
+    assert budget == lowest, (
+        f"未登记角色拿到了 {budget}，最低档是 {lowest} ⇒ 兜底没有 fail-closed"
+    )
+
+
 # ==================== S5 · 在用的模型必须**明确**配价 ====================
 
 def test_models_actually_in_use_have_explicit_pricing():

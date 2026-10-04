@@ -803,6 +803,40 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- 🔴 **未登记角色的兜底日预算 `100_000` → `10_000`** —— 兜底**不许等于最高档**（2026-10-04 · `DEC-068`）。
+
+  `api/token_config.py` 的 `DEFAULT_DAILY_TOKEN_BUDGET` 是
+  `token_tracker.get_user_token_budget()` 里 `ROLE_TOKEN_BUDGET.get(role, …)` 的**落点**。
+  **改前它 = `100_000` = `premium` = 最高档** ⇒ 角色名拼错 / 新角色忘了登记
+  ⇒ 用户**静默拿到最高额度**（⛔ 不报错、不告警、日志里看不出）
+  —— 与 `DEC-040`/`DEC-046` 一路的 **fail-closed** 取向正好相反。
+  ⇒ 现锚在 **`free` = 现存最低档**：**出错时少给**。
+
+  ⚠️ **不是"把数字抄成 `10_000`"** —— 守卫是**推导的**（`兜底 ≤ min(各档)`），
+  将来真加了比 `free` 还便宜的一档，兜底**必须跟着降**，否则用例转红。
+  ⛔ **档位体系本轮一点没动**（还是 `free/premium/admin` 三档）——
+  定档要先知道「一次问答花多少 token」，而本仓 **RAG 侧零记账**
+  （`ROADMAP.md:245` 实测 `grep -c record_usage api/api_v1_rag.py` ⇒ `0`），
+  只有**一个**样本（`DEC-029`：`plan_execute` ≈3346）⇒ **一个样本定的档位数字就是编的**。
+  📌 **触发条件（⛔ 不是日期）**：**RAG 侧记账接上之后**（`DEC-053` §遗留·2）。
+
+  **改前没有任何东西钉着这个值**（全仓 3 处引用：定义 / import / 唯一使用点）⇒ 先补守卫：
+  `api/test_token_config.py` **+3 条** —— 一条推导型不变量（`UserRole` 每个成员都必须登记，
+  ⚠️ **从建立起就是绿的**，别读成"抓到过什么"）、一条 `兜底 ≤ min(各档)`、一条走**真函数**。
+
+  **判据（可打印）**：
+  ```bash
+  venv/bin/python -m pytest api/test_token_config.py -q                        # ⇒ 13 passed
+  DEFAULT_DAILY_TOKEN_BUDGET=100000 venv/bin/python -m pytest api/test_token_config.py -q
+                                                                               # ⇒ 2 failed（证伪）
+  bash scripts/ci-local.sh                                                     # ⇒ 521 passed
+  ```
+  ⚠️ **改前基线 = `518 passed, 3 skipped, 31 deselected`**，在 `origin/main` 的**独立 worktree** 上实跑
+  （⛔ 不是拿中间数字推的）⇒ 差 **+3**，与新增用例数**一致**。
+  ⚠️ **一条测不出东西的写法已避开**：拿 `get_user_token_budget("__no_such_user__")` 测兜底**是错的**
+  —— `get_user_role()` 对未知用户名返回 `FREE`，而 `free` **是登记过的** ⇒ 走正常路径、
+  **根本碰不到兜底**，改前也是绿的。必须**强行**让取角色那步返回一个不存在的角色。
+
 - 🔴 **`B13` 实跑核出两处口径错 —— `/agent/cost/overview` 换数据源 + 补上「全站还剩多少」的出口**（2026-10-03 · `①b` Task 7 · `DEC-047`）。
 
   `B13` 的原话是「**先实跑核一遍，缺了再补**」。跑完**四个面都打得开**，但核出两处
