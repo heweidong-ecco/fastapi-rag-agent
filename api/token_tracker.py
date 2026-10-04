@@ -148,7 +148,71 @@ def record_usage(
     if get_user_summary(user_name).get("total_cost", 0) > DAILY_COST_ALERT_THRESHOLD:
         print(f"⚠️ 用户 {user_name} 今日花费已超过 {DAILY_COST_ALERT_THRESHOLD} 元！")
 
-#
+
+# ==================== 预算耗尽时的统一话术 ====================
+# ⚠️ 2026-10-04 新增（`DEC-072`）。**为什么要有个常量**：三条原先不记账的链本轮补上拦截，
+#    各自要返回一句"超出预算"给用户。若各写各的，措辞会漂成四五份 ——
+#    统一放这里，⛔ 别在 `agent_graph*.py` 里再抄字面量。
+BUDGET_EXCEEDED_MSG = "今日Token预算已用完，请明天再试。"
+
+
+def record_from_response(
+    llm_obj,
+    response,
+    purpose: str,
+    *,
+    user_name: str = "unknown",
+    thread_id: str = "unknown",
+    tool_name: str = None,
+    tool_args: dict = None,
+) -> bool:
+    """从一次 LLM 响应里取用量并记账 —— **唯一实现**（`DEC-072` §四）。
+
+    ## 为什么要有它
+
+    三条会真调 LLM 的链（`/agent/langgraph_chat` · `/agent/advanced_chat` ·
+    `/agent/memory_chat`）此前**一分钱不记**。修法是给 8 个调用点一个共同入口 ——
+    ⛔ 不让每个调用点各抄一遍取用量的那几行，否则**必然漂**
+    （同款立场见 `agent_graph_advanced_learning.py` 顶部"两表结构上不可能再漂"）。
+
+    ## 🔴 判据必须是 `usage_metadata`
+
+    `AIMessage` / `AIMessageChunk` **都没有** `.usage` 属性 —— 真名是 `usage_metadata`。
+    本仓 `agent_checkpointer.py:83` 曾写 `hasattr(response, "usage")`，**恒为假**
+    ⇒ 那整段记账**从未执行过**，而所有测试照样全绿。
+    `api/test_token_budget_hookup.py::test_does_not_record_on_the_old_wrong_attribute`
+    就是它的墓碑：拿一个**只有 `.usage`** 的对象来调，本函数必须返回 `False`。
+
+    ## 返回
+
+    * `True` —— 真写了账（`token_usage_logs` + `cost_records` 各一行）
+    * `False` —— 这次响应没带用量 ⇒ **静默跳过，⛔ 不抛异常**
+      （同 `get_daily_token_usage` 的 fail-open 取向：模型没回 usage 不该让整个请求 500）
+      ⚠️ **代价要认**：这一笔会**漏记**。
+
+    ## ⚠️ `model=` 从对象取，⛔ 不许写死
+
+    本仓因写死 `"qwen-turbo"` 按**错的单价**记过账
+    （`agent_graph_advanced.py:352-354` · `agent_checkpointer.py:85-87` 两处前科）。
+    """
+    # ⛔ 不用 `hasattr(response, "usage")` —— 见 docstring 与那是墓碑的测试
+    usage = getattr(response, "usage_metadata", None)
+    if not usage:
+        return False
+
+    record_usage(
+        model=getattr(llm_obj, "model_name", None) or getattr(llm_obj, "model", "unknown"),
+        prompt_tokens=usage.get("input_tokens", 0),
+        completion_tokens=usage.get("output_tokens", 0),
+        purpose=purpose,
+        user_name=user_name,
+        thread_id=thread_id,
+        tool_name=tool_name,
+        tool_args=tool_args,
+    )
+    return True
+
+
 def record_cost(
     user_name: str,
     thread_id: str,

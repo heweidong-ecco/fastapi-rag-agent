@@ -893,6 +893,18 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- 🔴 **`/agent/memory_chat` 的 token 配额从【形同虚设】变成【真生效】**（2026-10-04 · `DEC-072`）。
+
+  它与上面那条 `### Fixed` 是**同一批改动**，但**这一面是行为变更**，单列：
+  改前这条链**一笔都不记** ⇒ 端点上的 B8 会话上限 / B11 全站熔断**收不到它的数据** ⇒ **永不触发**。
+  修好之后，**超预算的请求会被拒**（返回 `BUDGET_EXCEEDED_MSG`），而改前一律放行。
+
+  ⚠️ **同一批还改了一处统计口径**：`agent_checkpointer.agent_decide` 记账的 `purpose`
+  **从 `"query_rewrite"` 改成 `"agent_decision"`** —— 原值与节点事实不符（它是**决策**节点）。
+  真库 `query_rewrite` **0 条** ⇒ **无历史数据要迁**。⚠️ 依赖 `purpose` 分类的**报表口径会跟着变**。
+
+  ⚠️ **被预算拦下的那次【不记账】**（拦在调用之前、没花钱）—— 所以"拦了几次"看**拦截日志**，⛔ 不是看 `token_usage_logs`。
+
 - 📄 **`CLAUDE.md` 压缩：239 → 198 行** —— **留结论、删过程**（2026-10-04 · `DEC-070`）。
 
   业务方原话：「`CLAUDE.md` 文件中很多内容是**太复杂的，需要压缩过程不要记录太多，
@@ -1741,6 +1753,37 @@ All notable changes to this project will be documented in this file.
   ⇒ `docs/decisions/DEC-067-删除Postman集合与登记三处死模块.md`
 
 ### Fixed
+
+- 🔴 **关掉三条【不记账】的 LLM 通路**（2026-10-04 · `DEC-072`）—— `agent_graph.py`（`/agent/langgraph_chat`）· `agent_checkpointer.py`（`/agent/memory_chat`）· `agent_graph_advanced_learning.py`（`/agent/advanced_chat`），**共 9 个 LLM 调用点**。
+
+  **改前实况**：这三张图**既不查预算、也不记账** ——
+  `grep -c 'record_usage\|check_token_budget'` 在三份里**都是 0**。
+  而 `/agent/advanced_chat` 实测 **HTTP 200、真库新增 0 条** ⇒ 任何用户（**含 `FREE`**）**无限免费**。
+  ⚠️ 端点上的 B8 会话上限 / B11 全站熔断对本图**等于不存在**（守卫读的计数器它们从不写）。
+
+  **做了什么**：每个调用点 **`.stream()`/`.invoke()` 之前** 查 `check_token_budget(user_name, estimated_tokens=500)`、
+  **之后** 调新函数 **`token_tracker.record_from_response(...)`**（**三张图共用的唯一记账实现**）。
+  `AgentState` 补 `user_name` / `thread_id`（**由端点注入**，⛔ 不是 `session_key` 那个 `sess`）。
+
+  🔴 **链 3 是【有史以来第一笔账】** —— `agent_checkpointer.py` 那段记账判据写的是
+  `hasattr(response, "usage")`，而真属性名是 **`usage_metadata`**（`.usage` **不存在**）⇒ **恒为 False** ⇒
+  从建立起**一笔都没记过**（旧块整段留在注释里作墓碑）。
+  ⚠️ **同型错误是"静默"的**：接口一切正常，只是没账 —— 所以统一走 `record_from_response`，⛔ 不许各链自己 `getattr`。
+
+  **端到端实测**（真 HTTP 栈 + 真图 + 真 LLM + 真库 · `T8`）：三条端点各写
+  `token_usage_logs` 与 `cost_records` **各 4 行**，`user_name` / `thread_id` 全是**端点传进去的原值**。
+  测试行已清理（`DELETE` 各 4 行，`isolation_a` 回到 3,329）。⚠️ **未走容器** ——
+  `docker-compose.yml` 的 api 服务**只挂 `./logs`、无源码挂载** ⇒ 容器里是旧代码。
+
+  ⚠️ **一处【行为变更】**见下方 `### Changed`。
+
+  **判据（可打印）**：
+  ```bash
+  python -m pytest api/test_billing_wiring.py api/test_token_budget_hookup.py -q   # ⇒ 19 passed（14 + 5）
+  python -m pytest api/ -m "not integration and not needs_db" -q                   # ⇒ 全绿
+  # 证伪（两步，均实测）：① 注释掉 agent_graph.agent_decide 的 record_from_response ⇒ AST 与行为两条都红；
+  #                       ② 删掉某端点补的 thread_id ⇒ red 报出「哪个端点缺哪个键」
+  ```
 
 - 🔴 **清掉两处「已作废的口径 / 失效的锚点」**（2026-10-04 · **无决策事项** —— 都是照**已定**的规矩执行）。
 

@@ -2,20 +2,24 @@
 
 | 项 | 内容 |
 |---|---|
-| **状态** | 🟡 **可用** —— ⚠️ **2026-10-03 起它不再是"三套口径"之一**（次数那套已删，`DEC-046`）<br>🟢 **①a 已落地（2026-10-01）**：额度常量已收口到 `api/token_config.py`（本文件**只剩同名别名**）· 本文件下方 **实施计划 ①a** 已执行完<br>🔵 **①b（2026-10-02）**：Task 0 ✅ / Task 1 ✅（B7 接线）/ **Task 2 ✅（B8 会话级 · 已接 7 条链）** / **Task 3 ✅（B10 全局日级 · 判定函数）** / **Task 4 ✅（B11 熔断 · 已接 8 处，`B10` 由此生效）** / **Task 5 🟡 部分（`L2`）**（改写后只做构造收口，⛔ 自动兜底【推迟】—— 见该 Task 的修订块） / **Task 6 ✅（`决策一` 落地 · `DEC-046` —— 撤次数配额、原位换 token 口径 = `R1.3`）** / **Task 7 ✅（`B13` 实跑核成本可见 · `DEC-047` —— `①b` 收尾）**<br>⚠️ **`B10` 曾一度"有函数没接线"（2026-10-01 当天）—— 那句话已作废**，2026-10-02 Task 4 接上了 |
-| **对外提供** | `record_usage()` · `record_cost()` · `check_multilevel_budget()` · `check_token_budget_detail()` · `get_token_budget_info()` · **10 个汇总函数**（2026-10-03 起 +`get_user_overview`）<br>🔵 **2026-10-03 起**：`get_token_budget_info()` 还被 **`main.QuotaMiddleware`** 消费（全路径按用户日级 = `R1.3`）—— **它不再只是"记账/看板"用的** |
-| **谁在用** | `permission`（取角色）· `agent_graph_advanced.py:239`（唯一调多级预算的地方）· `cost_dashboard.py` · 各 `api_v1_*.py` |
-| **规模** | **962 行**（2026-10-03 重取；Task 7 之前是 888） |
+| **状态** | 🟡 **可用** —— ⚠️ **2026-10-03 起它不再是"三套口径"之一**（次数那套已删，`DEC-046`）<br>🟢 **①a 已落地（2026-10-01）**：额度常量已收口到 `api/token_config.py`（本文件**只剩同名别名**）· 本文件下方 **实施计划 ①a** 已执行完<br>🔵 **①b（2026-10-02）**：Task 0 ✅ / Task 1 ✅（B7 接线）/ **Task 2 ✅（B8 会话级 · 已接 7 条链）** / **Task 3 ✅（B10 全局日级 · 判定函数）** / **Task 4 ✅（B11 熔断 · 已接 8 处，`B10` 由此生效）** / **Task 5 🟡 部分（`L2`）**（改写后只做构造收口，⛔ 自动兜底【推迟】—— 见该 Task 的修订块） / **Task 6 ✅（`决策一` 落地 · `DEC-046` —— 撤次数配额、原位换 token 口径 = `R1.3`）** / **Task 7 ✅（`B13` 实跑核成本可见 · `DEC-047` —— `①b` 收尾）**<br>⚠️ **`B10` 曾一度"有函数没接线"（2026-10-01 当天）—— 那句话已作废**，2026-10-02 Task 4 接上了<br>🔴 **2026-10-04（`DEC-072`）：新增 `record_from_response()` —— 【取用量的唯一实现】** —— 962 → **1027 行**。改前"从响应取 usage"这件小事**在每条链里各写一遍**，于是三条链里有的**写错了属性名**（`.usage` 恒假）⇒ **静默不记账**。现在**三张图 9 个调用点**统一调它，⛔ 不许再各写各的。<br>⚠️ **它只做「取+记」，⛔ 不做「拦」** —— 拦是 `check_token_budget` 的事，由**调用方在 `.stream()` 之前**自己调 |
+| **对外提供** | `record_usage()`（`:71`）· 🆕 **`record_from_response()`（`:159`）** · `record_cost()`（`:216`）· `check_multilevel_budget()`（`:789`）· `check_token_budget_detail()`（`:440`）· `get_token_budget_info()`（`:477`）· **10 个汇总函数**（2026-10-03 起 +`get_user_overview`）· 🆕 常量 `BUDGET_EXCEEDED_MSG`（`:156`）<br>🔵 **2026-10-03 起**：`get_token_budget_info()` 还被 **`main.QuotaMiddleware`** 消费（全路径按用户日级 = `R1.3`）—— **它不再只是"记账/看板"用的** |
+| **谁在用** | `permission`（取角色）· `agent_graph_advanced.py:239`（唯一调多级预算的地方）· `cost_dashboard.py` · 各 `api_v1_*.py`<br>🔴 **2026-10-04 起新增 3 个图模块**：`agent_graph.py` · `agent_checkpointer.py` · `agent_graph_advanced_learning.py`（都是 `check_token_budget` + `record_from_response` 成对，`DEC-072`） |
+| **规模** | **1027 行**（2026-10-04 `DEC-072` 重取；此前 962） |
 
 ## ✅ 做了什么
 
-- **按 model 记账**：`record_usage(model=…)`（`:69`）· `PRICING` 表（`:50`）+ 兜底单价（`:54`）· `by_model` 汇总（`:467`）
-- **多级预算**（`:651` `check_multilevel_budget`）—— **自标「3 级」**：
-  ① 单次上限（**元**，`MAX_SINGLE_CALL_COST=0.5`，`:646`）
-  ② 单线程上限（**元**，`MAX_THREAD_COST=5.0`，`:649`）
-  ③ 每日预算（**token**，`ROLE_TOKEN_BUDGET`，`:286`）
-- **10 个汇总函数**（⚠️ 行号 2026-10-03 重取）：`get_daily_token_usage`(:193) · `get_user_summary`(:252) · `get_purpose_summary`(:259) · `get_thread_summary`(:264) · ⭐ **`get_user_overview`(:272) ← Task 7 新增** · `get_recent_usage`(:335) · `get_token_budget_info`(:413) · `generate_monthly_report`(:429) · `get_daily_usage_cost`(:658) · `get_intercept_count`(:708)
-- **拦截记录**：`record_intercept`(:607)
+- **按 model 记账**：`record_usage(model=…)`（`:71`）· `PRICING` 表 + 兜底单价（**同名别名**，`:56-60`，真身在 `token_config`）· `by_model` 汇总（`:606`）
+- 🆕 **`record_from_response(llm_obj, response, purpose, *, user_name, thread_id, …)`（`:159` · `DEC-072`）** ——
+  **从一次 LLM 响应里取用量并记账的唯一实现**。取 `getattr(response, "usage_metadata", None)`；
+  无 usage ⇒ **返回 `False`、静默跳过**（⛔ 不写 0 行）；有 ⇒ 调 `record_usage(...)` 并返回 `True`。
+  ⚠️ **参数 `llm_obj` 只是为了取 `model_name`**（`getattr(llm_obj, "model_name", None) or getattr(llm_obj, "model", "unknown")`）。
+- **多级预算**（`:789` `check_multilevel_budget`）—— **自标「3 级」**：
+  ① 单次上限（**元**，`MAX_SINGLE_CALL_COST=0.5`，`:787` 从 `token_config` import）
+  ② 单线程上限（**元**，`MAX_THREAD_COST=5.0`，`:787`）
+  ③ 每日预算（**token**，`ROLE_TOKEN_BUDGET`，`:59` **别名** → `token_config.ROLE_DAILY_TOKEN`）
+- **10 个汇总函数**（⚠️ 行号 2026-10-04 重取）：`get_daily_token_usage`(:257) · `get_user_summary`(:316) · `get_purpose_summary`(:323) · `get_thread_summary`(:328) · ⭐ **`get_user_overview`(:336) ← Task 7 新增** · `get_recent_usage`(:399) · `get_token_budget_info`(:477) · `generate_monthly_report`(:493) · `get_daily_usage_cost`(:722) · `get_intercept_count`(:772)
+- **拦截记录**：`record_intercept`(:746)
 
 ## 🟡 做到哪 / 缺什么
 
@@ -30,7 +34,9 @@
   🔴 **2026-10-03（Task 7）又给它补了【出口】** —— 在那之前它**只有入口没有出口**：
   超了所有人吃 429，**界面上却看不到逼近**（`DEC-047`）。
   现在 `/agent/token/budget` 与看板第 5 格都报了 `global_used_today` / `global_remaining`
-- ⬜ **零测试覆盖**（`docs/说明/测试.md` §六 **#8**）
+- 🟡 **测试覆盖【2026-10-04 起不再为零】**（原先 `docs/说明/测试.md` §六 **#8** 记"零覆盖"）：
+  新增 `api/test_token_budget_hookup.py`（**5 例**，钉新函数 `record_from_response`：正常路径 · **旧错属性墓碑** · 无 usage 静默跳过 · 模型名兜底 · 多模态只取 `input/output_tokens`）。
+  ⚠️ **覆盖的是新函数那一小块** —— 本文件的**其余部分（10 个汇总函数 / 多级预算 / 熔断计数）仍无测试**。
 - ⬜ **R2.2 恢复条件未核** —— `EXPIRE 86400` 是首次 INCR 时设的（滚动），**没人实测过 TTL**
 
 ## ⚠️ 看代码会误判的地方 ⭐
@@ -46,6 +52,9 @@
 | ✅ ~~🔴 **「`check_global_daily_budget` 存在 ⇒ 全站额度在管着」**~~ | ✅ **2026-10-02 起【是的】—— 这句话已经翻面，⛔ 别照旧理解。**<br>**2026-10-01 当天**确实如原文所说「**没有任何调用点**」（Task 3 只出函数）；**Task 4（`B11`）把它接进了 `breaker.py:75`** ⇒ 现在**真的在管着**。<br>**判据（可打印）**：`grep -rn "check_global_daily_budget" api/ --include="*.py"` ⇒ 应命中 `breaker.py` 的 `:74/:75`（接线）**与** `token_tracker.py:907`（定义）。<br>📌 **保留这一行的理由**：它是「**常量/函数建好没接上**」（本仓第三次：`B7` 前、`B8` 前）的标本 —— 但**标本的意思是"当时没接"，不是"现在没接"**。⚠️ **这类行的有效期很短，读到请先跑判据。** |
 | 🔴 **「`get_global_daily_token_usage` 与 `get_daily_token_usage` 差不多」** | 差的正是**全部**：前者 SQL **⛔ 不许有 `user_name`**（全站），后者**必须有**（单用户）。<br>⚠️ 抄后者改前者时**漏删** `WHERE user_name` ⇒ 函数名还叫「全局」、**返回值正常、只是偏小**、**没有任何报错** ⇒ 本仓**永远不会有全局额度**。<br>⇒ 已用 **AST 静态守卫**钉死（`api/test_global_daily_budget_offline.py` 的**配对**测试：一边必须有、一边必须没有） |
 | ⚠️ **「`GLOBAL_DAILY_TOKEN_LIMIT` = 1,000,000 是个随手写的默认值」** | 🟡 **2026-10-01 起它变成了【裁定值】**（`DEC-042`）—— 业务方在源文档 B10 那个空上填的。⚠️ 但**它仍不在环境变量契约里**（`.env.example` / `docs/契约/环境变量.md` 都无此项），想不改代码调它**得先补契约** |
+| 🔴 **「从响应取用量，`getattr(response, "usage", None)` 就行」** | ⛔ **属性名是 `usage_metadata`** —— `AIMessage` / `AIMessageChunk` 上**没有 `.usage`**，`hasattr` **恒为 False**。写错的后果是**静默不记账**（接口一切正常，只是没账）。本仓**真的栽过**：`agent_checkpointer.py` 那条链**从建立起就一笔都没记**（`DEC-072`）。<br>✅ **统一走 `record_from_response`**（`:159`）—— ⛔ 别在各链里自己 `getattr`。 |
+| 🔴 **「`record_from_response` 是全能的：取用量 + 拦预算」** | ⛔ **它只做「取+记」，⛔ 不做「拦」** —— 拦是 `check_token_budget` 的事，**必须由调用方在 `.stream()`/`.invoke()` 之【前】**自己调。<br>⚠️ 顺序反了（先调用后检查）⇒ 钱**已经花了**，只能丢结果、拦不住。 |
+| 🔴 **「`record_from_response` 返回 `False` = 出错」** | ⛔ **`False` = 「这次响应里没有 usage」**（如被拦下、或 provider 没回 usage）⇒ **有意跳过、不写 0 行** —— 写 0 会污染 `token_usage_logs` 的计数（它是额度权威源）。<br>⚠️ 想看"到底记没记"，**别只看返回值** ⇒ 查库（`T8` 端到端实测就是这么核的）。 |
 
 ## 关联
 
@@ -55,6 +64,7 @@
 `docs/specs/permission.md`（⏳ 待建）·
 `DEC-029`（两套口径，**已由 `DEC-040` 收口**）· **`DEC-046`**（次数那套的删除 + 原位换 token）·
 **`DEC-047`**（`①b` Task 7：**内存 vs 库 = 两个语义** · 全站额度的出口 = `get_user_overview` + 看板第 5 格）·
+**`DEC-072`**（**三条链不记账** —— 本文件新增 `record_from_response` = 取用量+记账的**唯一实现**；`BUDGET_EXCEEDED_MSG` 也在此集中）·
 `后端补齐清单` **B7/B8/B10/B11/B13**
 
 ---
