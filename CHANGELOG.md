@@ -10,6 +10,30 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- 🔴 **写 `documents` 表的地方必须让 BM25 缓存作废 —— 修法放在【helper 层】**（2026-10-04 · `DEC-063` · 待办 **N3**）。
+
+  `/rag/upload_document` 插完文档**不清 BM25 进程内缓存** ⇒ 上传的新文档在**本进程**的关键词检索里"不存在"，
+  直到别的写路径顺手清了缓存、或进程重启。
+  ⚠️ **同一个坑 2026-09-11 修过一次、没修全**：`api_v1_rag.py:163-164` 的注释里留着那次实测
+  （"重启前新文档不在 top10，重启后第 2 名"）—— 那次**修给了 `/rag/insert`，漏了 `/rag/upload_document`**。
+
+  **⛔ 修法不是"在 `upload_document` 里再补一句"**（那正是复发的成因：这个不变量只挂在端点上，
+  每条新写路径都得靠人记得）—— 改成**把它下沉到写操作自己那层**：
+  `db.insert_document()` / `db.insert_batch_documents()` 末尾各清一次
+  ⇒ 经 helper 写文档的路径**不再可能忘**（`upload_document` 因此一行没改）。
+
+  ⭐ **并配一道推导型守卫** `api/test_bm25_cache_invalidation_wiring.py`：
+  从 `api/*.py` 的 **AST 里推出**"谁在写 `documents`"，再要求它**自己**（判据 A）或**它调的 helper**（判据 B）清缓存
+  —— ⛔ **不维护端点名单**（名单型守卫只钉住"当时知道的那几个"，N3 正是名单漏项）⇒ 新增写路径忘了清就**立刻转红**。
+
+  **判据（可打印）**：
+  ```bash
+  venv/bin/python -m pytest api/test_bm25_cache_invalidation_wiring.py -q   # 改前 3 failed ⇒ 改后 3 passed
+  bash scripts/ci-local.sh                                                  # ⇒ 515 passed（改前 512 · 同树实测）
+  ```
+  **证伪**：把守卫的 `API_DIR` 指向一个只含**合成模块**的临时目录（里面放一条"写 `documents` 但不清缓存"的函数）
+  ⇒ 判据 A **立刻报它** ⇒ 证明它是"从代码推导"，⛔ 不是"把已知的几个函数钉住"。
+
 - 🔴 **硬门 D 端到端验收：人工接管**三条出口**全都会破坏会话** —— 已修（2026-10-04 · `DEC-062`）。
   业务方 2026-10-04 裁的「下一件事」= **硬门 D · 端到端验收**（后端四硬门里唯一「三段齐了但没验收」的那个）。
   **一跑就不通过**：拿真服务（真 DeepSeek + 真 `MemorySaver`）跑，**证真① 过、证真② 不过** ——
