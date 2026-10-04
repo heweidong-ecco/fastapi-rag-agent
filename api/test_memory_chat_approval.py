@@ -128,21 +128,40 @@ def test_memory_chat_registers_pending_with_graph_name(monkeypatch):
 
 # ==================== ③ approve 必须按【登记的图】路由 ====================
 
+# 卡在审批点的那条消息（真货形状：**只有 `tool_calls`、没有文字**）。
+_STUCK = AIMessage(content="", tool_calls=[
+    {"name": "web_search", "args": {}, "id": "call_1"}])
+
+
 class _FakeGraph:
-    def __init__(self, next_=("approval",)):
+    """⚠️ 本桩的两处形状是**被 approve 读出来的**，⛔ 别删：
+      · `values["messages"]` —— approve 要读卡住的 `tool_calls` 去回填配对的 `ToolMessage`；
+      · `next_after` —— approve 放行后**再读一次** state（判"该不该注销登记"），
+        与放行前那个 `next` **不是同一个值**。
+    改前只给 `values={}` + 一个恒定 `next`，是因为**改前的 approve 只读 `.next`** ——
+    `KeyError` 暴露的是桩不完整，不是被测代码错。
+    """
+
+    def __init__(self, next_=("approval",), next_after=()):
         self.trace = []
-        self._next = next_
+        self._before = next_
+        self._after = next_after
+        self._invoked = False
 
     def get_state(self, config):
         self.trace.append(("get_state", config))
-        return types.SimpleNamespace(next=self._next, values={})
+        return types.SimpleNamespace(
+            next=self._after if self._invoked else self._before,
+            values={"messages": [AIMessage(content="Q1"), _STUCK]},
+        )
 
-    def update_state(self, config, values=None):
+    def update_state(self, config, values=None, **kw):
         self.trace.append(("update_state", config))
         return config
 
     def invoke(self, state, config=None):
         self.trace.append(("invoke", config))
+        self._invoked = True
         return {"messages": [AIMessage(content="done")]}
 
 

@@ -10,6 +10,46 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- 🔴 **硬门 D 端到端验收：人工接管**三条出口**全都会破坏会话** —— 已修（2026-10-04 · `DEC-062`）。
+  业务方 2026-10-04 裁的「下一件事」= **硬门 D · 端到端验收**（后端四硬门里唯一「三段齐了但没验收」的那个）。
+  **一跑就不通过**：拿真服务（真 DeepSeek + 真 `MemorySaver`）跑，**证真① 过、证真② 不过** ——
+
+  | 出口 | 改前实测 | 后果 |
+  |---|---|---|
+  | 改写后放行 | `approve` **0.017s** 返回、`answer` = 输入原文 | 图**当场 END**，`tools`/`agent` 一个都没跑 |
+  | 原样放行（模型放行后**又**要敏感工具） | `answer=""`、图**仍停在审批点**，队列**已清空** | 🔴 **孤儿会话**（查不到、批不了） |
+  | 拒绝 | `answer` = **内部指令原文照抄吐给用户** | 界面上弹出一句写给模型看的话 |
+
+  **三条共通的硬症状**：同 `thread_id` 再问一句 ⇒ **500**
+  （`OpenAI 400: An assistant message with 'tool_calls' must be followed by tool messages`）。
+  ⚠️ **而单测全程 21 条绿** —— `B6` 那 6 条用的是**假图**：不校验消息结构，假 `invoke` 也不会在**下一轮** 400。
+
+  **根因**：`interrupt_before=["approval"]` 把 state 停在「末尾是一条带 `tool_calls` 的 `AIMessage`」上，
+  它**必须**由每个 `tool_call_id` 各一条 `ToolMessage` 闭合；三条出口改前塞的是别的类型 / 什么都不塞。
+  第二重坑：`update_state` 的 `as_node` 是**推**出来的 ⇒ 塞 `AIMessage` 会被当成 `agent` 输出 ⇒ **条件边重算 ⇒ END**。
+
+  **修法**（业务方裁「按 A+B+C 修，一次提交」）：
+  - **A · 状态合法** —— 人工裁定**回填成 `ToolMessage`**（每个 `tool_call_id` 一条）**+ 显式 `as_node="tools"`**；
+    三条出口共用新助手 `api_v1_agent._tool_rulings()`。⚠️ **只塞对消息类型还不够** —— 不传 `as_node` 实测 `next=()`（照旧 END）。
+  - **B · 该不该注销** —— 只有**真的走完**（`get_state().next != ("approval",)`）才 `resolve()`；
+    **又停下** ⇒ **重新登记** + 返回**第三态** `status="pending_approval"`（改前无条件注销 ⇒ 孤儿会话）。
+  - **C · 回归** —— `api/test_approval_resume.py` 加 **§⑤ 六条**（真图 + 假 LLM），**每条都先看过它红**。
+
+  **判据（可打印）**：
+  ```bash
+  venv/bin/python -m pytest api/test_approval_resume.py -q            # ⇒ 12 passed
+  venv/bin/python -m pytest api/ -q -m "not integration and not needs_db"
+  # ⇒ 512 passed, 3 skipped, 32 deselected   （改前 506 ⇒ +6，即 §⑤ 那六条）
+  ```
+  **端到端（真服务）**：改前证真② 不成立 ⇒ **改后 0 失败**（两次复跑 **22/22 · 19/19** ⚠️ **分母随运行变化**，
+  有几条断言在「`while status == 'pending_approval'`」循环里，看的是**有没有 🔴**）；其中模型**连续 3 次**放行后又要审批，**每次重新入队**。
+  📌 脚本已落仓（⛔ 不再留在 `/tmp` —— 易失）⇒ `fastapi-rag-agent-TODO待办/探针-硬门D人工接管验收.py`，**真打 API，⛔ 不进 CI**。
+  ⚠️ **硬门 D 仍标 🟡** —— 它的演示/反例里明确含**界面**（「点开后能看到完整上下文」「界面上找不到」），前端未开工。
+  现状准确表述 = **后端侧证真①②已过 · 界面侧待前端**。
+  ⚠️ **顺带修的测试基建**：3 个测试文件的 `_FakeGraph` 改前只实现 `.next`；修后的 `approve` 还要读
+  `values["messages"]` 与"放行后"的 `next` ⇒ 补齐（那个 `KeyError` 是**假图不完整**，⛔ 不是被测代码错）。
+  📄 全文（含否掉的 4 个备选 · 边界 4 条）⇒ `docs/decisions/DEC-062-人工接管三条出口都破坏会话.md`
+
 - 🟢 **`/specs` 对账 + 四处【计数口径】更正 —— 只改文档里的数，⛔ 没动代码**（2026-10-03 立 · **2026-10-04 刷新**）。
 
   **对账结果**（`bash scripts/spec_status.sh`）：**56 个产品模块 / 有 spec 26 / 没 spec 30 / 残留 0**。
@@ -618,7 +658,7 @@ All notable changes to this project will be documented in this file.
   📄 模块 spec ⇒ `docs/specs/pending_approvals.md` · 计划 ⇒ `docs/specs/api_v1_agent.md` 的「实施计划 ② · Task 2」。
   ⚠️ **`B6`（接管后续跑）仍未做 ⇒ 硬门 D 整体【未完成】。**
   ➡️ **2026-10-03 更新**：`B6` **已于同日 `②` Task 3 完成**（见本文件顶部那条）⇒ **硬门 D 三段齐了**
-  （⚠️ 但**端到端验收**还没做，见那条的说明）。
+  （⚠️ 本行原写「端到端验收还没做」—— ✅ **2026-10-04 已跑**：首跑**不通过** ⇒ `DEC-062` 修 ⇒ 复跑 **22/22**）。
 
 - 🟢 **审批触发条件从「任意 `tool_calls`」改成「工具白名单」**（2026-10-03 · `②` Task 1 · `B4`）。
 
@@ -668,7 +708,8 @@ All notable changes to this project will be documented in this file.
   📄 裁定 ⇒ **`docs/decisions/DEC-048-审批触发条件改工具白名单.md`**（四个未定死处：语义 / 哪些工具 / 写在哪 / 空名单怎么办）
   · `fastapi-rag-agent-TODO待办/后端补齐清单-待裁-20260929.md` 的 `B4 · ✍️ 裁` · `决策二`。
   ⚠️ **`B5`（待接管队列）/ `B6`（接管后续跑）仍未做 ⇒ 硬门 D 整体【未完成】。**
-  ➡️ **2026-10-03 更新**：`B5` **已于同日 `②` Task 2 完成** · `B6` **已于同日 `②` Task 3 完成**（见本文件顶部两条）⇒ **硬门 D 三段齐了**（⚠️ 端到端验收仍未做）。
+  ➡️ **2026-10-03 更新**：`B5` **已于同日 `②` Task 2 完成** · `B6` **已于同日 `②` Task 3 完成**（见本文件顶部两条）⇒ **硬门 D 三段齐了**
+  （⚠️ 本行原写「端到端验收仍未做」—— ✅ **2026-10-04 已跑**，首跑**不通过** ⇒ `DEC-062` 修 ⇒ 复跑 **22/22**，见本文件 `[Unreleased]` 顶部）。
 
 - 🟢 **新增复盘 `docs/复盘/2026-10-02-判据写歪了不报错.md`** + 两条规矩落进 `docs/规范/开发规范.md`（2026-10-02）。
 
