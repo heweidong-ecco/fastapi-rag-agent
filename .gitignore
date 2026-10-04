@@ -47,3 +47,13 @@ fastapi-rag-agent-TODO待办/*.png
 
 # ===== 凭据黑名单（装的是"绝不能再进仓库"的值本身，故必须忽略）=====
 .secret-denylist
+
+# ⚠️ Claude Code 的 worktree 落点 —— 【不入库】（2026-10-04 加 · `DEC-067`）
+#   由来：`git worktree add` 把工作树建在 `.claude/worktrees/<name>/` 下，它**自带一个 `.git`**
+#   ⇒ 外层仓看到的是一个**嵌入式 git 仓**，`git add -A` 会把它当成 **gitlink** 暂存。
+#   🔴 **实测（2026-10-04）**：本仓做 `DEC-067` 时 `git add -A` **真的把它暂存了**
+#      （`git status` 显示 `A?`，git 自己打了一串 "adding embedded git repository" 警告）。
+#   ⚠️ 危害不是"多一个目录"，是**别人克隆后拿到一个空壳**（外层只记 sha，内容不入库）
+#      —— 与 `Product/` 外层仓把 15 个嵌套仓记成 gitlink 是**同一件事**。
+#   📌 为什么放**结构**而不是写句纪律：纪律靠人记得，`git add -A` 不会读纪律。
+.claude/worktrees/
