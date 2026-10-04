@@ -222,8 +222,13 @@ def human_approval(state: AgentState):
 #    —— 函数体里的是局部名，外面拿不到。
 #    ⚠️ 病根同上一条 `DEC-051`：**一个名字两个来源 ⇒ 必然漂移，而漂移是静默的**
 #    （那次两个来源对不上，审批门**从来没触发过**，接口一切正常）。
-#    ⚠️ 判据：`api/test_agent_stream_chains.py::test_streamable_nodes_exist_in_the_graph`
-#    钉住「名单里的名字**真的在图里**」（`get_graph(xray=1)` 按 `split(":")[-1]` 后缀比）。
+#    ⚠️ 判据：`api/test_agent_stream_chains.py::test_every_streamable_node_name_exists_in_its_graph`
+#    钉住「名单里的名字**真的在图里**」（对本图 `get_graph(xray=1)`，按 `split(":")[-1]` 比后缀）。
+#    🔴 2026-10-04 更正：本条原引的 `test_streamable_nodes_exist_in_the_graph` **不存在**
+#    （全仓只有这句注释本身提到它，`get_graph(xray=1)` 也**从没被调用过**）——
+#    即那是一条**恒假的判据**。现已把用例真写出来（4 张图参数化）。
+#    ⚠️ **它覆盖不到反方向** —— 「图上真的出了块、但名字不在名单里」由
+#    `test_real_chain_*` 那几条负责（两条合起来才闭口）。
 #    ⛔ 同族的 `tools` / `approval` 不在里面：它们**不调 LLM**（无字可流），
 #    而 `tools` 返回的 `ToolMessage` 会被当成"新消息"发出来 ⇒ 混进正文（实测）。
 STREAMABLE_NODES = frozenset({

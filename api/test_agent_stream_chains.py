@@ -33,6 +33,7 @@
 
 import ast
 import asyncio
+import importlib
 import inspect
 import json
 import textwrap
@@ -505,6 +506,47 @@ def test_chain_a_whitelist_is_the_graph_module_s_own(monkeypatch):
                     if isinstance(n, ast.Assign)
                     and any(getattr(t, "id", None) == "STREAMABLE_NODES" for t in n.targets)]
     assert not defined_here, "端点在**自己**定义 STREAMABLE_NODES ⇒ 又变成两处口径了"
+
+
+# ==================== 白名单 × 图 对账（`B1` 评审收口 · 2026-10-04）====================
+#
+# 🔴 **为什么需要这一条**：白名单里写错一个名字（例如 `chat_node` 而不是 `chat`）
+#    **不会有任何用例报错** —— 那段 token 只是**静默丢掉**，接口一切正常。
+#    上面那些 `test_real_chain_*` 只抓**反方向**（"实际出块的节点不在白名单"），
+#    抓不到"白名单里有**不存在**的名字"。
+#
+# ⚠️ 本条**只建图、不 invoke** ⇒ 不联网、不花钱、不碰 mem0。
+#    四张图的 builder 全是纯构图（`StateGraph` + `add_node` + `compile`）。
+
+#: (模块名, builder 名) —— ⛔ 用字符串走 `importlib`（`agent_graph` 未在本文件 import）
+_STREAMABLE_WHITELISTS = [
+    ("agent_graph", "build_agent_graph"),
+    ("agent_checkpointer", "build_checkpointer_agent"),
+    ("agent_graph_advanced", "build_mcp_agent"),
+    ("agent_graph_advanced_learning", "build_advanced_agent"),
+]
+
+
+@pytest.mark.parametrize("module_name,builder_name", _STREAMABLE_WHITELISTS)
+def test_every_streamable_node_name_exists_in_its_graph(module_name, builder_name):
+    """⭐ 白名单里的**每个名字**都必须真的在它那张图里。
+
+    ⚠️ **`xray=1` 是必须的**：链 A 的 5 个部门全是**子图**，不开 xray 只能看到 `react_dept`
+       这层壳，看不到里面的 `agent` / `search_summarize` / `translate_execute`。
+    ⚠️ 按 `split(":")[-1]` 比**后缀** —— 与 `meta["langgraph_node"]` 报的名字**同口径**
+       （它报的是**子图内层**名，见 `api/sse.py:145-152`）。
+    """
+    module = importlib.import_module(module_name)
+    graph = getattr(module, builder_name)()
+
+    node_ids = set(graph.get_graph(xray=1).nodes)
+    suffixes = {nid.split(":")[-1] for nid in node_ids}
+
+    missing = set(module.STREAMABLE_NODES) - suffixes
+    assert not missing, (
+        f"{module_name}.STREAMABLE_NODES 里有名字【不在图中】⇒ 那段 token 会被静默丢掉：{sorted(missing)}\n"
+        f"图中实际的节点名（后缀口径）：{sorted(suffixes)}"
+    )
 
 
 # ==================== 链 B 独有：审批登记不能被流式带坏 ====================
