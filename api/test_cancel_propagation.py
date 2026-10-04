@@ -44,7 +44,9 @@ from prometheus_client import REGISTRY
 
 import api_v1_agent as agent_mod
 import api_v1_rag as rag_mod
+import cache as cache_mod
 import db as db_mod
+from conftest import FakeRedis
 from schemas import QuestionRequest
 
 RAG_ENDPOINT = "rag_stream_search"
@@ -117,6 +119,9 @@ class _AsyncSpyStream:
         self.item_factory = item_factory
         self.first_delay = first_delay
         self.i = 0
+        # ⚠️ `DEC-055`：吐够 N 块之后**抛**（"生成到一半炸了"那条出口要用）——
+        #    `None` ⇒ 从不抛，与改前**逐字相同**（`_SpyGraph` 没有这个属性 ⇒ 取到 `None`）。
+        self.explode_after = getattr(owner, "explode_after", None)
 
     def __aiter__(self):
         return self
@@ -124,6 +129,9 @@ class _AsyncSpyStream:
     async def __anext__(self):
         if self.i >= self.owner.cap:
             raise StopAsyncIteration
+        # ⚠️ 判据是「**已经吐出去 N 块**」⇒ 在**取下一块时**抛（`i` 此刻正是已吐出的块数）。
+        if self.explode_after is not None and self.i >= self.explode_after:
+            raise RuntimeError("上游炸了")
         self.i += 1
         self.owner.pulled += 1
         # ⚠️ 第一块的等待时长可调：`B3` 要测「**一块都还没生成**就断了」，
@@ -182,9 +190,11 @@ class _SpyRagLLM:
     ⚠️ `cap` 是**安全阀** —— 取消没生效时，测试应当**断言失败**，⛔ 不是挂住。
     """
 
-    def __init__(self, cap=40, first_delay=None, aclose_interrupted=False, aclose_raises=False):
+    def __init__(self, cap=40, first_delay=None, aclose_interrupted=False, aclose_raises=False,
+                 explode_after=None):
         self.cap = cap
         self.first_delay = first_delay
+        self.explode_after = explode_after           # ⇒ 吐够 N 块之后抛（`DEC-055` 的异常出口）
         self.pulled = 0
         self.closed = False
         self.aclose_called = False
@@ -207,12 +217,15 @@ class _SpyRagLLM:
 class _SpyGraph:
     """假的图：与 `test_agent_sse._FakeGraph` 同款，**额外记「流有没有被关」**。"""
 
-    def __init__(self, cap=40, aclose_interrupted=False):
+    def __init__(self, cap=40, aclose_interrupted=False, explode_after=None):
         self.cap = cap
         self.pulled = 0
         self.closed = False
         self.aclose_called = False
         self.aclose_interrupted = aclose_interrupted
+        # ⚠️ `DEC-055`：吐够 N 块之后抛（"生成到一半炸了"）—— `_AsyncSpyStream` 从本对象上取它
+        #    （同 `_SpyRagLLM` 的用法）。`None` ⇒ 从不抛，与改前**逐字相同**。
+        self.explode_after = explode_after
         self.aget_state_calls = []
 
     def astream(self, payload, config, stream_mode):
@@ -256,12 +269,21 @@ class _FakeCursor:
 def _call_rag_stream(monkeypatch, llm, history=None, get_history=None, **kw):
     """直接调端点函数，把**所有**外部依赖短路 —— 本文件测的是取消，⛔ 不是检索/预算/认证。
 
-    ⚠️ 传 `history=[]` ⇒ 把写入历史的调用**记下来**（`B3` 的观测对象）；
-       不传 ⇒ 照旧短路掉（其余用例不关心历史）。
-    ⚠️ 传 `get_history=` ⇒ 换成**真的能读回**的假存储（默认读回空）——
-       用于把"落账"与"下一轮读到"**接起来**验（端点 `:628` 那只在前端没传历史时才读）。
+    ⚠️ 传 `history=<FakeRedis>` ⇒ 把**真落进存储的那些条目**留下来（`B3`/`DEC-055` 的观测对象）；
+       不传 ⇒ 换一个**一次性的**假存储 —— ⛔ 其余用例也不许碰真 redis。
+    ⚠️ 传 `get_history=` ⇒ 覆盖"读回"；**默认真的从那个假存储读** ——
+       这才把"落账"与"下一轮读到"**接起来**（端点 `:628` 只在前端没传历史时才读）。
+
+    🔴 **桩打在【叶子】`cache.redis_client`，⛔ 不是 `rag_mod.append_chat_history`。**
+       `DEC-055` 把留痕搬进了 `cache.persist_turn`，它调的是 **`cache` 自己的模块全局** ——
+       patch `rag_mod` 上那个名字**够不着它**，写入会**直接打到真 redis**。
+       📌 同一个病本仓刚栽过（`get_db` 有两个模块全局）⇒ `docs/复盘/2026-10-03-CI同款命令不等于CI等价物.md`。
     """
-    monkeypatch.setattr(rag_mod, "get_chat_history", get_history or (lambda user: []))
+    store = history if history is not None else FakeRedis()
+    monkeypatch.setattr(cache_mod, "redis_client", store)
+    # ⚠️ 端点 `:628` 调的是 **`api_v1_rag` 的模块全局** ⇒ 这个 patch 是必需的
+    #    （与上面那个不是一个东西）。默认值 = 从上面那个假存储里**真读**。
+    monkeypatch.setattr(rag_mod, "get_chat_history", get_history or cache_mod.get_chat_history)
     monkeypatch.setattr(rag_mod, "check_session_token_budget", lambda *a, **k: (True, ""))
     monkeypatch.setattr(rag_mod, "circuit", lambda *a, **k: (True, ""))
     monkeypatch.setattr(rag_mod, "get_embedding", lambda text: [0.0] * 8)
@@ -279,12 +301,6 @@ def _call_rag_stream(monkeypatch, llm, history=None, get_history=None, **kw):
     #       `POSTGRES_PORT=59999 venv/bin/python -m pytest api/ -q -m "not integration and not needs_db"`
     #    📄 复现与根因 ⇒ `docs/复盘/2026-10-03-CI同款命令不等于CI等价物.md`
     monkeypatch.setattr(db_mod, "get_db", lambda: _FakeConn())
-    if history is None:
-        monkeypatch.setattr(rag_mod, "append_chat_history", lambda *a, **k: None)
-    else:
-        monkeypatch.setattr(
-            rag_mod, "append_chat_history", lambda *a, **k: history.append(a)
-        )
     kw.setdefault("thread_id", "t-cancel")
     kw.setdefault("user_name", "tester")
     # ⚠️ `citations` 默认 `False` = **旧行为**（⛔ 不是本次新增的行为）。
@@ -297,12 +313,14 @@ def _call_rag_stream(monkeypatch, llm, history=None, get_history=None, **kw):
     return asyncio.run(rag_mod.stream_search(req, **kw))
 
 
-def _call_agent_stream(monkeypatch, graph, **kw):
+def _call_agent_stream(monkeypatch, graph, redis=None, **kw):
     monkeypatch.setattr(agent_mod, "agent_graph", graph)
     monkeypatch.setattr(agent_mod, "check_session_token_budget", lambda *a, **k: (True, ""))
     monkeypatch.setattr(agent_mod, "circuit", lambda *a, **k: (True, ""))
     monkeypatch.setattr(agent_mod, "register", lambda *a, **k: None)
     monkeypatch.setattr(agent_mod, "resolve", lambda *a, **k: None)
+    # 🔴 `DEC-055`：端点会往 `chat_history` 写留痕 ⇒ 短路存储（⛔ 否则打到真 redis）。
+    monkeypatch.setattr(cache_mod, "redis_client", redis if redis is not None else FakeRedis())
     kw.setdefault("thread_id", "t-cancel")
     kw.setdefault("user_name", "tester")
     kw.setdefault("question", "你好")
@@ -416,30 +434,39 @@ def _seen_content(sent):
         text = b.decode()
         if not text.startswith("data: {"):
             continue  # `data: [DONE]` 之类
-        parts.append(json.loads(text[len("data: "):])["content"])
+        payload = json.loads(text[len("data: "):])
+        # ⚠️ 只数**内容帧** —— `sources` / `error` 这些收尾帧没有 `content` 键
+        #    （`DEC-055` 加的异常出口用例会走到这里）。
+        if "content" in payload:
+            parts.append(payload["content"])
     return "".join(parts)
 
 
 def test_rag_persists_partial_answer_when_cancelled(monkeypatch):
     """🔴 `B3` 核心：客户端断开后，**已经生成的那半截要进历史**（⛔ 不是直接丢）。
 
-    ⚠️ 为什么非存不可：`api_v1_rag.py:667` 那行注释早就写了这个意图 ——
+    ⚠️ 为什么非存不可：`api_v1_rag.py` 那行注释早就写了这个意图 ——
        「如果有停止当前消息先放历史……真停止按钮的调用（**使它支持历史补偿**）」。
        取消时丢掉 ⇒ 用户那问句**也一起丢**（它跟答案写在同一段代码里）。
     """
     llm = _SpyRagLLM()
-    hist = []
-    resp = _call_rag_stream(monkeypatch, llm, history=hist, question="中断也要留痕")
+    store = FakeRedis()
+    resp = _call_rag_stream(monkeypatch, llm, history=store, question="中断也要留痕")
     sent = _drive_asgi_until_disconnect(resp, after_chunks=DISCONNECT_AFTER)
 
     seen = _seen_content(sent)
     assert seen, "根本没流出内容 ⇒ 本断言无意义"
-    assert [h[1] for h in hist] == ["user", "assistant"], (
-        f"中断后历史应**成对**写入 user+assistant，实际 {hist}"
+    entries = store.history("tester")
+    assert [e["role"] for e in entries] == ["user", "assistant"], (
+        f"中断后历史应**成对**写入 user+assistant，实际 {entries}"
     )
-    assert hist[0][2] == "中断也要留痕", f"用户那问句没存对：{hist[0]}"
-    assert hist[1][2] == seen + rag_mod.INTERRUPTED_SUFFIX, (
-        f"存进历史的不是客户端看到的那半截（或缺中断标记）：{hist[1][2]!r}"
+    assert entries[0]["content"] == "中断也要留痕", f"用户那问句没存对：{entries[0]}"
+    assert entries[1]["content"] == seen + rag_mod.INTERRUPTED_SUFFIX, (
+        f"存进历史的不是客户端看到的那半截（或缺中断标记）：{entries[1]['content']!r}"
+    )
+    # 🔴 `DEC-055`：光有"半截 + 标记"还不够 —— 读的人得能**机器可读**地分出这不是完整答案。
+    assert [e["status"] for e in entries] == ["cancelled", "cancelled"], (
+        f"取消那条出口的 status 不对（`DEC-055` 判决表那一格）：{entries}"
     )
 
 
@@ -457,9 +484,9 @@ def test_rag_bookkeeping_survives_interrupted_aclose(monkeypatch):
     ⇒ 本用例把**"用户已经看到字了才点停止"**这个主场景钉死：三件收尾一件都不能少。
     """
     llm = _SpyRagLLM(aclose_interrupted=True)
-    hist = []
+    store = FakeRedis()
     before = _metric(RAG_ENDPOINT)
-    resp = _call_rag_stream(monkeypatch, llm, history=hist, question="关流被打断也要留痕")
+    resp = _call_rag_stream(monkeypatch, llm, history=store, question="关流被打断也要留痕")
     with _capture_logs() as lines:
         sent = _drive_asgi_until_disconnect(resp, after_chunks=DISCONNECT_AFTER)
 
@@ -471,10 +498,12 @@ def test_rag_bookkeeping_survives_interrupted_aclose(monkeypatch):
     assert any("断开" in line for line in lines), f"日志里没有取消事件：{lines}"
     seen = _seen_content(sent)
     assert seen, "根本没流出内容 ⇒ 本断言无意义"
-    assert [h[1] for h in hist] == ["user", "assistant"], f"半截没成对落盘：{hist}"
-    assert hist[1][2] == seen + rag_mod.INTERRUPTED_SUFFIX, (
-        f"落盘的不是客户端看到的那半截：{hist[1][2]!r}"
+    entries = store.history("tester")
+    assert [e["role"] for e in entries] == ["user", "assistant"], f"半截没成对落盘：{entries}"
+    assert entries[1]["content"] == seen + rag_mod.INTERRUPTED_SUFFIX, (
+        f"落盘的不是客户端看到的那半截：{entries[1]['content']!r}"
     )
+    assert entries[1]["status"] == "cancelled", f"status 没跟着走：{entries}"
 
 
 def test_rag_bookkeeping_lands_even_when_aclose_itself_fails(monkeypatch):
@@ -489,9 +518,9 @@ def test_rag_bookkeeping_lands_even_when_aclose_itself_fails(monkeypatch):
        （很自然的"收尾动作要放前面才干净"），B3 的承诺就**静默**没了。
     """
     llm = _SpyRagLLM(aclose_raises=True)
-    hist = []
+    store = FakeRedis()
     before = _metric(RAG_ENDPOINT)
-    resp = _call_rag_stream(monkeypatch, llm, history=hist, question="关流自己抛也要留痕")
+    resp = _call_rag_stream(monkeypatch, llm, history=store, question="关流自己抛也要留痕")
     with _capture_logs() as lines:
         sent = _drive_asgi_until_disconnect(
             resp, after_chunks=DISCONNECT_AFTER, expect_raise=True
@@ -506,10 +535,13 @@ def test_rag_bookkeeping_lands_even_when_aclose_itself_fails(monkeypatch):
     assert any("断开" in line for line in lines), f"日志里没有取消事件：{lines}"
     seen = _seen_content(sent)
     assert seen, "根本没流出内容 ⇒ 本断言无意义"
-    assert [h[1] for h in hist] == ["user", "assistant"], (
-        f"关流抛 ⇒ 半截没落盘（B3 承诺失效）：{hist}"
+    entries = store.history("tester")
+    assert [e["role"] for e in entries] == ["user", "assistant"], (
+        f"关流抛 ⇒ 半截没落盘（B3 承诺失效）：{entries}"
     )
-    assert hist[1][2] == seen + rag_mod.INTERRUPTED_SUFFIX, f"落盘的半截不对：{hist[1][2]!r}"
+    assert entries[1]["content"] == seen + rag_mod.INTERRUPTED_SUFFIX, \
+        f"落盘的半截不对：{entries[1]['content']!r}"
+    assert entries[1]["status"] == "cancelled", f"status 没跟着走：{entries}"
 
 
 def test_rag_next_turn_prompt_reads_the_interrupted_half_answer(monkeypatch):
@@ -520,20 +552,17 @@ def test_rag_next_turn_prompt_reads_the_interrupted_half_answer(monkeypatch):
        本用例把这一段**接起来**：第一轮被切断 ⇒ 第二轮（不带历史）发问 ⇒
        检查**真喂给 LLM 的 messages** 里有没有那半截 + 中断标记。
     """
-    store = []                                   # 假存储：(user_name, role, content)
+    store = FakeRedis()                          # 假存储：两轮**共用同一个**
     llm1 = _SpyRagLLM(cap=40)
     resp = _call_rag_stream(monkeypatch, llm1, history=store, question="第一问：紫色河马协议")
     _drive_asgi_until_disconnect(resp, after_chunks=DISCONNECT_AFTER)
-    assert [a[1] for a in store] == ["user", "assistant"], (
-        f"前提没成立：第一轮被切断后历史没落账，后面对不上：{store}"
+    assert [e["role"] for e in store.history("tester")] == ["user", "assistant"], (
+        f"前提没成立：第一轮被切断后历史没落账，后面对不上：{store.history('tester')}"
     )
 
-    # 第二轮：**不传 conversation_history** ⇒ 走 `:628` 从存储读回
+    # 第二轮：**不传 conversation_history** ⇒ 走 `:628` 从存储读回（`_call_rag_stream` 的默认读法）
     llm2 = _SpyRagLLM(cap=2)
-    resp2 = _call_rag_stream(
-        monkeypatch, llm2, question="接着上面说",
-        get_history=lambda user: [{"role": r, "content": c} for _, r, c in store],
-    )
+    resp2 = _call_rag_stream(monkeypatch, llm2, history=store, question="接着上面说")
     _drive_asgi_until_disconnect(resp2, after_chunks=99)   # 正常跑完
 
     contents = [m["content"] for m in llm2.astream_calls[0]]
@@ -552,13 +581,17 @@ def test_rag_full_answer_is_saved_without_interrupt_marker(monkeypatch):
     否则下一轮 prompt 会把一个好好的回答当成"被截断的"，模型的行为跟着变。
     """
     llm = _SpyRagLLM(cap=3)
-    hist = []
-    resp = _call_rag_stream(monkeypatch, llm, history=hist, question="完整的一问")
+    store = FakeRedis()
+    resp = _call_rag_stream(monkeypatch, llm, history=store, question="完整的一问")
     _drive_asgi_until_disconnect(resp, after_chunks=99)  # 永不触发断开
 
-    assert [h[1] for h in hist] == ["user", "assistant"], f"正常收尾的历史不对：{hist}"
-    assert hist[1][2] == "字" * 3, f"正常收尾存的不是完整答案：{hist[1][2]!r}"
-    assert rag_mod.INTERRUPTED_SUFFIX not in hist[1][2], "完整答案被误标成了中断"
+    entries = store.history("tester")
+    assert [e["role"] for e in entries] == ["user", "assistant"], f"正常收尾的历史不对：{entries}"
+    assert entries[1]["content"] == "字" * 3, f"正常收尾存的不是完整答案：{entries[1]['content']!r}"
+    assert rag_mod.INTERRUPTED_SUFFIX not in entries[1]["content"], "完整答案被误标成了中断"
+    assert [e["status"] for e in entries] == ["done", "done"], (
+        f"🔴 `DEC-055`：正常走完那条出口的 status 必须是 'done'（读的人靠它分辨）：{entries}"
+    )
 
 
 def test_rag_cancel_before_any_chunk_saves_nothing(monkeypatch):
@@ -568,11 +601,54 @@ def test_rag_cancel_before_any_chunk_saves_nothing(monkeypatch):
     ⚠️ 首块延迟调大是为了让"断开送到"与"首块产出"的**竞态**稳定倒向我们要测的那一边。
     """
     llm = _SpyRagLLM(first_delay=0.3)
-    hist = []
-    resp = _call_rag_stream(monkeypatch, llm, history=hist, question="还没开始就断了")
+    store = FakeRedis()
+    resp = _call_rag_stream(monkeypatch, llm, history=store, question="还没开始就断了")
     _drive_asgi_until_disconnect(resp, after_chunks=0)
 
-    assert hist == [], f"没生成任何内容却写了历史：{hist}"
+    assert store.history("tester") == [], f"没生成任何内容却写了历史：{store.history('tester')}"
+
+
+def test_rag_persists_partial_answer_when_generation_raises(monkeypatch):
+    """🔴 `DEC-055` 判据①：**异常**那条出口现在也要留痕（改前是"🔴 丢"）。
+
+    ⚠️ 改前的形状：骨架**只有一个"取消专用"的钩子**（`on_cancel`）⇒ 上游抛异常时，
+       那半截**一个字都不留**（`DEC-055` 的普查表在 `/rag/stream_search` 的「异常」列写的就是「🔴 丢」）。
+    ⚠️ 与取消那条**存同一个形态**（半截 + 标记 + 成对），差别只在 `status` ——
+       **机器可读的区分在 `status`，⛔ 不另造第二个标记串**（`DEC-055` §八·3）。
+    """
+    llm = _SpyRagLLM(explode_after=2)
+    store = FakeRedis()
+    resp = _call_rag_stream(monkeypatch, llm, history=store, question="生成到一半炸了")
+    sent = _drive_asgi_until_disconnect(resp, after_chunks=99)   # 永不触发断开
+
+    seen = _seen_content(sent)
+    assert seen == "字" * 2, f"前提没成立：断前应已收到 2 块，实际 {seen!r}"
+    entries = store.history("tester")
+    assert [e["role"] for e in entries] == ["user", "assistant"], f"异常后没成对落盘：{entries}"
+    assert entries[0]["content"] == "生成到一半炸了"
+    assert entries[1]["content"] == seen + rag_mod.INTERRUPTED_SUFFIX, (
+        f"落盘的不是客户端看到的那半截：{entries[1]['content']!r}"
+    )
+    assert entries[1]["status"] == "error", f"异常那条出口的 status 不对：{entries}"
+
+
+def test_rag_error_path_still_emits_no_done_frame(monkeypatch):
+    """⛔ **旧契约不许被这条新接线带歪**：错误路径**没有** `[DONE]`。
+
+    ⚠️ 本端点靠"**没有** `[DONE]`"分辨出错（`_on_error` 的 docstring）——
+       加上它就等于把"出错"变成"正常结束"的样子。
+    🔴 为什么值得单钉：`DEC-055` 给错误出口**新接了一根线**（`on_incomplete`），
+       接线时最自然的"顺手整一下"就是让尾巴统一 —— 而那条尾巴**是故意的**。
+    """
+    llm = _SpyRagLLM(explode_after=2)
+    resp = _call_rag_stream(monkeypatch, llm, question="生成到一半炸了")
+    sent = _drive_asgi_until_disconnect(resp, after_chunks=99)
+
+    texts = [b.decode() for b in _body_chunks(sent)]
+    assert any('"error"' in t for t in texts), f"压根没发 error 帧 ⇒ 本断言无意义：{texts}"
+    assert not any(t.strip() == "data: [DONE]" for t in texts), (
+        f"错误路径混进了 [DONE] ⇒ 前端会把'出错'读成'正常结束'：{texts}"
+    )
 
 
 def test_rag_emits_sources_frame_after_done(monkeypatch):
@@ -655,6 +731,49 @@ def test_agent_records_cancel_event_when_aclose_interrupted(monkeypatch):
     assert graph.closed, "关流被取消打断后**图的流没真的关上** ⇒ 图会继续跑完"
     assert _metric(AGENT_ENDPOINT) == before + 1, "aclose 抛异常 ⇒ 取消没计数"
     assert any("断开" in line for line in lines), f"日志里没有取消事件：{lines}"
+
+
+# -------- `DEC-055`（2026-10-04）：Agent 端两条"没走完"的出口也要留痕 --------
+#
+# 🔴 **判据（可打印）**：`grep -n "on_incomplete" api/api_v1_agent.py` ⇒ 改前**零命中**
+#    （5 条 Agent 链只传 `on_complete`）⇒ 取消/异常时**一个字都不留**。
+
+
+def test_agent_persists_the_partial_answer_when_client_disconnects(monkeypatch):
+    """🔴 `DEC-055`：Agent 端取消 ⇒ **客户端看到的那半截 + 标记 + `status="cancelled"`**。
+
+    ⚠️ 半截长度是竞态（见 `_AsyncSpyStream`）⇒ 只断"至少一块、且全是 `字`"，
+       ⛔ 不钉死具体块数 —— 真服务本来就断在第几块不定。
+    """
+    store = FakeRedis()
+    graph = _SpyGraph()
+    resp = _call_agent_stream(monkeypatch, graph, redis=store)
+    _drive_asgi_until_disconnect(resp, after_chunks=DISCONNECT_AFTER)
+
+    entries = store.history("tester")
+    assert [e["role"] for e in entries] == ["user", "assistant"], f"取消后没成对留痕：{entries}"
+    assert entries[0]["content"] == "你好", f"提问没留下：{entries[0]}"
+    body = entries[1]["content"]
+    assert body.endswith(cache_mod.INTERRUPTED_SUFFIX), f"半截没带中断标记：{body!r}"
+    head = body[:-len(cache_mod.INTERRUPTED_SUFFIX)]
+    assert head and set(head) == {"字"}, f"存的不是客户端看到的那半截：{head!r}"
+    assert entries[1]["status"] == "cancelled", f"status 不对：{entries[1]}"
+
+
+def test_agent_persists_the_partial_answer_when_generation_raises(monkeypatch):
+    """🔴 `DEC-055` 判据①：Agent 端的**异常**出口也留痕 —— 改前 `DEC-055` §一 那格写的是「🔴 丢」。"""
+    store = FakeRedis()
+    graph = _SpyGraph(cap=10, explode_after=2)
+    resp = _call_agent_stream(monkeypatch, graph, redis=store)
+    _drive_asgi_until_disconnect(resp, after_chunks=99)   # 跑到自然结束（错误帧收尾）
+
+    entries = store.history("tester")
+    assert [e["role"] for e in entries] == ["user", "assistant"], f"异常后没成对留痕：{entries}"
+    assert entries[0]["content"] == "你好", f"提问没留下：{entries[0]}"
+    assert entries[1]["content"] == "字" * 2 + cache_mod.INTERRUPTED_SUFFIX, (
+        f"异常时该存'已吐出的那两块 + 标记'：{entries[1]['content']!r}"
+    )
+    assert entries[1]["status"] == "error", f"status 不对：{entries[1]}"
 
 
 def test_agent_normal_completion_is_not_counted_as_cancel(monkeypatch):

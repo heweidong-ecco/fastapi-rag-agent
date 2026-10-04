@@ -43,6 +43,8 @@ import pytest
 
 import agent_graph
 import api_v1_agent as m
+import cache as cache_mod
+from conftest import FakeRedis
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
@@ -338,16 +340,21 @@ class _FakeGraph:
         return type("S", (), {"values": {"messages": messages}})
 
 
-def _call_stream_route(monkeypatch, fake_graph, **kw):
+def _call_stream_route(monkeypatch, fake_graph, redis=None, **kw):
     """直接调端点函数（⛔ 不走 TestClient / 不建库）—— 拿到的是**未缓冲**的生成器。
 
     ⚠️ 用 `monkeypatch` 装假图，理由同 `_install_fake_model`。
     ⚠️ 顺带把 B8 / B11 短路掉：本文件测的是**流式接线**，⛔ 不是预算判定
        （那两条各有自己的用例：`test_session_budget_wiring.py` / `test_breaker_wiring.py`）。
+    ⚠️ `DEC-055` 起端点会往 `chat_history` 写留痕 ⇒ 必须短路存储
+       （⛔ 不打桩就会写**真 redis**：本机 `ci-local.sh` 复用长期容器 `redis-rag`，会攒 key）。
     """
     monkeypatch.setattr(m, "agent_graph", fake_graph)
     monkeypatch.setattr(m, "check_session_token_budget", lambda *a, **k: (True, ""))
     monkeypatch.setattr(m, "circuit", lambda *a, **k: (True, ""))
+    # 🔴 桩打在【叶子】`cache.redis_client`（⛔ 不是 `m.append_chat_history` 之类的 import 方全局）——
+    #    一个点盖住全部 6 条端点。
+    monkeypatch.setattr(cache_mod, "redis_client", redis if redis is not None else FakeRedis())
     kw.setdefault("question", "你好")
     kw.setdefault("thread_id", "t-sse")
     kw.setdefault("user_name", "tester")
@@ -522,3 +529,46 @@ def test_summary_frame_carries_requested_by(monkeypatch):
 
     objs = [json.loads(f[len("data: "):]) for f in frames if f.strip() != "data: [DONE]"]
     assert objs[-1].get("requested_by") == "tester", f"汇总帧没带 requested_by：{objs[-1]}"
+
+
+# ==================== `DEC-055` · 留痕（链 L = `/agent/langgraph_chat/stream`） ====================
+
+
+def test_stream_route_persists_the_turn_on_completion(monkeypatch):
+    """🔴 `DEC-055`：正常跑完 ⇒ **成对**写进 `chat_history`，且 `status == "done"`。
+
+    ⚠️ 答案取自**图的最终状态**（`aget_state`）—— 所以这里刻意让 `_FakeGraph` 的
+       流内 token 与最终状态**不一样**（流的是 `你/好`，最终状态是 `最终答案`）：
+       ⛔ 拿 `collected` 攒出来的话，这条断言会红。
+    """
+    store = FakeRedis()
+    fake = _FakeGraph(tokens=("你", "好"), final_messages=[AIMessage(content="最终答案")])
+    _collect_frames(_call_stream_route(monkeypatch, fake, redis=store, question="问题一"))
+
+    entries = store.history("tester")
+    assert [e["role"] for e in entries] == ["user", "assistant"], f"没成对写：{entries}"
+    assert entries[0]["content"] == "问题一"
+    assert entries[1]["content"] == "最终答案", (
+        f"`DEC-055`：`done` 的答案必须取自**图的最终状态**，⛔ 不是攒流过的块：{entries[1]['content']!r}"
+    )
+    assert entries[1]["status"] == "done", f"status 不对：{entries}"
+
+
+def test_stream_route_writes_nothing_while_waiting_for_approval(monkeypatch):
+    """🔴 `DEC-055` 规则 2：**停在审批点**的这一轮**一条都不写**。
+
+    ⚠️ 不 gate 就会把「等人工审批的半句」写成 `status="done"` ——
+       `summarize_agent_result` 此时给的 `answer` 是**非空的半句**（模型"先说一句再调工具"），
+       ⇒ 那是**本 DEC 的 `status` 字段要防的那类误判**。
+    ⚠️ 这不是"漏了一个出口"：停在审批点是图的**正常**行为，不属 `DEC-055`
+       「没能正常走完」的射程（`DEC-055` §八·1 已登记为另裁）。
+    """
+    store = FakeRedis()
+    monkeypatch.setattr(m, "register", lambda *a, **k: None)
+    monkeypatch.setattr(m, "resolve", lambda *a, **k: None)
+    fake = _FakeGraph(tool_call=True)
+    _collect_frames(_call_stream_route(monkeypatch, fake, redis=store))
+
+    assert store.history("tester") == [], (
+        f"停在审批点却写了历史 ⇒ 那半句会被读成'说完了'：{store.history('tester')}"
+    )

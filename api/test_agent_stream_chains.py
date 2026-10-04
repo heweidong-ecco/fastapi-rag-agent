@@ -46,6 +46,8 @@ import agent_checkpointer as ac
 import agent_graph_advanced as aga
 import agent_graph_advanced_learning as agl
 import api_v1_agent as m
+import cache as cache_mod
+from conftest import FakeRedis
 
 # 🔴 **复用既有夹具**（⛔ 不复制粘贴第三份）—— 理由见文件头。
 from test_agent_sse import (           # noqa: E402
@@ -204,15 +206,18 @@ class _ChainGraph:
     """
 
     def __init__(self, cap=None, items=None, final_values=None,
-                 aclose_interrupted=False, aclose_raises=False):
+                 aclose_interrupted=False, aclose_raises=False, explode_after=None):
         # ⚠️ `cap` 不传时按 `items` 的长度**自然结束**；显式传 `cap=40` 才是"一直吐到断开"
         #    （取消用例要的正是后者 —— 上游必须还在吐，断开才有东西可断）。
+        # ⚠️ `DEC-055`：`explode_after=N` ⇒ 吐够 N 块之后抛 `RuntimeError`（"生成到一半炸了"）。
+        #    `_AsyncSpyStream` 从 owner 上取这个属性（同 `_SpyGraph` / `_SpyRagLLM` 的用法）。
         self.cap = cap if cap is not None else (len(items) if items else 40)
         self.pulled = 0
         self.closed = False
         self.aclose_called = False
         self.aclose_interrupted = aclose_interrupted   # 模拟"关流被二次取消打断"（真服务实测）
         self.aclose_raises = aclose_raises             # 模拟"关流动作自己失败"（shield 护不住）
+        self.explode_after = explode_after             # ⇒ 吐够 N 块之后抛（`DEC-055` 异常出口）
         self.items = items or []
         self._i = 0
         self._final_values = final_values
@@ -253,7 +258,7 @@ def _tokens(*texts, nodes=("agent",)):
     return out
 
 
-def _call(chain_key, monkeypatch, graph=None, patch_pending=True, **kw):
+def _call(chain_key, monkeypatch, graph=None, patch_pending=True, redis=None, **kw):
     """直接调端点函数（⛔ 不走 TestClient / 不建库）—— 拿到的是**未缓冲**的生成器。
 
     ⚠️ 把 B8 / B11 短路掉：本文件测的是**流式接线**，⛔ 不是预算判定
@@ -261,6 +266,7 @@ def _call(chain_key, monkeypatch, graph=None, patch_pending=True, **kw):
     ⚠️ 链 C 还要短路**追踪 / 预算提醒**（`start_trace` / `finish_trace` /
        `check_budget_warning`）—— 它们会往追踪存储里写，与"流式接线"无关。
     ⚠️ `patch_pending=False` 留给链 B 那条**要断言登记内容**的用例（它自己装间谍）。
+    ⚠️ `DEC-055` 起端点会往 `chat_history` 写留痕 ⇒ 必须短路存储（同 `_call_stream_route`）。
     """
     spec = CHAINS[chain_key]
     if graph is not None:
@@ -274,6 +280,8 @@ def _call(chain_key, monkeypatch, graph=None, patch_pending=True, **kw):
     if patch_pending:
         monkeypatch.setattr(m, "register", lambda *a, **k: None)
         monkeypatch.setattr(m, "resolve", lambda *a, **k: None)
+    # 🔴 桩打在【叶子】`cache.redis_client`（⛔ 不是各端点的模块全局）—— 一个点盖住 6 条端点。
+    monkeypatch.setattr(cache_mod, "redis_client", redis if redis is not None else FakeRedis())
     kw.setdefault("question", "你好")
     kw.setdefault("thread_id", THREAD)
     kw.setdefault("user_name", "tester")
@@ -479,6 +487,111 @@ def test_normal_completion_is_not_counted_as_cancel(chain_key, monkeypatch):
     assert _metric(spec["endpoint"]) == before, "正常收尾被记成了取消"
 
 
+# ==================== ⑤ 留痕（`DEC-055` · 三条出口各写各的 status） ====================
+#
+# 🔴 **判据（可打印）**：`grep -n "persist_turn\|append_chat_history" api/api_v1_agent.py`
+#    ⇒ 改前**零命中**（5 条 Agent 链一个钩子都没接）。
+#
+# ⚠️ 这三条**不是**"顺手补的覆盖" —— 它们是 `DEC-055` 决策 2/3 的**落点**：
+#    `chat_history` 与 LangGraph checkpoint 是**两套互不相通的存储**，
+#    而 Agent 链此前只写 checkpoint ⇒ 中断/异常时**一个字都不留**。
+
+@pytest.mark.parametrize("chain_key", ["A", "B", "C"])
+def test_completed_turn_is_persisted_with_done_status(chain_key, monkeypatch):
+    """🔴 正常跑完 ⇒ **成对写** `chat_history`，`status == "done"`，答案是**图最终状态**里的那个。
+
+    ⚠️ 流内块是 `你/好/呀`，最终状态是 `最终答案` —— **故意不同**：
+       ⛔ 拿 `collected` 攒的话这条会红（`DEC-050` 真服务撞过的同一个坑：
+       链 A 的 `calc_execute` 分支一个字都不流，答案来自工具返回值）。
+    """
+    store = FakeRedis()
+    graph = _ChainGraph(items=_tokens("你", "好", "呀"),
+                        final_values=_FINAL_BY_CHAIN[chain_key])
+    _collect_frames(_call(chain_key, monkeypatch, graph, redis=store, question="问题一"))
+
+    entries = store.history("tester")
+    assert [e["role"] for e in entries] == ["user", "assistant"], (
+        f"{CHAINS[chain_key]['route']} 正常跑完却没成对留痕：{entries}"
+    )
+    assert entries[0]["content"] == "问题一", f"提问没留下：{entries[0]}"
+    assert entries[1]["content"] == "最终答案", (
+        f"🔴 `done` 的答案取自**图最终状态**，⛔ 不是攒流过的块：{entries[1]['content']!r}"
+    )
+    assert entries[1]["status"] == "done", f"status 不对：{entries[1]}"
+    assert cache_mod.INTERRUPTED_SUFFIX not in entries[1]["content"], (
+        "正常跑完的答案**不许**带中断标记 —— 带了会让下一轮把好答案当'被截断'的"
+    )
+
+
+@pytest.mark.parametrize("chain_key", ["A", "B", "C"])
+def test_cancelled_turn_is_persisted_with_cancelled_status(chain_key, monkeypatch):
+    """🔴 客户端断开 ⇒ 存**客户端已经看到的那半截 + 标记**，`status == "cancelled"`。
+
+    ⚠️ 半截长度是 `[DISCONNECT_AFTER, DISCONNECT_AFTER + TOLERANCE]`（竞态，见 `_AsyncSpyStream`）
+       ⇒ 断"至少含前 2 块" + "块数在上界内"，⛔ 不钉死具体数字。
+    """
+    store = FakeRedis()
+    graph = _ChainGraph(cap=40, items=_tokens("字"))
+    resp = _call(chain_key, monkeypatch, graph, redis=store, question="问题一")
+    _drive_asgi_until_disconnect(resp, after_chunks=DISCONNECT_AFTER)
+
+    entries = store.history("tester")
+    assert [e["role"] for e in entries] == ["user", "assistant"], (
+        f"{CHAINS[chain_key]['route']} 取消后没成对留痕：{entries}"
+    )
+    body = entries[1]["content"]
+    assert body.endswith(cache_mod.INTERRUPTED_SUFFIX), f"半截没带中断标记：{body!r}"
+    head = body[:-len(cache_mod.INTERRUPTED_SUFFIX)] if body.endswith(cache_mod.INTERRUPTED_SUFFIX) else ""
+    assert head == "字" * len(head) and DISCONNECT_AFTER <= len(head) <= DISCONNECT_AFTER + TOLERANCE, (
+        f"存的不是客户端看到的那半截（应为 2–4 个'字'）：{head!r}"
+    )
+    assert entries[1]["status"] == "cancelled", f"status 不对：{entries[1]}"
+
+
+@pytest.mark.parametrize("chain_key", ["A", "B", "C"])
+def test_failed_turn_is_persisted_with_error_status(chain_key, monkeypatch):
+    """🔴 `DEC-055` 判据①：**异常**出口也留痕 —— 改前三条链一个钩子都没接（"🔴 丢"）。
+
+    ⚠️ 异常出**没有图的最终状态可查**（图正跑到一半）⇒ 这里只能用 `collected`，
+       与上面那条（`done` 取自最终态）**不矛盾**。
+    """
+    store = FakeRedis()
+    graph = _ChainGraph(cap=10, items=_tokens("字"), explode_after=2)
+    resp = _call(chain_key, monkeypatch, graph, redis=store, question="问题一")
+    _drive_asgi_until_disconnect(resp, after_chunks=99)   # 跑到自然结束（错误帧收尾）
+
+    entries = store.history("tester")
+    assert [e["role"] for e in entries] == ["user", "assistant"], (
+        f"{CHAINS[chain_key]['route']} 异常后没成对留痕：{entries}"
+    )
+    assert entries[1]["content"] == "字" * 2 + cache_mod.INTERRUPTED_SUFFIX, (
+        f"异常时该存'已吐出的那两块 + 标记'：{entries[1]['content']!r}"
+    )
+    assert entries[1]["status"] == "error", f"status 不对：{entries[1]}"
+
+
+def test_pending_approval_turn_writes_nothing(monkeypatch):
+    """🔴 停在审批点 ⇒ **本轮一条都不写**（`DEC-055` 规则 2）。
+
+    ⚠️ 不 gate 就会把「等审批的半截」写成 `status="done"` —— 而 `summarize_agent_result`
+       在审批点给的 `answer` 是**模型已写的那半句（非空）** ⇒ `persist_turn` 的
+       "空答案跳过"那道闸**拦不住它** ⇒ 这正是本 DEC 的 status 字段要防的**假信号**。
+    """
+    store = FakeRedis()
+    pending = {"messages": [AIMessage(content="我来查一下", tool_calls=[
+        {"name": "get_weather", "args": {}, "id": "c1"}
+    ])]}
+    resp = _call("B", monkeypatch,
+                 _ChainGraph(items=_tokens("我来查一下"), final_values=pending),
+                 patch_pending=False, redis=store, question="问题一")
+    objs = _frames_to_objs(_collect_frames(resp))
+
+    assert objs[-2]["status"] == "pending_approval", f"前提没成立：{objs[-2]}"
+    assert store.history("tester") == [], (
+        f"停在审批点却写了历史 ⇒ 那半步会被当成 `done` 的完整答案：{store.history('tester')}"
+    )
+
+
 # ==================== 链 A 的两条独有红线 ====================
 
 
@@ -635,10 +748,12 @@ class _LazyResponse:
         await resp(scope, receive, send)
 
 
-def _plan_factory(monkeypatch, *, plan_task=None, execute_plan=None, **kw):
+def _plan_factory(monkeypatch, *, plan_task=None, execute_plan=None, redis=None, **kw):
     """装好替身，返回一个「在跑它的那个 loop 里建响应」的工厂。"""
     monkeypatch.setattr(m, "check_session_token_budget", lambda *a, **k: (True, ""))
     monkeypatch.setattr(m, "circuit", lambda *a, **k: (True, ""))
+    # 🔴 `DEC-055`：链 D 也留痕（`on_complete` 走 `done`、`bridge.fail` 走 `error`）⇒ 短路存储。
+    monkeypatch.setattr(cache_mod, "redis_client", redis if redis is not None else FakeRedis())
     if plan_task is not None:
         monkeypatch.setattr(m, "plan_task", plan_task)
     if execute_plan is not None:
@@ -776,6 +891,88 @@ def test_plan_execute_stream_closes_bridge_on_disconnect(monkeypatch):
         f"日志里没有取消事件：{lines}"
     )
     assert not any(b"[DONE]" in b for b in bodies), f"取消后还发帧了：{bodies}"
+
+
+def test_plan_execute_persists_the_turn_on_completion(monkeypatch):
+    """🔴 `DEC-055` · 链 D 正常跑完 ⇒ 成对写历史，答案取**执行结果**（⛔ 不是规划段的 JSON 片段）。"""
+    store = FakeRedis()
+
+    def fake_plan(goal, user_name="unknown", on_token=None):
+        if on_token:
+            on_token("规划中")
+        return [{"step": 1, "action": "算", "tool": "calculator", "input": "6*7"}]
+
+    factory = _plan_factory(monkeypatch, plan_task=fake_plan,
+                            execute_plan=lambda p, g, u: "结果是 42", redis=store)
+    _collect_plan_frames(factory)
+
+    entries = store.history("tester")
+    assert [e["role"] for e in entries] == ["user", "assistant"], (
+        f"链 D 正常跑完却没成对留痕：{entries}"
+    )
+    assert entries[0]["content"] == "帮我算 6*7", f"提问没留下：{entries[0]}"
+    assert entries[1]["content"] == "结果是 42", (
+        f"该存**执行结果**，⛔ 不是流出去的规划段 JSON 片段：{entries[1]['content']!r}"
+    )
+    assert entries[1]["status"] == "done", f"status 不对：{entries[1]}"
+
+
+def test_plan_execute_persists_the_turn_on_budget_exceeded(monkeypatch):
+    """🔴 `DEC-055`：链 D 的**异常**出口（预算中途触顶）也留痕 ⇒ 半截 + 标记 + `error`。"""
+    from plan_execute import BudgetExceededError
+
+    store = FakeRedis()
+
+    def fake_plan(goal, user_name="unknown", on_token=None):
+        if on_token:
+            on_token("开始规划")
+        raise BudgetExceededError("今日额度用完")
+
+    factory = _plan_factory(monkeypatch, plan_task=fake_plan,
+                            execute_plan=lambda p, g, u: "不该跑到这里", redis=store)
+    _collect_plan_frames(factory)
+
+    entries = store.history("tester")
+    assert [e["role"] for e in entries] == ["user", "assistant"], (
+        f"链 D 异常后没成对留痕：{entries}"
+    )
+    assert entries[0]["content"] == "帮我算 6*7", f"提问没留下：{entries[0]}"
+    assert entries[1]["content"] == "开始规划" + cache_mod.INTERRUPTED_SUFFIX, (
+        f"异常时该存'已流出的那截 + 标记'：{entries[1]['content']!r}"
+    )
+    assert entries[1]["status"] == "error", f"status 不对：{entries[1]}"
+
+
+def test_plan_execute_persists_the_turn_on_cancel(monkeypatch):
+    """🔴 `DEC-055` · 链 D 取消 ⇒ 半截 + 标记 + `cancelled`。
+
+    ⚠️ 留痕里是**半截 JSON**（`{"step"` 这种）—— 链 D 的流本就不是人读终稿
+       （`api_v1_agent.py` 明写"⛔ 不是人读终稿"）⇒ **照实存**，⛔ 不许为了好看去 `json.loads`。
+    """
+    import time
+
+    store = FakeRedis()
+
+    def paced_plan(goal, user_name="unknown", on_token=None):
+        for i in range(100):
+            if on_token:
+                on_token(f"块{i}")
+            time.sleep(0.005)
+        return []
+
+    factory = _plan_factory(monkeypatch, plan_task=paced_plan,
+                            execute_plan=lambda p, g, u: "", redis=store)
+    _drive_asgi_until_disconnect(_LazyResponse(factory), after_chunks=DISCONNECT_AFTER)
+
+    entries = store.history("tester")
+    assert [e["role"] for e in entries] == ["user", "assistant"], (
+        f"链 D 取消后没成对留痕：{entries}"
+    )
+    assert entries[0]["content"] == "帮我算 6*7", f"提问没留下：{entries[0]}"
+    body = entries[1]["content"]
+    assert body.endswith(cache_mod.INTERRUPTED_SUFFIX), f"半截没带中断标记：{body!r}"
+    assert body.startswith("块0"), f"存的不是客户端看到的那半截：{body!r}"
+    assert entries[1]["status"] == "cancelled", f"status 不对：{entries[1]}"
 
 
 def test_plan_execute_stream_frames_match_the_other_three_chains(monkeypatch):
