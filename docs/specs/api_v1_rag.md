@@ -3,7 +3,7 @@
 | 项 | 内容 |
 |---|---|
 | **状态** | ✅ **2026-10-04（`DEC-065`）：`tags=["模拟类测试"]` 整组【归零】** —— 另 **2 条**（`/rag/async_ask` · `/rag/parallel_ask`）**已删**（纯 mock · 零消费者）。本文件因此 **`@router.` 14 → 12**、**HTTP 12 → 10**。<br>⚠️ ⛔ **本文件现在没有任何"假端点"了** —— 剩下的 10 条 HTTP 条条都动真东西（库里/embedding/共享层）。<br>🔴 **2026-10-04（`DEC-064`）：`POST /rag/jwt_ask` 已【删除】** —— 三条理由与做法见 `docs/decisions/DEC-064-删除-rag-jwt-ask.md`。本文件因此 **`@router.` 15 → 14**、**HTTP 13 → 12**。<br>🟡 ~~部分可用 —— 有 2 条是"模拟类测试"（原 3 条；`/rag/ask` 2026-10-03 已删，`DEC-057`）~~ ⇒ **已归零**。<br>🔵 **2026-10-04（`B1` 剩余 4 条链 · 批 3）：`/rag/stream_search` 的 SSE 生成器【改成走共享层】** —— 内联的 `try/except/finally` 整段换成 `sse_response(sse_stream(...))`（`:731`）。<br>· 🔴 **行为必须【逐帧等价】，⛔ 不是"顺手统一"** ⇒ 三处**显式覆盖**骨架默认值：`ensure_ascii=True`（中文仍 `\uXXXX`）· `on_error`（**只有 error 帧、⛔ 不加 `[DONE]`**）· `chunk_delay=0.01`（限速照旧）。<br>· ⭐ **判据 = 既有两份用例"全绿且文件 diff 为空"**（`api/test_agent_sse.py` + `api/test_cancel_propagation.py`）—— ⛔ 没有新加断言 = 重构真的等价。<br>· ⚠️ **上游从同步 `.stream()` 改 `astream(messages)`（`:735`）不是本批的改动**（那是 `③` Task 5 · `B2`）；本批只是把它搬进 `lambda: …` 工厂。<br>📄 骨架见 `docs/specs/sse.md`<br>✅ **2026-10-03（`③` Task 5 · `B2`）**：`/rag/stream_search` 的**取消传播做完了** —— 上游改 `astream`、`finally` 里 `aclose()` 关流、取消时记 `stream_cancelled_total`（`DEC-052`）。⚠️ **"上游真停"仍只有代码内证据**（本机无出账）<br>✅ **2026-10-03（`③` Task 6 · `B3`）**：中断后**那半截答案存进历史**（提问 + 半截 + `INTERRUPTED_SUFFIX` 标记，落 `finally` —— `DEC-053`）<br>✅ **2026-10-04（`DEC-055`）**：**三条出口都留痕，且各带一个 `status`** —— `done`（= 完整答案、⛔ 无标记）/ `cancelled` / `error`。🔴 改前 **`except Exception` 那条一个字都不留**（连提问一起丢）⇒ 现在也写了。留痕例程已收进 **`cache.persist_turn`**，本文件只剩**两个调用点**（`_complete` `:715` · `on_incomplete` `:745`）<br>🔴 **未修**：**本文件的 LLM 调用一处都不记账**（`grep -c record_usage api/api_v1_rag.py` ⇒ **0**）⇒ 见下方「做到哪」与 `DEC-053` §遗留·2<br>✅ 2026-10-01：两处 `ChatOpenAI`（**当时** `:578` 流式答案 · `:751` WS agent）接上 `MAX_TOKENS_ANSWER`（`B7`）—— ⚠️ **两处都已不存在**：2026-10-02 起改走 `llm_factory.make_llm("chat","answer")`（见下一条），`ChatOpenAI` 早已不是本文件的调用形状<br>✅ 2026-10-02（`①b` Task 5）：那两处**改走 `llm_factory.make_llm("chat", "answer")`** ⇒ **本文件已不再 import `ChatOpenAI` / `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL_CHAT`**。<br>⚠️ **`get_llm_stream()` 的惰性没变**（`make_llm` 自己把 langchain 的 import 关在函数内）· ⚠️ `temperature=0.3` + `streaming=True` 是**本处特有的逐点调参**，仍写在调用点上 |
-| **对外提供** | **10 条 HTTP**（文档管理 4 · 检索 **5** · 流式 1 · ~~**模拟 2**~~ ⇒ **0**）· **2 条 WebSocket**<br>⚠️ **计数沿革**：14 →（2026-10-03）13 —— `/rag/ask` 已删（`DEC-057`）→（2026-10-04）**12** —— `/rag/jwt_ask` 已删（`DEC-064`）→（2026-10-04）**10** —— `/rag/async_ask` · `/rag/parallel_ask` 已删（`DEC-065`）。<br>🔴 **顺带更正一个【改前就存在】的错**：本行原写「**15 条 HTTP**」，**而括号里的分项一直加不到 15**（4+6+1+3 = **14**）—— **分项是对的，那个 15 是错的**。判据（可打印）：`grep -c '@router\.' api/api_v1_rag.py` ⇒ **12**（= **10 HTTP + 2 WebSocket**，WS 两条在 `:831` `:908`）。📌 **这种"总数与分项对不上"的错，本仓已记过一次**（数出来的数要能对上）。<br>⚠️ **用 `grep -c '@router\.'` 数路由时：⚠️ 墓碑注释里⛔【别】写 `@router.` 字面串** —— 会把它一起数进去（`DEC-065` 实测：带 `@` ⇒ 14，去掉 ⇒ **12**）。📌 这就是判据纪律第 2 条「**注释里也有同样的串**」。 |
+| **对外提供** | **10 条 HTTP**（文档管理 4 · 检索 **5** · 流式 1 · ~~**模拟 2**~~ ⇒ **0**）· **2 条 WebSocket**<br>⚠️ **计数沿革**：14 →（2026-10-03）13 —— `/rag/ask` 已删（`DEC-057`）→（2026-10-04）**12** —— `/rag/jwt_ask` 已删（`DEC-064`）→（2026-10-04）**10** —— `/rag/async_ask` · `/rag/parallel_ask` 已删（`DEC-065`）。<br>🔴 **顺带更正一个【改前就存在】的错**：本行原写「**15 条 HTTP**」，**而括号里的分项一直加不到 15**（4+6+1+3 = **14**）—— **分项是对的，那个 15 是错的**。判据（可打印）：`grep -c '@router\.' api/api_v1_rag.py` ⇒ **12**（= **10 HTTP + 2 WebSocket**，WS 两条在 `:840` `:917`）。📌 **这种"总数与分项对不上"的错，本仓已记过一次**（数出来的数要能对上）。<br>⚠️ **用 `grep -c '@router\.'` 数路由时：⚠️ 墓碑注释里⛔【别】写 `@router.` 字面串** —— 会把它一起数进去（`DEC-065` 实测：带 `@` ⇒ 14，去掉 ⇒ **12**）。📌 这就是判据纪律第 2 条「**注释里也有同样的串**」。 |
 | **谁在用** | 全部对外检索入口 |
 
 ## ✅ 做了什么
@@ -80,7 +80,7 @@
     ⚠️ 这是 `DEC-053` §遗留·1 明确留给 `DEC-055` 的那一件，不是"顺手扩范围"
 - 🔴 **本文件的 LLM 调用【一处都不记账】** —— `grep -c record_usage api/api_v1_rag.py` ⇒ **0**。
   ⚠️ **本文件里真正的 LLM 调用点只有这些**（`grep -n 'astream(\|ainvoke(\|make_llm(' api/api_v1_rag.py`）：
-  `stream_search`（`:735`）· `get_agent_executor`（`:776`，被 Agent 端点共用）· `agent_websocket`（`:831`）。
+  `stream_search`（`:735`）· `get_agent_executor`（`:777`，被 Agent 端点共用）· `agent_websocket`（`:840`）。<br>⚠️ **后两个行号 2026-10-04（`DEC-066`）重取过** —— 本文件当天因收口 `calculator` 而位移（`get_agent_executor` 776→**777** · `agent_websocket` 831→**840**）。
   🔴 **2026-10-03 更正（乙段顺带核出）**：本行原先列的四条里有**两条是错的** ——
   · ~~**`/rag/jwt_ask` 一处 LLM 都不调**（`jwt_ask_question` 整条是 `SELECT content … LIMIT` 然后返回）~~
     —— ⛔ **该端点 2026-10-04 已整体删除**（`DEC-064`）；这里保留的是**当时核出的事实**（它现在不存在了）；
@@ -132,12 +132,15 @@
 | ⚠️ **「`/rag/stream_search` 一直有 `thread_id`」** | 🔴 **2026-10-01 才补的**（B8，query 参数）。`QuestionRequest` **没有**这个字段 ⇒ 它**不在 body 里** |
 | 🔴 **「`/ws/agent` 的额度是按人算的」** | ⛔ **按连接算** —— 该 WS **整条没有鉴权**，拿不到用户身份 ⇒ `user_name` 只能是 `"unknown"`，会话 id 用**每连接生成的 uuid**。<br>⇒ **断开重连 = 换一个新桶**。⚠️ 这不是漏洞：**没有身份就谈不上按人计**；根因（WS 无鉴权）记在 `DEC-041` 遗留·1 |
 | 🔴🔴 **「乙段之后，单测 patch `api_v1_rag.get_db` 就够短路了」** | ⛔ **不够，而且本机看不出来** —— 乙段让 `stream_search` **改调共享层** `db.search_similar` ⇒ **`get_db()` 的解析位置从 `api_v1_rag` 的模块全局搬到了 `db.py` 的模块全局**。<br>⇒ 只 patch `rag_mod.get_db` 的测试**够不着真实连接点**，会**真去连库**。<br>🔴 **本机为什么看不见**：本机 Postgres 真开着 ⇒ 连上、`fetchall()` 回 `[]` —— **与假连接的返回值恰好一样** ⇒ **全绿**。**CI 没有 Postgres ⇒ `Connection refused`**（实测 12 条红，`2026-10-03`）。<br>⇒ **判据**：`grep -rn 'setattr(.*get_db' api/test_*.py` —— 逐条看它 patch 的是**哪个模块的** `get_db`；<br>⚠️ **改了任何函数的【依赖来源】（换模块调 / 走共享层 / 抽公共层）⇒ 必须回头过一遍这个 grep**。<br>📄 `docs/复盘/2026-10-03-CI同款命令不等于CI等价物.md`（**教训是"入口没指向 `scripts/ci-local.sh`"**） |
+| 🔴🔴 **「本文件的 tools 跟别处一样，`calculator` 早就收口过了」** | ⛔ **改前不成立**（`DEC-066`）—— `get_agent_executor()` 里**本地又手抄了一套 tools**（**第 6 份拷贝**），其中 `calculator` **一直写的是 `eval`**（`2c1a922` · 2026-07-17 起），<br>而 `/ws/agent` **整条没有鉴权** ⇒ **匿名可达的任意代码执行**。⚠️ **两道 AST 守卫都看不见它** —— 旧判据只认「`ast.Call` 的 `func` 是裸名 `eval`」，而本行是 `asyncio.to_thread(eval, expression)`（`eval` 是**实参**）。<br>✅ **2026-10-04 已收口**（换 `safe_math.calculate`）+ **守卫判据改成只认名字**（与调用形状无关）。<br>⚠️ **同批改了 `search`**：`DuckDuckGoSearchRun` → `search_tools.web_search`（`duckduckgo.com` 本机不通 · `DEC-051`）。<br>⚠️ **⛔ 别读成"这条 WS 干净了"** —— **鉴权仍然没有**（`DEC-041` 遗留·1），匿名照样能连、能烧 token（额度**按连接**算）。 |
 
 ## 关联
 
 `docs/decisions/DEC-056-多用户资源隔离的现状审计与分阶段收口.md` ·
 **`docs/decisions/DEC-057-删除-rag-ask.md`** · **`docs/decisions/DEC-064-删除-rag-jwt-ask.md`** ·
 **`docs/decisions/DEC-065-删除-无鉴权端点与收口鉴权.md`**（本文件删过的**四条**端点 —— 后两条是 `DEC-065`）·
+**`docs/decisions/DEC-066-第六份calculator的eval与守卫形状盲区.md`**（🔴 **本文件 `get_agent_executor()` 的 tools 收口** —— 那处 `eval` 的第 6 份拷贝）·
+**`docs/specs/safe_math.md`**（收口清单 **5 → 6 处**）·
 **`docs/specs/sse.md`**（本文件流式端点的**骨架** —— 2026-10-04 起它才在本文件里）·
 `后端补齐清单` **B1/B2/B3** · `docs/decisions/DEC-052-取消传播的观测对象与上游改异步.md` ·
 `docs/decisions/DEC-053-中断后的半截答案存进历史并打标记.md` ·
