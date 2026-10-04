@@ -133,7 +133,13 @@
 ```
 
 **配套脚本**（不在 `.claude/` 里，在 `scripts/`）：
-`check_route_auth.py`（无鉴权路由清单 + 基线比对）· `route-auth-baseline.txt`（基线，**10 条已知的债**）
+`check_route_auth.py`（无鉴权路由清单 + 基线比对）· `route-auth-baseline.txt`（基线，**现为 1 条** —— 见下）
+
+> 🔴 **2026-10-04（`DEC-065`）基线由 10 条降到 1 条** —— `S1`/`S2`/`S14` 那 9 条**已收口**
+> （5 条加 `require_admin` · 4 条**端点删除**）。**仅剩 `/api/v1/`**（`main.py` 的根路径，
+> ⚠️ **是否有意公开仍未裁**）。
+> 📌 判据（可打印）：`venv/bin/python scripts/check_route_auth.py` ⇒ **无鉴权路由 1 条** ·
+> `venv/bin/python scripts/check_route_auth.py --baseline` ⇒ **与基线一致**。
 
 > 🔴 **`.claude/` 必须入库**（本仓实测：**没有被 `.gitignore` 挡**）。
 > 理由：hook 脚本要靠它分发；`.gitignore` 掉 ⇒ **克隆的人没有门**。

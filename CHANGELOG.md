@@ -1367,6 +1367,74 @@ All notable changes to this project will be documented in this file.
 
 ### Removed
 
+- 🔴 **删除端点 `GET /users/{user_id}` · `GET /tool/benchmark` · `POST /rag/async_ask` · `POST /rag/parallel_ask`**
+  + **给 5 条无鉴权路由补上 `Depends(require_admin)`**（2026-10-04 · 待办总表 **`S1`/`S2`/`S3`/`S14`** · **`DEC-065`**）——
+  **一次把 10 条无鉴权路由收口**（4 条删端点 · 5 条加鉴权 · 1 条 `/api/v1/` 留公开）。
+
+  ⚠️ **先说清与 2026-09-30 那次裁定的差别**（⛔ 别读成"按原计划做的"）：
+  当时裁的是「**三条都「加鉴权」**」，口径写明「**给那 10 条无鉴权路由加 `Depends(...)`**」；
+  业务方 2026-10-04 **改了口径** —— 原话：
+
+  > 「**这些是否还有留的必要，不需要的我想删除，不然留着没用，容易出问题。**」
+
+  ⇒ **4 条由"加鉴权"改判为"删端点"**。
+
+  **删掉的 4 条，共同形状 = 「看起来像个接口，却不产生任何真事实」**：
+  - `/users/{user_id}` ⇒ **只回显入参**（不查库、不看 `user_name`）—— 本仓早就点名「**要么真查库，要么删**」
+  - `/tool/benchmark` ⇒ **benchmark 的是 mock**（`get_weather` = `time.sleep(2)` + 硬编码串）
+  - `/rag/async_ask` · `/rag/parallel_ask` ⇒ **纯 mock**（`asyncio.sleep(2)` 后返回硬编码字符串）
+    ⇒ **这两条一删，`tags=["模拟类测试"]` 整组归零**（`/rag/ask` 10-03 `DEC-057` ·
+    `/rag/jwt_ask` 10-04 `DEC-064`）—— **四条同一天里走完，模式完全一样：先没人用，再删。**
+
+  **加 `require_admin` 的 5 条**：`/debug/count` · `/debug/quota/{user_name}` · `/debug/cache_stats` ·
+  `/debug/rate_limit/{user_name}` · `/rag/benchmark-embedding` ——
+  ⚠️ **前 4 条不删的理由是「它们给的是真事实」**（真查库 / 真算配额 / 真读 Redis / 真读限流桶）。
+  🔴 **`/rag/benchmark-embedding` 单独说**：它是**全仓唯一匿名可打、且真烧钱**的端点
+  （实测匿名 **HTTP 200** · 385ms **真调 DashScope**）。
+  ⚠️ **它早就接了 B11 全站熔断，但熔断管不住它** ——
+  **B11 管「全站今天超预算了谁都别烧」，管不住「谁都能烧」** ⇒ **两层互补，一条都不能少**。
+
+  **TDD（先红后绿）**：
+  - **先写 4 条用例**追加进 `api/test_removed_endpoints.py`，**每条断言 `404`** ⇒ **RED `4 failed, 2 passed`**。
+  - **删端点 + 加 `Depends`** ⇒ **GREEN `6 passed`**。
+  - ⚠️ **判据必须是 `404`，⛔ 不能是「不是 200」** —— 这几条删之前**也未必回 200**
+    （`/rag/jwt_ask` 删前本来就回 **401**）⇒ 用「不是 200」当判据，用例**从第一天起就是绿的**。
+
+  **🔴 同日另裁：两份接线守卫的【反向清单】删空 ⇒ 连守卫本身一起删**
+  `api/test_breaker_wiring.py` 的 `NON_SPENDING` 与 `api/test_session_budget_wiring.py` 的 `NON_LLM`
+  **各删到 0**（4→3→2→**0**）。⚠️ **清单空了而守卫留着 ⇒ `for` 循环体一次都不执行 ⇒ 测试永远绿**
+  = **静默假通过**（本仓明文纪律）⇒ **删守卫 + 墓碑注释**。
+  ⚠️ **代价说清楚**：**正向那半一字未动**（8 + 7 条"该接的必须接"），
+  **但"将来有人再加一条不调 LLM 的假对话端点"不再有人拦** —— 这是**纯粹的"这次没事"，⛔ 不是"机制上安全了"**。
+
+  **判据（可打印）**：
+  - `venv/bin/python -m pytest api/test_removed_endpoints.py -q -p no:warnings` ⇒ **6 passed**
+  - `venv/bin/python -m pytest api/test_breaker_wiring.py api/test_session_budget_wiring.py -q -p no:warnings` ⇒ **15 passed**
+  - `venv/bin/python scripts/check_route_auth.py` ⇒ **真实 APIRoute 总数 58**（删前 62）· **无鉴权路由 1 条**（删前 10；仅剩 `/api/v1/`）
+  - `venv/bin/python scripts/check_route_auth.py --baseline` ⇒ **✅ 与基线一致**（基线 10 行 → **1 行**）
+  - `grep -c '^@router\.' api/api_v1.py` ⇒ **9**（删前 11）· `grep -c '= Depends(require_admin)' api/api_v1.py` ⇒ **6**（删前 1）
+    ⚠️ **那条 `= ` 不能省** —— 写成 `grep -c 'Depends(require_admin)'` 会数到 **10**（**注释/docstring 里也有这个串**）
+  - `grep -c '@router\.' api/api_v1_rag.py` ⇒ **12**（删前 14）
+  - **匿名实测**（裸 `TestClient`，`DEC-058`）⇒ 5 条新收口路由**全部 401**
+    （⚠️ **是 401 ⛔ 不是 403** —— **没带凭据** ⇒ `AUTH_MISSING`；**带非管理员凭据**才轮到 `FORBIDDEN`）
+  - 全量 —— `bash scripts/ci-local.sh` ⇒ **518 passed, 3 skipped, 31 deselected**，退出码 0
+    （516 → 518 = **+4 条墓碑用例 − 2 条反向守卫**）
+
+  🔴 **共用一份 DEC 里记载的坑：本仓【第三次】栽在「注释里也有同样的串」**
+  （`DEC-057` · `DEC-064` · 本份）—— 我在 `api_v1_rag.py` 的**墓碑注释**里原样写了
+  `@router.post("/rag/async_ask", …)` ⇒ `grep -c '@router\.'` **立刻从 12 变 14**（**墓碑被数成了路由**）。
+  ⇒ **修法**：墓碑里**故意去掉 `@`**，写成 `router.post(...)`，并写明**为什么**。
+  ⚠️ 同一天同一个 DEC 里，`grep -c 'Depends(require_admin)'` **也踩了同型的一次**（10 vs 6）。
+  ⭐ **教训句**：**"数出来一个数"不等于"数对了"** —— **让 grep 数数之前，先问"这个串还会在哪儿出现？"**
+
+  **⚠️ 本份顺带推翻了旧结论一条**：「**匿名能打到的只有两个端点，而它们是桩**」——
+  **错**：当时**只查了 `summary` 标着"无需 API Key"的两个**，**没查"完全没有鉴权依赖"的**（那才是 10 条）。
+  ⇒ **`B9-②` 的挂起条件当时就已经满足**（⛔ 不是"将来会出现"）。
+  ⚠️ **但处置走的是【另一条路】**：**把端点锁上**（加 `require_admin`），⛔ **不是"让配额对匿名生效"**
+  ⇒ **`B9-②` 现在是「条件不再成立」，⛔ 不是「做完了」** —— **是它的对象没了**。
+
+  📄 全文（含逐条留/删依据 · 17 处改动 · 守卫为什么删 · **反悔成本**）⇒ `docs/decisions/DEC-065-删除-无鉴权端点与收口鉴权.md`
+
 - 🔴 **删除端点 `POST /rag/jwt_ask`**（2026-10-04 · 待办总表 **N7** · `DEC-064`）——
   **它收了 `question`，却完全不拿它做检索**，这是删它的第一条理由。
   ⚠️ **与上一条 `DEC-057`（`/rag/ask`）逐条同构** —— **两个同型体，两天内清完。**
