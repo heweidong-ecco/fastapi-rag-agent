@@ -486,8 +486,11 @@ from token_config import (
 )
 ```
 
-⚠️ **`DEFAULT_DAILY_TOKEN_BUDGET` 目前是 `int(os.getenv("DEFAULT_DAILY_TOKEN_BUDGET", "100000"))`
-（`token_tracker.py:283`）** —— 也搬进 `token_config.py`。
+⚠️ **`DEFAULT_DAILY_TOKEN_BUDGET` 现为 `int(os.getenv("DEFAULT_DAILY_TOKEN_BUDGET", "10000"))`**
+（`token_config.py:66` —— ⚠️ 原写 `token_tracker.py:283`，**B7 已搬到 `token_config.py`**）。
+🔴 **2026-10-04（丁）从 `100000` 降到 `10000`**：改前它 = `premium` = 最高档
+⇒ `get_user_token_budget()` 的 `.get(role, DEFAULT_DAILY_TOKEN_BUDGET)`（`:374`）
+一旦被走到，用户**静默拿到最高额度**。现在锚在 `free` = 现存最低档。📄 `DEC-068`
 
 - [ ] **Step 7: 跑全量，确认行为没变**
 

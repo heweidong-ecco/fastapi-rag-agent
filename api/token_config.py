@@ -53,7 +53,17 @@ ROLE_DAILY_TOKEN = {
 }
 
 # 未登记角色的兜底日预算（迁自 `token_tracker.py:283`）
-DEFAULT_DAILY_TOKEN_BUDGET = _int("DEFAULT_DAILY_TOKEN_BUDGET", 100_000)
+# 🔴 2026-10-04 改（丁）：**100_000 → 10_000**。
+#   改前它 **= premium = 最高档** ⇒ `get_user_token_budget()` 里的
+#   `.get(role, DEFAULT_DAILY_TOKEN_BUDGET)` 一旦被走到（角色名拼错 / 新角色没登记），
+#   用户**静默拿到全额最高额度**，⛔ 不报错、不告警 —— 与 `DEC-040`/`DEC-046` 一路的
+#   **fail-closed** 取向正好相反。
+#   改后 = `free` = **现存最低档**（⛔ 不是"把数字抄成 10_000"，是"锚在最低档上"）。
+#   ⚠️ **定档位数（要不要分更多档）本轮【不动】** —— 触发条件是 **RAG 侧记账接上之后**
+#      （`DEC-053` §遗留·2）：现在全仓只有**一个**"一次问答花多少 token"的实测
+#      （`DEC-029`：`plan_execute` ≈3346），**一个样本定的档位数字就是编的**。
+#   📌 守卫：`api/test_token_config.py` 两条（一条推导型 → 兜底 ≤ 最低档；一条走真函数）
+DEFAULT_DAILY_TOKEN_BUDGET = _int("DEFAULT_DAILY_TOKEN_BUDGET", 10_000)
 
 # ==================== 模型单价（元 / 1000 tokens） ====================
 # 迁自 `token_tracker.PRICING`（:50）。⚠️ 加新模型时**只改这里**。
