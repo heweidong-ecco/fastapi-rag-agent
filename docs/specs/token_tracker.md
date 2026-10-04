@@ -875,6 +875,12 @@ git commit -m "feat(额度): B7 接线 —— 15 个 ChatOpenAI 构造点带上�
 >    ⚠️ **但比来源文档又少 4 条** —— 逐条核实后发现 **`/rag/ask` · `/rag/jwt_ask` ·
 >    `/rag/async_ask` · `/rag/parallel_ask` 根本不调 LLM**（前两条只 `SELECT documents`，
 >    后两条是 `asyncio.sleep(2)` 的 mock）⇒ **接上去是错的**（让不花钱的接口占额度甚至被拦）。
+>    🔴 **2026-10-04 补：这 4 条现在【全部已删除】** —— `/rag/ask`（`DEC-057`）·
+>    `/rag/jwt_ask`（`DEC-064`）· `/rag/async_ask` + `/rag/parallel_ask`（`DEC-065`）。
+>    ⇒ **上面那句「接上去是错的」已经不用再防了**（没有对象可接）；
+>    ⛔ **但结论本身仍然有效**：**列清单前必须逐条对代码核** —— 这正是本条的教训句。
+>    📌 连带：两份**接线守卫的反向清单**（`test_session_budget_wiring.py` / `test_breaker_wiring.py`）
+>    **删到空之后，守卫本身也删了**（空清单 = 静默假通过）⇒ `DEC-041` 变更记录末条。
 >
 > 📌 **教训与 Task 1 那条同族**：**计划里的清单同样是"作者当时的理解"，不是事实。**
 >    Task 1 是**少数**了（漏 `evaluate_with_ragas.py`），本条是**多数**了（多列 4 条）
@@ -975,7 +981,15 @@ venv/bin/python -m pytest api/ -m "not integration and not needs_db" -q
 > 接在 **8 处**（`api_v1_agent.py` ×5 · `api_v1_rag.py` ×2 · `api_v1.py` ×1）。
 > ⚠️ **落点不是 `api/main.py`**（原计划写的）—— 理由是 `QuotaMiddleware` 整段包在
 > `if user_name:` 里 ⇒ **匿名请求完全绕过**，而 `benchmark-embedding` **恰恰是匿名能打且真花钱的**。
-> **判据（可打印）**：`grep -rn "circuit(global_key())" api/ --include="*.py" | grep -v test_` ⇒ **8 处**
+> 🔴 **2026-10-04（`DEC-065`）更正**：`benchmark-embedding` **已不再是匿名的**
+> （补上 `Depends(require_admin)` ⇒ 见 `api_v1.py` 该函数的注释）。
+> ⚠️ **但这不改变「落点为什么选它」** —— 那条理由写的是**当时**的实况；
+> 而且**中间件绕过这件事本身仍在**（`QuotaMiddleware` 依然整段在 `if user_name:` 里）。
+> ⇒ ⛔ **别读成"既然加了鉴权，落点可以搬回 `main.py` 了"**。
+> **判据（可打印）**：`grep -rn "circuit(global_key())" api/ --include="*.py" | grep -v test_` ⇒ **13 处**
+> （`api_v1_agent.py` ×10 · `api_v1_rag.py` ×2 · `api_v1.py` ×1）
+> ⚠️ **2026-10-04 实测更正：原写「8 处」（`agent` ×5 · `rag` ×2 · `api_v1` ×1）** ——
+> 之后 `api_v1_agent.py` 又接了 5 处（与 `DEC-065` **无关**，是更早的漂移）。
 > 📌 模块详情 ⇒ `docs/specs/breaker.md`
 
 > 🔴 **这是同一个陷阱的第三次**（⚠️ 前两次都真栽了，第三次靠接线测试兜住）：

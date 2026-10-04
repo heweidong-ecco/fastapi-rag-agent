@@ -4,7 +4,7 @@ API v1 路由集中定义
 """
 import json
 import time
-from fastapi import APIRouter, Depends, Path, Query
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse, JSONResponse
 
 from config import ACCESS_TOKEN_EXPIRE_MINUTES
@@ -33,7 +33,9 @@ from token_tracker import get_token_budget_info
 from rate_limiter import user_limiter
 from cache import redis_client
 from embedding_client import client
-from tools_with_cache import get_weather, calculator
+# ⚠️ 2026-10-04 删 `get_weather`（`DEC-065`）：它在本文件**只有** `/tool/benchmark` 一处用，
+#    那条端点已删。⚠️ `calculator` 是**既有未用导入**（`D1` 旧账），⛔ 本 PR 不碰。
+from tools_with_cache import calculator
 from db import invalidate_bm25_cache
 from hybrid_search import hybrid_search
 from hybrid_search import rerank_search
@@ -169,41 +171,40 @@ async def create_user(
 
 
 
-@router.get(
-    "/users/{user_id}",
-    summary="获取用户信息",
-    description="根据用户ID查询用户基本资料。可选择是否返回详细信息。",
-    tags=["用户管理"],
-    response_description="用户信息对象，包含用户ID和详情标志",
-    responses={
-        200: {"description": "查询成功"},
-        422: {"description": "参数格式错误，如 user_id 不是整数","content": {"example": {"code": "PARAM_INVALID"}}}
-    }
-)
-async def get_user(
-    user_id: int = Path(
-        ...,
-        description="用户的唯一数字ID",
-        example=123,
-        ge=1
-    ),
-    include_detail: bool = Query(
-        False,
-        description="是否返回详细信息（如邮箱、注册时间等），默认仅返回基础信息",
-        example=True
-    )
-):
-    return {"user_id": user_id, "detail": include_detail}
+# ==================== 【已删除】GET /api/v1/users/{user_id} ====================
+# 🔴 2026-10-04 **删除**（`DEC-065`）—— 函数 `get_user` 已移除。
+# 原先是：
+#     async def get_user(user_id: int = Path(...), include_detail: bool = Query(False)):
+#         return {"user_id": user_id, "detail": include_detail}
+#
+# 为什么删（三条）：
+#   ① **一行数据都不读** —— 不查库、不看 `user_name`，纯粹回显入参。它是 **Path/Query
+#      参数校验的演示**，却挂了 `tags=["用户管理"]` + `summary="获取用户信息"`，
+#      **极易被当成真接口**。
+#   ② 本仓**自己早就点名要处理它**：`docs/specs/api_v1.md` ⚠️④ 与「待办」表第 4 条
+#      原文写着「**要么真查库，要么删**」⇒ 本次裁「删」。
+#   ③ 消费者 = 0（仓内无前端 · 无测试引用 · 只有 Postman 1 个文件夹，已删）。
+#
+# ⛔ **别照抄这个形状再把端点加回来** —— `api/test_removed_endpoints.py::test_users_by_id_stays_removed`
+#    会红。若真要恢复，**先读 `docs/decisions/DEC-065-*.md`**，且必须**同时**给出真实数据来源
+#    与 `Depends(require_admin)`（它读的是**任意** user_id）。
+# ================================================================================
 
 
 
 # ==================== 调试接口 ====================
+# 🔴 2026-10-04（`DEC-065`）：本节的 4 条 + `/rag/benchmark-embedding` 全部补上
+#    `Depends(require_admin)`。此前它们**匿名可打** —— 其中 `/debug/quota/{user_name}` 与
+#    `/debug/rate_limit/{user_name}` **泄露任意用户的角色/配额/限流桶**（**可枚举用户名**），
+#    `/rag/benchmark-embedding` 更是**全仓唯一匿名真烧钱**的端点。
+# ⚠️ **参数名用 `_admin`**：`check_quota` / `check_rate_limit` 的**路径参数就叫 `user_name`**
+#    （那个是「要查谁」，管理员才有权指定别人）⇒ 依赖的返回值不能重名，取值也不用。
 @router.get(
     "/debug/count",
     summary="调试：查看数据库中文档数量",
     tags=["调试"]
 )
-async def debug_count():
+async def debug_count(_admin: str = Depends(require_admin)):
     """查看文档总数"""
     with get_db() as conn:
         with conn.cursor() as cur:
@@ -217,7 +218,7 @@ async def debug_count():
     description="查看用户的日配额（**token 口径** · 按角色不同预算）",
     tags=["调试"]
 )
-async def check_quota(user_name: str):
+async def check_quota(user_name: str, _admin: str = Depends(require_admin)):
     """查看用户的日配额（**token 口径** · `DEC-046`）。
 
     🔴 2026-10-03 改：原先返回「每日**请求次数**」（`permission.ROLE_QUOTA` + `quota_limiter`）。
@@ -240,12 +241,14 @@ async def check_quota(user_name: str):
     summary="对比测试：缓存命中和无缓存命中 时间差距 ，正常生产级数据库大概是5倍，看数据库大小",
     tags=["调试"]
 )
-async def benchmark_embedding(req:QuestionRequest):
+async def benchmark_embedding(req: QuestionRequest, _admin: str = Depends(require_admin)):
     # B11 · 全站日级熔断（`①b` Task 4）。
-    # 🔴 本端点在全仓**独一份**：**匿名可打、且真花钱** ——
-    #    签名里没有 `Depends` 鉴权，而下面 `get_embedding()` 真调 DashScope。
-    #    ⚠️ 也正因如此它接不上 B8（会话级要 `user_name`/`thread_id`，这里**两者都没有**）；
-    #    B11 是**全站**级、`circuit("global:…")` 不需要用户身份 ⇒ 它是唯一能管住这条的那层。
+    # 🔴 🔴 2026-10-04（`DEC-065`）**补上 `Depends(require_admin)`** ——
+    #    此前本端点在全仓**独一份**：**匿名可打、且真花钱**（下面 `get_embedding()` 真调 DashScope）。
+    #    ⚠️ **熔断层与鉴权层是两件事，⛔ 别因为有了 B11 就不加鉴权**：
+    #      B11 管的是「**全站今天超预算了就别再烧**」，**管不住「谁都能烧」**。
+    #    ⚠️ 它仍然接不上 B8（会话级要 `user_name`/`thread_id`，这里只有身份、没有会话）；
+    #      B11 是**全站**级、`circuit("global:…")` 不需要用户身份 ⇒ 它仍是唯一能管住这条的那层。
     ok, why = circuit(global_key())
     if not ok:
         raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
@@ -272,7 +275,7 @@ async def benchmark_embedding(req:QuestionRequest):
     summary="调试接口，用来查看当前缓存中有多少个 Embedding 键",
     tags=["调试"]
 )
-async def cache_stats():
+async def cache_stats(_admin: str = Depends(require_admin)):
     count = 0
     sample = []
     for key in redis_client.scan_iter(match="emb:*", count=100):
@@ -285,29 +288,24 @@ async def cache_stats():
     }
 
 
-@router.get(
-    "/tool/benchmark",
-    summary="调试接口，对比缓存前后的工具调用耗时s",
-    tags=["调试"]
-)
-async def benchmark_tool():
-    """对比缓存前后的工具调用耗时"""
-    # 第一次调用（无缓存）
-    start = time.time()
-    result1 = get_weather("Beijing")
-    t1 = time.time() - start
-    
-    # 第二次调用（命中缓存）
-    start = time.time()
-    result2 = get_weather("Beijing")
-    t2 = time.time() - start
-    
-    return {
-        "first_call_ms": round(t1 * 1000, 2),
-        "second_call_ms": round(t2 * 1000, 2),
-        "speedup": f"{t1 / t2:.1f}x" if t2 > 0 else "∞",
-        "results_same": result1 == result2
-    }
+# ==================== 【已删除】GET /api/v1/tool/benchmark ====================
+# 🔴 2026-10-04 **删除**（`DEC-065`）—— 函数 `benchmark_tool` 已移除。
+# 原先它把 `get_weather("Beijing")` 调两次、比耗时，输出 `speedup`。
+#
+# 为什么删：
+#   🔴 **它 benchmark 的是一个 mock** —— `tools_with_cache.get_weather` 的本体是
+#      `time.sleep(2)` + 硬编码 `f"{city}当前温度25°C，晴"`。⇒ 这个端点证明的只是
+#      「**缓存装饰器在一个假函数上生效了**」，**证明不了任何生产事实**。
+#      ⚠️ 而缓存装饰器本身已有单测覆盖（`api/test_audit_fixes.py`）⇒ **信息量为零**。
+#   ⚠️ 它还**匿名可打**（是待办 `S1` 的两条之一）—— 虽然不花钱，但一个只会
+#      `sleep(2)` 的端点挂在公网上没有任何理由。
+#
+# ⛔ **别照抄这个形状再把端点加回来** —— `api/test_removed_endpoints.py::test_tool_benchmark_stays_removed`
+#    会红。⚠️ 若将来真要 benchmark 缓存，**必须拿真函数**（如 `/rag/benchmark-embedding`
+#    那样真调 DashScope），且**必须带鉴权**。
+# ==============================================================================
+
+# 新增命令桶 调试接口：
 
 # 新增命令桶 调试接口：
 @router.get(
@@ -315,7 +313,7 @@ async def benchmark_tool():
     summary="调试接口，查询某用户的剩余令牌数",
     tags=["调试"]
 )
-async def check_rate_limit(user_name: str):
+async def check_rate_limit(user_name: str, _admin: str = Depends(require_admin)):
     """查询某用户的剩余令牌数"""
     remaining = user_limiter.get_remaining(user_name)
     return {

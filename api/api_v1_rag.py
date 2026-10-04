@@ -3,7 +3,8 @@ API v1 路由集中定义
 所有 /api/v1 前缀的接口在此管理。
 """
 import json
-import time
+# ⚠️ 2026-10-04 删 `import time`（`DEC-065`）：本文件**只有** `/rag/async_ask` 与
+#    `/rag/parallel_ask` 用 `time.time()`，两条端点已删（全仓已核，见 `grep -n '\btime\b'`）。
 import uuid
 from typing import Literal
 from fastapi import APIRouter, Depends, Path, Query
@@ -927,46 +928,36 @@ async def test_websocket(websocket: WebSocket):
 #    📌 顺带消灭了它响应体里那个 **重复的 `"requested_by"` 键**（本仓一处已登记的 dead code）。
 #    📄 全文（含消费者清点 · 7 处改动 · 2 处活口径同步 · 反悔成本）⇒ `docs/decisions/DEC-057-删除-rag-ask.md`
 
-# ==================== 模拟RAG异步函数 ====================
-async def async_search(query: str) -> list:
-    """模拟异步检索，实际可替换为真实RAG"""
-    await asyncio.sleep(2)
-    return [f"异步文档A({query})", f"异步文档B({query})", f"异步文档C({query})"]
-
-async def parallel_search(queries: list[str]) -> list:
-    tasks = [async_search(q) for q in queries]
-    return await asyncio.gather(*tasks)
-
-# 异步检索（模拟，无需API Key）
-@router.post(
-    "/rag/async_ask",
-    summary="异步检索（模拟，无需API Key）",
-    tags=["模拟类测试"]
-)
-async def async_ask_question(req: QuestionRequest):
-    start = time.time()
-    docs = await async_search(req.question)
-    duration = time.time() - start
-    return {
-        "question": req.question,
-        "docs": docs,
-        "elapsed": f"{duration:.3f}秒",
-        "mode": "异步"
-    }
-
-# 并行检索（模拟）
-@router.post(
-    "/rag/parallel_ask",
-    summary="并行检索（模拟）",
-    tags=["模拟类测试"]
-)
-async def parallel_ask_question(req: QuestionRequest):
-    start = time.time()
-    results = await parallel_search([req.question, f"相关：{req.question}"])
-    duration = time.time() - start
-    return {
-        "question": req.question,
-        "results": results,
-        "elapsed": f"{duration:.3f}秒",
-        "mode": "并行异步"
-    }
+# ============ 【已删除】POST /rag/async_ask · POST /rag/parallel_ask ============
+# 🔴 2026-10-04 **删除**（`DEC-065`）—— 连同它们**专用的**两个 helper
+#    `async_search()` / `parallel_search()` 一并移除（全仓**只有这两条端点**在调它们）。
+#
+# 原先它们是：
+#     async def async_search(query):  await asyncio.sleep(2); return ["异步文档A(…)", …]
+#     async def parallel_search(qs):  return await asyncio.gather(*[async_search(q) for q in qs])
+#     router.post("/rag/async_ask",    tags=["模拟类测试"])  →  async def async_ask_question(req)
+#     router.post("/rag/parallel_ask", tags=["模拟类测试"])  →  async def parallel_ask_question(req)
+#     ⚠️ 上面两行**故意去掉 `@`** —— 本仓数路由的判据是 `grep -c '@router\.'`，
+#        留着 `@` 会让【墓碑注释】也被数进去（判据纪律 #2：注释里也有同样的串）。
+#        实测：带 `@` ⇒ 14（错，多算 2）；不带 ⇒ **12**（对）。
+#
+# 为什么删：
+#   🔴 **纯 mock** —— 库里没有、embedding 没有、LLM 没有，只是 `asyncio.sleep(2)` 之后
+#      返回硬编码字符串 `["异步文档A({query})", …]`。**消费者 = 0**（仓内无前端 ·
+#      无测试引用 · 只有 Postman 2 个文件夹，已删）。
+#   ⇒ ⚠️ 这两条一删，`tags=["模拟类测试"]` **整组归零**：
+#      `/rag/ask` 2026-10-03 删（`DEC-057`）· `/rag/jwt_ask` 2026-10-04 删（`DEC-064`）。
+#      **那组四条走完，模式完全一样：先没人用，再删。**
+#
+# ⚠️ **顺带收掉 `import time`**（文件头第 6 行）：本文件**只有**这两条端点用 `time.time()`
+#    （全仓已核：`grep -n '\btime\b' api/api_v1_rag.py` 只命中 `import` 与这两处）。
+#    ⛔ `import asyncio` **留着** —— `:794` `:800` 的 `asyncio.to_thread` 还在用。
+#
+# ⛔ **别照抄这个形状再把端点加回来** ——
+#    `api/test_removed_endpoints.py::test_rag_async_ask_stays_removed` /
+#    `::test_rag_parallel_ask_stays_removed` 会红。
+# 🔴 **若真要再加一条「不花钱、不查库」的端点**，必须**同时**做一件事：
+#    **重建一份反向接线守卫**（原先是 `test_breaker_wiring.py` 与
+#    `test_session_budget_wiring.py` 里那两张豁免清单）—— ⚠️ 那两张清单**随本次删除已空，
+#    空清单 = `for` 体一次都不跑 = 恒绿假通过 ⇒ 两段守卫**已删**。详见 `DEC-065`。
+# ==============================================================================

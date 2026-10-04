@@ -10,16 +10,22 @@
 
 ## ⚠️ 为什么是【这 7 条】（2026-10-01 逐条实测）
 
-只收**真的调 LLM、真的烧 token** 的对话端点。**以下 2 条【故意不在表里】**，因为它们不消耗 token，
-接上去是**错的**（会让不花钱的接口占额度甚至被拦）：
+只收**真的调 LLM、真的烧 token** 的对话端点。原先另有 **2 条【故意不在表里】** ——
+`/rag/async_ask` · `/rag/parallel_ask`（**纯 mock**，`await asyncio.sleep(2)` 后返回假字符串）
+⇒ 接上会话上限是**错的**（会让不花钱的接口占额度甚至被拦）。
 
-| 端点 | 为什么不接 |
-|---|---|
-| `/rag/async_ask` | `await asyncio.sleep(2)` 后返回假字符串（**mock**） |
-| `/rag/parallel_ask` | 同上（调 `async_search`） |
+🔴 **2026-10-04（`DEC-065`）：那 2 条端点已【整体删除】** ⇒ 本文件的**反向守卫一并删除**。
 
-⚠️ **计数沿革**：4 条 →（2026-10-03）3 条 →（2026-10-04）**2 条**
-· `/rag/ask` 已**删除**（`DEC-057`）· `/rag/jwt_ask` 已**删除**（`DEC-064`）。
+⚠️ **计数沿革**：4 条 →（2026-10-03）3 条（`/rag/ask` 删 · `DEC-057`）
+→（2026-10-04）2 条（`/rag/jwt_ask` 删 · `DEC-064`）→ **0 条**（另 2 条端点也删了 · `DEC-065`）。
+
+🔴 **反向守卫为什么删，而不是留成空清单**：端点一删，那张豁免清单**空了** ⇒
+`for` 体**一次都不跑** ⇒ 用例**永远绿**，**什么也没钉住**。⚠️ 留着一个永远绿的用例
+比删掉更坏 —— 它看起来像"有防护"（本仓 `docs/复盘/` 反复记过这一族）。
+✅ **保护换了住处**：`api/test_removed_endpoints.py::test_rag_async_ask_stays_removed` /
+`::test_rag_parallel_ask_stays_removed`（判据 = **404**）。
+⚠️ **代价**：将来再加「不调 LLM」的端点，**不会有测试自动拉红**叫去接线（见 `DEC-065`）。
+📌 同款处理在 `test_breaker_wiring.py` 的模块注释里（两张清单同时清空）。
 
 📌 裁定见 `docs/decisions/DEC-041-B8会话上限的窗口与接线范围.md` 备选方案·三
    （⚠️ 本表最初**列错**过 —— 把上面几条也列了进去，核实后才剔除）。
@@ -85,27 +91,17 @@ def test_endpoint_calls_session_budget(filename, func_name):
     )
 
 
-def test_the_two_non_llm_endpoints_stay_unwired():
-    """🔴 **反向守卫**：那 2 条【不调 LLM】的端点，⛔ **不许**被接上限。
-
-    **危害方向与上一条相反，但同样是真问题**：
-    `/rag/async_ask` / `/rag/parallel_ask` **纯 mock**，
-    **一分 token 都不花**。接上会话上限 ⇒ 用户**白白被扣额度甚至被 429**，
-    而账单上根本没有对应的消耗 —— 这是**向用户收费却没有服务**。
-
-    📌 本表最初正是**列错**了这几条（核实端点实现时才剔除）⇒ 本条把它钉住。
-    ⚠️ 原先 4 条；`/rag/ask` 于 2026-10-03 **删除**（`DEC-057`）、`/rag/jwt_ask` 于 2026-10-04
-    **删除**（`DEC-064`）⇒ 变 2 条。
-    """
-    NON_LLM = [
-        ("api_v1_rag.py", "async_ask_question"),     # /rag/async_ask —— mock
-        ("api_v1_rag.py", "parallel_ask_question"),  # /rag/parallel_ask —— mock
-    ]
-    for filename, func_name in NON_LLM:
-        tree = ast.parse((_API / filename).read_text(encoding="utf-8"))
-        fn = _find_function(tree, func_name)
-        assert fn is not None, f"{filename} 里找不到 {func_name}()"
-        assert GUARD not in _calls_in(fn), (
-            f"{filename}:{fn.lineno} 的 {func_name}() 被接上了会话上限，但它**不调 LLM**：\n"
-            "  ⇒ 用户会为一次**没有发生**的 LLM 调用被扣额度。"
-        )
+# 🔴 ============ 【已删除】test_the_two_non_llm_endpoints_stay_unwired ============
+# 2026-10-04 删除（`DEC-065`）。原钉：2 条**不调 LLM** 的 mock 端点（`/rag/async_ask` ·
+# `/rag/parallel_ask`）**不许**被接上会话上限（接上 ⇒ 用户为一次**没发生**的 LLM 调用被扣额度）。
+#
+# ⛔ **删它的理由不是"不需要了"，是"它已经变成恒绿的假守卫"**：
+#    那两条端点已**整体删除** ⇒ 豁免清单**空了** ⇒ `for` 体一次都不跑 ⇒ **永远绿**。
+#    ⚠️ 留着一个永远绿的用例，比删掉它更坏 —— 它看起来像"有防护"。
+#
+# ✅ **保护没有丢，是换了住处**：`api/test_removed_endpoints.py` 的
+#    `test_rag_async_ask_stays_removed` / `test_rag_parallel_ask_stays_removed`（判据 = **404**）。
+#
+# ⚠️ **代价（知道再选）**：将来若再加一条「不调 LLM」的端点，**不会有测试自动拉红**叫去接线。
+#    处理要求写在模块 docstring 与 `docs/decisions/DEC-065-*.md` 里。
+# ===================================================================================

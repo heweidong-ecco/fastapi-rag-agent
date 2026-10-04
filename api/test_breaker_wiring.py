@@ -21,14 +21,25 @@
    ⇒ 拿 **token** 预算去闸它是**代理指标**，不是精确计量。
    判据：**「全站今天已经超预算了，就别再拿调试端点烧账号了」** —— 这是策略，不是计量。
 
-## ⚠️ 与 `B8` 一样，这 2 条【故意不接】
+## 🔴 反向守卫【已于 2026-10-04 删除】—— ⚠️ 这里要说清为什么，别当成"守卫丢了"
 
-`/rag/async_ask` · `/rag/parallel_ask` —— **纯 mock**（`asyncio.sleep(2)` 后返回硬编码串），
-**一分钱不花**。接上去 ⇒ 用户为**没发生**的调用被 429（`DEC-041` 范围表已裁）。
+原先本文件另有一条反向用例 `test_the_two_non_spending_endpoints_stay_unwired`，
+钉住 2 条**不花钱**的端点（`/rag/async_ask` · `/rag/parallel_ask` —— 纯 mock，
+`asyncio.sleep(2)` 后返回硬编码串）**不许**被接上断路器。
 
-⚠️ **计数沿革**：4 条 →（2026-10-03）3 条 →（2026-10-04）**2 条**
-· `/rag/ask` 已**删除**（`DEC-057`）· `/rag/jwt_ask` 已**删除**（`DEC-064`）
-⇒ 两条都**不再需要**这条守卫（端点不存在了，守卫自然消失）。
+⚠️ **计数沿革**：4 条 →（2026-10-03）3 条（`/rag/ask` 删 · `DEC-057`）
+→（2026-10-04）2 条（`/rag/jwt_ask` 删 · `DEC-064`）→ **0 条**（另 2 条端点也删了 · `DEC-065`）。
+
+🔴 **删它的理由不是"不需要了"，是"它已经变成恒绿的假守卫"**：
+端点一删，那张豁免清单**空了** ⇒ `for` 体**一次都不跑** ⇒ 用例**永远绿**，
+**什么也没钉住**。留着它等于留一个**假通过**（本仓 `docs/复盘/` 反复记过这一族）。
+⇒ 按 `DEC-065` 的裁决**删掉该用例**，保护**收敛到**
+`api/test_removed_endpoints.py::test_rag_async_ask_stays_removed` /
+`::test_rag_parallel_ask_stays_removed`（判据 = **404**）。
+
+⚠️ **代价（知道再选）**：**将来若有人再加一条「不花钱」的端点，
+不会有测试自动拉红**叫他去接线 —— 只能靠 `DEC-065` 里写明的要求 + 本段。
+📌 同款处理在 `test_session_budget_wiring.py` 的模块注释里（两张清单同时清空）。
 """
 import ast
 import pathlib
@@ -94,24 +105,17 @@ def test_endpoint_calls_breaker(filename, func_name):
     )
 
 
-def test_the_two_non_spending_endpoints_stay_unwired():
-    """🔴 **反向守卫**：那 2 条【不花钱】的端点，⛔ **不许**被接上断路器。
-
-    **危害方向与上一条相反，但同样是真问题**：它们一分钱不花，
-    接上 ⇒ 全站额度用尽时，连**查库**的接口都 429 了 —— **没有任何账单依据**。
-
-    ⚠️ 原先 4 条；`/rag/ask` 于 2026-10-03 **删除**（`DEC-057`）、`/rag/jwt_ask` 于 2026-10-04
-    **删除**（`DEC-064`）⇒ 变 2 条。
-    """
-    NON_SPENDING = [
-        ("api_v1_rag.py", "async_ask_question"),     # /rag/async_ask —— mock
-        ("api_v1_rag.py", "parallel_ask_question"),  # /rag/parallel_ask —— mock
-    ]
-    for filename, func_name in NON_SPENDING:
-        tree = ast.parse((_API / filename).read_text(encoding="utf-8"))
-        fn = _find_function(tree, func_name)
-        assert fn is not None, f"{filename} 里找不到 {func_name}()"
-        assert GUARD not in _calls_in(fn), (
-            f"{filename}:{fn.lineno} 的 {func_name}() 被接上了断路器，但它**不花钱**：\n"
-            "  ⇒ 全站额度用尽时，一个不消耗额度的接口也被 429。"
-        )
+# 🔴 ============ 【已删除】test_the_two_non_spending_endpoints_stay_unwired ============
+# 2026-10-04 删除（`DEC-065`）。原钉：2 条**不花钱**的 mock 端点（`/rag/async_ask` ·
+# `/rag/parallel_ask`）**不许**被接上断路器（接上 ⇒ 全站额度用尽时，不花额度的接口也被 429）。
+#
+# ⛔ **删它的理由不是"不需要了"，是"它已经变成恒绿的假守卫"**：
+#    那两条端点已**整体删除** ⇒ 豁免清单**空了** ⇒ `for` 体一次都不跑 ⇒ **永远绿**。
+#    ⚠️ 留着一个永远绿的用例，比删掉它更坏 —— 它看起来像"有防护"。
+#
+# ✅ **保护没有丢，是换了住处**：`api/test_removed_endpoints.py` 的
+#    `test_rag_async_ask_stays_removed` / `test_rag_parallel_ask_stays_removed`（判据 = **404**）。
+#
+# ⚠️ **代价（知道再选）**：将来若再加一条「不花钱」的端点，**不会有测试自动拉红**叫去接线。
+#    处理要求写在模块 docstring 与 `docs/decisions/DEC-065-*.md` 里。
+# ======================================================================================
