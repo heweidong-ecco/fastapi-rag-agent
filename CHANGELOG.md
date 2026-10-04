@@ -10,6 +10,27 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- 🟢 **`B1` 评审收口（`#78` 合并前评审 · 5 件事 · 一个 PR）**（2026-10-04 · `DEC-060` · `DEC-061`）——
+  ⛔ **不改运行行为**（⑧ 除外：**加字段 = 增量、兼容**，⛔ 不是破坏性变更）。全量 **477 passed, 3 skipped, 32 deselected**
+  （**本 PR 改前 = 466** ⇒ **+11**；⚠️ 本行**原写「改前 473」** —— 那是**只算 ⑤ 那一步**的数，⛔ 不是本 PR 的基线。
+  判据：`git worktree add --detach /tmp/base 93eb2fb` + CI dummy env 跑同一条命令 ⇒ **466 passed**）。
+
+  | 评审编号 | 事 | 落点 / 判据 |
+  |---|---|---|
+  | **Important ①** | **`api/agent_graph.py` 的「幽灵锚点」变成真守卫** —— 那句「判据」指向的用例**根本不存在**（`grep` 全仓 **1 命中 = 那句注释自己**），而白名单里写错一个名字**不会有任何用例报错**（那段 token **静默丢掉**，接口一切正常） | 新增 `test_every_streamable_node_name_exists_in_its_graph`（**4 张图参数化**，`xray=1` 按 `split(":")[-1]` 比后缀）· **`DEC-061`** |
+  | **Important ③** | **链 A / C 补「碎片化 `tool_calls`」守卫** —— 此前**只有 B 与 B0 有**；聚合若退化成 `content +=` / 「只留最后一块」，碎片**静默丢掉** ⇒ `should_continue` 判不出 `tools` ⇒ **工具一次都不跑，而接口看着一切正常** | `test_react_subgraph_aggregates_fragmented_tool_calls`（链 A，同步 `invoke`）· `test_real_chain_c_aggregates_fragmented_tool_calls`（链 C，`ainvoke`） |
+  | **Minor ⑥** | **RAG 的 `sources` 帧序补上唯一一条钉子** —— `content… → [DONE] → sources`（**`[DONE]` 在前**，反直觉但是线上契约、前端已按此适配），此前**零用例、只有注释**；将来任何人「顺手整理一下收尾顺序」都**不会有东西红** | `test_rag_emits_sources_frame_after_done`（扩 `_call_rag_stream` 一个 `citations` kwarg，默认 `False` = **旧行为**） |
+  | **Minor ⑦** | **`docs/specs/sse.md` 的假判据** —— 原写「**44 passed**」与该行的命令**对不上**（44 = 当时那两份文件的 **29** + `api/test_sse_layer.py` 的 **15**）⇒ 按**实测**更正为 **31 passed**。⚠️ **同一条错数还出现在 `docs/specs/api_v1_agent.md`**（一并更正） | `docs/specs/sse.md:31` · `docs/specs/api_v1_agent.md` |
+  | **Minor ⑧** | **5 条流式端点的汇总帧补 `requested_by`** —— **非流式兄弟 5 条全有、流式一条都没有**（且 `B1` 原计划 §八 **明文承诺过**链 D 末帧含它 = **承诺没落地**）⇒ **静默的形状不一致**：两侧其余字段一模一样，只有它无声没了 | `api/api_v1_agent.py`（**5 处汇总帧**）· **`DEC-060`** |
+
+  📌 **判据（可打印）**：
+  `grep -c '"requested_by": user_name' api/api_v1_agent.py` ⇒ **32**（改前 **27**）·
+  `pytest api/test_agent_sse.py api/test_agent_stream_chains.py -k "requested_by or plan_execute_summary_carries"` ⇒ **5 passed** ·
+  `pytest api/test_agent_stream_chains.py -k streamable_node_name` ⇒ **4 passed** ·
+  `pytest api/test_cancel_propagation.py -k sources_frame` ⇒ **1 passed** ·
+  `venv/bin/python scripts/check_route_auth.py --baseline` ⇒ ✅ 与基线一致（路由 / 鉴权面**未动**）。
+  ⚠️ **①③⑥ 三条守卫都做过反证**（把实现改坏 ⇒ **必红**，再 `git checkout --` 还原复跑绿）—— ⛔ 不是恒绿。
+
 - 🟢 **`B1` 剩余 4 条链：Agent 端 5 条对话链【全部真流式】+ 抽出共享层 `api/sse.py`**（2026-10-04 · `DEC-059`）——
   **新增 4 条 SSE 路由**：`POST /agent/{advanced_chat, memory_chat, mcp_chat, plan_execute}/stream`。
   路由 **30 → 34**，全仓流式端点 **2 → 6** ⇒ ✅ **硬门 A 的「该流的流」关掉了**。

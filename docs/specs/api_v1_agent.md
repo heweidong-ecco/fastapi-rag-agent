@@ -104,6 +104,8 @@
 | ⚠️ **「`/agent/token/budget` 的数是【本人】的，那就跟全站无关」** | ⚠️ **2026-10-03 起它同时答两层**（`DEC-047`）：本人（`daily_budget`/`used_today`/`remaining`）**和**全站（`global_daily_limit`/`global_used_today`/`global_remaining`）。<br>⚠️ **字段名不带 `global_` 前缀的那三个是本人的** —— ⛔ **别拿未加前缀的 `remaining` 当全站余量**。<br>📌 理由：**"还剩多少"必须能同时看到本人和全站**，否则看到 `999961` 也不知道那是谁的上限 |
 | ⚠️ **「全站额度快满了，接口会给个预警」** | ⛔ **不会** —— 全站额度超了是**所有人吃 429**（`B11` 熔断），**没有"快到阈值了"的软提示**。<br>✅ 现在能**看到逼近**（`global_remaining`），但**得自己去看** —— ⬜ 无主动告警，`DEC-047` §遗留未列，本行仅备查 |
 
+| ⚠️ **「流式端点与非流式兄弟返回的形状一样」** | ⚠️ **2026-10-04 之前【不是】** —— 5 条流式端点的**汇总帧都少一个 `requested_by`**，而各自的非流式兄弟（`:177` / `:469` / `:682` / `:840` / `:1195`）**全都有**，且**没有任何用例报错**（**静默的形状不一致**：两侧其余字段一模一样，只有它无声没了）。<br>✅ **`b0b1835` 起 5 条汇总帧都带它**（`DEC-060`）。⚠️ **注意落点**：在**汇总帧**上（终态），⛔ 不在逐 token 的 `{"content": …}` 帧上（增量）。<br>📌 判据（可打印）：`grep -c '"requested_by": user_name' api/api_v1_agent.py` ⇒ **32**（改前 27）· `pytest api/test_agent_sse.py api/test_agent_stream_chains.py -k "requested_by or plan_execute_summary_carries"` ⇒ **5 passed** |
+
 ## 关联
 
 `docs/specs/agent_graph.md`（审批节点的本尊）· `docs/specs/agent_checkpointer.md` ·
@@ -870,7 +872,8 @@ Test `api/test_cancel_propagation.py`（10 例 · 纯离线 · 进 CI）
       勘察 ⇒ `fastapi-rag-agent-TODO待办/硬门A-Agent端流式勘察-20261003.md` §8.5
 - [x] Step 2 建 `api/sse.py` + spec + `api/test_sse_layer.py`（**15 例**）
 - [x] Step 3 两条既有点端改用它 ⇒ ⭐ **判据 = 两份既有用例"全绿且 diff 为空"**
-      （`api/test_agent_sse.py` + `api/test_cancel_propagation.py`，44 passed）—— ⛔ **没有新加断言**
+      （`api/test_agent_sse.py` + `api/test_cancel_propagation.py` —— ⚠️ 原写 **44 passed**，**命令与数字对不上**
+      （44 = 当时那两份的 **29** + `api/test_sse_layer.py` 的 **15**）⇒ 2026-10-04 评审收口按**实测**更正为 **31 passed**）—— ⛔ **没有新加断言**
 - [x] Step 4 改节点（A 4 个 · B 1 个 · C 2 个）—— **每个只加 `config` 形参 + 换流式 + `+` 聚合**
       ⚠️ **⛔ 没有把任何同步节点改成 `async def`**（`DEC-050`：同步 `graph.invoke()` 会当场 `TypeError`）
 - [x] Step 5 四条新路由（**两条前置闸照抄，⛔ 不挪进共享层** —— 两个 AST 守卫挖的是函数体内部）
@@ -879,7 +882,7 @@ Test `api/test_cancel_propagation.py`（10 例 · 纯离线 · 进 CI）
       （置标志 + 排空 + 取消任务），⛔ **不 `await thread.join()`**（线程杀不掉）。
       ⚠️ **它用 `extract=None`**（桥吐出来的**就是文本**）—— 同族的 `graph_message_text` 会 `ValueError`。
       ⚠️ **链 D 只流「规划段」** ⇒ 之后是**一长段静默**（`execute_plan` 不流），然后才是末帧 —— ⛔ **不是 bug**。
-- [x] Step 6 新测试 `api/test_agent_stream_chains.py`（**39 例**，夹具**复用**既有两份，⛔ 不新造一套）
+- [x] Step 6 新测试 `api/test_agent_stream_chains.py`（**39 例** —— `B1` 收工时的数；⚠️ 2026-10-04 评审收口后 **47 例**，夹具**复用**既有两份，⛔ 不新造一套）
       四条链各测：①**逐 token 出帧** ②**汇总来自 `aget_state`**（⛔ 不是攒块）③**断连 ⇒ 关上游 + 计数 + 日志**
       + A 链**额外**：`supervisor`/`calc_execute` 的字**一帧都不许漏**（那条 ⭐ 表的红线）
       + D 链**额外**：`_invoke_llm` 换流式后**仍然记账**（⛔ 不能拿"接口正常"代替）

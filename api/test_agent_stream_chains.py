@@ -33,12 +33,13 @@
 
 import ast
 import asyncio
+import importlib
 import inspect
 import json
 import textwrap
 
 import pytest
-from langchain_core.messages import AIMessage, AIMessageChunk
+from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
 from langchain_core.outputs import ChatGenerationChunk
 
 import agent_checkpointer as ac
@@ -386,6 +387,32 @@ def test_summary_comes_from_final_state_not_from_streamed_chunks(chain_key, monk
     assert graph.aget_state_calls, "端点没有读图的最终状态 ⇒ 它是在拿流式块猜"
 
 
+@pytest.mark.parametrize("chain_key", ["A", "B", "C"])
+def test_summary_frame_carries_requested_by(chain_key, monkeypatch):
+    """⭐ 汇总帧必须带 `requested_by` —— 三条链的**非流式兄弟一直都有它**
+    （`api_v1_agent.py:469` / `:838` / `:1193`）。
+
+    ⚠️ 少一个字段是**最难发现**的那类差异：从 `/agent/advanced_chat` 切到
+       `/agent/advanced_chat/stream`，两边其余字段长得**一模一样**，只有它静默没了。
+    ⚠️ **另外两条端点的同一断言不在本用例里**：链 D 没有图（走 `_plan_factory`），
+       断言加在 `test_plan_execute_summary_carries_plan_and_execution_result`；
+       基线端点 `/agent/langgraph_chat/stream` 在 `api/test_agent_sse.py`。
+    """
+    graph = _ChainGraph(
+        items=_tokens("半截"),
+        final_values=_FINAL_BY_CHAIN[chain_key],
+    )
+    resp = _call(chain_key, monkeypatch, graph)
+    objs = _frames_to_objs(_collect_frames(resp))
+
+    # ⚠️ 与上面那条同款取法：末帧是 `[DONE]`，汇总帧在它**前面**一帧。
+    summary = objs[-2] if objs[-1] == "__DONE__" else objs[-1]
+    assert summary.get("requested_by") == "tester", (
+        f"{CHAINS[chain_key]['route']} 的汇总帧没带 requested_by ⇒ "
+        f"与非流式兄弟的形状**静默不一致**：{summary}"
+    )
+
+
 # ---------------------------------------------------------------- ④ 取消传播
 
 @pytest.mark.parametrize("chain_key", ["A", "B", "C"])
@@ -505,6 +532,47 @@ def test_chain_a_whitelist_is_the_graph_module_s_own(monkeypatch):
                     if isinstance(n, ast.Assign)
                     and any(getattr(t, "id", None) == "STREAMABLE_NODES" for t in n.targets)]
     assert not defined_here, "端点在**自己**定义 STREAMABLE_NODES ⇒ 又变成两处口径了"
+
+
+# ==================== 白名单 × 图 对账（`B1` 评审收口 · 2026-10-04）====================
+#
+# 🔴 **为什么需要这一条**：白名单里写错一个名字（例如 `chat_node` 而不是 `chat`）
+#    **不会有任何用例报错** —— 那段 token 只是**静默丢掉**，接口一切正常。
+#    上面那些 `test_real_chain_*` 只抓**反方向**（"实际出块的节点不在白名单"），
+#    抓不到"白名单里有**不存在**的名字"。
+#
+# ⚠️ 本条**只建图、不 invoke** ⇒ 不联网、不花钱、不碰 mem0。
+#    四张图的 builder 全是纯构图（`StateGraph` + `add_node` + `compile`）。
+
+#: (模块名, builder 名) —— ⛔ 用字符串走 `importlib`（`agent_graph` 未在本文件 import）
+_STREAMABLE_WHITELISTS = [
+    ("agent_graph", "build_agent_graph"),
+    ("agent_checkpointer", "build_checkpointer_agent"),
+    ("agent_graph_advanced", "build_mcp_agent"),
+    ("agent_graph_advanced_learning", "build_advanced_agent"),
+]
+
+
+@pytest.mark.parametrize("module_name,builder_name", _STREAMABLE_WHITELISTS)
+def test_every_streamable_node_name_exists_in_its_graph(module_name, builder_name):
+    """⭐ 白名单里的**每个名字**都必须真的在它那张图里。
+
+    ⚠️ **`xray=1` 是必须的**：链 A 的 5 个部门全是**子图**，不开 xray 只能看到 `react_dept`
+       这层壳，看不到里面的 `agent` / `search_summarize` / `translate_execute`。
+    ⚠️ 按 `split(":")[-1]` 比**后缀** —— 与 `meta["langgraph_node"]` 报的名字**同口径**
+       （它报的是**子图内层**名，见 `api/sse.py:145-152`）。
+    """
+    module = importlib.import_module(module_name)
+    graph = getattr(module, builder_name)()
+
+    node_ids = set(graph.get_graph(xray=1).nodes)
+    suffixes = {nid.split(":")[-1] for nid in node_ids}
+
+    missing = set(module.STREAMABLE_NODES) - suffixes
+    assert not missing, (
+        f"{module_name}.STREAMABLE_NODES 里有名字【不在图中】⇒ 那段 token 会被静默丢掉：{sorted(missing)}\n"
+        f"图中实际的节点名（后缀口径）：{sorted(suffixes)}"
+    )
 
 
 # ==================== 链 B 独有：审批登记不能被流式带坏 ====================
@@ -643,6 +711,12 @@ def test_plan_execute_summary_carries_plan_and_execution_result(monkeypatch):
     assert summary["execution_result"] == "结果是 42", f"汇总帧没带执行结果：{summary}"
     assert summary["goal"] == "帮我算 6*7"
     assert summary["thread_id"] == THREAD
+    # ⚠️ 链 D 的 `requested_by` 是**原计划 §八 明文承诺过**的
+    #    （末帧 = `{goal, plan, execution_result, requested_by}`）——
+    #    承诺过、实现当时没落地，评审收口补上。
+    assert summary["requested_by"] == "tester", (
+        f"链 D 汇总帧没带 requested_by（原计划 §八 承诺过它有）：{summary}"
+    )
 
 
 def test_plan_execute_stream_survives_budget_exceeded_midway(monkeypatch):
@@ -867,3 +941,110 @@ def test_real_chain_c_nodes_stream_one_chunk_per_token(monkeypatch):
     assert aga.STREAMABLE_NODES >= nodes, (
         f"白名单盖不住实际出块的节点 ⇒ 有一段答案会被丢掉：{nodes} - {set(aga.STREAMABLE_NODES)}"
     )
+
+
+def test_real_chain_c_aggregates_fragmented_tool_calls(monkeypatch):
+    """🔴 **链 C 的真节点**：碎片化的 `tool_calls` 必须被 `astream` 侧的 `+` 聚合还原。
+
+    ⚠️ **为什么链 A / B 有守卫、链 C 也要有**：`+` 聚合是**保住 `tool_calls` 的唯一手段**。
+       `api/agent_graph_advanced.py` 自己写着后果 ——
+       「工具**永远不会被执行**，而接口一切正常」（`:373-375`）。
+       B0（`api/test_agent_sse.py`）与 B（`api/test_memory_chat_approval.py`）都有守卫，
+       **A 与 C 此前没有**（A 的那条已补在 `api/test_agent_repairs.py`）。
+       ⚠️ 代码本身是**对的**（全仓 7 个聚合点都写的是 `+` 全块聚合）⇒ 这是**测试债，⛔ 不是现存缺陷**。
+
+    ⚠️ 走**真节点、真图**（不是假图）：`agent_decide` 判出 `tool_calls` ⇒ 路由去 `tools`
+       ⇒ 回到 `agent` 拿终稿。**聚合一旦退化**（只留最后一块 / 只拼 `content`），
+       `should_continue` 会判**没有** `tool_calls` ⇒ **直接跳去 `chat` 出最终答案**
+       ⇒ 答案看着**完全正常**，而**工具一次都没跑**（本用例断言 `ToolMessage` 进没进 state）。
+       ⛔ 判据**不能**是"接口返回正常" —— 那正是上面说的静默失效。
+
+    ⚠️ **反证**（做过，非声称）：把本图两处聚合改成 `response = chunk` ⇒ **必红**
+       （实测失败信息见本文件对应的提交）。
+    """
+    agent_model = _FragmentedThenAnswerModel()
+    # ⚠️ `chat_node` 用的是**模块全局 `llm`**，与 `agent_decide` 那条路**不是同一个实例**
+    #    ⇒ 它自己从第 1 次调用起就该吐终稿（`answer_from=1`），否则它会再吐一次 `tool_calls`。
+    chat_model = _FragmentedThenAnswerModel(answer_from=1)
+
+    async def _fake_get_llm_with_mcp_tools():
+        # ⚠️ **必须每次返回同一个实例** —— 每次 `new` 会让 `calls` 从 0 重来
+        #    ⇒ 第二轮又吐 `tool_calls` ⇒ `agent → tools → agent` **无限循环**。
+        return _bind(agent_model)
+
+    async def _fake_tool_execute(state):
+        # ⛔ 挡掉**真的**工具执行：真 `tool_execute` 会经 `call_mcp_tool_with_cache` 起 MCP client
+        #    子进程、真联网。本用例的判据是「**有没有路由到 `tools`**」，
+        #    ⛔ 不是"工具抓没抓到网页"。
+        return {"messages": [
+            ToolMessage(content="stub", tool_call_id=tc["id"], name=tc["name"])
+            for tc in state["messages"][-1].tool_calls
+        ]}
+
+    monkeypatch.setattr(aga, "get_llm_with_mcp_tools", _fake_get_llm_with_mcp_tools)
+    monkeypatch.setattr(aga, "llm", _bind(chat_model))
+    monkeypatch.setattr(aga, "inject_memories_to_prompt", lambda prompt, state: prompt)
+    monkeypatch.setattr(aga, "check_token_budget", lambda *a, **k: True)
+    monkeypatch.setattr(aga, "record_usage", lambda **k: None)
+    monkeypatch.setattr(aga, "record_agent_decision", lambda *a, **k: None)
+    monkeypatch.setattr(aga, "tool_execute", _fake_tool_execute)
+
+    graph = aga.build_mcp_agent()
+
+    async def _go():
+        # ⚠️ **必须 `ainvoke`**（不是同步 `invoke`）—— 本图两个节点都是 `async def`。
+        return await graph.ainvoke(
+            {"messages": [m.HumanMessage(content="算一下 6*7")], "user_name": "tester",
+             "thread_id": "t-frag-c", "memory_space": "default"},
+            {"configurable": {"thread_id": "t-frag-c"}},
+        )
+
+    out = asyncio.run(_go())
+
+    tool_msgs = [x for x in out["messages"] if isinstance(x, ToolMessage)]
+    assert tool_msgs, (
+        "聚合丢了碎片化的 tool_calls ⇒ should_continue 判不出 tools ⇒ 直接跳去 chat "
+        f"出最终答案，而工具一次都没跑：{[type(x).__name__ for x in out['messages']]}"
+    )
+    # ⚠️ 下面两条**比"有 ToolMessage"更强**：`name` 与 `id` **都在【第一块碎片】上**，
+    #    能对上 ⇒ 证明 `+` 真的**跨块合并**了，⛔ 不是"某一块的 `tool_calls` 恰好还在"。
+    assert tool_msgs[0].name == "calculator"
+    assert tool_msgs[0].tool_call_id == "c1"
+    assert out.get("final_output") == "答案来自工具后的总结。", (
+        f"工具跑完后应回到 `agent` 拿终稿：{out.get('final_output')!r}"
+    )
+
+
+class _FragmentedThenAnswerModel(_FakeStreamingModel):
+    """**异步**假模型：第 `answer_from` 次调用起吐终稿，之前吐**碎片化的 `tool_calls`**。
+
+    ⚠️ 碎片形态照抄真 provider（也与 `_FakeStreamingModel.with_tool` 一致）：
+       `name` + `id` 在**第一块**，`args` 分两段续上，后两块的 `name` / `id` 都是 `None`。
+       ⇒ **只有 `+` 聚合**才拼得出一个完整的 `tool_calls`（单看最后一块，`tool_calls` 是**空的**）。
+    """
+
+    tokens: list = []      # ⛔ 不吐正文 token：本用例只看「有没有路由到 `tools`」
+    calls: int = 0
+    answer_from: int = 2
+
+    def _stream(self, messages, stop=None, run_manager=None, **kw):
+        self.calls += 1
+        if self.calls < self.answer_from:
+            yield ChatGenerationChunk(message=AIMessageChunk(content="", tool_call_chunks=[
+                {"name": "calculator", "args": "", "id": "c1", "index": 0},
+            ]))
+            for frag in ['{"expression"', ': "6*7"}']:
+                yield ChatGenerationChunk(message=AIMessageChunk(content="", tool_call_chunks=[
+                    {"name": None, "args": frag, "id": None, "index": 0},
+                ]))
+        else:
+            yield ChatGenerationChunk(message=AIMessageChunk(content="答案来自工具后的总结。"))
+        # 🔴 **最后一块必须带 `usage_metadata`** —— 链 C 的两个节点写的是
+        #    `if hasattr(response, "usage_metadata"): usage = response.usage_metadata`
+        #    然后**直接** `usage.get(...)`；而 `AIMessageChunk` **天然有**该属性（默认 `None`）
+        #    ⇒ 少了这块会 `AttributeError: 'NoneType' object has no attribute 'get'`。
+        #    ⚠️ 真 provider 也把 usage 挂在最后一块（`content=''`）上，见 `_UsageCarryingModel`。
+        yield ChatGenerationChunk(message=AIMessageChunk(
+            content="",
+            usage_metadata={"input_tokens": 11, "output_tokens": 7, "total_tokens": 18},
+        ))
