@@ -133,6 +133,39 @@ def summarize_agent_result(result: dict) -> dict:
     return {"status": "answered", "answer": content}
 
 
+def _tool_rulings(pending_calls: list, ruling_text: str) -> list:
+    """把「人工对卡住的工具调用的裁定」变成**配对回答** —— 每个 `tool_call_id` 一条 `ToolMessage`。
+
+    🔴 **为什么必须是 `ToolMessage`**（2026-10-04 端到端验收实测，改前塞的是别的类型）：
+
+    **① 结构**：`interrupt_before=["approval"]` 停在审批点时，state 末尾是
+      **一条带 `tool_calls` 的 `AIMessage`**。此刻再往 state 里 append 一条别的类型，
+      就永久留下了「`tool_calls` 后面没有配对 `ToolMessage`」的**非法结构** ⇒
+      真模型下一轮直接 400：
+        `An assistant message with 'tool_calls' must be followed by tool messages
+         responding to each 'tool_call_id'.`
+      ⚠️ **假图 / 单测看不出来** —— 只有真模型的 API 才校验这个结构（本仓栽过：21 条单测全绿）。
+
+    **② 路由**：`update_state` 会**按消息类型推断"这次更新来自哪个节点"**（`as_node`），
+      推断结果决定了**接下来跑哪个节点**：
+      · 塞 `AIMessage` ⇒ 被当成 **`agent` 节点**的输出 ⇒ 条件边重算 ⇒ **图当场 END**
+        ⇒ `tools` / `agent` **一个都不跑**（实测：`approve` 耗时 **0.017s**、`answer` = 输入原文）。
+      · 塞 `ToolMessage` ⇒ `as_node` 被推成 **`agent`**（= 最后跑过的那个节点）⇒ 条件边重算时
+        末条是 `ToolMessage`（没有 `tool_calls`）⇒ 还是 **END**（🔴 实测，别凭直觉）。
+      ⇒ 🔴 **两条都要做**：塞 `ToolMessage` **且** 显式传 `as_node="tools"`
+        （调用点见 `approve_agent_action`）—— 这样下一步正好是 `agent`
+        ⇒ **模型真的被叫醒**，看到人工的裁定后生成最终答复（这才是"续跑"）。
+        ⚠️ 实测对照（`/tmp/probe_asnode.py`）：不传 `as_node` ⇒ `next=()`；传 `"tools"` ⇒ `next=('agent',)`。
+
+    ⚠️ `pending_calls` 为空 ⇒ 返回空列表（`update_state` 随之退化成"不改 state"）。
+    📄 判据 ⇒ `api/test_approval_resume.py` §⑤（真图 + 假 LLM，核「state 里没有孤儿 `tool_calls`」）。
+    """
+    return [
+        ToolMessage(content=ruling_text, tool_call_id=c["id"], name=c.get("name"))
+        for c in (pending_calls or []) if c.get("id")
+    ]
+
+
 # ==================== 以下是 Agent 接口 ====================
 # ==================== AgentGraph 接口 ====================
 @router.post("/agent/langgraph_chat")
@@ -337,10 +370,18 @@ async def approve_agent_action(
 
     `edited_answer`：**人工把答案改过之后再放行**。
       · 不给 ⇒ 按原样续跑（行为与改动前一致）
-      · 给了 ⇒ 先 `update_state` 把改写推成一条 **`AIMessage`**，再从 checkpoint 续跑
+      · 给了 ⇒ 先 `update_state` 把改写推成**一组 `ToolMessage`**，再从 checkpoint 续跑
         ⚠️ **必须进 state、不能只当返回值吐出去** —— 只放响应里，**后续节点看不到这个改写**。
-        ⚠️ 必须是 `AIMessage`，⛔ 不是 `HumanMessage` —— 后者会让模型把"人给的结论"当**新输入**再答一遍。
+        🔴 **形状是 `ToolMessage`（每个卡住的 `tool_call_id` 一条）+ 显式 `as_node="tools"`**
+           —— ⛔ **不是 `AIMessage`、也不是 `HumanMessage`**。理由（结构合法 + 图还往下走）
+           逐条写在 `_tool_rulings` 的 docstring 里，**改前那版（`AIMessage`）是错的**，
+           两种错都实测过（真模型 400 / 图当场 END）。2026-10-04 硬门 D 端到端验收后改。
       · ⚠️ **只有"批准"时才生效**；拒绝时给了也会被忽略（拒绝的语义是"别做了"）。
+
+    ⚠️ **返回第三态 `status="pending_approval"`**：批了/拒了，但模型**又要**一个敏感工具
+       ⇒ 图**再次**停在审批点 ⇒ 这里**重新登记**（⛔ 不再无条件注销 —— 那会让会话变**孤儿**：
+       `/agent/pending` 查不到、再批报"没有等待审批的任务"、同 thread 再问 500）。
+       调用方要按**与首次触发时相同**的方式处理它（再走一遍本接口）。
     """
     # 🔴 丙段（`DEC-056`）：**先按【原 thread_id】查队列定属主，再按属主拼键**。
     #    ⛔ 别按调用方拼 —— admin 会拼出自己那个不存在的桶 ⇒ **永远批不了别人的**（硬门 D 死掉）。
@@ -396,28 +437,61 @@ async def approve_agent_action(
         resolve(sess)
         return {"status": "error", "message": "当前没有等待审批的任务"}
 
+    # 🔴 卡在审批点的那条消息带了哪些工具调用 ⇒ 它们的 `tool_call_id` **必须**有人配对回答。
+    #    ⛔ 别用 `getattr(..., "tool_calls", None) or []` 糊过去：真的取不到就说明"没停在审批点"，
+    #       而上面那句已经在拦它了 —— 这里的取值失败**不该被静默吞掉**。
+    pending_calls = (
+        getattr(current_state.values["messages"][-1], "tool_calls", None) or []
+    )
+
     if approved:
         if edited_answer is not None:
-            # B6：人工改写 ⇒ 推进 messages，**再从 checkpoint 续跑**。
-            # ⚠️ 不能"跳过模型直接把这个答案返回" —— 那样后续节点（`tools`→`agent`）看不到它。
-            target.update_state(
-                config, values={"messages": [AIMessage(content=edited_answer)]}
-            )
+            # 🔴 B6 修正（2026-10-04 · 端到端验收）：人工改写**回填成 `ToolMessage`**，
+            #    ⛔ 不再是 `AIMessage` —— 两个理由（结构合法 · 图还能往下走）见 `_tool_rulings`。
+            target.update_state(config, values={"messages": _tool_rulings(
+                pending_calls,
+                f"【人工接管】该工具**未被执行**。人工给出的结论：{edited_answer}")},
+                as_node="tools")       # 🔴 见 `_tool_rulings` 的「② 路由」——⛔ 不传就会直接 END
         else:
             # 原样放行：`values=None` ⇒ 不改 state，图继续前进到 approval 节点，然后去 tools
             target.update_state(config, values=None)
         result = target.invoke(None, config)
     else:
-        # 拒绝：更新 state，添加一条消息，并终止工具调用流程
-        target.update_state(
-            config,
-            values={"messages": [HumanMessage(content="审批拒绝，请忽略工具调用请求，直接告知用户操作已被拒绝。")]}
-        )
+        # 拒绝：同样**回填 `ToolMessage`**（⛔ 不再是 `HumanMessage` —— 同型缺陷，见 `_tool_rulings`）。
+        # ⚠️ 措辞里**不许出现 `edited_answer`**：拒绝的语义是"别做了"，不是"按我说的做"。
+        target.update_state(config, values={"messages": _tool_rulings(
+            pending_calls,
+            "【人工接管】该工具已被人工**拒绝执行**，请不要再调用它 —— "
+            "直接告知用户这次操作被拒绝了。")},
+            as_node="tools")           # 🔴 同上：⛔ 不传 `as_node` 图就会直接 END（模型不参与）
         result = target.invoke(None, config)
-    
+
     final_message = result["messages"][-1]
 
-    # B5：批完就注销 —— 否则它会**永远留在队列里**（`resolve` 幂等，重复调不抛）。
+    # 🔴 B5/B6 修正（2026-10-04 · 端到端验收）：**只有"真的走完了"才许 `resolve()`**。
+    #    改前是**无条件**注销 ⇒ 放行后若模型**又**要求敏感工具，图**再次**停在审批点，
+    #    而队列里已经没有它了 ⇒ **孤儿会话**：`/agent/pending` 查不到、
+    #    再 `/agent/approve` 报「当前没有等待审批的任务」、同 thread 再问 ⇒ 400。
+    #    实测（2026-10-04 真服务）：`approve` 返回 `answer=""`（末条 = 只有 tool_calls 的 AIMessage）
+    #    且放行后 `count=0` —— 正是这个形态。
+    #    📄 判据 ⇒ `api/test_approval_resume.py::test_resume_that_stops_again_is_re_registered`
+    after = target.get_state(config)
+    if after.next == ("approval",):
+        # 又停在审批点 ⇒ **重新入队**（按**属主**登记，⛔ 不是按调用方 —— 批的人可能是 admin）。
+        # ⚠️ `raw_thread_id` 用**请求里那个原值**（⛔ 不是拼过的 `sess`）—— `register` 的契约要求原值。
+        new_calls = list(getattr(after.values["messages"][-1], "tool_calls", None) or [])
+        register(sess, owner, new_calls, raw_thread_id=thread_id, graph=graph_name)
+        return {
+            "status": "pending_approval",       # 第三态：批了，但它**又**停下来了
+            "thread_id": thread_id,
+            "answer": final_message.content,
+            "pending_tool_calls": [
+                {"name": tc.get("name"), "args": tc.get("args")} for tc in new_calls
+            ],
+            "requested_by": user_name,
+        }
+
+    # 走到这里 = 图**真的走完了** ⇒ 注销（否则它会**永远留在队列里**；`resolve` 幂等，重复调不抛）。
     resolve(sess)
 
     return {

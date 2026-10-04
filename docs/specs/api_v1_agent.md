@@ -15,14 +15,20 @@
     与 `langgraph_chat/stream`（`:181`）**共用 `api/sse.py`**。⚠️ **四条链的"可流节点名单"各不相同**，
     且**住在各自的图模块里**（`STREAMABLE_NODES`）—— ⛔ 端点不许抄字面量（`DEC-051` 的教训：一个名字两个来源必然**静默**漂移）
 - **人工审批**：`POST /agent/approve`（`:300`）—— 批准 / 拒绝 / **改写后提交**，靠 `agent_graph` 的 `interrupt_before`
-  · 🔵 **改写后提交（`②` Task 3 · `B6` · 2026-10-03）**：可选参数 **`edited_answer`（`:304`）**。
-    **批准 ∧ 给了改写** ⇒ 先 `update_state` 把它推成一条 **`AIMessage`**，再 `invoke(None, config)` 续跑；
-    **不给** ⇒ 走原来的 `update_state(values=None)`（行为与改动前一致）；**拒绝** ⇒ 给了也忽略。
-  · ⭐ **续跑形状被测试钉住**：`api/test_approval_resume.py`（6 条 · **纯离线 · 进 CI**）——
+  · 🔵 **改写后提交（`②` Task 3 · `B6` · 2026-10-03 · 🔴 口径 2026-10-04 由 `DEC-062` 修正）**：可选参数 **`edited_answer`（`:304`）**。
+    **批准 ∧ 给了改写** ⇒ 先 `update_state` 推入**一组 `ToolMessage`**（每个卡住的 `tool_call_id` 一条，`_tool_rulings()`）
+    **并显式传 `as_node="tools"`**，再 `invoke(None, config)` 续跑；
+    **不给** ⇒ 走原来的 `update_state(values=None)`（行为与改动前一致）；**拒绝** ⇒ 给了也忽略（措辞不同）。
+    🔴 **改前推的是 `AIMessage`** —— **那是错的**（理由见「看代码会误判」表那条）。
+  · 🔴 **返回第三态 `status="pending_approval"`** —— 批了/拒了，但模型**又要**一个敏感工具 ⇒ 图**再次**停在审批点
+    ⇒ 这里**重新登记**（⛔ 不再无条件注销）。调用方按**与首次触发相同**的方式再走一遍本接口。
+  · ⭐ **续跑形状被测试钉住**：`api/test_approval_resume.py`（**12 条** · **纯离线 · 进 CI**）——
     `invoke` 必须是 **`None`**（= 从 checkpoint 继续，⛔ 不是新开一轮）、`config` 必须是**请求里那个 thread_id**
+    · §⑤ 六条是**真图 + 假 LLM**，钉「state 里没有孤儿 `tool_calls`」/「模型真的被叫醒」/「又停下就重新入队」
 - 🔵 **待接管队列（`②` Task 2 · `B5` · 2026-10-03）**：新增 **`GET /agent/pending`** —— 列出**当前在等接管的会话**
   （事实来源 = 新模块 **`api/pending_approvals.py`**，⛔ **不是从 checkpoint 反查** —— `MemorySaver` **没有"列出全部 thread"的 API**）。
-  `langgraph_chat` 在拿到 `summary` 后**登记 / 注销**，`approve_agent_action` 在**每条 return 前**注销。
+  `langgraph_chat` 在拿到 `summary` 后**登记 / 注销**；⚠️ **`approve_agent_action` 改前【每条 return 前】都注销，`DEC-062`（2026-10-04）起不是了** ——
+  **只有图真的走完才 `resolve()`**（又停下 ⇒ 重新登记；⛔ 无条件注销会造**孤儿会话**，见「看代码会误判」表）。
 - **⭐ `summarize_agent_result()`（`:82`）** —— 把图的运行结果翻成 `{"status": "pending_approval"/"answered", …}`，
   并**把模型已写出的文字一并返回**（真实 LLM 常"先说一句再调工具"）
 - **预算**：`check_budget` 依赖（`:1089`，抛 `AppException(QUOTA_EXCEEDED)`）· 6 个 `/agent/token/*` 查询路由
@@ -91,13 +97,15 @@ RAG 那条的骨架**没有图**，答案只能从 `collected` 取；Agent 这�
 | 🔴 **「客户端断开得靠 `request.is_disconnected()` 自己轮询」** | ⛔ **不用，那是框架给的**（uvicorn 报 `spec_version 2.3` ⇒ Starlette 监听 `http.disconnect` 后**取消生成器**）。<br>⇒ 真正的缺口只有「**停下并关掉上游**」这一件；**自己加轮询 = 多余，且会掩盖真缺口**（`DEC-052`） |
 | 🔴 **「中间件日志里那个秒数 = 这条流的生成耗时」** | ⛔ **不是** —— 它记到**响应开始返回**为止。实测：`(0.019s)` 的那条客户端收了 **27KB**、`(0.004s)` 的那条 **3 秒后**才 cancel。<br>⇒ ⛔ 别拿它当"生成提前停了"的证据（第一版就这么误读过 · `DEC-052`） |
 | 🔴 **「`status=answered` 就是拿到最终答案了」** | ⚠️ **要看 `status`** —— 返回 `pending_approval` 时 `answer` 里是**模型"先说的一句"**，**工具还没执行**。`summarize_agent_result` 的 docstring（`:55-80`）专门讲了这点：**不能加 `and not content`**，否则这种形态会被**误报成 `answered`**。⚠️ **该 docstring 还写了这条判据"依赖什么、什么时候会失效"**（B4 后理由变了）—— 改图的路由时**要回去重看** |
-| ⚠️ ~~🔴 **「审批已经能用了，硬门 D 算完成」**~~ | ✅ **2026-10-03（`②` Task 1 · `B4`）改了口径**：**触发条件不再是「任意 `tool_calls`」**，而是**工具白名单**（`agent_graph.py` 的 `SENSITIVE_TOOLS`）⇒ **问个日期不再进审批**。<br>🔴 **但白名单里的名字当时写错了**（`search_tool` 是**变量名**）⇒ **交集恒空 ⇒ 审批其实【永不触发】**，**直到 2026-10-03 才由 `DEC-051` 修掉**。⇒ ⚠️ **"改了口径"与"口径真的生效"是两件事** —— 前者当天就成立了，后者晚了三天。<br>✅ **2026-10-03（`②` Task 2/3）：`B5` 队列 与 `B6` 续跑都【已做】** ⇒ **三段（什么时候停 / 停在哪看得到 / 批了怎么接着跑）齐了**。<br>⚠️ **但"齐了"≠"验收过"**：`B6` 只钉了**接线与语义**（`invoke(None)` + `edited_answer` 进 `AIMessage`），<br>**"上下文真的连续"没有端到端跑过**（要真 LLM + 真 `MemorySaver`，**联网花钱**）⇒ 验收演示时**要补那一步**。<br>⚠️ **本条 2026-10-03 之前写的是旧口径**，⛔ 别照旧理解 |
+| ⚠️ ~~🔴 **「审批已经能用了，硬门 D 算完成」**~~ | ✅ **2026-10-03（`②` Task 1 · `B4`）改了口径**：**触发条件不再是「任意 `tool_calls`」**，而是**工具白名单**（`agent_graph.py` 的 `SENSITIVE_TOOLS`）⇒ **问个日期不再进审批**。<br>🔴 **但白名单里的名字当时写错了**（`search_tool` 是**变量名**）⇒ **交集恒空 ⇒ 审批其实【永不触发】**，**直到 2026-10-03 才由 `DEC-051` 修掉**。⇒ ⚠️ **"改了口径"与"口径真的生效"是两件事** —— 前者当天就成立了，后者晚了三天。<br>✅ **2026-10-03（`②` Task 2/3）：`B5` 队列 与 `B6` 续跑都【已做】** ⇒ **三段（什么时候停 / 停在哪看得到 / 批了怎么接着跑）齐了**。<br>⚠️ **但"齐了"≠"验收过"**：`B6` 只钉了**接线与语义**（`invoke(None)` + `edited_answer` 进 state），<br>**"上下文真的连续"没有端到端跑过**（要真 LLM + 真 `MemorySaver`，**联网花钱**）⇒ 验收演示时**要补那一步**。<br>🔴 **2026-10-04 补上了 —— 一跑就【不通过】**：真服务跑三条出口，**证真① 过、证真② 不过**；三条出口（改写放行 / 原样放行 / 拒绝）**每一条都会把会话弄坏**（同 thread 再问 ⇒ **500**）。⚠️ **而当时单测 21 条全绿** —— 因为假图**不校验消息结构**、假 `invoke` **不会有"下一轮"**。<br>✅ **同已修**（`DEC-062`，A+B+C）⇒ 复跑 **22/22**。🔴 **教训写在 `DEC-062`**：**硬门 D 的证真② 只有真服务跑得出来**（与 `DEC-061` 的"幽灵判据"同源：**以为门上挂着锁**）。<br>⚠️ **硬门 D 仍不标 ✅** —— 它的演示/反例里含**界面**（「点开后能看到完整上下文」「界面上找不到」），前端未开工。<br>⚠️ **本条 2026-10-03 之前写的是旧口径**，⛔ 别照旧理解 |
 | ⚠️ **「`/agent/approve` 收 JSON body」** | ⛔ **不是** —— `thread_id` / `approved` / **`edited_answer`** **都是 query 参数**（`:152-155`） |
 | 🔴🔴 **「`/agent/approve` 拿 `thread_id` 就能批」** | ⛔ **2026-10-03（丙段）起不能了** —— 它现在**先从待接管队列反查属主**，再判**本人或 admin**。<br>⚠️ **改之前它没有任何归属校验** —— 任何人拿一个 `thread_id` 就能**批准并续跑**那个会话。<br>🔴 **为什么不能"按调用方拼"**：`/agent/pending` 是**跨用户队列**（硬门 D）⇒ 按调用方拼，admin 会拼出 `admin:…`、属主是 `alice:…` ⇒ **admin 永远批不了别人的**。<br>⚠️ **代价（知道再选）**：**队列是唯一入口** ⇒ `AGENT_CHECKPOINT_BACKEND=sqlite` 重启后（图在盘上、队列在内存）会答"没有待审批任务"，而以前能批。📌 判据 ⇒ `api/test_approve_ownership.py` |
 | 🔴 **「`/agent/approve` 只认 `agent_graph`」** | ⛔ **两张图** —— `/agent/langgraph_chat` 走 `agent_graph`、**`/agent/memory_chat` 走 `checkpointer_agent`**（丙段给它加了审批门）⇒ approve **按登记表里的 `graph` 字段路由**。<br>⚠️ 写死 `agent_graph` 的后果：memory_chat 那条会话**永远放行不了**（**门关了却没有钥匙**，比不加门还糟）。业务方 2026-10-03 裁。📌 判据 ⇒ `api/test_memory_chat_approval.py::test_approve_routes_to_checkpointer_graph` |
 | 🔴 **「`memory_chat` 没有审批门」（2026-10-03 前的口径）** | ✅ **丙段起有了** —— `checkpointer_agent` 带 `interrupt_before=["approval"]`，敏感工具会停下。⚠️ **输出形状也变了**：新增 `status` / `pending_tool_calls`（与 `/agent/langgraph_chat` 一致，⛔ 不再返回 200 + 空答案） |
 | ⚠️ **「`thread_id` 拼身份 = 全仓统一拼法」** | ⛔ **不是** —— checkpoint 轴用 `session_key()`（**长度前缀**，无歧义）；而 **`:612`（`add_memory`）与 `:628`（`search_memory`）那两处 `f"{user_name}:{memory_space}"`** 仍是**朴素拼接**（含 `:` 会有歧义）。⚠️ 两条轴**各有各的拼法**，丙段**只动了 checkpoint 那条** |
-| 🔴 **「`edited_answer` 就是"把答案改一下再返回"」** | ⛔ **不止** —— 它**先写进 graph state**（`update_state` → `AIMessage`），**再从 checkpoint 续跑**。<br>⚠️ **差别在哪**：审批之后图**还要去 `tools` → `agent`** ⇒ 只把改写当返回值吐出去，**后续节点看不到它**（改写等于没改）。<br>⚠️ **必须是 `AIMessage`**：用 `HumanMessage` 会让模型把"人给的结论"当成**用户新提的问题**再答一遍 |
+| 🔴 **「`edited_answer` 就是"把答案改一下再返回"」** | ⛔ **不止** —— 它**先写进 graph state**，**再从 checkpoint 续跑**。<br>⚠️ **差别在哪**：审批之后图**还要去 `agent`** ⇒ 只把改写当返回值吐出去，**后续节点看不到它**（改写等于没改） |
+| 🔴🔴 **「改写/拒绝时往 state 里塞 `AIMessage` 就行」**（**改前 spec 就是这么写的，2026-10-04 已推翻**） | ⛔ **`AIMessage` 是错的**，`HumanMessage` 也是错的 —— **必须是 `ToolMessage`（按 `tool_call_id` 配对）且显式传 `as_node="tools"`**。<br>🔴 **为什么**（`DEC-062`，全部真机实测）：`interrupt_before=["approval"]` 停在审批点时，state 末尾是**一条带 `tool_calls` 的 `AIMessage`**，它**必须**由每个 `tool_call_id` 各一条 `ToolMessage` 闭合。<br>· 塞 `AIMessage`/`HumanMessage` ⇒ 那个配对**永远不闭合** ⇒ 真模型**下一轮直接 400**（`must be followed by tool messages`）—— **而单测看不出来**（假图不校验结构、假 `invoke` 不会有"下一轮"）。<br>· 塞 `AIMessage` 还有第二重错：`update_state` 会**按消息类型推 `as_node`** ⇒ `AIMessage` 被认成 `agent` 的输出 ⇒ **条件边重算 ⇒ 图当场 END**（实测 `approve` **0.017s**、`answer` = 输入原文、`tools`/`agent` 一个都没跑）。<br>· ⚠️ **反直觉**：**只塞对 `ToolMessage` 也不够** —— 不传 `as_node` 时它被推成 `agent` ⇒ **照样 END**（实测 `next=()`）。⇒ **两件事都要做**。<br>📌 判据 ⇒ `api/test_approval_resume.py` §⑤（真图 + 假 LLM）· 端到端 **22/22**（`DEC-062`） |
+| 🔴 **「批完就从待接管队列里注销了」** | ⚠️ **改前是这样的，`DEC-062` 起不是** —— 只有**图真的走完**（`get_state().next != ("approval",)`）才 `resolve()`。<br>⚠️ **为什么**：模型放行后**又要**一个敏感工具是**常见行为**（实测连续 3 次）⇒ 无条件注销 = 图还停着、队列已空 = 🔴 **孤儿会话**（`/agent/pending` 查不到、「再批」报"没有等待审批的任务"、同 thread 再问 **500**）。<br>📌 判据 ⇒ `test_resume_that_stops_again_is_re_registered` · `test_resume_that_finishes_clears_the_queue` |
 | ⚠️ **「审批状态是持久化的」** | ⚠️ **默认不是** —— `agent_graph.py:179` 用的是 `MemorySaver()`（**进程内存**）⇒ **重启即丢**。只有设了 `AGENT_CHECKPOINT_BACKEND=sqlite` 才落盘 |
 | 🔴 **「`check_budget` 就是会话上限」** | ⛔ **不是** —— `check_budget`（`:426`）判的是**用户【每日】token 预算**。**会话级是另一个函数**（`check_session_token_budget`，B8 · 2026-10-01）。两者**并存**，⚠️ `/agent/mcp_chat` 上**两条都挂** |
 | 🔴 **「会话上限没拦住 = 没生效」** | ⚠️ **先看 `thread_id` 是不是默认值** —— 会话 key = **`user_name` + `thread_id`**（`DEC-041` 决策二）。<br>4 个端点的 `thread_id` 默认 `"default"` ⇒ **同一个人的**多次默认调用**共用**一个桶（**不同人不会互相踩** —— 这正是决策二加 `user_name` 的原因）。<br>⚠️ 但**换个 `thread_id` 就是换个桶** ⇒ 这是**设计如此**，不是漏拦<br>✅ **2026-10-03 起两条轴终于一致了** —— **checkpoint 那条轴**原先按**裸 `thread_id`** 走（`DEC-056` §二 根因），现在也拼 `user_name`（丙段）。⚠️ 但**拼法不同**（这条是 `f"{user}:{thread}"`，那条是长度前缀）⇒ ⛔ 别以为能互推 |
@@ -142,11 +150,14 @@ RAG 那条的骨架**没有图**，答案只能从 `collected` 取；Agent 这�
 > | ✅ | **Task 0** · 前置决策（白名单里放哪些工具） | **业务方 2026-10-03 已答** = ~~`{search_tool}`~~ → **`{web_search}`** · `.env SENSITIVE_TOOLS`（见 `DEC-048`；🔴 **标识符已由 `DEC-051` 勘误**） |
 > | ✅ | **Task 1** · `B4` 触发条件改工具白名单 | **已落地**（`DEC-048`）—— 判据：`pytest api/test_approval_trigger.py -q` ⇒ **7 passed** |
 > | ✅ | **Task 2** · `B5` 待接管队列（数据 + 端点） | **已落地** —— 判据：`pytest api/test_pending_approvals.py api/test_pending_approvals_wiring.py -q` ⇒ **13 passed** |
-> | ✅ | **Task 3** · `B6` 接管后续跑（含改写后提交） | **已落地** —— 判据：`pytest api/test_approval_resume.py -q` ⇒ **6 passed** |
+> | ✅ | **Task 3** · `B6` 接管后续跑（含改写后提交） | **已落地**（🔴 **口径 2026-10-04 由 `DEC-062` 修正**）—— 判据：`pytest api/test_approval_resume.py -q` ⇒ **12 passed**（原 6 条接线/语义 **+ §⑤ 六条真图用例**） |
+> | ✅ | **Task 4** · `B6` **端到端验收**（2026-10-04 补） | **已跑 · 首跑不通过 · 已修** —— 业务方 2026-10-04 裁的「下一件事」。真服务（真 DeepSeek + 真 `MemorySaver`）跑三条出口 ⇒ **证真① 过、证真② 不过** ⇒ `DEC-062` 修（`ToolMessage` 回填 + `as_node="tools"` + 只在真走完时注销）⇒ **复跑 22/22** |
 >
-> ⇒ **`②` 的 4 个 Task（0–3）全部落地** ⇒ **硬门 D 三段齐了**。
-> ⚠️ **但"齐了"≠"验收过"** —— `B6` 只钉了**接线与语义**（假图），
-> **"上下文真的连续"仍需一次真 LLM 端到端演示**（⛔ 本条别读成"硬门 D 已验证"）。
+> ⇒ **`②` 的 5 个 Task（0–4）全部落地** ⇒ **硬门 D 三段齐了 + 后端侧端到端已验**。
+> ⚠️ **但别读成"硬门 D 已验证"** —— 它的**演示/反例里含界面**（「点开后能看到完整上下文」「界面上找不到」），
+> 前端按 `DEC-033` 🅱️ 未开工 ⇒ 现状 = **后端侧证真①②已过 · 界面侧待前端**。
+> 🔴 **本次的教训**：`B6` 原来那 **6 条**（假图）**全绿**，而真服务**三条出口全坏** ——
+> **"接线测过"与"端到端成立"之间隔着一整个真模型**（`DEC-062` §3.1）。
 
 > ### 🔴🔴 **勘误（2026-10-03 · `DEC-051`）—— 读本节之前先读这一段**
 >
@@ -667,6 +678,13 @@ python -m pytest api/test_approval_resume.py -q
 并在 docstring 里写明"这是钉住现有正确行为的守卫，不是新功能"）
 
 - [x] **Step 3: 给 `/agent/approve` 加 `edited_answer`**
+
+> 🔴🔴 **勘误（2026-10-04 · `DEC-062`）—— 下面这个代码块是【当时的计划原文】，⛔ 别照抄。**
+> 它有两处**后来被真机推翻**的写法：
+> ① `AIMessage(content=edited_answer)` —— **必须是 `ToolMessage` 按 `tool_call_id` 配对 + 显式 `as_node="tools"`**；
+> ② 结尾**无条件** `resolve(thread_id)` —— **只有图真的走完才许注销**。
+> 两处的后果与实测 ⇒ 本节上方 Task 3 那一行 + 「⚠️ 看代码会误判的地方」表那两条。
+> ⚠️ **为什么留原文**：它是**当时的决策依据**，删了就看不出"为什么当初会这么想"。
 
 ```python
 @router.post("/agent/approve")

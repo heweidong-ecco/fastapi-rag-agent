@@ -26,23 +26,44 @@ from session_key import session_key
 THREAD = "default"
 
 
-class _FakeGraph:
-    """记下 approve 对图做过的**每一个动作**（含没做动作 ⇒ `trace == []`）。"""
+# 卡在审批点的那条消息（真货形状：**只有 `tool_calls`、没有文字**）。
+_STUCK = AIMessage(content="", tool_calls=[
+    {"name": "web_search", "args": {}, "id": "call_1"}])
 
-    def __init__(self, next_=("approval",)):
+
+class _FakeGraph:
+    """记下 approve 对图做过的**每一个动作**（含没做动作 ⇒ `trace == []`）。
+
+    ⚠️ **`values["messages"]` 必须给**：`/agent/approve` 现在要读**卡住的那条 `tool_calls`**，
+       去回填配对的 `ToolMessage`（2026-10-04 硬门 D 修复）。⛔ 给空 dict 会直接 `KeyError` ——
+       而那是**假图的缺陷**，不是被测代码的（真 `StateSnapshot` 一定有 `.values["messages"]`）。
+    ⚠️ **`next_after`**：**放行之后** `get_state().next`。默认 `()`（走完了）。
+       approve 现在读两次 state（放行前判"停没停"、放行后判"该不该注销登记"）——
+       若两处共用一个恒定值，**"放行后还停在审批点"这条岔路就永远测不到**。
+    """
+
+    def __init__(self, next_=("approval",), next_after=()):
         self.trace = []          # [(动作名, config), …] —— **按调用顺序**
-        self._next = next_
+        self._before = next_
+        self._after = next_after
+        self._invoked = False
 
     def get_state(self, config):
         self.trace.append(("get_state", config))
-        return types.SimpleNamespace(next=self._next, values={})
+        return types.SimpleNamespace(
+            next=self._after if self._invoked else self._before,
+            values={"messages": [AIMessage(content="Q1"), _STUCK]},
+        )
 
-    def update_state(self, config, values=None):
+    def update_state(self, config, values=None, **kw):
+        # ⚠️ 吞掉 `as_node` 等关键字（真货会收）；回填的**形状**由
+        #    `test_approval_resume.py` §⑤ 的真图用例钉，这里只记"动过图"。
         self.trace.append(("update_state", config))
         return config
 
     def invoke(self, state, config=None):
         self.trace.append(("invoke", config))
+        self._invoked = True
         return {"messages": [AIMessage(content="done")]}
 
     def configs(self):
