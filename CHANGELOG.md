@@ -1549,6 +1549,47 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- 🔴 **第 6 份 `calculator` 还留着 `eval` —— 匿名 WS 可达的任意代码执行**（2026-10-04 · `DEC-066`）。
+
+  `api/api_v1_rag.py` 的 `get_agent_executor()` 里**本地又手抄了一套 tools**（第 6 份拷贝），
+  其中 `calculator` **一直写的是 `eval`**（`2c1a922` · 2026-07-17 起）：
+
+  ```python
+  result = await asyncio.to_thread(eval, expression)   # :801
+  ```
+
+  **可达路径**：匿名连 `ws://<host>/api/v1/ws/agent` → `:884 get_agent_executor()`
+  → `AgentExecutor(tools=[calculator, date_today, search])` → LLM 被诱导调用 ⇒ **服务进程里执行任意代码**。
+  ⚠️ 该 WS **整条没有鉴权**（`DEC-041` 遗留·1，代码注释里自己写着）；
+  ⚠️ `scripts/check_route_auth.py` **只扫 `APIRoute`**，**WebSocket 结构上不在它的范围内**。
+
+  **实测**（复刻同一调用形状）：`eval` 返回 `'0'`（= `system()` 的返回值），**`touch` 的文件真被创建** ——
+  与 `DEC-049` 记下的签名一模一样（**模型收到的是一条正常的"答案是 0"，没有任何异常信号**）。
+
+  🔴 **比这个洞更值钱的是"守卫为什么看不见它"**：`DEC-049` 配了两道闸，其中一道自述
+  「**全仓扫一遍**，谁再写裸 `eval` 就当违规」—— 它的判据是**调用的形状**，
+  只认 `eval(x)`，**认不出 `asyncio.to_thread(eval, x)`**（`eval` 在那儿是**实参**）
+  ⇒ **两道闸全返回空**，而 `docs/specs/safe_math.md` 与 `docs/说明/测试.md` 都据此写过
+  「**整个 `api/` 里没有 `eval` 调用**」—— **那句话是假的，而闸是绿的。**
+  📌 同族：`DEC-061`（幽灵锚点）· `DEC-065`（空清单 = 静默假通过）——
+  **「门上看得出挂着锁」≠「锁真的在那个位置」。**
+
+  **修法（TDD）**：① **先改判据**，抽出唯一的 `eval_name_offenders()`（两条闸共用），
+  判据由「调用的形状」换成「**名字本身**」（`ast.Name.id == "eval"`，⛔ 不误伤 `redis_client.eval(...)`
+  —— 那是 `ast.Attribute`）⇒ **先看它红**（`['api_v1_rag.py:801']`）；
+  ② 再收口那处（`eval` → `safe_math.calculate`），同批把 `DuckDuckGoSearchRun` 换成
+  `search_tools.web_search`（`duckduckgo.com` 本机不通 · `DEC-051`）—— **两条同一个主题**：
+  这条遗留链的本地工具集是第 6 份手抄拷贝，已经和别处漂开了。
+
+  **判据（可打印）**：
+  ```bash
+  venv/bin/python -m pytest api/test_safe_math_wiring.py -q   # 改前 1 failed ⇒ 改后 23 passed
+  venv/bin/python -m pytest api/ -q -m "not integration and not needs_db"   # ⇒ 518 passed, 3 skipped, 31 deselected
+  ```
+
+  ⚠️ **本份没有解决什么**：`/ws/agent` **仍然没有鉴权**（`DEC-041` 遗留·1，**另开**）——
+  「堵了 RCE」≠「这条链安全了」，匿名照样能连、能烧 token（额度**按连接**算）。
+
 - ⚠️ **`DEC-065` 收口后的两处过期指路 —— 计数写死 + 指针指向已闭合的条目**（2026-10-04）。
 
   **① `docs/文档地图.md` 把 DEC 份数写死**（`:69` 写 `61` 份 · `:183` 写 `61` 且区间写 `DEC-001–061`）。

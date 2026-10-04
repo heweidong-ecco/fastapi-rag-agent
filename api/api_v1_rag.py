@@ -781,8 +781,9 @@ def get_agent_executor():
         # ⚠️ 全部放在函数内：导入期不拉 langchain
         from langchain.agents import create_tool_calling_agent, AgentExecutor
         from langchain_core.prompts import ChatPromptTemplate
-        from langchain_community.tools import  DuckDuckGoSearchRun
         from langchain_core.tools import tool
+        from safe_math import calculate       # DEC-066：⛔ 别改回 `eval`
+        from search_tools import web_search   # DEC-066 · DEC-051：⛔ 别改回 DuckDuckGo
 
         #一 初始化模型
         # ⚠️ 角色 = 「模型轴 chat」+「长度轴 answer(2000)」—— 见 `api/llm_factory.py` 的模块 docstring。
@@ -791,15 +792,23 @@ def get_agent_executor():
         @tool
         async def search(query: str) -> str:
             """搜索互联网获取实时信息。输入搜索关键词。"""
-            search_tool = DuckDuckGoSearchRun()
-            result = await asyncio.to_thread(search_tool.invoke, query)
-            return result
+            # 🔴 DEC-066：⛔ 别改回 `DuckDuckGoSearchRun`。`api/search_tools.py:47` 记着 2026-09-21 的实测：
+            #    `duckduckgo.com` 本机**完全不通**（`cn.bing.com` 是当时唯一可达的）⇒ 旧写法在本机**必定失败**，
+            #    `/ws/agent` 的搜索**每次都返回失败**。
+            return await asyncio.to_thread(web_search.invoke, query)
 
         @tool
-        async def calculator(expression:str) -> str:
+        async def calculator(expression: str) -> str:
             """计算一个数学表达式。例如3*4-5/6。输入的必须是纯数学表达式"""
-            result = await asyncio.to_thread(eval, expression)
-            return str(result)
+            # 🔴 DEC-066：**不许改回 `eval`**。
+            #    这条是**本仓第 6 份 `calculator` 拷贝**，2026-10-04 才被挖出来 ——
+            #    旧判据只认「`ast.Call` 的 `func` 是裸名 `eval`」，而本行写的是
+            #    `asyncio.to_thread(eval, expression)`（`eval` 是**实参**）⇒ **两道守卫都看不见它**，
+            #    但**命令真的跑了**（实测：返回值 `'0'`，`touch` 的文件真被创建）。
+            #    ⚠️ 本行**匿名可达**（`/api/v1/ws/agent` 整条没有鉴权，`DEC-041` 遗留·1），
+            #    而 `expression` 是 **LLM 生成**的，LLM 的上下文含用户提问 / 搜索结果 ⇒ 间接提示注入面。
+            #    实现与三道闸见 `api/safe_math.py`；接线由 `api/test_safe_math_wiring.py` 守。
+            return await asyncio.to_thread(calculate, expression)
 
         @tool
         async def date_today(query: str = "") -> str:

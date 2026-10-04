@@ -27,6 +27,38 @@ API_DIR = Path(__file__).resolve().parent
 
 
 # ===========================================================================
+# 零、**唯一的**检测函数 —— 两条闸都调它，⛔ 不许各写一份（那正是漂移的来源）
+# ===========================================================================
+def eval_name_offenders(tree: ast.AST) -> list[int]:
+    """返回**所有「裸名 `eval`」**出现的行号 —— ⛔ 不是"所有 `eval(...)` 调用"。
+
+    🔴 **2026-10-04 修（`DEC-066`）：原判据只抓 `ast.Call` 且 `func` 是裸名 `eval`**，
+    于是这一行**两条闸都看不见**：
+
+        result = await asyncio.to_thread(eval, expression)      # api_v1_rag.py:801
+
+    `eval` 是**实参**，不是被调用的目标 —— `ast.Call` 的 `func` 是 `asyncio.to_thread`
+    ⇒ 旧判据返回**空**，而**命令真的跑了**（实测：返回值 `'0'`，`touch` 的文件真被创建）。
+
+    ⇒ **改成「只要这个名字被读出来就报」**，与它的**调用形状无关**：
+      · `eval(x)`                ✅ 抓到（`ast.Name` 一定在）
+      · `to_thread(eval, x)`     ✅ 抓到 —— **旧判据漏的就是这个**
+      · `f = eval` / `getattr(m, "eval")` 之类 ✅ 一并抓到
+
+    ⚠️ **⛔ 不会误伤 `redis_client.eval(...)`**（`api/rate_limiter.py` 真家伙）——
+       它的 `eval` 是 `ast.Attribute.attr`，**不是** `ast.Name`。
+
+    ⚠️ **改判据时要看它能不能红**（本仓两条教训）：这次改完**先跑**，
+       红在 `api_v1_rag.py:801` 才算数 —— 判据纪律见 `api/agent_graph.py` 同名注释 / `DEC-061`。
+    """
+    return sorted(
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Name) and node.id == "eval"
+    )
+
+
+# ===========================================================================
 # 一、行为验证：喂恶意表达式，验"没被执行"
 # ===========================================================================
 #: (模块名, 入口名) —— 入口名不同是因为 `simple_tools_impl` 那份叫 `calculator_impl`。
@@ -119,18 +151,9 @@ def test_no_eval_call_remains(label, path):
     正则会把说明文字的命中当成违规（本仓栽过：见 `docs/复盘/2026-09-21-拿动作成功当结果正确.md`）。
     """
     tree = ast.parse(path.read_text(encoding="utf-8"))
+    offenders = eval_name_offenders(tree)
 
-    offenders = [
-        node.lineno
-        for node in ast.walk(tree)
-        # ⚠️ 只看**裸 `eval(...)`**。`redis_client.eval(...)`（`api/rate_limiter.py`）
-        #    是 `ast.Attribute`，是另一回事，⛔ 别误伤。
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "eval"
-    ]
-
-    assert not offenders, f"🔴 {label} 里还有裸 `eval()` 调用，行号：{offenders}"
+    assert not offenders, f"🔴 {label} 里还有裸 `eval` 的引用，行号：{offenders}"
 
 
 @pytest.mark.parametrize("label,path", _site_files(), ids=[p for p, _ in _site_files()])
@@ -159,25 +182,23 @@ def test_site_delegates_to_safe_math(label, path):
 # 三、名单自身别放过期了
 # ===========================================================================
 def test_no_other_module_defines_an_eval_based_calculator():
-    """防止"第 6 份拷贝"：全仓扫一遍，谁再写裸 `eval` 就当违规。
+    """防止"第 n 份拷贝"：全仓扫一遍，谁引用裸名 `eval` 就当违规。
 
     ⚠️ 扫的是**整个 `api/`**（不只是上面那 5 个文件）—— 上面那 5 个是"已知的"，
        这条管的是"**将来又冒出来的**"。本仓的拷贝文化是真的：这一份就被复制了 5 次。
+
+    🔴 **2026-10-04（`DEC-066`）：这条闸原先【有形盲区】** —— 判据是 `ast.Call` 且 `func` 是裸名
+       `eval` ⇒ `asyncio.to_thread(eval, expression)`（`api_v1_rag.py:801`）**它抓不到**，
+       而那一处**真的在执行任意代码**（匿名 WS `/ws/agent` 可达）。⇒ 改用 `eval_name_offenders()`。
     """
     offenders = []
     for path in sorted(API_DIR.glob("*.py")):
         if path.name.startswith("test_"):
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
-            if (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Name)
-                and node.func.id == "eval"
-            ):
-                offenders.append(f"{path.name}:{node.lineno}")
+        offenders += [f"{path.name}:{n}" for n in eval_name_offenders(tree)]
 
     assert not offenders, (
-        "🔴 全仓还有裸 `eval()` —— 每多一处，就是一个未收口的任意代码执行面："
+        "🔴 全仓还有裸名 `eval` —— 每多一处，就是一个未收口的任意代码执行面："
         f"{offenders}"
     )
