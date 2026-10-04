@@ -2,7 +2,7 @@
 
 | 项 | 内容 |
 |---|---|
-| **状态** | 🟡 **部分可用** —— 有 **2 条**是"模拟类测试"（原 3 条；`/rag/ask` **2026-10-03 已删**，`DEC-057`）<br>🔵 **2026-10-04（`B1` 剩余 4 条链 · 批 3）：`/rag/stream_search` 的 SSE 生成器【改成走共享层】** —— 内联的 `try/except/finally` 整段换成 `sse_response(sse_stream(...))`（`:753`）。<br>· 🔴 **行为必须【逐帧等价】，⛔ 不是"顺手统一"** ⇒ 三处**显式覆盖**骨架默认值：`ensure_ascii=True`（中文仍 `\uXXXX`）· `on_error`（**只有 error 帧、⛔ 不加 `[DONE]`**）· `chunk_delay=0.01`（限速照旧）。<br>· ⭐ **判据 = 既有两份用例"全绿且文件 diff 为空"**（`api/test_agent_sse.py` + `api/test_cancel_propagation.py`）—— ⛔ 没有新加断言 = 重构真的等价。<br>· ⚠️ **上游从同步 `.stream()` 改 `astream(messages)`（`:757`）不是本批的改动**（那是 `③` Task 5 · `B2`）；本批只是把它搬进 `lambda: …` 工厂。<br>📄 骨架见 `docs/specs/sse.md`<br>✅ **2026-10-03（`③` Task 5 · `B2`）**：`/rag/stream_search` 的**取消传播做完了** —— 上游改 `astream`、`finally` 里 `aclose()` 关流、取消时记 `stream_cancelled_total`（`DEC-052`）。⚠️ **"上游真停"仍只有代码内证据**（本机无出账）<br>✅ **2026-10-03（`③` Task 6 · `B3`）**：中断后**那半截答案存进历史**（提问 + 半截 + `INTERRUPTED_SUFFIX` 标记，落 `finally` —— `DEC-053`）<br>🔴 **未修**：**本文件的 LLM 调用一处都不记账**（`grep -c record_usage api/api_v1_rag.py` ⇒ **0**）⇒ 见下方「做到哪」与 `DEC-053` §遗留·2<br>✅ 2026-10-01：两处 `ChatOpenAI`（现 `:578` 流式答案 · `:751` WS agent）接上 `MAX_TOKENS_ANSWER`（`B7`）<br>✅ 2026-10-02（`①b` Task 5）：那两处**改走 `llm_factory.make_llm("chat", "answer")`** ⇒ **本文件已不再 import `ChatOpenAI` / `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL_CHAT`**。<br>⚠️ **`get_llm_stream()` 的惰性没变**（`make_llm` 自己把 langchain 的 import 关在函数内）· ⚠️ `temperature=0.3` + `streaming=True` 是**本处特有的逐点调参**，仍写在调用点上 |
+| **状态** | 🟡 **部分可用** —— 有 **2 条**是"模拟类测试"（原 3 条；`/rag/ask` **2026-10-03 已删**，`DEC-057`）<br>🔵 **2026-10-04（`B1` 剩余 4 条链 · 批 3）：`/rag/stream_search` 的 SSE 生成器【改成走共享层】** —— 内联的 `try/except/finally` 整段换成 `sse_response(sse_stream(...))`（`:753`）。<br>· 🔴 **行为必须【逐帧等价】，⛔ 不是"顺手统一"** ⇒ 三处**显式覆盖**骨架默认值：`ensure_ascii=True`（中文仍 `\uXXXX`）· `on_error`（**只有 error 帧、⛔ 不加 `[DONE]`**）· `chunk_delay=0.01`（限速照旧）。<br>· ⭐ **判据 = 既有两份用例"全绿且文件 diff 为空"**（`api/test_agent_sse.py` + `api/test_cancel_propagation.py`）—— ⛔ 没有新加断言 = 重构真的等价。<br>· ⚠️ **上游从同步 `.stream()` 改 `astream(messages)`（`:757`）不是本批的改动**（那是 `③` Task 5 · `B2`）；本批只是把它搬进 `lambda: …` 工厂。<br>📄 骨架见 `docs/specs/sse.md`<br>✅ **2026-10-03（`③` Task 5 · `B2`）**：`/rag/stream_search` 的**取消传播做完了** —— 上游改 `astream`、`finally` 里 `aclose()` 关流、取消时记 `stream_cancelled_total`（`DEC-052`）。⚠️ **"上游真停"仍只有代码内证据**（本机无出账）<br>✅ **2026-10-03（`③` Task 6 · `B3`）**：中断后**那半截答案存进历史**（提问 + 半截 + `INTERRUPTED_SUFFIX` 标记，落 `finally` —— `DEC-053`）<br>✅ **2026-10-04（`DEC-055`）**：**三条出口都留痕，且各带一个 `status`** —— `done`（= 完整答案、⛔ 无标记）/ `cancelled` / `error`。🔴 改前 **`except Exception` 那条一个字都不留**（连提问一起丢）⇒ 现在也写了。留痕例程已收进 **`cache.persist_turn`**，本文件只剩**两个调用点**（`_complete` `:723` · `on_incomplete` `:753`）<br>🔴 **未修**：**本文件的 LLM 调用一处都不记账**（`grep -c record_usage api/api_v1_rag.py` ⇒ **0**）⇒ 见下方「做到哪」与 `DEC-053` §遗留·2<br>✅ 2026-10-01：两处 `ChatOpenAI`（现 `:578` 流式答案 · `:751` WS agent）接上 `MAX_TOKENS_ANSWER`（`B7`）<br>✅ 2026-10-02（`①b` Task 5）：那两处**改走 `llm_factory.make_llm("chat", "answer")`** ⇒ **本文件已不再 import `ChatOpenAI` / `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL_CHAT`**。<br>⚠️ **`get_llm_stream()` 的惰性没变**（`make_llm` 自己把 langchain 的 import 关在函数内）· ⚠️ `temperature=0.3` + `streaming=True` 是**本处特有的逐点调参**，仍写在调用点上 |
 | **对外提供** | **13 条 HTTP**（文档管理 4 · 检索 6 · 流式 1 · **模拟 2**）· **2 条 WebSocket**<br>⚠️ **2026-10-03 由 14 变 13**：`/rag/ask` 已删（`DEC-057`）。<br>🔴 **顺带更正一个【改前就存在】的错**：本行原写「**15 条 HTTP**」，**而括号里的分项一直加不到 15**（4+6+1+3 = **14**）—— **分项是对的，那个 15 是错的**。判据（可打印）：`grep -c '@router\.' api/api_v1_rag.py` ⇒ **15**（= **13 HTTP + 2 WebSocket**，其中 WS 两条在 `:876` `:953`）。📌 **这种"总数与分项对不上"的错，本仓已记过一次**（数出来的数要能对上） |
 | **谁在用** | 全部对外检索入口 |
 
@@ -63,12 +63,16 @@
 - ✅ ~~**硬门 C（服务端 cancel）没做** —— 只有 `except asyncio.CancelledError`（旧 `:676`），**不关上游 HTTP 流**~~
   ⇒ **2026-10-03（`③` Task 5 · `B2`）已做**：上游 `astream`（现 `:757`）· 关流与计数**2026-10-04 起搬进
   共享层 `api/sse.py`**（约束①②：同步收尾排在 `await` 前 + `shield` 关上游）—— 本文件这边
-  只剩一个 `on_cancel` 回调（`:767`）。📄 `DEC-052` · `DEC-054`
+  只剩一个 `on_incomplete` 回调（`:753`）。📄 `DEC-052` · `DEC-054` · `DEC-055`
   ⚠️ **仍未证的是"上游计费真停"** —— 本机没有 DashScope 出账，⛔ 别把"我们关了流"说成"账单停了"
 - ⬜ **无停止按钮**（前端不存在）
 - ✅ ~~**中断后那半截答案【直接丢】**（`DEC-052` §遗留·3 点的名）~~ ⇒ **2026-10-03（`③` Task 6 · `B3`）已改**：
-  取消时**存**「提问 + 半截 + 中断标记」（`_persist_interrupted_turn`，`:608`；调用点 `:767`），落点由骨架排在 `await` 之前。
-  📄 `DEC-053`。⚠️ **`except Exception` 那条路仍然丢提问**（**有意**，见该 DEC §遗留·1）
+  取消时**存**「提问 + 半截 + 中断标记」，落点由骨架排在 `await` 之前。📄 `DEC-053`
+  · ⚠️ **`DEC-055` 搬了家**：`_persist_interrupted_turn`（原 `:608`）**已删**，逻辑收进
+    **`cache.persist_turn`** —— 它与 5 条 Agent 链**共用同一段**（`DEC-055` 决策 2）。
+  · ✅ ~~**`except Exception` 那条路仍然丢提问**（**有意**，`DEC-053` §遗留·1）~~
+    ⇒ **2026-10-04（`DEC-055`）已改**：**异常出口也写了**（`status="error"`，同样带中断标记）。
+    ⚠️ 这是 `DEC-053` §遗留·1 明确留给 `DEC-055` 的那一件，不是"顺手扩范围"
 - 🔴 **本文件的 LLM 调用【一处都不记账】** —— `grep -c record_usage api/api_v1_rag.py` ⇒ **0**。
   ⚠️ **本文件里真正的 LLM 调用点只有这些**（`grep -n 'astream(\|ainvoke(\|make_llm(' api/api_v1_rag.py`）：
   `stream_search`（`:757`）· `get_agent_executor`（`:796`，被 Agent 端点共用）· `agent_websocket`（`:851`）。
@@ -80,9 +84,10 @@
   ⚠️ **取消场景补不了**（`llm_factory` 没开 `stream_usage` ⇒ 提前 `aclose()` 就永远收不到 usage 帧）
   ⇒ 已立进 `docs/待办总表.md`，**范围是成功路径**（`DEC-053` §遗留·2）
 - 🟡 ~~零测试覆盖本文件（`docs/说明/测试.md` §六）~~ ⇒ **2026-10-03 起有了第一条**：
-  `api/test_cancel_propagation.py`（**13 例**）覆盖 **`/rag/stream_search` 的取消路径**
-  （关流 `DEC-052` + 半截答案 `DEC-053`）。
-  ⚠️ **但只盖了取消这一条路** —— 检索 / 引用 / 历史落库**仍然零覆盖**
+  `api/test_cancel_propagation.py`（**22 例**；其中 **RAG 15 · Agent 7**）覆盖 **`/rag/stream_search`
+  的取消路径与异常路径**（关流 `DEC-052` + 半截答案 `DEC-053` + 三条出口各写什么 `status` `DEC-055`）。
+  ⚠️ **覆盖仍偏在"非正常出口"上**：**检索 / 引用（`sources` 帧）** 只有零散几条；正常路径的**历史落库**
+  现在有了（`test_rag_full_answer_is_saved_without_interrupt_marker`），但**检索语义本身仍然零覆盖**
 - ✅ ~~**隔离：4 条收口 / 2 条没做**~~ ⇒ **2026-10-03（乙段）后：8 条检索路径全部收口**（`DEC-056` 甲段 + 乙段）。
   `api/test_isolation.py` **19 条用例守着**（离线 **9** · `needs_db` **10**）。
   已做过证伪：**甲段**拿掉共享层 `WHERE` ⇒ **4 条变红**；**乙段**分别退回那两条的修改 ⇒ **各恰好 1 条红**。
@@ -107,8 +112,8 @@
 | 🔴 **「自己去 `request.is_disconnected()` 轮询才知道客户端断了」** | ⛔ **不用，那是框架给的** —— uvicorn 报 `spec_version 2.3` ⇒ Starlette 已监听 `http.disconnect` 并**取消生成器**。<br>⇒ 真正的缺口只有「**停下并关掉上游**」这一件。**自己加轮询 = 多余，且会掩盖真缺口**（`DEC-052`） |
 | 🔴 **「中间件日志里那个秒数 = 生成耗时」** | ⛔ **不是** —— 它记到**响应开始返回**为止。实测：`(0.019s)` 的那条客户端收了 **27KB**、`(0.004s)` 的那条 **3 秒后**才 cancel。<br>⇒ ⛔ **别拿它当"生成提前停了"的证据**（第一版就这么误读过 · `DEC-052` §真服务实测） |
 | 🔴 **「换两个字问同一个问题就能测取消」** | ⛔ **会被语义缓存吃掉** —— 问句只差"基线/切断"⇒ 当成同一个问题、`0.006s` 返回全量 ⇒ **根本没在生成，取消测不出来**。<br>⇒ 测取消**必须换语义上不同的问句** |
-| 🔴 **「历史里那条助手消息是完整回答」** | ⛔ **可能是半截**（`③` Task 6 · `B3` 起）—— 被中断的那轮存进去的答案**尾部带 `INTERRUPTED_SUFFIX`**（"…（本次回答被中断，以上为已生成部分）"）。<br>⇒ **读历史的人（人 / 模型 / 另一个脚本）必须看这个尾巴**，⛔ 别把半截当结论。⚠️ 这个尾巴是**故意**进 prompt 的：不标 ⇒ 模型会把断掉的话当成自己说完了（`DEC-053`） |
-| 🔴 **「取消后用户那问句也没了，是设计如此」** | ⛔ **不是设计，是碰巧** —— 改动前 `append_chat_history(user, …)` 与答案写在同一段收尾代码里，取消先 `raise` ⇒ **两个一起丢**。<br>⇒ **2026-10-03（`B3`）已让取消路径成对写**（`DEC-053`）。⚠️ **`except Exception` 那条路【仍然丢】**（**有意留着**，属另一件事 —— 已立 `DEC-055`，⬜ 未实施） |
+| 🔴 **「历史里那条助手消息是完整回答」** | ⛔ **可能是半截**（`③` Task 6 · `B3` 起）—— 被中断的那轮存进去的答案**尾部带 `INTERRUPTED_SUFFIX`**（"…（本次回答被中断，以上为已生成部分）"）。<br>⇒ **读历史的人（人 / 模型 / 另一个脚本）必须看这个尾巴**，⛔ 别把半截当结论。⚠️ 这个尾巴是**故意**进 prompt 的：不标 ⇒ 模型会把断掉的话当成自己说完了（`DEC-053`）。<br>🔵 **2026-10-04（`DEC-055`）起还有机器可读的那一份**：每条都是 `{role, content, status}`，`status ∈ done / cancelled / error`。<br>⚠️ **`cancelled` 与 `error` 的中断标记串【是同一个】**（`INTERRUPTED_SUFFIX`，有意不另造）⇒ **要区分只有 `status`**；<br>🔴 **老条目（`DEC-055` 之前写的）没有 `status`** ⇒ `get_chat_history` 读的时候**补成 `done`**（按"完整答案"处理，因为那时根本不存半截） |
+| 🔴 **「取消后用户那问句也没了，是设计如此」** | ⛔ **不是设计，是碰巧** —— 改动前 `append_chat_history(user, …)` 与答案写在同一段收尾代码里，取消先 `raise` ⇒ **两个一起丢**。<br>⇒ **2026-10-03（`B3`）已让取消路径成对写**（`DEC-053`）。<br>✅ **2026-10-04（`DEC-055`）**：**`except Exception` 那条也成对写了**（`status="error"`）—— 改前它**连提问一起丢**。⚠️ **三条出口现在都留痕，且都成对**；`persist_turn` 里那条「**空答案 ⇒ 一条都不写**」是唯一的"不写"分支（防空的助手消息污染下一轮 prompt） |
 | 「`/rag/search` 是纯检索」 | 🟡 **它能生成答案** —— 传 `generate_answer: true` 即可（**默认 `False`**，`api/schemas.py:14`） |
 | 「检索都走 `rag_pipeline`」 | 🔴 **`/rag/stream_search` 不走 pipeline** —— 它直接调**共享层**的**纯向量那一档**<br>`search_similar(query_embedding, req.top_k, user_id=user_name)`，**不经过** `pipeline` / `hybrid_search` / **BM25** / **reranker** ⇒ **与 `/rag/search` 召回不同源**。<br>⚠️ **2026-10-03 更正**：本行原先写「**内联裸 SQL**」—— 乙段起**不再成立**（改走共享层了）。<br>🔴 **别把这句和隔离混起来**：乙段让它的**过滤**跟上了（共享层带 `WHERE`），但**召回源【没】拉齐** —— 这两件事在这条端点上恰好相反：**隔离对齐了，召回没对齐** |
 | 🔴 **「本文件的端点都接了会话上限」** | ⛔ **不是** —— **只有 2 条接**（B8 · 2026-10-01）：`/rag/stream_search` 与 `/ws/agent`。<br>**`/rag/jwt_ask` · `/rag/async_ask` · `/rag/parallel_ask` 【故意不接】** —— 它们**不调 LLM**（前一条只 `SELECT documents`，后两条是 mock）⇒ 接上去会让**没花钱的接口占额度**。⚠️ **2026-10-03 由 4 条变 3 条**：原第 1 条 `/rag/ask` 已删（`DEC-057`）。<br>⚠️ 这条有**双向守卫**：`api/test_session_budget_wiring.py` 与 `api/test_breaker_wiring.py` **各一份**，既查该接的接了，也查**不该接的没接** |
@@ -123,6 +128,7 @@
 `后端补齐清单` **B1/B2/B3** · `docs/decisions/DEC-052-取消传播的观测对象与上游改异步.md` ·
 `docs/decisions/DEC-053-中断后的半截答案存进历史并打标记.md` ·
 `docs/decisions/DEC-054-取消路径的收尾顺序与关流护盾.md` ·
-`docs/decisions/DEC-055-中断与异常路径的留痕口径.md`（⬜ 未实施）·
+`docs/decisions/DEC-055-中断与异常路径的留痕口径.md`（✅ **2026-10-04 已实施** ——
+`/rag/stream_search` 是它的 RAG 那一半；另 5 条 Agent 链见 `docs/specs/api_v1_agent.md`）·
 `docs/契约/接口契约.md` §四 · `docs/原理/架构.md` §3.2 ·
 `docs/复盘/2026-09-29-结果为空就断言能力不存在.md`
