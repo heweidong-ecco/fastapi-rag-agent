@@ -196,7 +196,13 @@ async def langgraph_chat(
     sess = session_key(user_name, thread_id)
 
     result = agent_graph.invoke(
-        {"messages": [HumanMessage(content=question)]},
+        # 🔴 2026-10-04（`DEC-072`）：`user_name` / `thread_id` 必须**进 state** ——
+        #    图里靠它们记账（缺了**不报错**，只是静默记成 "unknown"，配额拦不住具体的人）。
+        #    ⚠️ 这里的 `thread_id` 是**原值**，⛔ 不是下面 config 里的 `sess`：
+        #       `sess = session_key(...)` 是 **checkpoint 的键**，两者用途不同
+        #       （参照 `/agent/mcp_chat`，见 `DEC-071` §三）。
+        {"messages": [HumanMessage(content=question)],
+         "user_name": user_name, "thread_id": thread_id},
         config={"configurable": {"thread_id": sess}}
     )
     summary = summarize_agent_result(result)
@@ -329,7 +335,11 @@ async def langgraph_chat_stream(
         #    骨架要拿它去关流（客户端断开后不关 ⇒ 图**继续跑完** = 继续调模型 = 继续烧钱）。
         #    ⛔ 别退回"在 `async for` 里内联调用"：那样拿不到句柄，关不掉。
         lambda: agent_graph.astream(
-            {"messages": [HumanMessage(content=question)]},
+            # 🔴 2026-10-04（`DEC-072`）：同 `/agent/langgraph_chat` —— 身份必须进 state。
+            #    ⚠️ 流式这条尤其容易漏：`lambda` 里的 state 写在别处，肉眼扫端点函数体看不出来
+            #       ⇒ `api/test_billing_wiring.py` 专门下钻 `lambda` 查这两个键。
+            {"messages": [HumanMessage(content=question)],
+             "user_name": user_name, "thread_id": thread_id},
             config={"configurable": {"thread_id": sess}},
             stream_mode="messages",
         ),
@@ -555,6 +565,10 @@ async def advanced_agent_chat(
             "messages": [HumanMessage(content=question)],
             "user_name": user_name,
             "memory_space": memory_space,
+            # 🔴 2026-10-04（`DEC-072`）：本端点**原先只传 `user_name`**，没有 `thread_id`
+            #    ⇒ 6 个节点的记账会全部落到 `"unknown"` 这个会话桶里
+            #    （账记上了、但归不到具体哪个会话）。⚠️ 传**原值**，⛔ 不是 `sess`。
+            "thread_id": thread_id,
         },
         config={"configurable": {"thread_id": sess}}
     )
@@ -641,6 +655,8 @@ async def advanced_agent_chat_stream(
                 "messages": [HumanMessage(content=question)],
                 "user_name": user_name,
                 "memory_space": memory_space,
+                # 🔴 2026-10-04（`DEC-072`）：同 `/agent/advanced_chat` —— ⚠️ 传**原值**，⛔ 不是 `sess`。
+                "thread_id": thread_id,
             },
             config={"configurable": {"thread_id": sess}},
             stream_mode="messages",
@@ -934,7 +950,11 @@ async def memory_chat(
     sess = session_key(user_name, thread_id)
     config = {"configurable": {"thread_id": sess}}
     result = checkpointer_agent.invoke(
-        {"messages": [HumanMessage(content=question)]},
+        # 🔴 2026-10-04（`DEC-072`）：身份必须进 state —— 本图此前**连记账都没有**
+        #    （判据 `hasattr(response,"usage")` 恒假，见 `agent_checkpointer.agent_decide`）。
+        #    ⚠️ `thread_id` 传**原值**，⛔ 不是 `config` 里的 `sess`（那是 checkpoint 的键）。
+        {"messages": [HumanMessage(content=question)],
+         "user_name": user_name, "thread_id": thread_id},
         config=config
     )
     # 🔴 丙段：本端点现在**会停在审批点**（`checkpointer_agent` 的 `interrupt_before=["approval"]`）。
@@ -1023,7 +1043,9 @@ async def memory_chat_stream(
 
     return sse_response(sse_stream(
         lambda: checkpointer_agent.astream(
-            {"messages": [HumanMessage(content=question)]},
+            # 🔴 2026-10-04（`DEC-072`）：同 `/agent/memory_chat` —— 身份必须进 state。
+            {"messages": [HumanMessage(content=question)],
+             "user_name": user_name, "thread_id": thread_id},
             config={"configurable": {"thread_id": sess}},
             stream_mode="messages",
         ),

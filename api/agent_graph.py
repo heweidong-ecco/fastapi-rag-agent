@@ -16,6 +16,9 @@ from langchain_core.runnables import RunnableConfig   # B1：节点要靠它把�
 from datetime import datetime
 from safe_math import calculate  # DEC-049：`calculator` 的求值实现 —— ⛔ 别改回 `eval`
 from search_tools import web_search  # DEC-051：搜索工具换成 Bing 版（旧的 DuckDuckGo 本机不可达）
+# 🔴 2026-10-04（`DEC-072`）：本图**原先既不拦也不记** —— 一个 LLM 调用点免费跑。
+#    `record_from_response` 是三张图共用的**唯一记账实现**，⛔ 别在本文件里另抄一份取用量。
+from token_tracker import check_token_budget, record_from_response, BUDGET_EXCEEDED_MSG
 
 # ==================== 初始化模型 ====================
 # ⚠️ 角色 = 「模型轴 fast」+「长度轴 agent(1024)」—— 见 `api/llm_factory.py` 的模块 docstring。
@@ -105,6 +108,13 @@ def validate_approval_config() -> None:
 class AgentState(TypedDict):
     # 对话历史消息列表。operator.add 表示新消息会被追加到末尾，而不是覆盖。
     messages: Annotated[List, operator.add]
+    # 🔴 2026-10-04（`DEC-072`）：这两个键**此前不存在** ⇒ 记账读不到身份。
+    #    `user_name` = 配额按谁算；`thread_id` = 这笔钱记到哪个会话。
+    #    ⚠️ **由端点注入**（`api_v1_agent.py:198-201`），⛔ 图自己推不出来。
+    #    ⚠️ 一律 `.get(..., "unknown")` 读 —— 旧调用方（`api_v1.py` / `api_v1_rag.py`）不传这两个键，
+    #       用下标会当场 `KeyError` 把那些路径打挂。缺身份**只该漏记到 "unknown"，不该 500**。
+    user_name: str
+    thread_id: str
 
 # ==================== 定义节点函数 ====================
 def agent_decide(state: AgentState, config: RunnableConfig):
@@ -134,6 +144,18 @@ def agent_decide(state: AgentState, config: RunnableConfig):
        ⇒ **B4 人工审批静默失效**，而接口返回 `{"status": "answered"}` 一切正常。
        守卫 ⇒ `api/test_agent_sse.py::test_agent_decide_preserves_tool_calls`
     """
+    # 🔴 2026-10-04（`DEC-072`）：**预算检查必须在 `.stream()` 之前** ——
+    #    放在之后钱已经花了，只能丢弃结果、拦不住（同参照图 `agent_graph_advanced.py:329`）。
+    #    ⚠️ 两条链先前**连检查都没有** ⇒ 端点上的 B8 会话上限 / B11 全站熔断对本图等于不存在。
+    user_name = state.get("user_name", "unknown")
+    thread_id = state.get("thread_id", "unknown")
+    # 预估本次调用消耗（经验值：决策通常消耗 200–500 tokens；与参照图同取 500）
+    if not check_token_budget(user_name, estimated_tokens=500):
+        # ⚠️ 返回 AIMessage 而非 `final_output` —— 本图的出口是 `should_continue` 读
+        #    `messages[-1].tool_calls`（见 `:195`）：无 tool_calls ⇒ END。
+        #    ⛔ 别忘了记账**在**这里也要有 —— 但拦下来的这次**没花钱**，不该记。
+        return {"messages": [AIMessage(content=BUDGET_EXCEEDED_MSG)]}
+
     response = None
     for chunk in llm_with_tools.stream(state["messages"], config=config):
         # ⚠️ 用 `+` 合并，⛔ 不是 `response.content += chunk.content`：
@@ -145,6 +167,14 @@ def agent_decide(state: AgentState, config: RunnableConfig):
     #    （`langchain_core/language_models/chat_models.py:551`，2026-10-03 实测），
     #    **永远不会返回一个空迭代器** ⇒ `response` 循环后必非 None。
     #    守卫 ⇒ `api/test_agent_sse.py::test_empty_stream_neither_writes_none_nor_returns_an_empty_answer`
+    # 新增 统计 Token 消耗（🔴 2026-10-04 · `DEC-072`：本图此前**一分钱不记**）
+    # ⚠️ 聚合后 `response` 是 `AIMessageChunk`，`usage_metadata` 挂在**最后一块**上
+    #    （provider 行为，见参照图 `agent_graph_advanced.py:341-343`）——
+    #    上面那个 `for` 遍历了**所有**块（⛔ 没跳过 content 为空的块），所以这里取得到。
+    record_from_response(
+        llm_with_tools, response, "agent_decision",
+        user_name=user_name, thread_id=thread_id,
+    )
     # 返回一个AIMessage，LangGraph会自动将它追加到messages中
     return {"messages": [response]}
 

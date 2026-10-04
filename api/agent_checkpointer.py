@@ -53,9 +53,17 @@ llm_with_tools = llm.bind_tools(tools)
 # ==================== 定义 State ====================
 class AgentState(TypedDict):
     messages: Annotated[List, operator.add]
+    # 🔴 2026-10-04（`DEC-072`）：同 `agent_graph.AgentState` —— 记账要的两个人身份键。
+    #    ⚠️ **由端点注入**（`POST /agent/memory_chat`），一律 `.get(..., "unknown")` 读。
+    user_name: str
+    thread_id: str
 
 # ==================== 定义节点 ====================
-from token_tracker import record_usage #Token统计模块
+from token_tracker import (          # noqa: E402  （原位保留，未挪动）
+    check_token_budget, record_from_response, BUDGET_EXCEEDED_MSG,
+)
+
+
 def agent_decide(state: AgentState, config: RunnableConfig):
     """决策节点（`B1` · 2026-10-04 改真流式）。
 
@@ -64,6 +72,13 @@ def agent_decide(state: AgentState, config: RunnableConfig):
        `TypeError: No synchronous function provided to "agent"`，而 `/agent/memory_chat` 在用它。
        （同型实现见 `api/agent_graph.py::agent_decide`，那份是 `DEC-050` 的样板。）
     """
+    # 🔴 2026-10-04（`DEC-072`）：**本图此前连预算检查都没有** —— 现在与 `agent_graph.py` 同形。
+    #    检查**必须在 `.stream()` 之前**（放之后钱已花，只能丢结果、拦不住）。
+    user_name = state.get("user_name", "unknown")
+    thread_id = state.get("thread_id", "unknown")
+    if not check_token_budget(user_name, estimated_tokens=500):
+        return {"messages": [AIMessage(content=BUDGET_EXCEEDED_MSG)]}
+
     response = None
     for chunk in llm_with_tools.stream(state["messages"], config=config):
         # ⚠️ 用 `AIMessageChunk.__add__`（`+`）合并，⛔ **不是** `response.content += chunk.content`：
@@ -75,21 +90,27 @@ def agent_decide(state: AgentState, config: RunnableConfig):
         #    而接口一切正常。
         response = chunk if response is None else response + chunk
     # 统计 Token
-    # 🔴 **下面这个判据恒为 False**（既有 bug，⛔ 本轮不修）—— 真 `AIMessage` / `AIMessageChunk`
-    #    都**没有** `.usage` 属性（只有 `usage_metadata`）⇒ **本端点的记账从来没执行过**。
-    #    ⚠️ 本轮**原样保留**这里的每一个字节：修它会让 `/agent/memory_chat` **开始拦人**
-    #       （配额从"形同虚设"变成"真的生效"）—— 那是**行为变更**，要单独裁。
-    #    📄 发现经过 ⇒ `fastapi-rag-agent-TODO待办/硬门A-Agent端流式勘察-20261003.md` §8.5
-    if hasattr(response, "usage"):
-        record_usage(
-            # ⚠️ 2026-10-01 修（🅗 S4）：原写死 `"qwen-turbo"`，而本文件的 `llm` 用的是
-            #    `LLM_MODEL_FAST`（= DeepSeek）⇒ 金额按**错的单价**记。
-            #    改从对象取（照抄 `plan_execute.py:154`）。
-            model=getattr(llm, "model_name", None) or getattr(llm, "model", "unknown"),
-            prompt_tokens=response.usage.prompt_tokens,
-            completion_tokens=response.usage.completion_tokens,
-            purpose="query_rewrite",
-        )
+    # 🔴🔴 **2026-10-04（`DEC-072`）修掉了本仓最难看的一个 bug。原先这里写的是**：
+    #
+    #     if hasattr(response, "usage"):
+    #         record_usage(..., prompt_tokens=response.usage.prompt_tokens,
+    #                           completion_tokens=response.usage.completion_tokens,
+    #                           purpose="query_rewrite", ...)   # ⛔ 还漏传 user_name/thread_id
+    #
+    #     **那个判据恒为 False** —— 真 `AIMessage` / `AIMessageChunk` 都**没有** `.usage`
+    #     属性（真名是 `usage_metadata`）⇒ **这段记账从写下那天起就没执行过一次**。
+    #     墓碑 ⇒ `api/test_token_budget_hookup.py::test_does_not_record_on_the_old_wrong_attribute`
+    #     （拿一个**只有 `.usage`** 的假对象来调，`record_from_response` 必须返回 `False`）。
+    #
+    # ⚠️ **`purpose` 从 `"query_rewrite"` 改成 `"agent_decision"`** —— 这是个**对话端点**，
+    #    记成"查询改写"是错的。⚠️ 真库 `token_usage_logs` 里 `query_rewrite` **0 条**
+    #    （正是因为它从没跑过）⇒ **无历史数据要迁移**。
+    # ⚠️ 修它 = **行为变更**：`/agent/memory_chat` 的配额从"形同虚设"变成"真的生效"。
+    #    裁定与理由 ⇒ `docs/decisions/DEC-072-关闭三条不记账的LLM通路.md` §八。
+    record_from_response(
+        llm_with_tools, response, "agent_decision",
+        user_name=user_name, thread_id=thread_id,
+    )
     return {"messages": [response]}
 
 def tool_execute(state: AgentState):

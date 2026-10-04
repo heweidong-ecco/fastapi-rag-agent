@@ -6,36 +6,43 @@
 
 | 项 | 内容 |
 |---|---|
-| **状态** | 🟡 **可用，且是生产链** —— 但 🔴 **它对 LLM 的花销【一处都不记账】**，且 ⚠️ **两个分支本来就无字可流**（见下）<br>🔵 **2026-10-04（`B1` 剩余 4 条链）：4 个该流的节点改成【真流式】** —— `search_summarize`（`:133`）· `translate_execute`（`:203`）· `agent_decide`（`:235`）· `chat_node`（`:385`）都声明 `config: RunnableConfig` + 换 `.stream(…, config=config)` 逐块 `+` 聚合 ⇒ **本图 388 → 450 行**（多出的行是"为什么这 4 个流、那 2 个不流"的注释 + 白名单常量 + 每个节点的改法说明）。<br>⚠️ **本图 4 个节点【全是同步的】** ⇒ 走**同步** `.stream(config=config)`；⛔ **别照抄链 C**（`agent_graph_advanced.py` 那两个是 `async` ⇒ 用 `astream`），⛔ **也别把本图节点改成 `async def`** —— 同步的 `graph.invoke()` 会当场 `TypeError: No synchronous function provided to "agent"`（`DEC-050` 实测）。<br>新增模块级 `STREAMABLE_NODES`（`:339`）；**为什么必须放模块级**（放进 `build_advanced_agent()` 就是局部名 ⇒ 端点 `AttributeError`）写在 `:316-338` 的注释里。<br>🔴 **链 A 走 `astream` 时必须开 `subgraphs=True`** —— 本图 5 个子图，**不开它一个字都流不出来**（⚠️ 且 `meta["langgraph_node"]` 报的是**子图内层**名，见 ⚠️④）。⚠️ **`+` 聚合在本图同样【必须】**：`tool_calls` 碎片化到达，只拼 `content` ⇒ react 子图拿不到 `tool_calls` ⇒ **工具永远不执行**，而接口一切正常。<br>📌 守卫 `api/test_agent_stream_chains.py`（含 `test_real_chain_a_node_streams_one_chunk_per_token` · `test_chain_a_filters_out_supervisor_and_calc_execute`） |
-| **对外提供** | `build_advanced_agent()`（`:349`，返回**编译好的图**，带 `MemorySaver`）<br>· 5 个 `create_*_subgraph()`（`:120` / `:160` / `:180` / `:196` / `:223`）<br>· 模块级 `llm`（`:22`）· `llm_search`（`:81`）· `llm_calc`（`:82`）· `llm_date`（`:83`）· `llm_with_tools`（`:75`）<br>· 工具 `calculator`（`:26`）· `date_today`（`:32`）· `tools`（`:60`，**从 `mcp_server.TOOLS` 派生**）<br>· `inject_memories_to_prompt()`（`:97`）· `AgentState`（`:86`）· 🆕 `STREAMABLE_NODES`（`:339`） |
-| **谁在用** | `api_v1_agent.py:34` import → `:430` **模块级建图**（`advanced_agent = build_advanced_agent()`）→ `POST /agent/advanced_chat`（`:434` 定义 · `:455` `advanced_agent.invoke(...)`）<br>🆕 **`POST /agent/advanced_chat/stream`**（`:474`，`B1` · 2026-10-04）—— 同一张图，走 `astream(..., subgraphs=True)`（`:535`），汇总取自 `aget_state`（`:524`） |
-| **规模** | **450 行**（`bash scripts/spec_status.sh` 的口径 = 真实行数；⚠️ 本文件用 `wc -l` 会得 449 —— **末行没有换行符**，⛔ 差 1 不是笔误） |
+| **状态** | 🟡 **可用，且是生产链** —— ✅ **记账于 2026-10-04 补齐**（见下 `DEC-072`），⚠️ **两个分支本来就无字可流**（见下）<br>🔴 **2026-10-04（`DEC-072`）：6 个 LLM 调用点全部接上【预算拦 + 记账】** —— 改前本文件 `record_usage` / `check_token_budget` **0 命中** ⇒ 走 `/agent/advanced_chat` 的花销在 `token_usage_logs` 里**完全看不见**。450 → **540 行**。每个节点都是 **`.stream()`/`.invoke()` 之前**查 `check_token_budget(user_name, estimated_tokens=500)`、**之后**调 `record_from_response(…)`；`AgentState` 新增 `thread_id`（`user_name` 已有）—— **由端点注入**，子图与父图共用 `AgentState` ⇒ 身份自动流入子图。<br>⚠️ **`purpose` 五处取值**（`answer_generation` ×3 · `query_rewrite` ×1 · `agent_decision` ×2 —— 见「看代码会误判」表末行）<br>⚠️ **超预算的返回形状【按节点出口不同】** —— 见下方 ⚠️⑦：`supervisor` 那处**必须给 `intent`**，⛔ 否则 `route_by_intent` 读 `state["intent"]` 当场 `KeyError`。<br>📄 裁定 ⇒ `DEC-072`；📌 判据 ⇒ `api/test_billing_wiring.py`（AST 精确点名**本文件 6 条** + `-k behavior` 那条断言恰好 **2 笔**）<br>🔵 **2026-10-04（`B1` 剩余 4 条链）：4 个该流的节点改成【真流式】** —— `search_summarize`（`:143`）· `translate_execute`（`:237`）· `agent_decide`（`:279`）· `chat_node`（`:463`）都声明 `config: RunnableConfig` + 换 `.stream(…, config=config)` 逐块 `+` 聚合 ⇒ **本图 388 → 450 行**（多出的行是"为什么这 4 个流、那 2 个不流"的注释 + 白名单常量 + 每个节点的改法说明）。<br>⚠️ **本图 4 个节点【全是同步的】** ⇒ 走**同步** `.stream(config=config)`；⛔ **别照抄链 C**（`agent_graph_advanced.py` 那两个是 `async` ⇒ 用 `astream`），⛔ **也别把本图节点改成 `async def`** —— 同步的 `graph.invoke()` 会当场 `TypeError: No synchronous function provided to "agent"`（`DEC-050` 实测）。<br>新增模块级 `STREAMABLE_NODES`（`:399`）；**为什么必须放模块级**（放进 `build_advanced_agent()` 就是局部名 ⇒ 端点 `AttributeError`）写在 `:376-398` 的注释里。<br>🔴 **链 A 走 `astream` 时必须开 `subgraphs=True`** —— 本图 5 个子图，**不开它一个字都流不出来**（⚠️ 且 `meta["langgraph_node"]` 报的是**子图内层**名，见 ⚠️④）。⚠️ **`+` 聚合在本图同样【必须】**：`tool_calls` 碎片化到达，只拼 `content` ⇒ react 子图拿不到 `tool_calls` ⇒ **工具永远不执行**，而接口一切正常。<br>📌 守卫 `api/test_agent_stream_chains.py`（含 `test_real_chain_a_node_streams_one_chunk_per_token` · `test_chain_a_filters_out_supervisor_and_calc_execute`） |
+| **对外提供** | `build_advanced_agent()`（`:409`，返回**编译好的图**，带 `MemorySaver`）<br>· 5 个 `create_*_subgraph()`（`:130` / `:181` / `:214` / `:230` / `:267`）<br>· 模块级 `llm`（`:26`）· `llm_search`（`:85`）· `llm_calc`（`:86`）· `llm_date`（`:87`）· `llm_with_tools`（`:79`）<br>· 工具 `calculator`（`:30`）· `date_today`（`:36`）· `tools`（`:64`，**从 `mcp_server.TOOLS` 派生**）<br>· `inject_memories_to_prompt()`（`:107`）· `AgentState`（`:90`）· 🆕 `STREAMABLE_NODES`（`:399`） |
+| **谁在用** | `api_v1_agent.py:34` import → `:538` **模块级建图**（`advanced_agent = build_advanced_agent()`）→ `POST /agent/advanced_chat`（`:540` 定义 · `:563` `advanced_agent.invoke(...)`）<br>🆕 **`POST /agent/advanced_chat/stream`**（`:585`，`B1` · 2026-10-04）—— 同一张图，走 `astream(..., subgraphs=True)`（`:653`/`:669`），汇总取自 `aget_state`（`:636`） |
+| **规模** | **540 行**（`bash scripts/spec_status.sh` 的口径 = 真实行数；⚠️ 本文件用 `wc -l` 会得 539 —— **末行没有换行符**，⛔ 差 1 不是笔误） |
 
 ## ✅ 做了什么
 
-- **一张「主管路由 + 5 个部门子图」的图**（`build_advanced_agent`，`:349`）：
-  `supervisor`（`:353`，判意图）→ `route_by_intent`（`:423`）→ 六选一 →
+- **一张「主管路由 + 5 个部门子图」的图**（`build_advanced_agent`，`:409`）：
+  `supervisor`（`:413`，判意图）→ `route_by_intent`（`:513`）→ 六选一 →
   `search_dept` / `calc_dept` / `date_dept` / `translate_dept` / `react_dept` / `chat` → `END`
-- **5 个子图各自独立编译**（`:157` / `:177` / `:192` / `:218` / `:314`）：搜索（2 节点）· 计算（1）· 日期（1）· 翻译（1）· **ReAct（3 节点 + 循环）**
-- **长期记忆注入**：`supervisor`（`:363`）与 `inject_memories_to_prompt`（`:107`）都查 mem0；
-  `user_id = f"{user_name}:{memory_space}"`（`:361` / `:106`）
-- **工具表从 MCP 注册表派生**（`:58-60`）—— **单一事实源**（2026-09-20 业务方裁「乙」；理由与实测见 `:38-56`）
-- **REACT 子图有收尾节点**（`summarize`，`:285`）—— 2026-09-20 补的，此前 `final_output` 永远留占位串
-- **`calculator` 走 `safe_math.calculate`**（`:26`）—— `DEC-049`，⛔ 不许改回 `eval`
-- 🔵 **真流式（`B1` · 2026-10-04）**：4 个节点（`:133` / `:203` / `:235` / `:385`）声明 `config: RunnableConfig`
+- **5 个子图各自独立编译**（`:178` / `:211` / `:226` / `:262` / `:374`）：搜索（2 节点）· 计算（1）· 日期（1）· 翻译（1）· **ReAct（3 节点 + 循环）**
+- **长期记忆注入**：`supervisor`（`:421`）与 `inject_memories_to_prompt`（`:116`）都查 mem0；
+  `user_id = f"{user_name}:{memory_space}"`（`:421` / `:116`）
+- **工具表从 MCP 注册表派生**（`:64`）—— **单一事实源**（2026-09-20 业务方裁「乙」；理由与实测见 `:38-62`）
+- **REACT 子图有收尾节点**（`summarize`，`:345`）—— 2026-09-20 补的，此前 `final_output` 永远留占位串
+- **`calculator` 走 `safe_math.calculate`**（`:30`）—— `DEC-049`，⛔ 不许改回 `eval`
+- 🔴 **预算拦 + 记账（`DEC-072` · 2026-10-04）**：**6 个 LLM 调用点全部接上**（见下方节点表倒数第二列）——
+  每个节点 **调用之前** 查 `check_token_budget(user_name, estimated_tokens=500)`、**之后** 调
+  `record_from_response(…)`。`AgentState` 新增 `thread_id`（`user_name` 已有）⇒ 子图与父图共用同一 `AgentState`，
+  身份自动流入。⚠️ **超预算的返回形状按节点出口不同**（见 ⚠️⑦）。
+  📄 裁定 ⇒ `DEC-072`；📌 判据 ⇒ `api/test_billing_wiring.py`
+- 🔵 **真流式（`B1` · 2026-10-04）**：4 个节点（`:143` / `:237` / `:279` / `:463`）声明 `config: RunnableConfig`
   并用 `.stream(…, config=config)` 逐块聚合 ⇒ `/agent/advanced_chat/stream` 的
-  `astream(…, subgraphs=True)` 才拿得到 **token 级**的块。📄 裁定 ⇒ `DEC-050` · 白名单 ⇒ `STREAMABLE_NODES`（`:339`）
+  `astream(…, subgraphs=True)` 才拿得到 **token 级**的块。📄 裁定 ⇒ `DEC-050` · 白名单 ⇒ `STREAMABLE_NODES`（`:399`）
   ⚠️ **节点保持同步** —— 改 `async def` 会当场 `TypeError`（见状态栏）
 
 ## 🟡 做到哪 / 缺什么
 
-- 🔴 **本模块的 LLM 调用【一处都不记账】**
-  —— 判据（可打印）：`grep -c record_usage api/agent_graph_advanced_learning.py` ⇒ **0**。
-  而它**每次请求至少真跑 1 次 LLM**（`supervisor`），走 REACT 还要多轮
-  ⇒ **`/agent/advanced_chat` 的花销在 `token_usage_logs` 里看不见**，看板（`B13`/`R4`）上的钱偏少。
-  📌 **同族**：`api/api_v1_rag.py` 也是 0（那个已在它的 spec 里登记）。
-  ⚠️ **端点上那两道闸**（`check_session_token_budget` / `circuit(global_key())`，`api_v1_agent.py:469/475`）
-  **只是"拦"，不是"记"** —— 别把两者读成一回事。
+- ✅ ~~🔴 **本模块的 LLM 调用【一处都不记账】**~~
+  ⇒ **2026-10-04 起【已修】**（`DEC-072`）：6 个调用点全部接上 `check_token_budget` + `record_from_response`。
+  ⚠️ **改前判据（可打印，已作废）**：`grep -c record_usage api/agent_graph_advanced_learning.py` ⇒ **0**；
+  **改后**同一个 grep 仍可能 **0** —— 因为实现走的是 `record_from_response`（**三张图共用的唯一入口**），
+  ⛔ **别拿 `grep -c record_usage` 当"记没记账"的判据**（这条本身就是"两个名字"的病根）。
+  正确的可打印判据 ⇒ `python -m pytest api/test_billing_wiring.py -q`。
+  📌 **同族**：`api/api_v1_rag.py` 仍是 0（那个已在它的 spec 里登记，⛔ 本轮未动）。
+  ⚠️ **端点上那两道闸**（`check_session_token_budget` / `circuit(global_key())`，`api_v1_agent.py` 的 `advanced_agent_chat`）
+  **只是"拦"，不是"记"** —— 别把两者读成一回事。**这次补的是"记"**（以及每个节点自己的"拦"）。
 - ⚠️ **`MemorySaver()`**（`:450`）是**进程内存** ⇒ 重启即丢（与 `/agent/langgraph_chat`·`/agent/mcp_chat` 同）。
 - ⚠️ **`calculator` / `date_today` 在本文件里是【第二份定义】**（`:26` / `:32`）——
   与 `mcp_server.TOOLS` 里那两个**同名、不同对象**（被**子图节点直接 `.invoke()`**：`:170` / `:185`）。
@@ -52,26 +59,34 @@
 | ⚠️ **③ 「流式失败 ⇒ 一个字都流不出来」** | ⛔ **反了**：`calc_dept` / `date_dept` **两条分支本来就无字可流** —— 它们的答案来自**工具返回值**，不来自 LLM。<br>⇒ 用户会**一直等到最后一帧**才看到 `answer`。**这是设计如此，⛔ 不是 bug。** |
 | ⚠️ **④ 子图节点的名字** | **父图里**它们叫 `search_dept` / `react_dept`…，而 `stream_mode="messages"` 的 `meta["langgraph_node"]`<br>报的是**子图内层**名（`search_summarize` / `agent`…）—— ⚠️ **前提是开了 `subgraphs=True`**；<br>不开，要么只拿到子图的**返回值**（1 块整段 · 外层名），要么**一块都没有**。<br>📄 实测六剧本表 ⇒ `fastapi-rag-agent-TODO待办/探针-真流式与子图.py` · 勘察 §8.3 |
 | ⚠️ **⑤ `should_continue` 是本仓唯一那个** | ⛔ **不是** —— 本文件 `:278` 那个是**局部函数**，返回 **`"tools"` / `END`**；<br>`agent_graph.py:195` 那个返回 **`"approval"` / `"tools"` / END**；`agent_graph_advanced.py:430` 那个返回 **`"tools"` / `"chat"`**。<br>**同名 · 三个语义 · 三个作用域。** |
-| ⚠️ **⑥ 路由是"容错"的** | ⛔ **是【精确匹配】的**（`:423-430`）：`intent.content.strip()` 与 `"SEARCH"` 等**逐字相等**才命中，<br>**否则一律落 `chat`**（兜底）。⇒ 模型多吐一个句号（`REACT。`）就**静默走错分支**、且**不报错**。<br>⚠️ 这是**真实风险**，不是理论 —— 提示词（`:370`）只写「只返回一个单词」，**没有输出约束**。<br>🔵 **`B1` 之后这条更值得注意**：`chat_node` 是兜底 ⇒ **大多数请求走的其实是这条分支**（其 docstring `:385-390` 已写明） |
+| ⚠️ **⑥ 路由是"容错"的** | ⛔ **是【精确匹配】的**（`:513`）：`intent.content.strip()` 与 `"SEARCH"` 等**逐字相等**才命中，<br>**否则一律落 `chat`**（兜底）。⇒ 模型多吐一个句号（`REACT。`）就**静默走错分支**、且**不报错**。<br>⚠️ 这是**真实风险**，不是理论 —— 提示词（`:430`）只写「只返回一个单词」，**没有输出约束**。<br>🔵 **`B1` 之后这条更值得注意**：`chat_node` 是兜底 ⇒ **大多数请求走的其实是这条分支**（其 docstring 已写明） |
+| 🔴 **⑦ 「超预算了，6 个节点都 `return {"final_output": …}` 就完事」** | ⛔ **`supervisor` 那处必须【同时】返回 `intent`**（`:449`：`{"intent": "CHAT", "final_output": BUDGET_EXCEEDED_MSG}`）—— <br>因为它的下游是 `route_by_intent`（`:513`），**读 `state["intent"]`**：只给 `final_output` ⇒ 当场 `KeyError`。<br>⚠️ **其余 5 处出口不同**：`chat_node` / `search_summarize` / `calc_execute` / `translate_execute` 的出口是 `final_output`；<br>REACT 的 `agent_decide`（`:279`）出口是 `messages`（`{"messages": [AIMessage(...)]}`）—— 它的下游 `should_continue` 读 `messages[-1].tool_calls`。<br>⇒ **同一件事（拦），返回形状按【节点在图里的位置】定，⛔ 不能一刀切。** |
+| 🔴 **⑧ 「记账就是 `record_usage`，grep 它就能查有没有记账」** | ⛔ **本模块走的是 `record_from_response`**（三张图共用的**唯一入口**，`token_tracker.py`）—— <br>`grep -c record_usage` 在本文件**仍然是 0**（改前改后都是）⇒ **拿它当判据会得出"还是没记"的错误结论**。<br>✅ 正确判据：`python -m pytest api/test_billing_wiring.py -q`（它按**最内层函数**逐个点数）。 |
 
 ### 🔴 ⭐ 节点表：**6 个调 LLM 的节点，只有 4 个该流**
 
-| 节点 | 行（`def`） | 调什么 LLM | 该流？ | 为什么 |
-|---|---|---|---|---|
-| `supervisor` | `:353` | `llm.invoke(classify_prompt)`（`:380`） | ❌ | 输出是**路由词** `SEARCH`/`CALCULATOR`/… —— 流给用户 = 答案前面先蹦一个 `SEARCH` |
-| `chat_node` | `:385` | `llm.invoke(messages)` → 🔵 **`.stream(…, config=config)`**（`:400`） | ✅ | 就是答案。⚠️ **它是兜底分支** ⇒ 大多数请求走这条 |
-| `search_summarize` | `:133` | `llm_search.invoke(…)` → 🔵 **`.stream(…, config=config)`**（`:147`） | ✅ | 一句话总结 = 答案 |
-| `calc_execute` | `:164` | `llm_calc.invoke(extract_prompt)`（`:169`） | ❌ | **只提取表达式**（`6*7`）；真答案 `42` 来自 `calculator` 工具（`:170`），**⛔ 不是 LLM 输出** |
-| `translate_execute` | `:203` | `llm.invoke(prompt)` → 🔵 **`.stream(…, config=config)`**（`:210`） | ✅ | 译文 = 答案 |
-| `agent`（REACT 子图） | `:235` | `llm_react_with_tools.invoke(messages)` → 🔵 **`.stream(…, config=config)`**（`:251`） | ✅ | 答案 + `tool_calls` |
+| 节点 | 行（`def`） | 调什么 LLM | 该流？ | 记账 `purpose` | 为什么 |
+|---|---|---|---|---|---|
+| `supervisor` | `:413` | `llm.invoke(classify_prompt)`（`:451`） | ❌ | `agent_decision`（`:454`） | 输出是**路由词** `SEARCH`/`CALCULATOR`/… —— 流给用户 = 答案前面先蹦一个 `SEARCH` |
+| `chat_node` | `:463` | `llm.stream(…, config=config)`（`:486`） | ✅ | `answer_generation`（`:488`） | 就是答案。⚠️ **它是兜底分支** ⇒ 大多数请求走这条 |
+| `search_summarize` | `:143` | `llm_search.stream(…, config=config)`（`:164`） | ✅ | `answer_generation`（`:167`） | 一句话总结 = 答案 |
+| `calc_execute` | `:185` | `llm_calc.invoke(extract_prompt)`（`:196`） | ❌ | `query_rewrite`（`:201`） | **只提取表达式**（`6*7`）；真答案 `42` 来自 `calculator` 工具（`:204`），**⛔ 不是 LLM 输出** |
+| `translate_execute` | `:237` | `llm.stream(…, config=config)`（`:250`） | ✅ | `answer_generation`（`:252`） | 译文 = 答案 |
+| `agent`（REACT 子图） | `:279` | `llm_react_with_tools.stream(…, config=config)`（`:305`） | ✅ | `agent_decision`（`:310`） | 答案 + `tool_calls` |
 
-另有 **2 个节点不调 LLM**（**本来就无字可流**）：`date_execute`（`:184`，纯工具）、
-`summarize`（`:285`，只把最后一条消息的 `content` 搬进 `final_output`）。
+另有 **2 个节点不调 LLM**（**本来就无字可流**，**也⛔ 不记账 —— 没花钱**）：`date_execute`（`:218`，纯工具）、
+`summarize`（`:345`，只把最后一条消息的 `content` 搬进 `final_output`）。
 
-⚠️ **行号口径**：本表为 **2026-10-04 批 4 之后**的实测值（`grep -n "def <节点名>"` 可复核）。
-⛔ **别拿本文档早先版本的旧行号去找** —— 每个被改的节点都加了说明注释，**且各节点下移量不同**（+3 ~ +62）。
+⚠️ **行号口径**：本表为 **2026-10-04 `DEC-072`（记账）之后**的实测值（`grep -n "def <节点名>"` 可复核）。
+⛔ **别拿本文档早先版本的旧行号去找** —— `B1`（流式）与 `DEC-072`（记账）**各改过一次**，
+每次每个节点的下移量**都不同**（`B1`：+3 ~ +62；`DEC-072`：再 +10 ~ +90）。
 
-⇒ 落成 `STREAMABLE_NODES`（**`:339`，放在图定义旁边，⛔ 别让端点自己抄一份**）：
+⚠️ **记账列**：`purpose` **不是随手填的标签**，它进 `token_usage_logs`、是统计口径。
+本表 6 个值 = `answer_generation` ×3 · `query_rewrite` ×1 · `agent_decision` ×2。
+⚠️ `calc_execute` 那个 `query_rewrite` 与链 3（`agent_checkpointer`）改前填的**同名** —— 但那条已改成 `agent_decision`
+（它的节点确实是决策）。**本处保留 `query_rewrite` 是对的**：这个节点真在"把问题改写成表达式"。
+
+⇒ 落成 `STREAMABLE_NODES`（**`:399`，放在图定义旁边，⛔ 别让端点自己抄一份**）：
 ```python
 {"chat", "search_summarize", "translate_execute", "agent"}
 ```
@@ -86,7 +101,8 @@
 | `docs/specs/sse.md` | ⚠️ **本链的流式骨架** —— `sse_stream(graph_message_text(nodes=…))`；🔴 **链 A 是唯一必须 `subgraphs=True` 的一条** |
 | `docs/specs/agent_graph_advanced.md` | ⚠️ **同一族的对照** —— 那边也有 ⚠️「名字骗人」与「同名不同义」两条 |
 | `docs/specs/agent_checkpointer.md` · `docs/specs/agent_graph.md` | 另外两套图的 `agent/tools/approval` 节点（**同名碰撞**，见 ⚠️⑤） |
-| `docs/specs/token_tracker.md` | ⚠️ **本模块不调用它** —— 见 §🟡 第一条（这正是要看的地方） |
+| `docs/specs/token_tracker.md` | 🔴 **本模块现在【调用】它了**（2026-10-04 `DEC-072`：`check_token_budget` + `record_from_response`）—— 改前一条都不调，见 §🟡 第一条 |
+| `DEC-072` | **三条链不记账** —— 本模块 6 个调用点在此接上预算拦 + 记账（450 → 540 行） |
 | `docs/specs/safe_math.md` | `calculator` 的求值实现（`DEC-049`） |
 | `fastapi-rag-agent-TODO待办/硬门A-Agent端流式勘察-20261003.md` §8.1 | ⭐ **「6 个只有 4 个该流」那张表最早落在这里** |
 | `DEC-050` | 真流式的条件（声明 `config` + 转发给 `.stream()`）—— 本模块改造的依据 |

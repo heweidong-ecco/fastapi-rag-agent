@@ -16,6 +16,10 @@ from langchain_core.messages import HumanMessage, AIMessage, ToolMessage,SystemM
 from langchain_core.runnables import RunnableConfig   # B1：节点要靠它把回调接进模型调用
 from datetime import datetime
 from safe_math import calculate  # DEC-049：`calculator` 的求值实现 —— ⛔ 别改回 `eval`
+# 🔴 2026-10-04（`DEC-072`）：本图**6 个节点调 LLM，全都既不拦也不记** —— 是三条链里最大的
+#    那个口子（`/agent/advanced_chat` 与它的 `/stream` 都走这张图）。
+#    `record_from_response` 是三张图共用的**唯一记账实现**，⛔ 别在本文件里另抄 6 份取用量。
+from token_tracker import check_token_budget, record_from_response, BUDGET_EXCEEDED_MSG
 
 # ==================== 初始化模型 ====================
 # ⚠️ 角色 = 「模型轴 chat」+「长度轴 agent(1024)」—— 见 `api/llm_factory.py` 的模块 docstring。
@@ -89,6 +93,12 @@ class AgentState(TypedDict):
     final_output: str  # 存储最终回复
     user_name: str          # 新增：当前对话的用户名
     memory_space: str       # 新增：当前使用的记忆空间
+    # 🔴 2026-10-04（`DEC-072`）：本图此前**没有这个键** ⇒ 6 个调用点记账时取不到会话。
+    #    ⚠️ **由端点注入**（`api_v1_agent.py` 的 `/agent/advanced_chat` 与它的 `/stream`），
+    #       一律 `.get(..., "unknown")` 读。
+    #    ⚠️ 子图（search/calc/date/translate/react）与本图**共用同一个 `AgentState`** ⇒
+    #       父图的 `thread_id` 会流进子图节点，⛔ 不必逐个子图再注入一次。
+    thread_id: str
 
 # ==================== 创建 通用的“记忆注入”工具函数 ====================
 # ⚠️ 2026-09-20 删（D1/pyflakes 报 redefinition）：此处的 `from memory_store import search_user_memory`
@@ -138,14 +148,25 @@ def create_search_subgraph():
            ⛔ 本文件所有节点**都是同步的**，别改成 `async def`：同步的 `graph.invoke()`
            （`/agent/advanced_chat` 走的就是它）会当场抛 `TypeError`。
         """
+        # 🔴 2026-10-04（`DEC-072`）：拦在 `.stream()` **之前** —— 放之后钱已花，只能丢结果。
+        #    ⚠️ 这是**子图节点**：`user_name` / `thread_id` 由父图经共用 `AgentState` 流进来。
+        user_name = state.get("user_name", "unknown")
+        thread_id = state.get("thread_id", "unknown")
+        if not check_token_budget(user_name, estimated_tokens=500):
+            return {"final_output": BUDGET_EXCEEDED_MSG}
+
         raw = state["messages"][-1].content
         summary_prompt = f"请用一句话总结以下信息：{raw}"
         # ⚠️ `+` 聚合（`AIMessageChunk.__add__`），⛔ 不是 `content +=`。
-        # 🔴 **遍历【所有】块**，⛔ 不跳空 `content`（`usage_metadata` 挂在最后一块上 ——
-        #    本模块目前不记账，但聚合写法要一致，否则将来补记账时会踩同一个坑）。
+        # 🔴 **遍历【所有】块**，⛔ 不跳空 `content` —— `usage_metadata` 挂在**最后一块**上
+        #    （provider 行为）。跳过它 ⇒ 下面那句记账**静默失效**，而接口一切正常。
         summary = None
         for chunk in llm_search.stream([HumanMessage(content=summary_prompt)], config=config):
             summary = chunk if summary is None else summary + chunk
+        record_from_response(
+            llm_search, summary, "answer_generation",
+            user_name=user_name, thread_id=thread_id,
+        )
         return {"final_output": summary.content}
 
     subgraph.add_node("search_execute", search_execute)
@@ -163,10 +184,23 @@ def create_calculator_subgraph():
 
     def calc_execute(state: AgentState):
         """从用户消息中提取表达式并计算"""
+        # 🔴 2026-10-04（`DEC-072`）：拦在 `llm_calc.invoke()` **之前**。
+        user_name = state.get("user_name", "unknown")
+        thread_id = state.get("thread_id", "unknown")
+        if not check_token_budget(user_name, estimated_tokens=500):
+            return {"final_output": BUDGET_EXCEEDED_MSG}
+
         query = state["messages"][-1].content
         # 使用简单 prompt 提取表达式
         extract_prompt = f"提取以下问题中的数学表达式，只返回表达式，不要其他内容：{query}"
         expression = llm_calc.invoke([HumanMessage(content=extract_prompt)])
+        # 🔴 记账 —— `purpose="query_rewrite"`：这一步产出的**不是给用户的答案**，
+        #    而是喂给 `calculator` 工具的**规整后的输入**（真答案 `42` 来自工具，见 `STREAMABLE_NODES` 那张表）。
+        #    ⚠️ 别改成 `answer_generation`：那会让"这一步是什么角色"在账面上失真。
+        record_from_response(
+            llm_calc, expression, "query_rewrite",
+            user_name=user_name, thread_id=thread_id,
+        )
         result = calculator.invoke(expression.content)
         return {"final_output": result}
 
@@ -202,6 +236,12 @@ def create_translate_subgraph():
 
     def translate_execute(state: AgentState, config: RunnableConfig):
         """执行翻译（`B1` · 2026-10-04 改真流式 —— 译文本就是答案 ⇒ 该流）"""
+        # 🔴 2026-10-04（`DEC-072`）：拦在 `.stream()` **之前**。
+        user_name = state.get("user_name", "unknown")
+        thread_id = state.get("thread_id", "unknown")
+        if not check_token_budget(user_name, estimated_tokens=500):
+            return {"final_output": BUDGET_EXCEEDED_MSG}
+
         query = state["messages"][-1].content
         # 简单粗暴地翻译成英文
         prompt = f"请将以下内容翻译成英文，只输出翻译结果：\n\n{query}"
@@ -209,6 +249,10 @@ def create_translate_subgraph():
         result = None
         for chunk in llm.stream([HumanMessage(content=prompt)], config=config):
             result = chunk if result is None else result + chunk
+        record_from_response(
+            llm, result, "answer_generation",
+            user_name=user_name, thread_id=thread_id,
+        )
         return {"final_output": result.content}
 
     subgraph.add_node("translate_execute", translate_execute)
@@ -240,6 +284,16 @@ def create_react_subgraph():
            会让本子图的 `should_continue` 判不出 `"tools"` ⇒ **工具永远不会被执行**，
            而 `summarize` 照样写出 `final_output`（看着像正常回答）。
         """
+        # 🔴 2026-10-04（`DEC-072`）：拦在 `.stream()` **之前**。
+        #    ⚠️ 超预算时**必须返回 AIMessage、⛔ 不能只写 `final_output`** ——
+        #       本子图的出口是 `should_continue` 读 `messages[-1].tool_calls`：
+        #       给一条**没有 tool_calls** 的消息 ⇒ 走 `END` ⇒ 由 `summarize` 把它的文本
+        #       落成 `final_output`（那条边见 `add_conditional_edges` 的 `{END: "summarize"}`）。
+        user_name = state.get("user_name", "unknown")
+        thread_id = state.get("thread_id", "unknown")
+        if not check_token_budget(user_name, estimated_tokens=500):
+            return {"messages": [AIMessage(content=BUDGET_EXCEEDED_MSG)]}
+
         # 构建基础 system prompt
         system_prompt = "你是一个能使用工具的智能助理。请根据用户需求自主调用工具完成任务。"
 
@@ -250,6 +304,12 @@ def create_react_subgraph():
         response = None
         for chunk in llm_react_with_tools.stream(messages, config=config):
             response = chunk if response is None else response + chunk
+        # 🔴 记账。⚠️ 这是**循环节点**（`tools` ⇒ `agent`）—— 每一轮**各记一笔**，
+        #    这正是要的：循环 N 轮就花 N 次钱。
+        record_from_response(
+            llm_react_with_tools, response, "agent_decision",
+            user_name=user_name, thread_id=thread_id,
+        )
         return {"messages": [response]}
     # 工具执行节点现在只需一行核心逻辑
     from mcp_server import TOOL_HANDLERS
@@ -377,7 +437,25 @@ def build_advanced_agent():
 {memory_context}
 用户请求：{user_query}
 意图："""
+        # 🔴 2026-10-04（`DEC-072`）：拦在 `llm.invoke()` **之前**。
+        #    🔴🔴 **超预算时【必须】给 `intent`** —— `route_by_intent` 读的是 `state["intent"]`
+        #        （`:423`）。少了它，langgraph 会当场 `KeyError: 'intent'` ⇒ **500**，
+        #        而不是一句"预算用完了"。给 `"CHAT"` ⇒ 落到兜底分支 `chat_node`，
+        #        而 `chat_node` 自己的守卫也会拦下（同一个人、同样的额度）⇒
+        #        **最终不调任何模型**，用户看到的就是那句话术。
+        #    ⚠️ 这与参照图 `agent_graph_advanced.py:333` 的写法**不同**是**有意的**——
+        #       那张图的路由函数不读 `intent`，所以它不需要给。
+        if not check_token_budget(state.get("user_name", "unknown"), estimated_tokens=500):
+            return {"intent": "CHAT", "final_output": BUDGET_EXCEEDED_MSG}
+
         intent = llm.invoke([HumanMessage(content=classify_prompt)])
+        # ⚠️ 记账放在 `state["intent"] = …` **之前**：下面那行是**改 state 本身**（不是返回增量），
+        #    这里插在它前面只是为了读起来清楚，两者无依赖。
+        record_from_response(
+            llm, intent, "agent_decision",
+            user_name=state.get("user_name", "unknown"),
+            thread_id=state.get("thread_id", "unknown"),
+        )
         state["intent"] = intent.content.strip()
         return state
 
@@ -388,6 +466,14 @@ def build_advanced_agent():
         ⚠️ 它是**默认落点**：`route_by_intent` 是**精确匹配**的，模型多吐一个句号
            （`REACT。`）就静默落到这里 ⇒ **这条分支的流式体验 = 大多数请求的体验**。
         """
+        # 🔴 2026-10-04（`DEC-072`）：拦在 `.stream()` **之前**。
+        #    ⚠️ 这一处**不只是"漏记"** —— 它是 `supervisor` 超预算时的**落点**（见 `supervisor` 注释）：
+        #       这里的守卫是"那条路不花钱"的**第二道保证**，⛔ 别因为它看着冗余就删。
+        user_name = state.get("user_name", "unknown")
+        thread_id = state.get("thread_id", "unknown")
+        if not check_token_budget(user_name, estimated_tokens=500):
+            return {"final_output": BUDGET_EXCEEDED_MSG}
+
         # 构建基础 system prompt
         system_prompt = "你是一个智能助理，请直接回答用户的问题。"
 
@@ -399,6 +485,10 @@ def build_advanced_agent():
         response = None
         for chunk in llm.stream(messages, config=config):
             response = chunk if response is None else response + chunk
+        record_from_response(
+            llm, response, "answer_generation",
+            user_name=user_name, thread_id=thread_id,
+        )
         return {"final_output": response.content}
 
     # 3. 编译子图
