@@ -21,12 +21,14 @@
    ⇒ 拿 **token** 预算去闸它是**代理指标**，不是精确计量。
    判据：**「全站今天已经超预算了，就别再拿调试端点烧账号了」** —— 这是策略，不是计量。
 
-## ⚠️ 与 `B8` 一样，这 3 条【故意不接】
+## ⚠️ 与 `B8` 一样，这 2 条【故意不接】
 
-`/rag/jwt_ask` · `/rag/async_ask` · `/rag/parallel_ask` —— 只查库或纯 mock，
+`/rag/async_ask` · `/rag/parallel_ask` —— **纯 mock**（`asyncio.sleep(2)` 后返回硬编码串），
 **一分钱不花**。接上去 ⇒ 用户为**没发生**的调用被 429（`DEC-041` 范围表已裁）。
 
-⚠️ **2026-10-03 由 4 条变 3 条**：`/rag/ask` 已**删除**（`DEC-057`）⇒ 它不再需要这条守卫。
+⚠️ **计数沿革**：4 条 →（2026-10-03）3 条 →（2026-10-04）**2 条**
+· `/rag/ask` 已**删除**（`DEC-057`）· `/rag/jwt_ask` 已**删除**（`DEC-064`）
+⇒ 两条都**不再需要**这条守卫（端点不存在了，守卫自然消失）。
 """
 import ast
 import pathlib
@@ -92,16 +94,16 @@ def test_endpoint_calls_breaker(filename, func_name):
     )
 
 
-def test_the_three_non_spending_endpoints_stay_unwired():
-    """🔴 **反向守卫**：那 3 条【不花钱】的端点，⛔ **不许**被接上断路器。
+def test_the_two_non_spending_endpoints_stay_unwired():
+    """🔴 **反向守卫**：那 2 条【不花钱】的端点，⛔ **不许**被接上断路器。
 
     **危害方向与上一条相反，但同样是真问题**：它们一分钱不花，
     接上 ⇒ 全站额度用尽时，连**查库**的接口都 429 了 —— **没有任何账单依据**。
 
-    ⚠️ 原先 4 条；`/rag/ask` 于 2026-10-03 **删除**（`DEC-057`）⇒ 变 3 条。
+    ⚠️ 原先 4 条；`/rag/ask` 于 2026-10-03 **删除**（`DEC-057`）、`/rag/jwt_ask` 于 2026-10-04
+    **删除**（`DEC-064`）⇒ 变 2 条。
     """
     NON_SPENDING = [
-        ("api_v1_rag.py", "jwt_ask_question"),       # /rag/jwt_ask   —— 只查 documents
         ("api_v1_rag.py", "async_ask_question"),     # /rag/async_ask —— mock
         ("api_v1_rag.py", "parallel_ask_question"),  # /rag/parallel_ask —— mock
     ]

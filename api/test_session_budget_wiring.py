@@ -10,16 +10,16 @@
 
 ## ⚠️ 为什么是【这 7 条】（2026-10-01 逐条实测）
 
-只收**真的调 LLM、真的烧 token** 的对话端点。**以下 3 条【故意不在表里】**，因为它们不消耗 token，
+只收**真的调 LLM、真的烧 token** 的对话端点。**以下 2 条【故意不在表里】**，因为它们不消耗 token，
 接上去是**错的**（会让不花钱的接口占额度甚至被拦）：
 
 | 端点 | 为什么不接 |
 |---|---|
-| `/rag/jwt_ask` | 只 `SELECT content FROM documents`，不调 LLM |
 | `/rag/async_ask` | `await asyncio.sleep(2)` 后返回假字符串（**mock**） |
 | `/rag/parallel_ask` | 同上（调 `async_search`） |
 
-⚠️ **2026-10-03 由 4 条变 3 条**：`/rag/ask` 已**删除**（`DEC-057`）⇒ 它不再需要这条守卫。
+⚠️ **计数沿革**：4 条 →（2026-10-03）3 条 →（2026-10-04）**2 条**
+· `/rag/ask` 已**删除**（`DEC-057`）· `/rag/jwt_ask` 已**删除**（`DEC-064`）。
 
 📌 裁定见 `docs/decisions/DEC-041-B8会话上限的窗口与接线范围.md` 备选方案·三
    （⚠️ 本表最初**列错**过 —— 把上面几条也列了进去，核实后才剔除）。
@@ -85,19 +85,19 @@ def test_endpoint_calls_session_budget(filename, func_name):
     )
 
 
-def test_the_three_non_llm_endpoints_stay_unwired():
-    """🔴 **反向守卫**：那 3 条【不调 LLM】的端点，⛔ **不许**被接上限。
+def test_the_two_non_llm_endpoints_stay_unwired():
+    """🔴 **反向守卫**：那 2 条【不调 LLM】的端点，⛔ **不许**被接上限。
 
     **危害方向与上一条相反，但同样是真问题**：
-    `/rag/jwt_ask` / `/rag/async_ask` / `/rag/parallel_ask` 只查库或纯 mock，
+    `/rag/async_ask` / `/rag/parallel_ask` **纯 mock**，
     **一分 token 都不花**。接上会话上限 ⇒ 用户**白白被扣额度甚至被 429**，
     而账单上根本没有对应的消耗 —— 这是**向用户收费却没有服务**。
 
     📌 本表最初正是**列错**了这几条（核实端点实现时才剔除）⇒ 本条把它钉住。
-    ⚠️ 原先 4 条；`/rag/ask` 于 2026-10-03 **删除**（`DEC-057`）⇒ 变 3 条。
+    ⚠️ 原先 4 条；`/rag/ask` 于 2026-10-03 **删除**（`DEC-057`）、`/rag/jwt_ask` 于 2026-10-04
+    **删除**（`DEC-064`）⇒ 变 2 条。
     """
     NON_LLM = [
-        ("api_v1_rag.py", "jwt_ask_question"),       # /rag/jwt_ask   —— 只查 documents
         ("api_v1_rag.py", "async_ask_question"),     # /rag/async_ask —— mock
         ("api_v1_rag.py", "parallel_ask_question"),  # /rag/parallel_ask —— mock
     ]

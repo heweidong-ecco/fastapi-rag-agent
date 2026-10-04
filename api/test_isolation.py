@@ -544,52 +544,20 @@ def test_stream_search_endpoint_does_not_leak_across_users(probe_api_keys, monke
     assert _PROBE_B not in prompt_a
 
 
-@pytest.mark.needs_db
-def test_jwt_ask_endpoint_does_not_leak_across_users(probe_api_keys):
-    """`/rag/jwt_ask` —— JWT 身份 ⇒ 只拿得到自己的文档。
-
-    ⚠️ **这条的泄漏判据是【条数】，⛔ 不是【内容】。** 为什么：
-
-       那条 SQL **没有 `ORDER BY`** ⇒ 未加过滤时返回哪 20 篇取决于**物理顺序**，
-       而探针文档是刚插进去的、排在物理序**末尾** ⇒ A 的文档**很可能根本不在**
-       那 20 篇里。⇒ 只断言「内容里没有 A」**会在修之前就是绿的**（假绿）。
-
-       ⇒ 换成本条：`rag_test` 里 isolation_b **只拥有 1 篇**（就是探针那篇），
-         而用户能问的最大 `top_k` 是 **20**（`schemas.py` 的 `le=20`）、库里 200+ 篇。
-         **未加 WHERE ⇒ 它拿回 20 篇；加了 ⇒ 拿回 1 篇。** 与物理顺序无关。
-    """
-    from config import JWT_SECRET_KEY
-    from jwt_handler import create_access_token
-
-    assert JWT_SECRET_KEY, "JWT_SECRET_KEY 未设置，无法自签 token"
-
-    from fastapi.testclient import TestClient
-    from main import app
-
-    client = TestClient(app)
-
-    def _ask(user: str):
-        # ⚠️ 本条端点是 `get_current_user_jwt` ⇒ 走**自签 JWT**，⛔ 不是 X-API-Key
-        return client.post(
-            "/api/v1/rag/jwt_ask",
-            json={"question": "隔离测试查询", "top_k": 20},
-            headers={"Authorization": f"Bearer {create_access_token(user)}"},
-        )
-
-    r_b = _ask("isolation_b")
-    assert r_b.status_code == 200, r_b.text
-    docs_b = r_b.json()["docs"]
-
-    assert len(docs_b) == 1, (
-        f"isolation_b 拿回了 {len(docs_b)} 篇 —— 它自己只有 1 篇 ⇒ 这条端点零 WHERE"
-    )
-    assert _PROBE_B in docs_b[0], "拿回来的不是自己的那篇 —— 上面那条断言证明不了什么"
-    assert _PROBE_A not in docs_b[0]
-
-    # 正向控制：admin 有 200+ 篇 ⇒ 它必须**拿满** top_k（证明端点本身是活的，
-    # 不是"整体坏掉返回空"让上面那条碰巧成立）
-    r_admin = _ask("admin")
-    assert r_admin.status_code == 200, r_admin.text
-    assert len(r_admin.json()["docs"]) == 20, (
-        f"admin 只拿到 {len(r_admin.json()['docs'])} 篇 ⇒ 端点整体不对劲，用例是空的"
-    )
+# ===========================================================================
+# 【已移除】`test_jwt_ask_endpoint_does_not_leak_across_users`
+# ===========================================================================
+# 🔴 2026-10-04 移除 —— 它守的端点 `/rag/jwt_ask` **本身已被删除**（`DEC-064`，
+#    业务方裁「N7 删」）。守着一个不存在的端点，用例只会变成 `404 != 200` 的噪音。
+#
+# ⚠️ **它不是"因为失效才删的"** —— 它在 2026-10-03 乙段当时**是有效的**
+#    （判据是【条数】：`rag_test` 里 isolation_b 只有 1 篇，未加 `WHERE` 时它会拿回 20 篇）。
+#    ⚠️ **它顺带记下了一件仍然成立的事**：那条端点的 SQL **没有 `ORDER BY`**
+#    ⇒ 未加过滤时返回哪 20 篇取决于**物理顺序** ⇒ 「断言内容里没有 A」这种写法
+#    **在修之前就是绿的**（假绿）。**这条推理对任何"无 `ORDER BY` 的 `LIMIT` 查询"都成立**，
+#    与端点存不存在无关 —— 所以留在本注释里，⛔ 不要当成"随端点一起作废"而丢掉。
+#
+# 📌 **本文件的条数随之变化**：19 → **18**（离线 **9** · `needs_db` **10 → 9**）。
+# ⛔ **别再把这两个数抄进别的文档** —— 现算：
+#    `venv/bin/python -m pytest api/test_isolation.py --collect-only -q | tail -3`
+# 📄 `docs/decisions/DEC-064-删除-rag-jwt-ask.md` · `api/test_removed_endpoints.py`（反向守卫）
