@@ -259,6 +259,10 @@ All notable changes to this project will be documented in this file.
     🔴 **2026-10-03 同日更正：现在是【2 行】**（该数在 `/rag/ask` 删除前是对的）
     —— `/rag/ask` 已删（`DEC-057`，见下方 `Removed`）⇒ 自己写 SQL 的读端点由 3 条变 2 条。
     📌 **本仓判据纪律第 8 条「建了入口就问谁指向它」的镜像**：**数出来的数，删了东西要回头重数**。
+    🔴 **2026-10-04 再更正：现在是【1 行】** —— **`/rag/jwt_ask` 也已删**（`DEC-064`，见下方 `Removed`）
+    ⇒ 自己写 SQL 的读端点**只剩 `pg_search` 一条**；用例数 **10 passed → 9 passed**、文件共 **19 条 → 18 条**
+    （离线 9 不变 · `needs_db` 10 → 9）· `bash scripts/ci-local.sh` 现值 **516 passed / 3 skipped / 31 deselected**
+    （⚠️ 这一句的**数字随时间还会变**，判据一律**现算**）。
   - 全量 —— ⚠️ **2026-10-03 同日更正这个标签**：`-m "not integration and not needs_db"` **⛔ 不是"CI 口径"**，
     它只是 CI 的「**选中哪些测试**」那条命令。**CI 没有 Postgres、也没有 `.env`，本机两样都有** ⇒
     **要 CI 的【结果】，跑 `bash scripts/ci-local.sh`**（本 PR **就栽在这上面**：裸命令跑出 411 全绿，CI 却 **12 failed**）：
@@ -1362,6 +1366,68 @@ All notable changes to this project will be documented in this file.
   **移入 = 源处删除 + 留指针**（516 → 480 行）。
 
 ### Removed
+
+- 🔴 **删除端点 `POST /rag/jwt_ask`**（2026-10-04 · 待办总表 **N7** · `DEC-064`）——
+  **它收了 `question`，却完全不拿它做检索**，这是删它的第一条理由。
+  ⚠️ **与上一条 `DEC-057`（`/rag/ask`）逐条同构** —— **两个同型体，两天内清完。**
+
+  **三条理由（都可打印地核过）**：
+  1. **收了 `question` 却不进 SQL** —— 函数体是
+     `SELECT content FROM documents WHERE requested_by = %s LIMIT %s`，
+     **无 embedding、无 `ORDER BY`** ⇒ **换任何问题，返回的都是同一批**（取哪几行由**物理顺序**决定）。
+     这正是本仓反复记的「**看着像检索、其实不是**」形态 ⇒ **结果不可复现**。
+  2. **能力被 `/rag/pg_search` 覆盖，而且那次是"更严"的覆盖** —— 🔴 **最容易读反的一点**：
+     它的 `get_current_user_jwt` **只收 Bearer JWT**，看着像**独有能力**，其实是**限制**；
+     `pg_search` 的 `get_current_user_hybrid` **JWT 与 X-API-Key 都收**（JWT 分支走**同一个**
+     `verify_jwt_token`）⇒ 是它的**真超集**。**删掉它，JWT 用户一个能力都没少。**
+  3. **消费者清点 = 0** —— 仓内**无前端** · 兄弟仓 **0 处** · Postman **1 个文件夹**（已删）
+     · 3 处测试引用**全是"关于它的守卫"**（两份接线守卫的**反向清单** + 一条隔离用例），
+     **没有一处是"在用"**。
+
+  ⚠️ **删它⛔ 与隔离无关**（别把它读成 `DEC-056` 的一部分）：它**有 `WHERE`**——
+  `DEC-056` **乙段**（2026-10-03）给它补的，**隔离账上它从来不欠**。
+  🔴 **而且要说清是哪种"消账"**：N7 那条账**不是被"修"好的，是那个矛盾的载体被删掉了** ——
+  ⛔ 不是「现在让它真检索了」（那会**开始花 embedding 的钱**，撞 `DEC-041` 已裁的额度范围表，
+  还要改 `api/test_session_budget_wiring.py` 里 `NON_LLM` 那条**反向守卫**）。
+
+  **TDD（先红后绿）**：
+  - **先写** `api/test_removed_endpoints.py::test_rag_jwt_ask_stays_removed`，**要求回 404**。
+  - **RED 实测** ⇒ `POST /api/v1/rag/jwt_ask - 401`。
+    🔴 **这条 RED 比上一条更值得记**：端点删之前**本来就是 401**（缺 Bearer Token）⇒
+    若用「**不是 200**」当判据，这条用例**从第一天起就是绿的**，**什么也没钉住**。
+    ⇒ **必须断言 404（路由不存在）**。
+  - **删** ⇒ **GREEN**。
+
+  **判据（可打印）**：
+  - `venv/bin/python -m pytest api/test_removed_endpoints.py -q -p no:warnings` ⇒ **2 passed**
+  - `grep -n 'WHERE requested_by' api/api_v1_rag.py | grep -v '#'` ⇒ **1 行**（删前 2）
+    ⚠️ **必须带 `| grep -v '#'`** —— 我的**新墓碑注释**又给这条判据加了一处污染
+    （`DEC-057` 那次也是同一个坑）⇒ **两次删端点，两次栽在同一条上**（判据纪律第 2 条）。
+  - `api/test_isolation.py --collect-only` ⇒ **18 tests collected**（删前 19）；
+    `-m needs_db` ⇒ **9 passed**（删前 10）
+  - 两份接线守卫的**反向清单**仍绿 —— 已由 3 条改 **2 条**，**用例名**同步由 `three` 改 `two`
+  - 全量 —— `bash scripts/ci-local.sh` ⇒ **516 passed, 3 skipped, 31 deselected**，退出码 0
+
+  **改了 9 处**：
+  ① `api/api_v1_rag.py`（端点 → 墓碑注释；**顺带收掉 `get_current_user_jwt` import** ——
+  它在本文件**只有这一处用**。⚠️ `require_admin` **保持原样**：那是**既有**的未使用导入，归 **T6** 管，⛔ 不顺手清）
+  ② `api/test_breaker_wiring.py` 的 `NON_SPENDING` ③ `api/test_session_budget_wiring.py` 的 `NON_LLM`（+ 同文件说明表）
+  ④ Postman 集合（**整文件夹删：158 删 / 0 增**）⑤ `api/test_isolation.py`（删那条用例 + 墓碑注释；
+  **`probe_api_keys` fixture 保留**，另有 7 条在用）⑥ 🔴 **`docs/specs/api_v1_rag.md`** ——
+  `@router. 15 → 14` · `HTTP 13 → 12`（检索 6 → 5）· 真 SQL `WHERE 2 → 1 处` · 引号 `11 → 10` ·
+  用例 `19 → 18`（`needs_db` 10 → 9）；**并把本次编辑到的行号锚点按实测重算**
+  （⚠️ 全仓行号漂移是**另一个待办 N8**，本次**只核了编辑到的那些**）⑦ `docs/待办总表.md`（N7 ✅ · N2 刷新 · N8 记一笔）
+  ⑧ `DEC-041` §三（活口径）⑨ `DEC-056` §1.2（半活）。
+
+  ⚠️ **`test_isolation.py` 里那句「8 条检索路径全部收口」【不改数字】** —— 那是 `DEC-056`
+  **收口当时的口径**，是个**历史事实**；只在旁边加「现存 6 条」。⇒ 与「**活口径 vs 记录**」的判据一致
+  （是规则 ⇒ 改；是记录 ⇒ 留）。
+
+  **⛔ 不动的**：`ROADMAP.md`（`③` Task 6 记录 · `DEC-056` 记录）· `docs/specs/token_tracker.md` ·
+  `DEC-053` · 归档目录 —— **历史记录原样留**，只在 `DEC-064` 里记「已删」。
+  ⚠️ **尤其别借本次改历史**：`ROADMAP` 那两处把 `/rag/jwt_ask` 列进「真调 LLM 的四条」，
+  **当时就写错了**（它一处 LLM 都不调）—— 那是**另一笔账**，⛔ 不是本次的授权。
+  📄 全文（含消费者清点 · 9 处改动 · 2 处活口径同步 · **反悔成本**）⇒ `docs/decisions/DEC-064-删除-rag-jwt-ask.md`
 
 - 🔴 **删除端点 `POST /rag/ask`**（2026-10-03 · 待办总表 **N6** · `DEC-057`）——
   **它是个自称"模拟类测试"的桩，却在查真库**，这是删它的第一条理由。

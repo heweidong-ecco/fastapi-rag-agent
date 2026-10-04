@@ -32,7 +32,11 @@ from schemas import (
     RefreshRequest,
     UserCreate,
 )
-from deps import get_current_user_hybrid, get_current_user_jwt, require_admin
+# ⚠️ 2026-10-04 删 `get_current_user_jwt`（`DEC-064`）：它在本文件**只有** `jwt_ask_question` 一处用，
+#    随该端点一起删 ⇒ 留着就是没人用的 import。
+# ⚠️ `require_admin` **保持原样**（本文件从未用过它）—— 那是**既有**的未使用导入，
+#    归 `docs/待办总表.md` 的 **T6**（103 个未使用导入 · 业务方裁「先挂起」）管，⛔ 本次不顺手清理。
+from deps import get_current_user_hybrid, require_admin
 from db import get_db, insert_document,insert_batch_documents
 from db import search_similar  # 🔴 2026-10-03 乙段（DEC-056）：stream_search 改走共享层
 from embedding_client import get_embedding
@@ -532,38 +536,26 @@ async def unified_search(
     return result
 
 
-@router.post(
-    "/rag/jwt_ask",
-    summary="JWT认证的问答接口",
-    description="输入JWT_SECRET_KEY，获得回答结果",
-    tags=["检索"],
-    response_description="返回搜索结果：创建JWT_SECRET_KEY，用户名，下的数据结果"
-)
-async def jwt_ask_question(
-    req: QuestionRequest,
-    user_name: str = Depends(get_current_user_jwt)  # JWT 认证
-):
-    start = time.time()
-    with get_db() as conn:
-        with conn.cursor() as cur:
-            # 🔴 2026-10-03 乙段（`DEC-056` §1.2 第 7 条）：补上 `WHERE requested_by`。
-            #    原先 **零 `WHERE`** ⇒ 查全库。实测：isolation_b 打自己的 JWT
-            #    却拿回了 20 篇 admin 的文档（`api/test_isolation.py`）。
-            #    ⚠️ **只加过滤，⛔ 不改检索语义** —— 它「拿到 question 却不拿它做检索」
-            #       （无 embedding、无 `ORDER BY`）是**另一条账**，不在隔离收口内。
-            cur.execute(
-                "SELECT content FROM documents WHERE requested_by = %s LIMIT %s",
-                (user_name, req.top_k),
-            )
-            rows = cur.fetchall()
-    docs = [r[0] for r in rows]
-    duration = time.time() - start
-    return {
-        "question": req.question,
-        "docs": docs,
-        "elapsed": f"{duration:.3f}秒",
-        "requested_by": user_name
-    }
+# ==================== 【已删除】POST /rag/jwt_ask ====================
+# 🔴 2026-10-04 **删除**（`DEC-064`）—— 端点 `jwt_ask_question` 已移除。三条理由（都可打印地核过）：
+#
+#   ① **拿到 `question` 却不拿它做检索** —— 无 embedding、无 `ORDER BY`，只是
+#      `SELECT content … LIMIT n`。**`LIMIT` 配不上 `ORDER BY`** ⇒ 取哪几行由物理顺序决定
+#      ⇒ **同一问题两次可能拿到不同的行**（"看着像检索、其实不是"—— 本仓反复记的那个形态）。
+#   ② **能力被 `/rag/pg_search` 覆盖，而且是更严的覆盖** —— 它用 `get_current_user_jwt`，
+#      **只收 JWT、不收 API Key**；而 `pg_search` 用 `get_current_user_hybrid`，
+#      **JWT 与 API Key 都收** ⇒ 是它的**超集**。
+#      ⚠️ **最容易读反的一点**：「只收 JWT」看着像独有能力，其实是**限制** ——
+#      ⇒ **删掉它，JWT 用户一个能力都没少**。
+#   ③ **全仓无消费者**（清点，⛔ 不是"试了没反应"）—— 无前端 · 测试里只有「**钉它不该被接上限**」
+#      的反向守卫（不是"在用"）· Postman 集合里 1 个文件夹。
+#
+# ⚠️ **它【不欠】隔离账** —— 2026-10-03 乙段已补 `WHERE requested_by`（`DEC-056` §1.2 第 7 条）。
+#    ⇒ 删它的理由**全部与隔离无关**，⛔ 别把本段读成隔离收口的一部分（同 `DEC-057` §二）。
+#
+# ⛔ **别照抄这个形状再把端点加回来** —— `api/test_removed_endpoints.py::test_rag_jwt_ask_stays_removed`
+#    会红（判据是 **404**，⛔ 不是"不是 200"：它删之前带鉴权，回的就是 **401**）。
+# 📄 全文（消费者清点 · 改动清单 · 反悔成本）⇒ `docs/decisions/DEC-064-删除-rag-jwt-ask.md`
 
 # ==================== 流式输出（SSE） ====================
 # ⚠️ 2026-09-20 删（D1/pyflakes 报 redefinition）：此处的 `StreamingResponse` 与 `json`
