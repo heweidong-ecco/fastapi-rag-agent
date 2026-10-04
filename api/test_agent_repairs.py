@@ -624,13 +624,26 @@ def test_react_subgraph_sets_final_output(monkeypatch):
     ⚠️ 用**替身 LLM**（替换 `make_llm`）驱动，不真调模型：
        模型返回一条**不带 tool_calls** 的消息 ⇒ `should_continue` 直接 END。
     """
-    from langchain_core.messages import AIMessage, HumanMessage
+    from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 
     import agent_graph_advanced_learning as L
 
+    _ANSWER = "三步计划是：先学语法，再写小项目，最后读源码。"
+
     class _Bound:
         def invoke(self, messages):
-            return AIMessage(content="三步计划是：先学语法，再写小项目，最后读源码。")
+            return AIMessage(content=_ANSWER)
+
+        def stream(self, messages, config=None):
+            """🔴 2026-10-04（`B1`）：`agent_decide` 已从 `.invoke()` 改成 `.stream()`（真流式）
+            ⇒ 替身必须跟上，否则 `AttributeError: '_Bound' object has no attribute 'stream'`。
+
+            ⚠️ **只吐一块是故意的**：本用例测的是「`final_output` 落没落」，⛔ 不是「分几块」
+               —— 分块与否由 `api/test_agent_stream_chains.py` 覆盖。
+            ⚠️ 必须是 `AIMessageChunk`（⛔ 不是 `AIMessage`）：节点用 `+` 聚合，
+               `AIMessage` **没有 `__add__`** ⇒ 会 `TypeError`。
+            """
+            yield AIMessageChunk(content=_ANSWER)
 
     class _FakeLLM:
         def __init__(self, **kwargs):

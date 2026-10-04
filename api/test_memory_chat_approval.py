@@ -15,7 +15,7 @@ import asyncio
 import types
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 
 import agent_checkpointer as ac
 import agent_graph as ag
@@ -41,18 +41,33 @@ class _ScriptedLLM:
     ⚠️ 必须有"之后"：门**没生效**时，假模型每次都回 tool_calls ⇒
        `agent → tools → agent …` **转到递归上限**，红灯变成 `GraphRecursionError`
        （吵、且看不出是哪条断言坏的）。
+
+    🔴 2026-10-04（`B1`）：`agent_decide` 已从 `.invoke()` 改成 `.stream()`（真流式）
+       ⇒ 替身必须跟上，否则 `AttributeError: '_ScriptedLLM' object has no attribute 'stream'`。
+    ⚠️ 敏感那一次**故意用碎片化的 `tool_call_chunks`**（而不是组装好的 `tool_calls`）——
+       这正是流式到达的**真实形态**，于是本用例**顺带守住**了「节点的 `+` 聚合
+       能不能把碎片还原成 `tool_calls`」：还原不出来 ⇒ `should_continue` 判不出审批
+       ⇒ 图**不会停在审批点**，而下面那条断言正好就是它的判据。
     """
 
     def __init__(self):
         self.calls = 0
 
-    def invoke(self, messages):
+    def _next_reply(self):
         self.calls += 1
         if self.calls == 1:
-            return AIMessage(content="", tool_calls=[
-                {"name": "web_search", "args": {"query": "x"}, "id": "c1"},
+            # ⚠️ 必须 `AIMessageChunk`（⛔ 不是 `AIMessage`）：节点用 `+` 聚合，
+            #    `AIMessage` **没有 `__add__`** ⇒ `TypeError`。
+            return AIMessageChunk(content="", tool_call_chunks=[
+                {"name": "web_search", "args": '{"query": "x"}', "id": "c1", "index": 0},
             ])
-        return AIMessage(content="done")
+        return AIMessageChunk(content="done")
+
+    def invoke(self, messages):
+        return self._next_reply()
+
+    def stream(self, messages, config=None):
+        yield self._next_reply()
 
 
 def test_memory_chat_graph_stops_at_approval_for_sensitive_tools(monkeypatch):

@@ -8,6 +8,342 @@
   },
   "item": [
     {
+      "name": "流式（SSE）· 2026-10-04 起 6 条",
+      "description": "本仓**全部**流式端点（业务方 2026-10-04 裁「`B1` 剩余 4 条链本轮一起做」）。\n\n| 端 | 端点 |\n|---|---|\n| RAG | `/rag/stream_search` |\n| Agent | `/agent/{langgraph_chat, advanced_chat, plan_execute, memory_chat, mcp_chat}/stream` |\n\n⚠️ **Agent 端 5 条对话链全齐**；其余 29 条端点非流式（查询/管理/记账类，无 token 可流）。\n⚠️ `POST /agent/approve` **不做流式**（业务方 2026-10-04 裁：它是\"续跑一个停下的图\"，不是\"生成答案\"）。\n📄 设计 ⇒ `docs/specs/sse.md` · 决策 ⇒ `docs/decisions/DEC-059`\n",
+      "item": [
+        {
+          "name": "rag",
+          "item": [
+            {
+              "name": "/rag/stream_search（RAG · SSE）",
+              "request": {
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{access_token}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "text/event-stream"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/rag/stream_search?thread_id=default",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "rag",
+                    "stream_search"
+                  ],
+                  "query": [
+                    {
+                      "key": "thread_id",
+                      "value": "default",
+                      "description": "会话 id（B8 会话级上限按它记账）"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"question\": \"FastAPI是什么？\",\n  \"top_k\": 3,\n  \"mode\": \"accurate_norerank\"\n}",
+                  "options": {
+                    "raw": {
+                      "headerFamily": "json",
+                      "language": "json"
+                    }
+                  }
+                },
+                "description": "## 帧格式（6 条流式端点同一套）\n| 帧 | 何时 |\n|---|---|\n| `data: {\"content\": \"…\"}` | 每个 token / 每个文本块一帧 |\n| `data: {…汇总…}` | 收尾一帧 |\n| `data: [DONE]` | 结束哨兵 |\n\n⚠️ **Postman 要用「Send → 右上角 … 看 EventStream」或直接 curl -N**，普通响应面板会等流结束才显示。\n⚠️ **别只看 content-type 判真流式** —— Agent 端要图那一侧配合（节点声明 `config` + 转发 `.stream(config)`），否则只吐 1 块而接口长得一模一样（`DEC-050`）。\n\n⚠️ **帧顺序反直觉**：`内容 → [DONE] → sources`（⛔ 不是 sources 在 [DONE] 之前）。\n⚠️ `mode` 默认 `accurate` 需要 torch，**容器里没装** ⇒ 请显式传 `accurate_norerank`（`DEC-034`）。\n"
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "agent",
+          "item": [
+            {
+              "name": "/agent/langgraph_chat/stream",
+              "request": {
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{access_token}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "text/event-stream"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/agent/langgraph_chat/stream?question=你好&thread_id=default",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "agent",
+                    "langgraph_chat",
+                    "stream"
+                  ],
+                  "query": [
+                    {
+                      "key": "question",
+                      "value": "你好",
+                      "description": ""
+                    },
+                    {
+                      "key": "thread_id",
+                      "value": "default",
+                      "description": ""
+                    }
+                  ]
+                },
+                "description": "## 帧格式（6 条流式端点同一套）\n| 帧 | 何时 |\n|---|---|\n| `data: {\"content\": \"…\"}` | 每个 token / 每个文本块一帧 |\n| `data: {…汇总…}` | 收尾一帧 |\n| `data: [DONE]` | 结束哨兵 |\n\n⚠️ **Postman 要用「Send → 右上角 … 看 EventStream」或直接 curl -N**，普通响应面板会等流结束才显示。\n⚠️ **别只看 content-type 判真流式** —— Agent 端要图那一侧配合（节点声明 `config` + 转发 `.stream(config)`），否则只吐 1 块而接口长得一模一样（`DEC-050`）。\n\n⚠️ 本图**带人工审批**：汇总帧 `status=\"pending_approval\"` ⇒ 工具**还没执行**，要拿 `pending_tool_calls` 走 `POST /agent/approve`（带**同一个** `thread_id`）。\n🔴 **那帧汇总砍不得** —— 砍了前端只会看到戛然而止的半截答案，而 HTTP 仍是 200。\n"
+              },
+              "response": []
+            },
+            {
+              "name": "/agent/advanced_chat/stream",
+              "request": {
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{access_token}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "text/event-stream"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/agent/advanced_chat/stream?question=帮我算 6*7&thread_id=default&memory_space=default",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "agent",
+                    "advanced_chat",
+                    "stream"
+                  ],
+                  "query": [
+                    {
+                      "key": "question",
+                      "value": "帮我算 6*7",
+                      "description": ""
+                    },
+                    {
+                      "key": "thread_id",
+                      "value": "default",
+                      "description": ""
+                    },
+                    {
+                      "key": "memory_space",
+                      "value": "default",
+                      "description": ""
+                    }
+                  ]
+                },
+                "description": "## 帧格式（6 条流式端点同一套）\n| 帧 | 何时 |\n|---|---|\n| `data: {\"content\": \"…\"}` | 每个 token / 每个文本块一帧 |\n| `data: {…汇总…}` | 收尾一帧 |\n| `data: [DONE]` | 结束哨兵 |\n\n⚠️ **Postman 要用「Send → 右上角 … 看 EventStream」或直接 curl -N**，普通响应面板会等流结束才显示。\n⚠️ **别只看 content-type 判真流式** —— Agent 端要图那一侧配合（节点声明 `config` + 转发 `.stream(config)`），否则只吐 1 块而接口长得一模一样（`DEC-050`）。\n\n🔴 **两条现状，⛔ 别当 bug 去\"修\"**：\n1. **CALC / DATE 两个意图一个字都流不出来** —— 答案来自**工具返回值**（`calculator` / `date_today`），⛔ 不是 LLM 输出 ⇒ 一直等到末帧才看到 `answer`。\n2. **`supervisor` 的路由词（`SEARCH`/`CALCULATOR`/…）不会出现** —— 它确实产块，靠 `STREAMABLE_NODES` 白名单挡掉。\n"
+              },
+              "response": []
+            },
+            {
+              "name": "/agent/plan_execute/stream",
+              "request": {
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{access_token}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "text/event-stream"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/agent/plan_execute/stream?goal=查一下今天的日期&thread_id=default",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "agent",
+                    "plan_execute",
+                    "stream"
+                  ],
+                  "query": [
+                    {
+                      "key": "goal",
+                      "value": "查一下今天的日期",
+                      "description": ""
+                    },
+                    {
+                      "key": "thread_id",
+                      "value": "default",
+                      "description": ""
+                    }
+                  ]
+                },
+                "description": "## 帧格式（6 条流式端点同一套）\n| 帧 | 何时 |\n|---|---|\n| `data: {\"content\": \"…\"}` | 每个 token / 每个文本块一帧 |\n| `data: {…汇总…}` | 收尾一帧 |\n| `data: [DONE]` | 结束哨兵 |\n\n⚠️ **Postman 要用「Send → 右上角 … 看 EventStream」或直接 curl -N**，普通响应面板会等流结束才显示。\n⚠️ **别只看 content-type 判真流式** —— Agent 端要图那一侧配合（节点声明 `config` + 转发 `.stream(config)`），否则只吐 1 块而接口长得一模一样（`DEC-050`）。\n\n🔴🔴 **两条必须知道（业务方 2026-10-04 裁定）**：\n1. **流内文本是【正在生成的 JSON 片段】，⛔ 不是人读终稿** —— 提示词要求严格 JSON。前端只能当**\"规划中\"指示器**；终稿**只看末帧**。⛔ 别把流到的 JSON 直接渲染成计划。\n2. **只有「规划段」在流** —— 执行段**不流** ⇒ 规划段之后是**一长段静默**（N 步 × 每步 2 次 LLM），然后才是末帧。\n⚠️ 本端点**不是图**：它是同步函数 + 线程→事件循环的桥（`_ThreadTokenBridge`）。\n"
+              },
+              "response": []
+            },
+            {
+              "name": "/agent/memory_chat/stream",
+              "request": {
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{access_token}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "text/event-stream"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/agent/memory_chat/stream?question=你好&thread_id=default",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "agent",
+                    "memory_chat",
+                    "stream"
+                  ],
+                  "query": [
+                    {
+                      "key": "question",
+                      "value": "你好",
+                      "description": ""
+                    },
+                    {
+                      "key": "thread_id",
+                      "value": "default",
+                      "description": ""
+                    }
+                  ]
+                },
+                "description": "## 帧格式（6 条流式端点同一套）\n| 帧 | 何时 |\n|---|---|\n| `data: {\"content\": \"…\"}` | 每个 token / 每个文本块一帧 |\n| `data: {…汇总…}` | 收尾一帧 |\n| `data: [DONE]` | 结束哨兵 |\n\n⚠️ **Postman 要用「Send → 右上角 … 看 EventStream」或直接 curl -N**，普通响应面板会等流结束才显示。\n⚠️ **别只看 content-type 判真流式** —— Agent 端要图那一侧配合（节点声明 `config` + 转发 `.stream(config)`），否则只吐 1 块而接口长得一模一样（`DEC-050`）。\n\n⚠️ 与 `/agent/memory_chat` 同样的**审批 + 待接管队列**接线：汇总帧 `status=\"pending_approval\"` ⇒ 去 `POST /agent/approve`（同一个 `thread_id`）。\n⚠️ 与 `/agent/langgraph_chat/stream` 是**两张不同的图**（`checkpointer_agent` vs `agent_graph`）。\n"
+              },
+              "response": []
+            },
+            {
+              "name": "/agent/mcp_chat/stream",
+              "request": {
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{access_token}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "text/event-stream"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/agent/mcp_chat/stream?question=你好&thread_id=default&memory_space=default",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "agent",
+                    "mcp_chat",
+                    "stream"
+                  ],
+                  "query": [
+                    {
+                      "key": "question",
+                      "value": "你好",
+                      "description": ""
+                    },
+                    {
+                      "key": "thread_id",
+                      "value": "default",
+                      "description": ""
+                    },
+                    {
+                      "key": "memory_space",
+                      "value": "default",
+                      "description": ""
+                    }
+                  ]
+                },
+                "description": "## 帧格式（6 条流式端点同一套）\n| 帧 | 何时 |\n|---|---|\n| `data: {\"content\": \"…\"}` | 每个 token / 每个文本块一帧 |\n| `data: {…汇总…}` | 收尾一帧 |\n| `data: [DONE]` | 结束哨兵 |\n\n⚠️ **Postman 要用「Send → 右上角 … 看 EventStream」或直接 curl -N**，普通响应面板会等流结束才显示。\n⚠️ **别只看 content-type 判真流式** —— Agent 端要图那一侧配合（节点声明 `config` + 转发 `.stream(config)`），否则只吐 1 块而接口长得一模一样（`DEC-050`）。\n\n⚠️ 鉴权依赖与 `/agent/mcp_chat` **一致**（`check_budget`，判**用户日预算**），⛔ 不是 `get_current_user_hybrid` ⇒ 除 Bearer 外**另需过日预算那道门**。\n⚠️ 工具走 **MCP Client**，本机环境不齐时该链会失败。\n"
+              },
+              "response": []
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "公共接口",
       "item": [
         {

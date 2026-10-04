@@ -3,19 +3,25 @@ API v1 路由集中定义
 所有 /api/v1 前缀的接口在此管理。
 """
 import asyncio
-# `③` Task 5 补（2026-10-03 · 真服务实测）：`finally` 里关图的流要用 `anyio.CancelScope(shield=True)`
-# **护住** —— 否则那一次 `await` 会被反复投递的取消打断（与 `api_v1_rag.py` 同一处病）。
-import anyio
-import json
 import time
 from fastapi import APIRouter, Depends, Path, Query
-from fastapi.responses import StreamingResponse   # B1：Agent 端 SSE
-from loguru import logger                          # `③` Task 5：取消事件要落到日志（判据①）
-from metrics import track_stream_cancel            # `③` Task 5：取消事件进 Prometheus（判据③的观测对象）
 from exceptions import ErrorCode, AppException
 from deps import get_current_user_hybrid, get_current_user_jwt, require_admin
 
-from agent_graph import agent_graph
+# `③` Task 4 · `B1`：SSE 骨架 —— 本仓**所有**流式端点共用一份（含那 5 条实测约束的顺序）。
+# ⚠️ 2026-10-04（批 3）：`anyio` / `json` / `StreamingResponse` / `logger` / `track_stream_cancel`
+#    这 5 个 import **已从这个文件删掉** —— 它们此前**只被** `/agent/langgraph_chat/stream`
+#    那一段内联生成器用到，现在那一段整块搬进了 `api/sse.py`。
+#    ⛔ 删它们不是"顺手清理"：留着就是**没人用的 import**（pyflakes 会报）。
+from sse import DONE_FRAME, graph_message_text, sse_frame, sse_response, sse_stream
+
+from agent_graph import agent_graph, STREAMABLE_NODES
+# 🔴 `B1`（2026-10-04）：四条流式链的**可流节点白名单**从**图模块**取
+#    （⛔ 端点不许自己抄一份字面量 —— `DEC-051` 的教训：一个名字两个来源必然漂移，
+#     而漂移是**静默**的）。所以这里要的是**模块对象**，不是常量本身。
+import agent_checkpointer
+import agent_graph_advanced
+import agent_graph_advanced_learning
 from pending_approvals import (
     list_pending, register, resolve,
     find_by_raw_thread_id,            # 丙段：按原 thread_id 反查**属主**
@@ -224,61 +230,18 @@ async def langgraph_chat_stream(
 
     ENDPOINT = "agent_langgraph_chat_stream"   # Prometheus 的 label（`③` Task 5）
 
-    async def generate():
-        stream = None
-        # ⚠️ 默认按「被取消」算 —— 只有跑到收尾才改成 `"done"`（理由同 `/rag/stream_search`：
-        #    Starlette 2.3 抛 `CancelledError`、2.4 抛 `GeneratorExit`，两条都要记到）。
-        outcome = "cancelled"
-        try:
-            # ⚠️ 必须**绑成变量**：`finally` 里要 `aclose()` 它。
-            #    ⛔ 别退回"在 `async for` 里内联调用" —— 那样拿不到这个流的句柄，关不掉。
-            stream = agent_graph.astream(
-                {"messages": [HumanMessage(content=question)]},
-                config={"configurable": {"thread_id": sess}},
-                stream_mode="messages",
-            )
-            async for chunk, meta in stream:
-                # ⚠️ 只转发 `agent` 节点出的块。图里还有 `tools` / `approval` 节点，
-                #    不加这道过滤，它们吐的消息会**混进正文**
-                #    （实测：`tools` 节点的 `ToolMessage` 内容会作为一块出现）。
-                if meta.get("langgraph_node") != "agent":
-                    continue
+    # 🔴 2026-10-04（`B1` 剩余 4 条链 · 批 3）：**内联生成器整个换成 `sse.sse_stream` 骨架**。
+    #    帧序、编码、取消语义**逐帧等价**（判据：`api/test_agent_sse.py` +
+    #    `api/test_cancel_propagation.py` **全绿且一行断言都没改**）。
+    #    ⚠️ 原来这个文件里那段 `try / except / except / finally` 的**顺序约束没有消失** ——
+    #    它们搬进了 `api/sse.py`（那 5 条实测约束的落点，见该模块 docstring）。
+    #    ⛔ 别把"骨架里没有"读成"不需要"：`X-Accel-Buffering` · 同步收尾排在 `await` 前 ·
+    #    `shield=True` 关流，三件都还在，只是现在**只有一份**。
+    async def _complete(collected):
+        """收尾尾巴（正常跑完才进）：**汇总帧 + `[DONE]`**。
 
-                # ⚠️ 空 content 的块**必须跳过**：`tool_call` 的碎片 content 就是空的
-                #    （实测：一次 tool_call 会来 2–3 个空 content 块）。
-                #    不过滤 ⇒ 前端收到一串空白帧。
-                if chunk.content:
-                    yield f"data: {json.dumps({'content': chunk.content}, ensure_ascii=False)}\n\n"
-            outcome = "done"
-        except asyncio.CancelledError:
-            # 客户端断开（`③` Task 5 · `B2`）—— ⛔ **不许吞**：吞掉外层会以为这是"正常结束"。
-            # ⚠️ 也**不许在这里 yield**：接收方已经走了，发出去只会让帧层面分不清
-            #    「已取消」与「正常收尾」（`/rag/stream_search` 那边的实测同款）。
-            raise
-        except Exception as e:
-            outcome = "error"
-            # 兜底：⛔ 别让异常**静默**变成"流自然结束" —— 那前端看到的是
-            # "答案说了一半就没了"，而**没有任何错误信号**。
-            yield f"data: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
-            yield "data: [DONE]\n\n"
-            return
-        finally:
-            # 🔴🔴 **顺序与关流方式 = 2026-10-03 真服务实测改的**（与 `api_v1_rag.py` 同一处病）：
-            #    `await stream.aclose()` 会被**二次投递的取消**打断 ⇒ 抛 `CancelledError`
-            #    ⇒ 排在它后面的计数与日志**一件都不跑**（实测：计数 `2.0→2.0`、日志没有）。
-            #    ⇒ ① **同步**的收尾提到 `await` 之前 · ② 关流用 shield 护住。
-            if outcome == "cancelled":
-                track_stream_cancel(ENDPOINT)
-                logger.info(f"[cancel] 客户端断开，已停止生成并关闭图的流 endpoint={ENDPOINT}")
-
-            # 🔴🔴 **本任务的核心动作**：客户端断开后**关掉图的流**。
-            #    不关 ⇒ 图会**继续跑完**（`DEC-050` §遗留·3 自己点了这条：
-            #    "新的流式路由同样没有 cancel 处理"）—— 继续跑 = 继续调模型 = 继续烧钱。
-            #    ⚠️ `shield=True` **必须**：取消作用域反复投递取消，不护住 ⇒ 关流半途而废。
-            if stream is not None:
-                with anyio.CancelScope(shield=True):
-                    await stream.aclose()
-
+        ⚠️ 形参 `collected`（已经发出去的那些文本块）**有意不用** —— 理由见下。
+        """
         # 🔴🔴 **状态必须取自【图的最终状态】，⛔ 不是"把 `agent` 节点的流式块攒起来"。**
         #
         #    这一条是 **2026-10-03 在真服务上跑出来的**（`③` Task 4 Step 4），不是想出来的：
@@ -294,6 +257,9 @@ async def langgraph_chat_stream(
         #
         #    ✅ 这样与 `/agent/langgraph_chat` 的口径**完全一致**（它也喂 `result` 整份 state），
         #       状态判定只有 `summarize_agent_result` 一处，⛔ 不在这里另写一套。
+        #
+        #    ⚠️ 骨架把 `collected` 递过来，**这不是"攒块"的口子** —— 它就是上面被否掉的那条路。
+        #       要状态，就 `aget_state`。
         state = await agent_graph.aget_state({"configurable": {"thread_id": sess}})
         summary = summarize_agent_result(state.values or {})
 
@@ -306,20 +272,27 @@ async def langgraph_chat_stream(
         else:
             resolve(sess)
 
-        yield f"data: {json.dumps({'thread_id': thread_id, **summary}, ensure_ascii=False)}\n\n"
-        yield "data: [DONE]\n\n"
+        yield sse_frame({"thread_id": thread_id, **summary}, ensure_ascii=False)
+        yield DONE_FRAME
 
-    # ⚠️ `X-Accel-Buffering: no` 不能省：有反代（Nginx / Cloudflare）时它会把 SSE **攒着发**，
-    #    本地直连一切正常、**上线后变成假流式** —— 而那是本任务唯一要防的东西。
-    return StreamingResponse(
-        generate(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
+    return sse_response(sse_stream(
+        # ⚠️ 上游**必须返回一个可 `aclose()` 的句柄**（这里是个 lambda，返回 `astream` 对象）——
+        #    骨架要拿它去关流（客户端断开后不关 ⇒ 图**继续跑完** = 继续调模型 = 继续烧钱）。
+        #    ⛔ 别退回"在 `async for` 里内联调用"：那样拿不到句柄，关不掉。
+        lambda: agent_graph.astream(
+            {"messages": [HumanMessage(content=question)]},
+            config={"configurable": {"thread_id": sess}},
+            stream_mode="messages",
+        ),
+        endpoint=ENDPOINT,
+        # ⚠️ 只转发**可流节点**出的块（名单在 `agent_graph.STREAMABLE_NODES`，⛔ 不在这里抄一份）。
+        #    图里还有 `tools` / `approval` 节点，不过滤的话它们吐的消息会**混进正文**
+        #    （实测：`tools` 节点的 `ToolMessage` 内容会作为一块出现）。
+        # ⚠️ 空 content 的块**必须跳过**（`tool_call` 的碎片 content 就是空的，一次调用来 2–3 个）
+        #    —— `graph_message_text` 一并挡了（见 `api/sse.py`）。
+        extract=lambda item: graph_message_text(item, nodes=STREAMABLE_NODES),
+        on_complete=_complete,
+    ))
 
 # ==================== 属于AgentGraph 接口下  新增的： AgentGraph 人工审批接口 ====================
 
@@ -496,7 +469,165 @@ async def advanced_agent_chat(
         "requested_by": user_name,
     }
 
+
+@router.post("/agent/advanced_chat/stream")
+async def advanced_agent_chat_stream(
+    question: str,
+    thread_id: str = "default",
+    memory_space: str = "default",
+    user_name: str = Depends(get_current_user_hybrid),
+):
+    """`/agent/advanced_chat` 的**流式**版本（`B1`）。SSE 逐 token 返回。
+
+    ## 帧格式（与另外三条 agent 流式链**同一套**，便于前端复用）
+
+    | 帧 | 何时 |
+    |---|---|
+    | `data: {"content": "…"}` | **每个 token 一帧** |
+    | `data: {"thread_id": …, "answer": …, "intent": …, "memory_space": …}` | 收尾**一帧汇总** |
+    | `data: [DONE]` | 结束哨兵 |
+
+    ## 🔴 两条**必须知道**的现状（⛔ 别当 bug 去"修"）
+
+    1. **CALC / DATE 两个意图【一个字都流不出来】。** 它们的答案来自**工具返回值**
+       （`calculator` / `date_today`），⛔ 不是 LLM 输出 ⇒ 那两条分支上，用户会一直等到
+       **最后一帧汇总**才看到 `answer`。⚠️ 别为了"看起来也在流"把 `calc_execute` 的
+       **表达式提取过程**放出去 —— 那是中间产物，不是答案。
+       📄 节点对照表（6 个调 LLM 的节点里只有 4 个该流）⇒
+       `docs/specs/agent_graph_advanced_learning.md` 的 ⭐ 节
+    2. **`supervisor` 的路由词（`SEARCH`/`CALCULATOR`/…）不会出现** —— 它**也是**调 LLM 的
+       节点，会**真的进到流里**，靠 `STREAMABLE_NODES` 白名单挡掉（⛔ 不是"它不产生块"）。
+
+    ## ⚠️ 三条接线与 `/agent/advanced_chat` 保持一致（⛔ 别只做一半）
+
+    1. **B8 会话级上限 + B11 全站日级熔断** —— 两条都要过，且必须在**进生成器之前**
+       （否则触顶会变成"HTTP 200 + 流到一半断掉"，调用方看不出是被限额拒了）；
+    2. `sess = session_key(user_name, thread_id)` —— 图收到的键**拼身份**，响应仍回显**原值**；
+    3. **汇总取自图的最终状态**（`aget_state`），⛔ 不是"把流过的块攒起来"（`DEC-050`）。
+    """
+    # B8 · 会话级 token 上限（`DEC-041`）
+    ok, why = check_session_token_budget(user_name, thread_id)
+    if not ok:
+        raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
+
+    # B11 · 全站日级熔断（`①b` Task 4）—— 与上一段**并列、都要过**
+    ok, why = circuit(global_key())
+    if not ok:
+        raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
+
+    # 🅾 丙段：**checkpoint 键**拼身份（⛔ 不是裸 `thread_id`）；响应里回显的仍是原值。
+    sess = session_key(user_name, thread_id)
+    ENDPOINT = "agent_advanced_chat_stream"
+
+    async def _complete(collected):
+        """收尾尾巴：**汇总帧 + `[DONE]`**（状态只从 `aget_state` 取 —— 见 docstring 第 3 条）。"""
+        state = await advanced_agent.aget_state({"configurable": {"thread_id": sess}})
+        values = state.values or {}
+        yield sse_frame({
+            "thread_id": thread_id,
+            "answer": values.get("final_output", "处理完成"),
+            "intent": values.get("intent", "unknown"),
+            "memory_space": memory_space,
+        }, ensure_ascii=False)
+        yield DONE_FRAME
+
+    return sse_response(sse_stream(
+        lambda: advanced_agent.astream(
+            {
+                "messages": [HumanMessage(content=question)],
+                "user_name": user_name,
+                "memory_space": memory_space,
+            },
+            config={"configurable": {"thread_id": sess}},
+            stream_mode="messages",
+            # 🔴🔴 **`subgraphs=True` 不可省**（实测，链 A 独有）：
+            #    这张图里 5 个部门**全是子图**。不开它 ⇒ 要么只拿到子图节点的**返回值**
+            #    （1 块整段 · **外层**名 `search_dept`），要么**一块都没有**
+            #    ⇒ 前端看到的是"半天没反应，然后整段蹦出来" = **假流式**。
+            #    ⚠️ 开了它，`item` 的形状变成 `(namespace, (chunk, meta))` ——
+            #       `graph_message_text` 已归一化，⛔ 端点别再解一次。
+            subgraphs=True,
+        ),
+        endpoint=ENDPOINT,
+        # ⚠️ 白名单来自**图模块**（`agent_graph_advanced_learning.STREAMABLE_NODES`）——
+        #    端点**一个字面量都不抄**（见文件头 import 处的理由）。
+        extract=lambda item: graph_message_text(
+            item, nodes=agent_graph_advanced_learning.STREAMABLE_NODES),
+        on_complete=_complete,
+    ))
+
 # ==================== Plan-and-Execute:AgentGraph 接口 ====================
+
+
+class _ThreadTokenBridge:
+    """链 D 专用：把「**同步线程**里产生的 token」搬进**事件循环**（`B1` · 2026-10-04）。
+
+    🔴 **为什么需要它**：`plan_task` 是**同步**函数、跑在 `asyncio.to_thread` 里
+       （`/agent/plan_execute` 一直如此 —— 直接在 async 端点里调会**阻塞整个事件循环**）。
+       ⇒ token 是在**别的线程**上产生的，而 `asyncio.Queue` **不是线程安全的**，
+         直接往里放会偶发丢数据/乱序 ⇒ 走 `loop.call_soon_threadsafe(...)`。
+
+    ⚠️ **本类【不】放进 `api/sse.py`** —— 共享层（按设计）**不引入线程依赖**，
+       它只认「一个有 `__anext__` / `aclose` 的对象」（见 `api/sse.py` 的 🟡 段）。
+
+    🔴 **`aclose()` 必须非阻塞 + 协作式**：
+       `push()` 只置一个"别发了"的标志。⛔ **绝不能 `await thread.join()`** ——
+       Python 的线程**杀不掉**（没有 safe thread kill），join 会把"客户端断开"
+       变成"服务端一直挂着等这次规划跑完"，**恰恰是本任务要修的那个病**。
+    """
+
+    _DONE = object()
+
+    def __init__(self, loop):
+        self._loop = loop
+        self._queue: "asyncio.Queue" = asyncio.Queue()
+        # ⚠️ 一个标志管两件事（"别再发了"）：`finish()` / `fail()` / `aclose()` 都要置它。
+        self._stop_pushing = False
+        # 供端点挂后台任务（取消时一并取消它，免得留个孤儿协程）
+        self.task = None
+
+    # ---------- 工作线程侧（⛔ 别在这里 await 任何东西） ----------
+    def push(self, token: str) -> None:
+        if self._stop_pushing:
+            return
+        self._loop.call_soon_threadsafe(self._queue.put_nowait, token)
+
+    def finish(self) -> None:
+        """正常结束：投递哨兵，让 `async for` 收尾（⇒ 骨架接着跑 `on_complete`）。"""
+        self._stop_pushing = True
+        self._loop.call_soon_threadsafe(self._queue.put_nowait, self._DONE)
+
+    def fail(self, exc: BaseException) -> None:
+        """出错：把异常投递过去，让 `async for` 在**事件循环侧**抛出 ⇒ 走骨架的错误路径。"""
+        self._stop_pushing = True
+        self._loop.call_soon_threadsafe(self._queue.put_nowait, exc)
+
+    # ---------- 事件循环侧 ----------
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        item = await self._queue.get()
+        if item is self._DONE:
+            raise StopAsyncIteration
+        if isinstance(item, BaseException):
+            raise item
+        return item
+
+    async def aclose(self) -> None:
+        """客户端断开时由骨架调用（`api/sse.py` 的 finally，已用 `shield` 护住）。"""
+        self._stop_pushing = True
+        # 排空：把还在队列里的东西丢掉，别让等着的一方再等
+        while not self._queue.empty():
+            try:
+                self._queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+        self._queue.put_nowait(self._DONE)
+        # ⚠️ 取消后台任务（**不是**等它结束）：规划线程本身杀不掉，但我们不该留一个
+        #    没人再读它产出的协程挂着。
+        if self.task is not None and not self.task.done():
+            self.task.cancel()
 
 
 @router.post("/agent/plan_execute")
@@ -549,6 +680,106 @@ async def agent_plan_execute(
         "execution_result": execution_result,
         "requested_by": user_name,
     }
+
+
+@router.post("/agent/plan_execute/stream")
+async def agent_plan_execute_stream(
+    goal: str,
+    thread_id: str = "default",
+    user_name: str = Depends(get_current_user_hybrid),
+):
+    """`/agent/plan_execute` 的**流式**版本（`B1`）。SSE 逐块返回。
+
+    ## 帧格式（与另外三条 agent 流式链**同一套**）
+
+    | 帧 | 何时 |
+    |---|---|
+    | `data: {"content": "…"}` | **规划段**逐块 |
+    | `data: {"goal": …, "thread_id": …, "plan": […], "execution_result": "…"}` | 收尾**一帧汇总** |
+    | `data: [DONE]` | 结束哨兵 |
+
+    ## 🔴🔴 两条**必须知道**的现状（都摘自业务方 2026-10-04 的裁定）
+
+    1. **流内文本是【正在生成的 JSON 片段】，⛔ 不是人读终稿。**
+       `plan_task` 的提示词明确要求严格 JSON 输出（`:216-222`），下游还要 `json.loads`。
+       ⇒ 前端的正确用法 = 当**"规划中"指示器**；**终稿只看最后一帧汇总**。
+       ⛔ **不许把流到的 JSON 直接渲染成计划**（模型可能吐不完整/非法 JSON）。
+    2. **只有「规划段」在流** —— `execute_plan`（执行段）**不流**。
+       ⇒ 规划段之后是**一长段静默**（N 步 × 每步 2 次 LLM），然后才是末帧。
+       ⛔ **别让读者以为执行段也在流**。
+
+    ## ⚠️ 两条与 `/agent/plan_execute` 不同（**是流式的固有代价，不是疏漏**）
+
+    * **预算耗尽从 4xx 变成 error 帧**：非流式那条会把 `BudgetExceededError` 转成
+      `QUOTA_EXCEEDED`（4xx）。这里响应头**已经发出去了**（HTTP 200 + `text/event-stream`），
+      改不了状态码 ⇒ 只能发一帧 `{"error": …}`。⚠️ **这正是 B8/B11 两道闸必须在
+      【进生成器之前】跑的原因** —— 它们能拦的那部分仍然是"根本没开始流"的干净 4xx。
+    * **取消时规划线程停不下来**：Python 线程杀不掉 ⇒ 只能"不再发"。见 `_ThreadTokenBridge`
+      的 docstring（⛔ 不许 `await thread.join()`）。
+    """
+    # B8 · 会话级 token 上限（`DEC-041`）—— ⚠️ 这两道闸能拦的，是"根本没开始流"的那部分
+    ok, why = check_session_token_budget(user_name, thread_id)
+    if not ok:
+        raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
+
+    # B11 · 全站日级熔断（`①b` Task 4）
+    ok, why = circuit(global_key())
+    if not ok:
+        raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
+
+    ENDPOINT = "agent_plan_execute_stream"
+    # ⚠️ 本端点**不用** `session_key`：`plan_execute` **没有图、没有 checkpoint** ——
+    #    `thread_id` 只是回显给调用方看的。⛔ 别为了"跟另外三条统一"而凭空拼一个键。
+    bridge = _ThreadTokenBridge(asyncio.get_running_loop())
+    result_holder: dict = {}
+
+    async def _run():
+        """跑「规划 → 执行」，把规划段的 token 通过 `bridge` 送出去。
+
+        ⚠️ **`bridge.finish()` 放在【两段都跑完之后】**（不是规划一跑完就 finish）——
+           那样骨架会在执行段还在跑时就收尾并发末帧，而 `result_holder` 里**还没有**
+           `execution_result` ⇒ 汇总帧里是空的。现在这样：流一直开着，执行段**静默**，
+           末帧**一定**带着完整结果（与上面 docstring 第 2 条一致）。
+        """
+        try:
+            plan = await asyncio.to_thread(plan_task, goal, user_name,
+                                           on_token=bridge.push)
+            execution_result = await asyncio.to_thread(execute_plan, plan, goal, user_name)
+        except asyncio.CancelledError:
+            # 客户端断开 ⇒ 骨架已经把 bridge 关了。⛔ 别把"取消"当成"上游出错"塞进队列。
+            raise
+        except BaseException as exc:        # noqa: BLE001 —— 任何失败都要让等待的一方醒过来
+            bridge.fail(exc)
+        else:
+            result_holder["plan"] = plan
+            result_holder["execution_result"] = execution_result
+            bridge.finish()
+
+    def _open_upstream():
+        """⚠️ 在**事件循环里**被骨架调用（`sse_stream` 的 `open_upstream()`）⇒ 起任务合法。
+
+        ⚠️ 必须**留下任务引用**（挂在 `bridge.task` 上）——
+           不然任务可能被 GC 掉，或者断开后没人取消它。
+        """
+        bridge.task = asyncio.create_task(_run())
+        return bridge
+
+    async def _complete(collected):
+        yield sse_frame({
+            "goal": goal,
+            "thread_id": thread_id,
+            "plan": result_holder.get("plan"),
+            "execution_result": result_holder.get("execution_result", ""),
+        }, ensure_ascii=False)
+        yield DONE_FRAME
+
+    return sse_response(sse_stream(
+        _open_upstream,
+        endpoint=ENDPOINT,
+        # ⚠️ `extract=None`：桥吐出来的**就是文本**（不是图的消息块）⇒ 原样发。
+        #    ⛔ 别给它套 `graph_message_text`（那要 `(chunk, meta)`，会 ValueError）。
+        on_complete=_complete,
+    ))
 
 
 # ==================== 测试类 ====================
@@ -607,6 +838,77 @@ async def memory_chat(
         "requested_by": user_name,
         **summary,
     }
+
+
+@router.post("/agent/memory_chat/stream")
+async def memory_chat_stream(
+    question: str,
+    thread_id: str = "default",
+    user_name: str = Depends(get_current_user_hybrid),
+):
+    """`/agent/memory_chat` 的**流式**版本（`B1`）。SSE 逐 token 返回。
+
+    ## 帧格式（与另外三条 agent 流式链**同一套**）
+
+    | 帧 | 何时 |
+    |---|---|
+    | `data: {"content": "…"}` | **每个 token 一帧** |
+    | `data: {"thread_id": …, "status": …, "answer": …, "pending_tool_calls": […]}` | 收尾**一帧汇总** |
+    | `data: [DONE]` | 结束哨兵 |
+
+    ⚠️ 那一帧**汇总**不是可有可无的：`status="pending_approval"` 是**唯一**告诉调用方
+       "工具还没执行、要带同一个 `thread_id` 去 `/agent/approve`"的地方。
+       **砍掉它 = 前端只会看到一个戛然而止的半截答案**，而 HTTP 返回 200。
+
+    ## ⚠️ 三条接线与 `/agent/memory_chat` 保持一致（⛔ 别只做一半）
+
+    1. **B8 会话级上限 + B11 全站日级熔断**（在**进生成器之前**）；
+    2. **B5 待接管队列** —— 停在审批点时要 `register`，否则 `/agent/pending` 里**找不到它**
+       （`MemorySaver` 没有"列出全部 thread"的 API，这个登记是**唯一**的入口）；
+       🔴 `graph="checkpointer_agent"` **必须写** —— `/agent/approve` 靠它决定续跑哪张图。
+    3. **`summarize_agent_result`** —— 状态口径只有它一处，⛔ 别在这里另写一套判断。
+    """
+    # B8 · 会话级 token 上限（`DEC-041`）
+    ok, why = check_session_token_budget(user_name, thread_id)
+    if not ok:
+        raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
+
+    # B11 · 全站日级熔断（`①b` Task 4）—— 与上一段**并列、都要过**
+    ok, why = circuit(global_key())
+    if not ok:
+        raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
+
+    # 🅾 丙段：**checkpoint / 待接管队列**用拼过身份的键；⛔ 响应里回显的仍是原 `thread_id`。
+    sess = session_key(user_name, thread_id)
+    ENDPOINT = "agent_memory_chat_stream"
+
+    async def _complete(collected):
+        """收尾尾巴：**登记/清队列 + 汇总帧 + `[DONE]`**（状态只从 `aget_state` 取）。"""
+        state = await checkpointer_agent.aget_state({"configurable": {"thread_id": sess}})
+        summary = summarize_agent_result(state.values or {})
+        # B5 · 与 `/agent/memory_chat` 同款：⚠️ `else` 那支不是可省的 ——
+        # 本轮没卡住 ⇒ 清掉上一次的登记，否则同一个 thread 卡过一次就**永远留在队列里变成假待办**。
+        if summary.get("status") == "pending_approval":
+            register(sess, user_name, summary.get("pending_tool_calls") or [],
+                     raw_thread_id=thread_id, graph="checkpointer_agent")
+        else:
+            resolve(sess)
+        yield sse_frame({"thread_id": thread_id, **summary}, ensure_ascii=False)
+        yield DONE_FRAME
+
+    return sse_response(sse_stream(
+        lambda: checkpointer_agent.astream(
+            {"messages": [HumanMessage(content=question)]},
+            config={"configurable": {"thread_id": sess}},
+            stream_mode="messages",
+        ),
+        endpoint=ENDPOINT,
+        # ⚠️ 白名单来自**图模块**；⛔ 这里**不开** `subgraphs` —— 本图**没有子图**。
+        extract=lambda item: graph_message_text(
+            item, nodes=agent_checkpointer.STREAMABLE_NODES),
+        on_complete=_complete,
+    ))
+
 # ==================== Men0 添加记忆管理接口 测试 ====================
 
 # 搜索 新增改动，灵活使用user_id进行用户不同功能的记忆空间隔离。
@@ -891,6 +1193,90 @@ async def mcp_agent_chat(
         "requested_by": user_name,
          "budget_warning": warning_info["message"] if warning_info["warning"] else None,
     }
+
+
+@router.post("/agent/mcp_chat/stream")
+async def mcp_agent_chat_stream(
+    question: str,
+    thread_id: str = "default",
+    memory_space: str = "default",
+    # ⚠️ 依赖**与 `/agent/mcp_chat` 一致**（`check_budget`，⛔ 不是 `get_current_user_hybrid`）——
+    #    它判的是【用户**日**预算】，是本端点原有的一道门，与会话级 `B8` **并存**（两个东西）。
+    user_name: str = Depends(check_budget),
+):
+    """`/agent/mcp_chat` 的**流式**版本（`B1`）。SSE 逐 token 返回。
+
+    ## 帧格式（与另外三条 agent 流式链**同一套**）
+
+    | 帧 | 何时 |
+    |---|---|
+    | `data: {"content": "…"}` | **每个 token 一帧** |
+    | `data: {"thread_id": …, "answer": …, "budget_warning": …}` | 收尾**一帧汇总** |
+    | `data: [DONE]` | 结束哨兵 |
+
+    ## ⚠️ 与 `/agent/mcp_chat` 保持一致的四处
+
+    1. **`start_trace` 在最前**（⚠️ 在 B8 **之前**：超限被拒时，追踪里仍留得下这次尝试的痕迹）；
+    2. **`check_budget` 依赖 + B8 会话级 + B11 全站日级** —— 三道门都要过；
+    3. **`sess` 拼身份**，但注入 state 的 `thread_id` **保持原值** ——
+       它喂的是**追踪 / 花费**那条轴（`/agent/trace/{thread_id}` 读的也是原值）。
+       🔴 **两条轴别混**（混了就得连追踪的读写一起改，那是另一件事）；
+    4. `finish_trace` + `check_budget_warning` 移到**收尾**（它们要在有最终答案之后才做）。
+    """
+    # 记录工具 开始追踪
+    start_trace(user_name, thread_id, question)
+
+    # B8 · 会话级 token 上限（`DEC-041`）
+    ok, why = check_session_token_budget(user_name, thread_id)
+    if not ok:
+        raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
+
+    # B11 · 全站日级熔断（`①b` Task 4）
+    ok, why = circuit(global_key())
+    if not ok:
+        raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
+
+    # 🅾 丙段：**checkpoint 键**拼身份（⛔ 不是裸 `thread_id`）
+    sess = session_key(user_name, thread_id)
+    ENDPOINT = "agent_mcp_chat_stream"
+
+    async def _complete(collected):
+        """收尾尾巴：**结束追踪 + 预算提醒 + 汇总帧 + `[DONE]`**。
+
+        ⚠️ `answer` 取自**图的最终状态**（最后一条消息），⛔ 不是攒流过的块 ——
+           与 `/agent/mcp_chat`（它取 `result["messages"][-1].content`）**同源**（`DEC-050`）。
+        """
+        state = await mcp_agent.aget_state({"configurable": {"thread_id": sess}})
+        messages = (state.values or {}).get("messages") or []
+        answer = getattr(messages[-1], "content", "") if messages else ""
+        # 记录工具 结束追踪
+        finish_trace(user_name, thread_id, answer)
+        # 预算提醒
+        warning_info = check_budget_warning(user_name)
+        yield sse_frame({
+            "thread_id": thread_id,
+            "answer": answer,
+            "budget_warning": warning_info["message"] if warning_info["warning"] else None,
+        }, ensure_ascii=False)
+        yield DONE_FRAME
+
+    return sse_response(sse_stream(
+        lambda: mcp_agent.astream(
+            {
+                "messages": [HumanMessage(content=question)],
+                "user_name": user_name,
+                "memory_space": memory_space,
+                "thread_id": thread_id,     # 注入 thread_id（追踪轴，保持原值）
+            },
+            config={"configurable": {"thread_id": sess}},
+            stream_mode="messages",
+        ),
+        endpoint=ENDPOINT,
+        # ⚠️ 白名单来自**图模块**；⛔ 本图**没有子图** ⇒ 不开 `subgraphs`。
+        extract=lambda item: graph_message_text(
+            item, nodes=agent_graph_advanced.STREAMABLE_NODES),
+        on_complete=_complete,
+    ))
 
 # ==================== 升级版 Agent MCP Client  动态获取当前可用的工具列表 接口 ====================
 @router.get("/agent/mcp_tools_dynamic")

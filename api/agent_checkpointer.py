@@ -12,6 +12,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from llm_factory import make_llm   # ①b Task 5：model / api_key / base_url / max_tokens 的唯一落点
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
+from langchain_core.runnables import RunnableConfig   # B1：节点要靠它把回调接进模型调用
 from datetime import datetime
 from safe_math import calculate  # DEC-049：`calculator` 的求值实现 —— ⛔ 别改回 `eval`
 from search_tools import web_search  # DEC-051：换掉本机不可达的 DuckDuckGo（见 `agent_graph.py` 同名处）
@@ -55,9 +56,30 @@ class AgentState(TypedDict):
 
 # ==================== 定义节点 ====================
 from token_tracker import record_usage #Token统计模块
-def agent_decide(state: AgentState):
-    response = llm_with_tools.invoke(state["messages"])
+def agent_decide(state: AgentState, config: RunnableConfig):
+    """决策节点（`B1` · 2026-10-04 改真流式）。
+
+    🔴 **真流式的唯一条件 = 声明 `config` 并把它转发给模型的 `.stream()`**（`DEC-050`）。
+       ⛔ 别改成 `async def` —— 同步的 `graph.invoke()` 会当场抛
+       `TypeError: No synchronous function provided to "agent"`，而 `/agent/memory_chat` 在用它。
+       （同型实现见 `api/agent_graph.py::agent_decide`，那份是 `DEC-050` 的样板。）
+    """
+    response = None
+    for chunk in llm_with_tools.stream(state["messages"], config=config):
+        # ⚠️ 用 `AIMessageChunk.__add__`（`+`）合并，⛔ **不是** `response.content += chunk.content`：
+        #    后者会丢掉**碎片化**到达的 `tool_calls`（name 一块、args 几块）
+        #    ⇒ `should_continue` 判不出 `"approval"` / `"tools"` ⇒ **审批门静默失效**。
+        # 🔴 并且**必须遍历【所有】块**，⛔ 不许跳过 `content` 为空的块 ——
+        #    provider 把 `usage_metadata` 挂在**最后一块**（`content=''`）上（实测，
+        #    `fastapi-rag-agent-TODO待办/探针-流式与记账.py`）⇒ 跳过它，下面那段记账就没了，
+        #    而接口一切正常。
+        response = chunk if response is None else response + chunk
     # 统计 Token
+    # 🔴 **下面这个判据恒为 False**（既有 bug，⛔ 本轮不修）—— 真 `AIMessage` / `AIMessageChunk`
+    #    都**没有** `.usage` 属性（只有 `usage_metadata`）⇒ **本端点的记账从来没执行过**。
+    #    ⚠️ 本轮**原样保留**这里的每一个字节：修它会让 `/agent/memory_chat` **开始拦人**
+    #       （配额从"形同虚设"变成"真的生效"）—— 那是**行为变更**，要单独裁。
+    #    📄 发现经过 ⇒ `fastapi-rag-agent-TODO待办/硬门A-Agent端流式勘察-20261003.md` §8.5
     if hasattr(response, "usage"):
         record_usage(
             # ⚠️ 2026-10-01 修（🅗 S4）：原写死 `"qwen-turbo"`，而本文件的 `llm` 用的是
@@ -94,6 +116,16 @@ def tool_execute(state: AgentState):
 # 🔴 2026-10-03（`DEC-056` 丙段）：本文件原先在这里**自己写了一份** `should_continue`
 #    （只有两条路：`tool_calls` ⇒ "tools" / 否则 END）。已删除 —— 改用 `agent_graph` 那一份
 #    （三条路，含 `"approval"`）。理由：审批的判据只能有**一处**，见文件顶部 import 处的注释。
+
+# ==================== 流式白名单（B1 · 2026-10-04）====================
+# 🔴 **`B1`：可流节点名单放在【图模块里】，⛔ 端点不许自己抄一份字面量**（理由见
+#    `api/agent_graph.py` 同名常量处 —— 一个名字两个来源必然漂移，而漂移是**静默**的）。
+# ⚠️ 必须放在**模块级**（⛔ 不能放进 `build_checkpointer_agent()`）：端点是按
+#    `agent_checkpointer.STREAMABLE_NODES` 取的，函数体里的是局部名，外面拿不到。
+# ⛔ `tools` / `approval` **不在**里面：它们不调 LLM（无字可流），
+#    而 `tools` 返回的 `ToolMessage` 会被当成"新消息"发出来 ⇒ 混进正文（实测）。
+STREAMABLE_NODES = frozenset({"agent"})
+
 
 # ==================== 构建图（支持选择 Checkpointer 后端） ====================
 # ======= 支持 MemorySaver SqliteSaver RedisSaver 自主选择架构后端 =======

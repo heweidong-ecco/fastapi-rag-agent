@@ -10,6 +10,57 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- 🟢 **`B1` 剩余 4 条链：Agent 端 5 条对话链【全部真流式】+ 抽出共享层 `api/sse.py`**（2026-10-04 · `DEC-059`）——
+  **新增 4 条 SSE 路由**：`POST /agent/{advanced_chat, memory_chat, mcp_chat, plan_execute}/stream`。
+  路由 **30 → 34**，全仓流式端点 **2 → 6** ⇒ ✅ **硬门 A 的「该流的流」关掉了**。
+
+  **业务方 2026-10-04 的三条裁定**（本次的前提）：
+  ① **落地形状 = 抽共享模块 `api/sse.py`，现有两条流式端点一起改**（⛔ 不是复制第 5、6 份内联生成器）；
+  ② **`/agent/approve` 不做流式**（它是「续跑一个已经停下的图」，不是「生成答案」）；
+  ③ **`plan_execute` 本轮一起做**，且**只流「规划段」**。
+
+  **改了四条链 —— 形态各不相同（⛔ 不是复制粘贴）**：
+
+  | 链 | 图 | 可流节点 | 形态 |
+  |---|---|---|---|
+  | A `advanced_chat` | `agent_graph_advanced_learning.py` | 4 个 | 同步 `.stream` · ⚠️ 需 `subgraphs=True` |
+  | B `memory_chat` | `agent_checkpointer.py` | 1 个 | 同步 `.stream` |
+  | C `mcp_chat` | `agent_graph_advanced.py` | 2 个 | ⚠️ **节点本来就是 `async def`** ⇒ `astream` |
+  | D `plan_execute` | **不是图**（同步函数） | — | `_ThreadTokenBridge`（线程 → 事件循环） |
+
+  **共享层 `api/sse.py` 抽走了 5 条约束**（都有出处，不是设计偏好）：
+  ① **同步收尾（计数 → 日志 → `on_cancel`）必须排在任何 `await` 之前**（`DEC-054`：`await` 会被**二次投递的取消**打断，
+     排在它后面的收尾**一件都不跑**，而单测全绿）；② 关上游包 **`anyio.CancelScope(shield=True)`**；
+  ③ `except asyncio.CancelledError: raise`（⛔ 不吞 · ⛔ 里面不 `yield`）；④ `except Exception` ⇒ 发 `{"error": …}` 帧后 **return**；
+  ⑤ 汇总帧**只从图的最终状态取**（`aget_state` → `summarize_agent_result`，`DEC-050`）。
+
+  ⛔ **没进共享层的两件事**：**B8 `check_session_token_budget` / B11 `circuit(global_key())` 两道前置闸**
+  —— 两个 AST 守卫（`api/test_session_budget_wiring.py:65` · `api/test_breaker_wiring.py:44`）**钻进端点函数体**里查，
+  搬进共享层会让守卫**查不到**（那就是"门挂在别处＝没有门"的变体）。
+
+  ✅ **两条既有流式端点（`/agent/langgraph_chat/stream` · `/rag/stream_search`）一起改到共享层，行为逐帧等价** ——
+  判据：两份既有测试**全绿且 diff 为空**。⚠️ RAG 那条有**三处看着像 bug、但不能动**的（`[DONE]` 在 `sources` **之前** ·
+  取消时**不发任何帧** · 每次 `yield` 后 `sleep(0.01)` 限速）⇒ 都由调用方**显式传入**，⛔ 没被"抽公共"抹掉。
+
+  **改动面**：`api/sse.py`（新）· `docs/specs/sse.md`（新）· 4 个图/流程模块（`agent_graph.py` ·
+  `agent_checkpointer.py` · `agent_graph_advanced.py` · `agent_graph_advanced_learning.py` · `plan_execute.py`）·
+  `api/api_v1_agent.py`（4 条新路由）· `api/api_v1_rag.py`（改走共享层）· 🆕 `api/test_sse_layer.py` + `api/test_agent_stream_chains.py`。
+  ⭐ **可流节点名单住在各自的图模块里**（模块级 `STREAMABLE_NODES`），端点⛔ 不许自己抄字面量（`DEC-051` 的病根）。
+
+  📌 **判据（可打印）**：`grep -c '"/agent/.*stream"' api/api_v1_agent.py` ⇒ **5** ·
+  `grep -c '^@router' api/api_v1_agent.py` ⇒ **34** ·
+  `venv/bin/python -m pytest api/ -q -m "not integration and not needs_db"` ⇒ **466 passed, 3 skipped, 32 deselected**
+  （2026-10-04 提交前**复跑实测**；⚠️ 本条原写 **450 passed**，**复跑对不上** ⇒ 已按实测更正，⛔ 不保留旧数）。
+
+  ⚠️ **本轮【只声明「该流的流了」】** —— 其余 29 条非流式是**查询 / 管理 / 记账类**（token 用量 · 工具健康 ·
+  预算 · 轨迹 · 记忆增删），**产出的不是逐字生成的文本**。🔴 **这是【本批的判断】，⛔ 没走业务裁定**。
+
+  ⚠️ 另外两条**如实写明、⛔ 不是缺陷**的现状：**链 A 的 CALC / DATE 两个分支本来就无字可流**（答案来自
+  `calculator` / `date_today` 的**返回值**）；**链 D 流出去的是【正在生成的 JSON 片段】**（提示词要求严格 JSON）
+  ⇒ 前端只能当**"规划中"指示器**，终稿**只看末帧**。
+
+  📄 `docs/decisions/DEC-059-SSE共享层与B1剩余四条链.md` · 🌐 PR（`feat/b1-stream-remaining-chains`，**一个完整任务一个 PR**）
+
 - 🟢 **新增 `DEC-058` + 一条规矩落进 `docs/规范/开发规范.md §2.5·5`**（2026-10-03）——
   **「不连库的用例一律用【裸】`TestClient(app)`，⛔ 不用 `with … as`」**。
 

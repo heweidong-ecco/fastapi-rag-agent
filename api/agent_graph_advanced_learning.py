@@ -13,6 +13,7 @@ from llm_factory import make_llm   # ①b Task 5：model / api_key / base_url / 
 from search_tools import web_search
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage,SystemMessage
+from langchain_core.runnables import RunnableConfig   # B1：节点要靠它把回调接进模型调用
 from datetime import datetime
 from safe_math import calculate  # DEC-049：`calculator` 的求值实现 —— ⛔ 别改回 `eval`
 
@@ -129,11 +130,22 @@ def create_search_subgraph():
         result = web_search.invoke(query)
         return {"messages": [AIMessage(content=f"搜索原始结果：{result[:500]}")]}
 
-    def search_summarize(state: AgentState):
-        """总结搜索结果"""
+    def search_summarize(state: AgentState, config: RunnableConfig):
+        """总结搜索结果
+
+        🔴 **`B1`（2026-10-04）：改真流式** —— 声明 `config` 并把它转发给 `.stream()`，
+           这是 `astream(stream_mode="messages")` 出不出 token 的**唯一条件**（`DEC-050`）。
+           ⛔ 本文件所有节点**都是同步的**，别改成 `async def`：同步的 `graph.invoke()`
+           （`/agent/advanced_chat` 走的就是它）会当场抛 `TypeError`。
+        """
         raw = state["messages"][-1].content
         summary_prompt = f"请用一句话总结以下信息：{raw}"
-        summary = llm_search.invoke([HumanMessage(content=summary_prompt)])
+        # ⚠️ `+` 聚合（`AIMessageChunk.__add__`），⛔ 不是 `content +=`。
+        # 🔴 **遍历【所有】块**，⛔ 不跳空 `content`（`usage_metadata` 挂在最后一块上 ——
+        #    本模块目前不记账，但聚合写法要一致，否则将来补记账时会踩同一个坑）。
+        summary = None
+        for chunk in llm_search.stream([HumanMessage(content=summary_prompt)], config=config):
+            summary = chunk if summary is None else summary + chunk
         return {"final_output": summary.content}
 
     subgraph.add_node("search_execute", search_execute)
@@ -188,12 +200,15 @@ def create_translate_subgraph():
     """
     subgraph = StateGraph(AgentState)
 
-    def translate_execute(state: AgentState):
-        """执行翻译"""
+    def translate_execute(state: AgentState, config: RunnableConfig):
+        """执行翻译（`B1` · 2026-10-04 改真流式 —— 译文本就是答案 ⇒ 该流）"""
         query = state["messages"][-1].content
         # 简单粗暴地翻译成英文
         prompt = f"请将以下内容翻译成英文，只输出翻译结果：\n\n{query}"
-        result = llm.invoke([HumanMessage(content=prompt)])
+        # ⚠️ 同 `search_summarize`：同步 `.stream()` + 转发 `config` + `+` 聚合所有块。
+        result = None
+        for chunk in llm.stream([HumanMessage(content=prompt)], config=config):
+            result = chunk if result is None else result + chunk
         return {"final_output": result.content}
 
     subgraph.add_node("translate_execute", translate_execute)
@@ -217,8 +232,14 @@ def create_react_subgraph():
     llm_react = make_llm("chat", "agent")
     llm_react_with_tools = llm_react.bind_tools(tools)
 
-    def agent_decide(state: AgentState):
-        """决策节点：调用模型，让它决定是回复文本还是调用工具。"""
+    def agent_decide(state: AgentState, config: RunnableConfig):
+        """决策节点：调用模型，让它决定是回复文本还是调用工具。
+
+        🔴 **`B1`（2026-10-04）：改真流式**（声明 `config` + 转发 `.stream()`，`DEC-050`）。
+           ⚠️ **`+` 聚合在这里是【必须】的**：`tool_calls` 是碎片化到达的，只拼 `content`
+           会让本子图的 `should_continue` 判不出 `"tools"` ⇒ **工具永远不会被执行**，
+           而 `summarize` 照样写出 `final_output`（看着像正常回答）。
+        """
         # 构建基础 system prompt
         system_prompt = "你是一个能使用工具的智能助理。请根据用户需求自主调用工具完成任务。"
 
@@ -226,7 +247,9 @@ def create_react_subgraph():
         system_prompt = inject_memories_to_prompt(system_prompt, state)
         # 将 system prompt 和消息列表合并
         messages = [SystemMessage(content=system_prompt)] + state["messages"]
-        response = llm_react_with_tools.invoke(messages)
+        response = None
+        for chunk in llm_react_with_tools.stream(messages, config=config):
+            response = chunk if response is None else response + chunk
         return {"messages": [response]}
     # 工具执行节点现在只需一行核心逻辑
     from mcp_server import TOOL_HANDLERS
@@ -290,6 +313,37 @@ def create_react_subgraph():
 
     return subgraph.compile()
 
+# ==================== 流式白名单（B1 · 2026-10-04）====================
+# 🔴 **`B1`：可流节点名单放在【图模块里】，⛔ 端点不许自己抄一份字面量**（理由见
+#    `api/agent_graph.py` 同名常量处 —— 一个名字两个来源必然漂移，而漂移是**静默**的）。
+# ⚠️ 必须放在**模块级**（⛔ 不能放进 `build_advanced_agent()`）：端点是按
+#    `agent_graph_advanced_learning.STREAMABLE_NODES` 取的，函数体里的是局部名。
+#
+# 🔴🔴 **这张名单是「6 个调 LLM 的节点里只有 4 个该流」那条判断的落点** ——
+#    它**⛔ 读代码推不出来**（要同时知道「这个节点的 LLM 输出是什么角色」＋「答案最终从哪来」）。
+#    完整对照表 ⇒ `docs/specs/agent_graph_advanced_learning.md` 的 ⭐ 节。
+#
+# | 节点 | 调什么 | 该流？| 为什么 |
+# |---|---|---|---|
+# | `chat` | `llm` | ✅ | 就是答案 |
+# | `search_summarize` | `llm_search` | ✅ | 一句话总结 = 答案 |
+# | `translate_execute` | `llm` | ✅ | 译文 = 答案 |
+# | `agent`（react 子图内层名） | `llm_react_with_tools` | ✅ | 答案 + `tool_calls` |
+# | ⛔ `supervisor` | `llm` | ❌ | 输出是**路由词**（`SEARCH`/`CALCULATOR`/…）—— 流出去 = 答案前面先蹦一个 `SEARCH` |
+# | ⛔ `calc_execute` | `llm_calc` | ❌ | 它**只提取表达式**（`6*7`）；真答案 `42` 来自 `calculator` **工具**，不是 LLM |
+#
+# ⚠️ 另有 **2 个节点根本不调 LLM** 因而无字可流：`date_execute`（纯工具）、`summarize`（只搬运）。
+# 🔴 由此得出的一条**必须知道、别误判成 bug 的事实**：**CALC 与 DATE 两个分支本来就一个字都流不出来**
+#    —— 用户会一直等到最后一帧汇总里的 `answer`。那是设计如此，⛔ 别为了"看起来也在流"
+#    把 `calc_execute` 的提取过程放出来（那是中间产物，不是答案）。
+STREAMABLE_NODES = frozenset({
+    "chat",
+    "search_summarize",
+    "translate_execute",
+    "agent",     # ⚠️ 子图**内层**名 —— `meta["langgraph_node"]` 报的就是它，⛔ 不是 `react_dept:agent`
+})
+
+
 # ==================== 构建主图 ====================
 from memory_store import search_user_memory
 def build_advanced_agent():
@@ -328,7 +382,12 @@ def build_advanced_agent():
         return state
 
     # 2. 添加对话节点（简单聊天）
-    def chat_node(state: AgentState):
+    def chat_node(state: AgentState, config: RunnableConfig):
+        """兜底对话节点（`B1` · 2026-10-04 改真流式）。
+
+        ⚠️ 它是**默认落点**：`route_by_intent` 是**精确匹配**的，模型多吐一个句号
+           （`REACT。`）就静默落到这里 ⇒ **这条分支的流式体验 = 大多数请求的体验**。
+        """
         # 构建基础 system prompt
         system_prompt = "你是一个智能助理，请直接回答用户的问题。"
 
@@ -336,7 +395,10 @@ def build_advanced_agent():
         system_prompt = inject_memories_to_prompt(system_prompt, state)
 
         messages = [SystemMessage(content=system_prompt)] + state["messages"]
-        response = llm.invoke(messages)
+        # ⚠️ 同族写法：同步 `.stream()` + 转发 `config` + `+` 聚合所有块。
+        response = None
+        for chunk in llm.stream(messages, config=config):
+            response = chunk if response is None else response + chunk
         return {"final_output": response.content}
 
     # 3. 编译子图

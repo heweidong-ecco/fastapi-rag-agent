@@ -216,6 +216,21 @@ def human_approval(state: AgentState):
     print("流程已暂停，等待人工审批...")
     return {}
 
+# ==================== 流式白名单（B1 · 2026-10-04）====================
+# 🔴 **`③` Task 4 · `B1`：可流节点名单放在【图模块里】，⛔ 端点不许自己抄一份字面量。**
+#    写在这里（不是 `build_agent_graph()` 函数体里）是因为**端点要按 `agent_graph.STREAMABLE_NODES` 取**
+#    —— 函数体里的是局部名，外面拿不到。
+#    ⚠️ 病根同上一条 `DEC-051`：**一个名字两个来源 ⇒ 必然漂移，而漂移是静默的**
+#    （那次两个来源对不上，审批门**从来没触发过**，接口一切正常）。
+#    ⚠️ 判据：`api/test_agent_stream_chains.py::test_streamable_nodes_exist_in_the_graph`
+#    钉住「名单里的名字**真的在图里**」（`get_graph(xray=1)` 按 `split(":")[-1]` 后缀比）。
+#    ⛔ 同族的 `tools` / `approval` 不在里面：它们**不调 LLM**（无字可流），
+#    而 `tools` 返回的 `ToolMessage` 会被当成"新消息"发出来 ⇒ 混进正文（实测）。
+STREAMABLE_NODES = frozenset({
+    "agent",     # 决策节点：`agent_decide` 已声明 `config` 并把流转发给模型（`DEC-050`）
+})
+
+
 # ==================== 构建图 ====================
 def build_agent_graph():
     """构建并编译 LangGraph Agent 图（带人工审批）"""
