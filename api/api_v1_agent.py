@@ -272,7 +272,7 @@ async def langgraph_chat_stream(
         else:
             resolve(sess)
 
-        yield sse_frame({"thread_id": thread_id, **summary}, ensure_ascii=False)
+        yield sse_frame({"thread_id": thread_id, "requested_by": user_name, **summary}, ensure_ascii=False)
         yield DONE_FRAME
 
     return sse_response(sse_stream(
@@ -528,6 +528,7 @@ async def advanced_agent_chat_stream(
             "answer": values.get("final_output", "处理完成"),
             "intent": values.get("intent", "unknown"),
             "memory_space": memory_space,
+            "requested_by": user_name,
         }, ensure_ascii=False)
         yield DONE_FRAME
 
@@ -770,6 +771,7 @@ async def agent_plan_execute_stream(
             "thread_id": thread_id,
             "plan": result_holder.get("plan"),
             "execution_result": result_holder.get("execution_result", ""),
+            "requested_by": user_name,
         }, ensure_ascii=False)
         yield DONE_FRAME
 
@@ -893,7 +895,7 @@ async def memory_chat_stream(
                      raw_thread_id=thread_id, graph="checkpointer_agent")
         else:
             resolve(sess)
-        yield sse_frame({"thread_id": thread_id, **summary}, ensure_ascii=False)
+        yield sse_frame({"thread_id": thread_id, "requested_by": user_name, **summary}, ensure_ascii=False)
         yield DONE_FRAME
 
     return sse_response(sse_stream(
@@ -1257,6 +1259,7 @@ async def mcp_agent_chat_stream(
             "thread_id": thread_id,
             "answer": answer,
             "budget_warning": warning_info["message"] if warning_info["warning"] else None,
+            "requested_by": user_name,
         }, ensure_ascii=False)
         yield DONE_FRAME
 

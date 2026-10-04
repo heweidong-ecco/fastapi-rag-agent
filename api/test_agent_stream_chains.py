@@ -387,6 +387,32 @@ def test_summary_comes_from_final_state_not_from_streamed_chunks(chain_key, monk
     assert graph.aget_state_calls, "端点没有读图的最终状态 ⇒ 它是在拿流式块猜"
 
 
+@pytest.mark.parametrize("chain_key", ["A", "B", "C"])
+def test_summary_frame_carries_requested_by(chain_key, monkeypatch):
+    """⭐ 汇总帧必须带 `requested_by` —— 三条链的**非流式兄弟一直都有它**
+    （`api_v1_agent.py:469` / `:838` / `:1193`）。
+
+    ⚠️ 少一个字段是**最难发现**的那类差异：从 `/agent/advanced_chat` 切到
+       `/agent/advanced_chat/stream`，两边其余字段长得**一模一样**，只有它静默没了。
+    ⚠️ **另外两条端点的同一断言不在本用例里**：链 D 没有图（走 `_plan_factory`），
+       断言加在 `test_plan_execute_summary_carries_plan_and_execution_result`；
+       基线端点 `/agent/langgraph_chat/stream` 在 `api/test_agent_sse.py`。
+    """
+    graph = _ChainGraph(
+        items=_tokens("半截"),
+        final_values=_FINAL_BY_CHAIN[chain_key],
+    )
+    resp = _call(chain_key, monkeypatch, graph)
+    objs = _frames_to_objs(_collect_frames(resp))
+
+    # ⚠️ 与上面那条同款取法：末帧是 `[DONE]`，汇总帧在它**前面**一帧。
+    summary = objs[-2] if objs[-1] == "__DONE__" else objs[-1]
+    assert summary.get("requested_by") == "tester", (
+        f"{CHAINS[chain_key]['route']} 的汇总帧没带 requested_by ⇒ "
+        f"与非流式兄弟的形状**静默不一致**：{summary}"
+    )
+
+
 # ---------------------------------------------------------------- ④ 取消传播
 
 @pytest.mark.parametrize("chain_key", ["A", "B", "C"])
@@ -685,6 +711,12 @@ def test_plan_execute_summary_carries_plan_and_execution_result(monkeypatch):
     assert summary["execution_result"] == "结果是 42", f"汇总帧没带执行结果：{summary}"
     assert summary["goal"] == "帮我算 6*7"
     assert summary["thread_id"] == THREAD
+    # ⚠️ 链 D 的 `requested_by` 是**原计划 §八 明文承诺过**的
+    #    （末帧 = `{goal, plan, execution_result, requested_by}`）——
+    #    承诺过、实现当时没落地，评审收口补上。
+    assert summary["requested_by"] == "tester", (
+        f"链 D 汇总帧没带 requested_by（原计划 §八 承诺过它有）：{summary}"
+    )
 
 
 def test_plan_execute_stream_survives_budget_exceeded_midway(monkeypatch):

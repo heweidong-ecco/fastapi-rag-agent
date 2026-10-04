@@ -506,3 +506,19 @@ def test_route_is_registered(route_missing_msg):
     """路由真的挂上去了（⛔ 别写成函数却忘了 `@router.post`）。"""
     paths = {r.path for r in m.router.routes}
     assert "/api/v1/agent/langgraph_chat/stream" in paths, f"路由没注册。现有：{sorted(paths)}"
+
+
+def test_summary_frame_carries_requested_by(monkeypatch):
+    """⭐ 汇总帧必须带 `requested_by` —— 与**非流式** `/agent/langgraph_chat`
+    （`api_v1_agent.py:177`）对齐。
+
+    ⚠️ 这是**基线**端点的那一条；A / B / C 三条新链在
+       `api/test_agent_stream_chains.py::test_summary_frame_carries_requested_by`，
+       链 D 在 `test_plan_execute_summary_carries_plan_and_execution_result`。
+    """
+    fake = _FakeGraph(tokens=("你", "好"))
+    resp = _call_stream_route(monkeypatch, fake, user_name="tester")
+    frames = _collect_frames(resp)
+
+    objs = [json.loads(f[len("data: "):]) for f in frames if f.strip() != "data: [DONE]"]
+    assert objs[-1].get("requested_by") == "tester", f"汇总帧没带 requested_by：{objs[-1]}"
