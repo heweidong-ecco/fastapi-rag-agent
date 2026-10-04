@@ -53,7 +53,7 @@ from document_preprocessor import DocumentPreprocessor
 from chunker import split_text_with_filter
 from document_parser import parse_document
 
-from cache import get_chat_history, append_chat_history
+from cache import get_chat_history, append_chat_history, persist_turn, INTERRUPTED_SUFFIX
 
 from agent_graph import agent_graph
 
@@ -599,27 +599,11 @@ def get_llm_stream():
     return _llm_stream
 
 
-# 🔴 `③` Task 6（`B3`）：中断后存进历史的那半截答案**必须带这个尾巴**。
-#    理由：历史会被**原样拼进下一轮的 prompt**（`:669-670`）——
-#    不带标记 ⇒ 模型会把一段**被截断的回答**当成"上一轮我说完了"，行为跟着变。
-INTERRUPTED_SUFFIX = "…（本次回答被中断，以上为已生成部分）"
-
-
-def _persist_interrupted_turn(user_name: str, question: str, collected_parts: list):
-    """客户端中断后，把**已经生成的那半截**补存进对话历史（`③` Task 6 · `B3`）。
-
-    ⚠️ 为什么不是"直接丢"：丢的话**用户那句提问也一起丢**（它和答案写在同一个
-       收尾段里）⇒ 用户下一轮问"接着上面说"，历史里**没有任何痕迹**。
-       代码原作者的意图写在本文件 `:691` 的注释里（"使它支持历史补偿"）。
-
-    ⚠️ **一块都没生成就不写** —— 写一条空的助手消息只会污染下一轮 prompt。
-    """
-    answer = "".join(collected_parts).strip()
-    if not answer:
-        return
-    # 成对写：只写答案不写提问 ⇒ 历史里出现一条**没有来由**的助手消息
-    append_chat_history(user_name, "user", question)
-    append_chat_history(user_name, "assistant", answer + INTERRUPTED_SUFFIX)
+# 🔴 2026-10-04（`DEC-055`）：`INTERRUPTED_SUFFIX` 与 `_persist_interrupted_turn` **搬去
+#    `api/cache.py`** —— 6 条流式端点现在共用同一段留痕（`persist_turn`），
+#    本文件只**再导出**这个名字（`api/test_cancel_propagation.py` 按 `rag_mod.INTERRUPTED_SUFFIX` 取它）。
+#    ⚠️ 搬家的理由不是"整理"：只有一份实现，`DEC-055` 那三条规则（成对写 / 空答案不写 / 非 done 带尾巴）
+#       才不会在 6 处各写一遍、各漏一条。
 
 
 @router.post("/rag/stream_search")
@@ -732,9 +716,11 @@ async def stream_search(
         yield DONE_FRAME
         # ---- 在这里记录对话历史 ----
         # 生成完成后，将本轮问答自动存入 Redis
-        full_answer = "".join(collected)
-        append_chat_history(user_name, "user", req.question)       # 记录用户问题
-        append_chat_history(user_name, "assistant", full_answer)   # 记录助手完整回答
+        # 🔴 `DEC-055`：三条出口（`done` / `cancelled` / `error`）**共用 `persist_turn`**
+        #    ⇒ `status` 这个区分只有一份实现，⛔ 不是在这里手写一遍 `append_chat_history`。
+        #    ⚠️ `done` 的字节与改前**逐字相同**（答案原样，⛔ 不 strip、⛔ 不带标记）。
+        #    ⚠️ **唯一的行为变化**：空答案 ⇒ **连提问也不写**（旧代码会写下孤零零的提问）。
+        persist_turn(user_name, req.question, "".join(collected), status="done")
         # 如果有引用，在结束后发送来源列表
         if req.citations and sources_list:
             yield sse_frame({"sources": sources_list}, ensure_ascii=True)
@@ -760,11 +746,13 @@ async def stream_search(
         #    （不过滤 ⇒ 前端收到一串空白帧）。
         extract=llm_chunk_text,
         on_complete=_complete,
-        # 🔴 `③` Task 6（`B3`）：取消时把**已经生成的那半截**补存进历史（⛔ 不是直接丢）。
-        #    ⚠️ 它**必须是同步的**（`append_chat_history` 是同步函数，`api/cache.py:39`）——
+        # 🔴 `DEC-055`：**取消与异常两条出口**都把**已经生成的那半截**补存进历史（⛔ 不是直接丢）。
+        #    ⚠️ 它**必须是同步的**（`persist_turn` 走同步的 `append_chat_history`）——
         #       骨架会在 `await aclose()` **之前**调它，这正是"晚切也存得下"的原因（`DEC-054`）。
-        #    ⚠️ 骨架的 `logger.info` 与这里的 `print` 不冲突：前者进日志文件，后者仍在 stdout。
-        on_cancel=lambda collected: _persist_interrupted_turn(user_name, req.question, collected),
+        #    ⚠️ 骨架的 `logger.info` 与 `_on_error` 里的 `print` 不冲突：前者进日志文件，后者仍在 stdout。
+        on_incomplete=lambda collected, status: persist_turn(
+            user_name, req.question, "".join(collected), status=status,
+        ),
         on_error=_on_error,
         # 🔴 **`ensure_ascii=True` 不是可有可无的**：本端点三帧一直用**默认的 `True`**
         #    （中文变 `\uXXXX`），而骨架的默认是 `False`（中文原样）⇒ 不显式传，**线上字节就变了**。

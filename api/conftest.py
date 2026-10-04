@@ -22,6 +22,45 @@ from fastapi.testclient import TestClient
 from main import app
 from config import LOGIN_USER_NAME, LOGIN_PASSWORD
 
+
+class FakeRedis:
+    """假 redis：只实现 `chat_history` 用到的 `rpush` / `lrange` / `expire`（`DEC-055`）。
+
+    🔴 **`lrange` 必须仿真 Redis 语义，⛔ 不能写成 `items[start:end]`** ——
+       `get_chat_history` 调的是 `lrange(key, -10, -1)`，而 Python 的 `[-10:-1]`
+       **不含最后一个元素**，与真 Redis 的 `LRANGE -10 -1`（**含**）相反
+       ⇒ 照抄会让「成对写入」的断言**假红/假绿**。
+    """
+
+    def __init__(self):
+        self.lists: dict[str, list[str]] = {}
+        self.expired: list[tuple[str, int]] = []
+
+    def rpush(self, key, value):
+        self.lists.setdefault(key, []).append(value)
+
+    def lrange(self, key, start, end):
+        items = self.lists.get(key, [])
+        if start < 0:
+            start = max(len(items) + start, 0)
+        if end < 0:
+            end = len(items) + end
+        return items[start:end + 1]          # ← 含 end（Redis 语义）
+
+    def expire(self, key, seconds):
+        self.expired.append((key, seconds))
+
+    def history(self, user_name):
+        import json
+        return [json.loads(x) for x in self.lists.get(f"chat_history:{user_name}", [])]
+
+
+@pytest.fixture
+def fake_redis():
+    """一条用例一个干净的假 redis（⛔ 不碰本机/CI 的真 redis）。"""
+    return FakeRedis()
+
+
 @pytest.fixture
 def client():
     return TestClient(app)

@@ -66,6 +66,14 @@ from breaker import circuit, global_key
 #    `Annotated[List, operator.add]`（append）⇒ **模型看得到别人的对话**。
 #    ⛔ 只在**传进图 / 传进待接管队列**时拼 —— 响应里回显的仍是调用方传进来的**原值**。
 from session_key import session_key
+# 🔴 `DEC-055`（2026-10-04）：**5 条 Agent 链的留痕**落到 Redis `chat_history`。
+#    ⚠️ 为什么是这里而不是 checkpoint：`chat_history` 与 LangGraph checkpoint 是**两套互不相通的存储**，
+#       而 `DEC-055` 决策 3 把 `status` 的落点定在 `chat_history` ⇒ 改前 5 条链**一个字都不留**
+#       （判据：`grep -n "persist_turn\|append_chat_history" api/api_v1_agent.py` ⇒ 改前零命中）。
+#    ⚠️ 代价（选它时就知道）：Agent 链的下一轮 prompt 来自 **checkpoint**，⛔ 不读 `chat_history`
+#       ⇒ 给它写的是**日志型数据**（今天无读者）。反方向有一条真影响：`api_v1_rag.py` 在
+#       **前端没传历史时**读这条键 ⇒ 此后 Agent 链的轮次会进 RAG 的 prompt（=「统一会话」的意图）。
+from cache import persist_turn
 # 记录工具 开始追踪 结束追踪
 from tool_visualizer import (
     start_trace, finish_trace, get_trace, get_all_traces,
@@ -274,6 +282,14 @@ async def langgraph_chat_stream(
 
         yield sse_frame({"thread_id": thread_id, "requested_by": user_name, **summary}, ensure_ascii=False)
         yield DONE_FRAME
+        # 🔴 `DEC-055` · 留痕（`status="done"`）。⚠️ **只写 `answered`** ——
+        #    停在审批点时 `summary["answer"]` 是**模型已经写出来的那半句（非空）**
+        #    ⇒ 不 gate 就会把「等审批的半截」写成 `done`，**正是本 DEC 的 status 要防的那类假信号**。
+        #    （停在审批点是图的【正常】暂停，不属 `DEC-055` 的射程 ⇒ 本轮登记为边界、不实现别的 status。）
+        #    ⚠️ 位置：排在**帧之后** —— 与 `/rag/stream_search` 的 `_complete` 同款。
+        #       redis 出问题时客户端**已经**拿到完整收尾，不会看到"答案被 error 帧顶掉"。
+        if summary.get("status") == "answered":
+            persist_turn(user_name, question, summary.get("answer") or "", status="done")
 
     return sse_response(sse_stream(
         # ⚠️ 上游**必须返回一个可 `aclose()` 的句柄**（这里是个 lambda，返回 `astream` 对象）——
@@ -292,6 +308,14 @@ async def langgraph_chat_stream(
         #    —— `graph_message_text` 一并挡了（见 `api/sse.py`）。
         extract=lambda item: graph_message_text(item, nodes=STREAMABLE_NODES),
         on_complete=_complete,
+        # 🔴 `DEC-055`：**取消与异常两条出口**都把**已经流出去的那半截**补存进历史（⛔ 不是直接丢）。
+        #    ⚠️ 必须是**同步**的 —— 骨架会在 `await aclose()` **之前**调它（`DEC-054`），
+        #       这正是"晚切（用户已看到字再点停止）也存得下"的原因。
+        #    ⚠️ 这里**只能用 `collected`**：取消/异常时图正跑到一半，**没有最终状态可查**
+        #       （与 `_complete` 那条"答案取自 `aget_state`"不矛盾 —— 那条管 `done`）。
+        on_incomplete=lambda collected, status: persist_turn(
+            user_name, question, "".join(collected), status=status,
+        ),
     ))
 
 # ==================== 属于AgentGraph 接口下  新增的： AgentGraph 人工审批接口 ====================
@@ -531,6 +555,11 @@ async def advanced_agent_chat_stream(
             "requested_by": user_name,
         }, ensure_ascii=False)
         yield DONE_FRAME
+        # 🔴 `DEC-055` · 留痕（`status="done"`）。⚠️ 答案取 `values.get("final_output") or ""` ——
+        #    与**上面那一帧**的占位串 `"处理完成"` **有意不同**：占位串是给前端看的兜底，
+        #    而把一句假的"处理完成"存进历史，下一轮 prompt 会把它当成**真的回答内容**。
+        #    ⚠️ 本链**没有** `status` 口径（不走 `summarize_agent_result`）⇒ 无审批点可停，不设 gate。
+        persist_turn(user_name, question, values.get("final_output") or "", status="done")
 
     return sse_response(sse_stream(
         lambda: advanced_agent.astream(
@@ -555,6 +584,10 @@ async def advanced_agent_chat_stream(
         extract=lambda item: graph_message_text(
             item, nodes=agent_graph_advanced_learning.STREAMABLE_NODES),
         on_complete=_complete,
+        # 🔴 `DEC-055`：取消 / 异常两条出口的留痕（同步 · 排在 `await aclose()` 之前）。
+        on_incomplete=lambda collected, status: persist_turn(
+            user_name, question, "".join(collected), status=status,
+        ),
     ))
 
 # ==================== Plan-and-Execute:AgentGraph 接口 ====================
@@ -774,6 +807,10 @@ async def agent_plan_execute_stream(
             "requested_by": user_name,
         }, ensure_ascii=False)
         yield DONE_FRAME
+        # 🔴 `DEC-055` · 留痕（`status="done"`）。答案取**执行结果**，⛔ 不是流出去的规划段 JSON 片段
+        #    （那半截 `{"step"` 本就不是人读终稿，见本函数上方）。
+        #    ⚠️ 与上面那一帧**同一个键**（`result_holder["execution_result"]`）⇒ 帧与历史不会对不上。
+        persist_turn(user_name, goal, result_holder.get("execution_result", ""), status="done")
 
     return sse_response(sse_stream(
         _open_upstream,
@@ -781,6 +818,12 @@ async def agent_plan_execute_stream(
         # ⚠️ `extract=None`：桥吐出来的**就是文本**（不是图的消息块）⇒ 原样发。
         #    ⛔ 别给它套 `graph_message_text`（那要 `(chunk, meta)`，会 ValueError）。
         on_complete=_complete,
+        # 🔴 `DEC-055`：取消 / 异常两条出口的留痕。⚠️ **提问变量是 `goal`**（本端点没有 `question`）。
+        #    ⚠️ **已知毛刺（登记，本轮不修）**：中途取消时存下去的是**半截 JSON**（`{"step"` 这种）
+        #       —— 它的流本就不是人读终稿。**照实存**，⛔ 不许为了好看去 `json.loads` 那半截（可能非法）。
+        on_incomplete=lambda collected, status: persist_turn(
+            user_name, goal, "".join(collected), status=status,
+        ),
     ))
 
 
@@ -897,6 +940,12 @@ async def memory_chat_stream(
             resolve(sess)
         yield sse_frame({"thread_id": thread_id, "requested_by": user_name, **summary}, ensure_ascii=False)
         yield DONE_FRAME
+        # 🔴 `DEC-055` · 留痕（`status="done"`）。⚠️ **只写 `answered`** —— 理由与
+        #    `/agent/langgraph_chat/stream` 那条**逐字相同**：审批点的 `answer` 是那半句**非空**的
+        #    模型输出，不 gate 会被写成 `done`（假信号）。停审批点**登记为边界、本轮不实现**。
+        #    ⚠️ ⛔ **别动上面 `register`/`resolve` 的顺序**（B5 待接管队列）。
+        if summary.get("status") == "answered":
+            persist_turn(user_name, question, summary.get("answer") or "", status="done")
 
     return sse_response(sse_stream(
         lambda: checkpointer_agent.astream(
@@ -909,6 +958,10 @@ async def memory_chat_stream(
         extract=lambda item: graph_message_text(
             item, nodes=agent_checkpointer.STREAMABLE_NODES),
         on_complete=_complete,
+        # 🔴 `DEC-055`：取消 / 异常两条出口的留痕（同步 · 排在 `await aclose()` 之前）。
+        on_incomplete=lambda collected, status: persist_turn(
+            user_name, question, "".join(collected), status=status,
+        ),
     ))
 
 # ==================== Men0 添加记忆管理接口 测试 ====================
@@ -1262,6 +1315,11 @@ async def mcp_agent_chat_stream(
             "requested_by": user_name,
         }, ensure_ascii=False)
         yield DONE_FRAME
+        # 🔴 `DEC-055` · 留痕（`status="done"`）。答案与上面那一帧**同一个来源**
+        #    （图的最终状态末条消息），⛔ 不是攒流过的块（`DEC-050`）。
+        #    ⚠️ ⛔ **别动 `finish_trace` 的顺序**（记录工具要的是"追踪先结束"）——
+        #       本句排在最后，不碰它。
+        persist_turn(user_name, question, answer, status="done")
 
     return sse_response(sse_stream(
         lambda: mcp_agent.astream(
@@ -1279,6 +1337,10 @@ async def mcp_agent_chat_stream(
         extract=lambda item: graph_message_text(
             item, nodes=agent_graph_advanced.STREAMABLE_NODES),
         on_complete=_complete,
+        # 🔴 `DEC-055`：取消 / 异常两条出口的留痕（同步 · 排在 `await aclose()` 之前）。
+        on_incomplete=lambda collected, status: persist_turn(
+            user_name, question, "".join(collected), status=status,
+        ),
     ))
 
 # ==================== 升级版 Agent MCP Client  动态获取当前可用的工具列表 接口 ====================

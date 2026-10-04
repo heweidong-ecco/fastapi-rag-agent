@@ -10,6 +10,33 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- 🟢 **`DEC-055` · 中断与异常路径的留痕口径 —— 6 条流式端点统一**（2026-10-04 · `DEC-055`）——
+  业务方 2026-10-03：「**提问，记半截+标记 和状态 status 等**」。改前**只有 `/rag/stream_search` 一条**有留痕，
+  且它的**异常出口一个字都不留**；5 条 Agent 链**零留痕** —— 它们只写 LangGraph checkpoint，
+  与 `chat_history` 是**两套互不相通的存储**（判据：`grep -n "persist_turn\|append_chat_history" api/api_v1_agent.py` ⇒ 改前零命中）。
+
+  **三段落地**（一句话一处）：
+
+  | # | 改哪 | 做了什么 |
+  |---|---|---|
+  | ① | `api/cache.py` | 新增 `persist_turn(user, question, answer, *, status)` —— 三条出口（`done` / `cancelled` / `error`）**共用同一段**（成对写 · 空答案不写 · 非 `done` 带 `INTERRUPTED_SUFFIX`）；`append_chat_history` 加**关键字必填**的 `status`（有默认值 ⇒「忘了传」会**静默**变成假信号）；`get_chat_history` 把老条目补成 `done` |
+  | ② | `api/sse.py` | **取消专用**的 `on_cancel(collected)` ⇒ 泛化成 `on_incomplete(collected, status)`，在**取消**与**异常**两条出口**各调一次**；异常那条排在**任何 `yield` 之前**（`yield` 也是 await 点 —— 同约束① 的理由） |
+  | ③ | 6 条端点 | 各接一处 `on_complete`（`done`）+ 一处 `on_incomplete`（RAG 1 条 + Agent 5 条） |
+
+  **三条贯穿规则**（⛔ 别读成"顺手统一"）：
+  - 🔴 `done` 的答案取自**图的最终状态**（`aget_state`），⛔ 不是 `collected`（`DEC-050` 撞过的同一个坑）；
+  - 🔴 停在审批点（`status == "pending_approval"`）⇒ **本轮不写** —— 那半句是**非空**的模型输出，不 gate 就会被写成 `done`（**假信号**）；
+  - 🔴 取消 / 异常时图正跑到一半、**没有最终状态可查** ⇒ 只能用 `collected`，与上一条**不矛盾**。
+
+  **判据（可打印）**：全量 **506 passed, 3 skipped, 32 deselected**（改前 **477**，同一台机、同一命令实测 ⇒ **+29**）。
+  判据是两份 `--collect-only` 清单做 `comm -13`：**新增 29 条、消失 0 条**。
+  ⛔ **不是恒绿** —— 三条都做过**反证**：摘掉 `on_incomplete` ⇒ **恰好 2 条红**；去掉审批 gate ⇒ **恰好 3 条红**；
+  链 A 的答案改回"攒流过的块" ⇒ **1 条红**。影响面 30 条既有用例按名字逐条重跑，全绿。
+
+  ⚠️ **已登记的边界（本轮 ⛔ 不实现）**：停在审批点的轮次**不写** `chat_history`（它是图的**正常**暂停，不属本 DEC 的射程）；
+  链 D 取消时留痕里是**半截 JSON**（它的流本就不是人读终稿）。
+  ⚠️ **已知行为变化**：Agent 链的轮次此后会进 **RAG 的下一轮 prompt**（前端未传历史时读同一把键）—— 这是「统一会话」的意图，但**是一条新行为**。
+
 - 🟢 **`B1` 评审收口（`#78` 合并前评审 · 5 件事 · 一个 PR）**（2026-10-04 · `DEC-060` · `DEC-061`）——
   ⛔ **不改运行行为**（⑧ 除外：**加字段 = 增量、兼容**，⛔ 不是破坏性变更）。全量 **477 passed, 3 skipped, 32 deselected**
   （**本 PR 改前 = 466** ⇒ **+11**；⚠️ 本行**原写「改前 473」** —— 那是**只算 ⑤ 那一步**的数，⛔ 不是本 PR 的基线。

@@ -35,13 +35,15 @@ class _FakeUpstream:
         return self
 
     async def __anext__(self):
+        # ⚠️ 顺序是「**先把块吐完，再抛**」（`DEC-055` 要测的正是"吐了几块之后才炸"）。
+        #    `exc` + `items=[]`（既有那三条用法）与旧行为**逐字相同** —— 第一次调用就抛。
+        if self._i < len(self._items):
+            item = self._items[self._i]
+            self._i += 1
+            return item
         if self._exc is not None:
             raise self._exc
-        if self._i >= len(self._items):
-            raise StopAsyncIteration
-        item = self._items[self._i]
-        self._i += 1
-        return item
+        raise StopAsyncIteration
 
     async def aclose(self):
         self.closed = True
@@ -187,7 +189,7 @@ def test_extract_none_passes_items_through_as_text():
 # ==================== 4 · 取消（约束①②③ 的正面判据） ====================
 
 def test_sync_teardown_runs_before_closing_the_upstream(monkeypatch):
-    """🔴 **本文件最重要的一条**：计数 → 日志 → `on_cancel` **都排在 `aclose()` 之前**。
+    """🔴 **本文件最重要的一条**：计数 → 日志 → `on_incomplete` **都排在 `aclose()` 之前**。
 
     出处 `DEC-054`（真服务实测）：`await stream.aclose()` 会被**二次投递的取消**打断
     ⇒ 排在它后面的收尾**一件都不跑**，而**单测当时全绿**（假流的 `aclose()` 不抛）。
@@ -201,7 +203,8 @@ def test_sync_teardown_runs_before_closing_the_upstream(monkeypatch):
     async def main():
         agen = sse.sse_stream(lambda: up, endpoint="ep-x",
                               extract=lambda x: x or None,
-                              on_cancel=lambda collected: events.append(("on_cancel", list(collected))))
+                              on_incomplete=lambda collected, status: events.append(
+                                  ("on_incomplete", list(collected), status)))
         first = await agen.asend(None)                      # ← 先真的发出去一块（"晚切"）
         assert _payload(first) == {"content": "a"}
         try:
@@ -212,10 +215,74 @@ def test_sync_teardown_runs_before_closing_the_upstream(monkeypatch):
     exc = asyncio.run(main())
     assert isinstance(exc, asyncio.CancelledError), "取消必须**上抛**（吞掉会让外层以为是正常结束）"
     assert counted == ["ep-x"], "取消要计数（判据③的观测对象）"
-    assert ("on_cancel", ["a"]) in events, "半截内容要原样交给 on_cancel"
+    hook_calls = [e for e in events if isinstance(e, tuple) and e[0] == "on_incomplete"]
+    assert hook_calls == [("on_incomplete", ["a"], "cancelled")], \
+        f"半截内容原样交出去，且**一次出口只调一次**、只按 'cancelled'：{hook_calls}"
     assert events.index("count") < events.index("aclose"), "同步收尾必须排在关流之前"
     assert next(i for i, e in enumerate(events) if isinstance(e, tuple)) < events.index("aclose")
     assert up.closed is True, "取消后**必须**关上上游（不关 = 上游继续生成、继续计费）"
+
+
+def test_incomplete_hook_fires_on_error_before_the_error_frame(monkeypatch):
+    """🔴 `DEC-055`：**异常**那条出口也要留痕。
+
+    旧实现只有一个"取消专用"的钩子 ⇒ **异常时半截一个字都不留**，
+    而 `DEC-055` 的正文里 `/rag/stream_search` 那格写的是「🔴 丢」。
+
+    ⚠️ **必须排在 error 帧之前**：留痕要**同步**做完（理由同约束① —— `yield` 也是 await 点，
+       被二次投递的取消打断 ⇒ 后面那件事一件都不跑，而**错误帧照样发得出去**）。
+    """
+    events = []
+    up = _FakeUpstream(["a"], events, exc=RuntimeError("炸了"))
+
+    async def _err(exc, collected):
+        # ⚠️ 在**帧被产出的那一刻**记一笔 —— 这样"留痕排在 error 帧之前"才是**可测**的，
+        #    而不是靠读代码相信它。
+        events.append(("error_frame", str(exc)))
+        yield sse.sse_frame({"error": str(exc)})
+        yield sse.DONE_FRAME
+
+    async def main():
+        return await _drain(sse.sse_stream(
+            lambda: up, endpoint="ep-err", extract=lambda x: x or None,
+            on_error=_err,
+            on_incomplete=lambda collected, status: events.append(
+                ("on_incomplete", list(collected), status)),
+        ))
+
+    frames, exc = asyncio.run(main())
+    assert exc is None, "异常是 'error' 出口 —— 骨架收住它，⛔ 不上抛"
+    hook_calls = [e for e in events if isinstance(e, tuple) and e[0] == "on_incomplete"]
+    assert hook_calls == [("on_incomplete", ["a"], "error")], \
+        f"半截内容原样交出去，且**一次出口只调一次**、只按 'error'：{hook_calls}"
+    assert events.index(("on_incomplete", ["a"], "error")) < events.index(("error_frame", "炸了")), \
+        "🔴 留痕必须**排在 error 帧之前**（同约束①：`yield` 也是 await 点）"
+    assert [_payload(f) for f in frames] == [{"content": "a"}, {"error": "炸了"}, "[DONE]"]
+
+
+def test_incomplete_hook_is_not_called_on_normal_completion(monkeypatch):
+    """🔴 **反向**：正常跑完 ⇒ `on_incomplete` **一次都不调**（防"修过头"）。
+
+    ⇒ 把"没走完"的钩子挂到"走完了"的路上，等于**每一次正常对话都记一遍假信号**。
+    """
+    hook_events = []
+    up = _FakeUpstream(["a", "b"], [])
+
+    async def _complete(collected):
+        yield sse.DONE_FRAME
+
+    async def main():
+        return await _drain(sse.sse_stream(
+            lambda: up, endpoint="ep-ok", extract=lambda x: x or None,
+            on_complete=_complete,
+            on_incomplete=lambda collected, status: hook_events.append(
+                ("on_incomplete", list(collected), status)),
+        ))
+
+    frames, exc = asyncio.run(main())
+    assert exc is None
+    assert hook_events == [], f"正常收尾不许碰 on_incomplete：{hook_events}"
+    assert _payload(frames[-1]) == "[DONE]"
 
 
 def test_cancel_emits_no_frame_at_all():
