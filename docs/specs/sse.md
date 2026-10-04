@@ -28,10 +28,10 @@
 | 批 | 事 | 状态 |
 |---|---|---|
 | 2 | 建 `api/sse.py` + 本 spec + `api/test_sse_layer.py` | ✅ |
-| 3 | 两条既有点端改用它（**行为逐帧等价**） | ✅ `api/test_agent_sse.py` + `api/test_cancel_propagation.py` **44 passed 且两份文件 diff 为空** |
+| 3 | 两条既有端点改用它（**行为逐帧等价**） | ✅ **改的那一刻两份文件一行未动** —— `api/test_agent_sse.py` / `api/test_cancel_propagation.py` **都不在 PR #78 的改动清单里**（`git show --stat 93eb2fb`）<br>⚠️ 本行原写 **44 passed** —— 那是把 `api/test_sse_layer.py` 的 **15** 条也算进去了（**当时**那两份文件 **29** 条：29 + 15 = 44）⇒ **命令与数字对不上**。2026-10-04 评审收口按**实测**更正：同一命令 **31 passed**（29 + 本批新增的 2 条） |
 | 4 | 改节点（A/B/C 三张图） | ✅ 见 `agent_graph.md` · `agent_checkpointer.md` · `agent_graph_advanced.md` · `agent_graph_advanced_learning.md` |
 | 5 | 4 条新 SSE 路由 | ✅ `advanced_chat` · `memory_chat` · `mcp_chat` · `plan_execute` |
-| 6 | `api/test_agent_stream_chains.py` | ✅ **39 条** |
+| 6 | `api/test_agent_stream_chains.py` | ✅ **39 条**（`B1` 收工时的数）<br>⚠️ 2026-10-04 评审收口后 **47 条**（本批补：白名单 × 图 4 · 链 C 碎片守卫 1 · 汇总帧 `requested_by` 3） |
 
 - ✅ **链 D（`plan_execute`）的「线程 → 事件循环」桥接器按计划落在调用方** ——
   `api_v1_agent.py::_ThreadTokenBridge`（`plan_task` 是同步函数、跑在 `asyncio.to_thread` 里）。
