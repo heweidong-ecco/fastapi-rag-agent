@@ -1,6 +1,6 @@
 
 import os
-from typing import TypedDict, List, Annotated
+from typing import TypedDict, List, Annotated, Optional
 import operator
 
 from langgraph.graph import StateGraph, END
@@ -57,10 +57,23 @@ class AgentState(TypedDict):
     #    ⚠️ **由端点注入**（`POST /agent/memory_chat`），一律 `.get(..., "unknown")` 读。
     user_name: str
     thread_id: str
+    # 🔴 2026-10-05（批 7 · `N11`）：**预算被拦的原因**，通往【端点层】的唯一通道
+    #    —— 端点据此回 **429**（非流式）/ **error 帧**（流式）。
+    #    ⚠️ 与 `agent_graph.AgentState` / `agent_graph_advanced.AgentState` 的同名键
+    #       **是同一个契约**：存**原因**，拼文案由
+    #       `api_v1_agent.agent_budget_intercept_message` 统一做（⛔ 别在节点里拼）。
+    #    ⚠️ 没挂 `operator.add` ⇒ last-write-wins + 落 checkpoint ⇒ **必须每轮清零**，
+    #       否则上一轮被拦会让下一轮的**正常提问**也返回 429。
+    #       📌 清零落在**入口节点** `agent_decide`（`set_entry_point("agent")` ⇒ 每轮必经），
+    #          **它的两个出口都要带上**。
+    budget_intercept: Optional[str]
 
 # ==================== 定义节点 ====================
 from token_tracker import (          # noqa: E402  （原位保留，未挪动）
     check_token_budget, record_from_response, BUDGET_EXCEEDED_MSG,
+    # 🔴 2026-10-05（批 7 · `N11`）：**保住 `check_token_budget` 这个调用，⛔ 别改成
+    #    `check_token_budget_detail`** —— 见 `agent_graph.py` 同一处的长注释（4 个测试文件
+    #    拿"模块属性 `check_token_budget`"当 monkeypatch 缝，换掉 ⇒ 补丁静默失效、转去连真库）。
 )
 
 
@@ -77,7 +90,13 @@ def agent_decide(state: AgentState, config: RunnableConfig):
     user_name = state.get("user_name", "unknown")
     thread_id = state.get("thread_id", "unknown")
     if not check_token_budget(user_name, estimated_tokens=500):
-        return {"messages": [AIMessage(content=BUDGET_EXCEEDED_MSG)]}
+        # 🔴 2026-10-05（批 7 · `N11`）：**同时置 `budget_intercept`** ——
+        #    改前只塞一句话当答案，端点照常回 **HTTP 200** ⇒ 调用方**看不出被拒了**。
+        #    ⚠️ 这是**入口节点**，所以它既是"清零的那一处"、也是"写标志的那一处"
+        #       —— 本出口写原因，⛔ **不写 `None`**。
+        #    ⚠️ **⛔ 不许在这里 `raise`**（`DEC-078` §二 的 checkpoint 污染实测）。
+        return {"messages": [AIMessage(content=BUDGET_EXCEEDED_MSG)],
+                "budget_intercept": BUDGET_EXCEEDED_MSG}
 
     response = None
     for chunk in llm_with_tools.stream(state["messages"], config=config):
@@ -111,7 +130,11 @@ def agent_decide(state: AgentState, config: RunnableConfig):
         llm_with_tools, response, "agent_decision",
         user_name=user_name, thread_id=thread_id,
     )
-    return {"messages": [response]}
+    # 🔴 2026-10-05（批 7 · `N11`）：**正常出口也要清零**（`DEC-078 §四`）——
+    #    `budget_intercept` 是普通 state 键（last-write-wins + 落 checkpoint）
+    #    ⇒ 只清一个出口的话，走**另一个**出口的那一轮会留着上一轮的值。
+    #    📌 守卫：`api/test_budget_soft_return.py::test_agent_checkpointer_上一轮的标志不串轮`
+    return {"messages": [response], "budget_intercept": None}
 
 def tool_execute(state: AgentState):
     """执行节点。🔴 **DEC-051：按 `TOOLS_BY_NAME` 查表分派** —— 理由与实测见 `agent_graph.py` 同名处。

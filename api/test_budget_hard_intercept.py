@@ -217,11 +217,23 @@ def test_上一轮的拦截标志不会串到下一轮(monkeypatch):
     assert llm.calls >= 1, "假 LLM 一次都没被调用 ⇒ 这个用例根本没跑到决策节点"
 
 
-def test_软返回那一轮的出口也要清零标志(monkeypatch):
+def test_软返回那一轮的出口也要带上本轮的值(monkeypatch):
     """⚠️ `agent_decide` 有**两个出口**（预算软返回 / 正常返回）。
 
-    只给一个带清零 ⇒ 走另一个出口的那一轮会**留着上一轮的值**
-    ⇒ 下一次提问（不需要工具）照样被判成 429。
+    只给一个带**标志** ⇒ 走另一个出口的那一轮会**留着上一轮的值**
+    ⇒ 端点拿旧原因回错的话，或者"本轮明明被拦了却报正常"。
+
+    ## 🔴 2026-10-05（批 7 · `N11`）本条**语义翻转**，⛔ 不是"改断言让它变绿"
+
+    改前本条的断言是 `is None` —— 当年 `agent_decide` 的软返回出口写的是 `**cleared`
+    （**显式清零**），因为那时"拦截"**只有** `tool_execute`（工具触发）那一种，
+    入口节点的任务仅仅是"别让上轮的值串过来"。
+
+    **批 7 新增的正是"入口节点自己就是拦截点"**（预算不够 ⇒ 根本走不到工具）
+    ⇒ 本出口必须写**本轮的原因**，⛔ 再写 `None` 就等于**把这次拦截藏起来**
+    （而那正是本批要治的病）。📄 裁定 ⇒ `docs/decisions/DEC-083`。
+
+    ⇒ 守的东西没变（**上轮的值不许串过来**），判据从"是 `None`"改成"**不是上一轮那个值**"。
     """
     _patch_graph_leaves(monkeypatch, require_tool=False)
     monkeypatch.setattr(aga, "check_token_budget", lambda u, estimated_tokens=500: False)
@@ -229,8 +241,12 @@ def test_软返回那一轮的出口也要清零标志(monkeypatch):
         _state("c1", budget_intercept="上一轮被拦了"),
         {"configurable": {"thread_id": f"{THREAD}-软返回串轮"}}))
 
-    assert out.get("budget_intercept") is None, (
-        f"走软返回出口的那一轮没清零，上轮标志留下来了：{out.get('budget_intercept')!r}"
+    got = out.get("budget_intercept")
+    assert got != "上一轮被拦了", (
+        f"走软返回出口的那一轮把**上一轮的**标志留下来了：{got!r}"
+    )
+    assert got, (
+        f"本轮明明被预算拦下了，出口却没留下原因 ⇒ 端点无从把它转成 429：{out}"
     )
 
 

@@ -4,7 +4,7 @@ LangGraph 进阶示例：多分支路由与子图协作
 import os
 import json
 import asyncio
-from typing import TypedDict, List, Annotated
+from typing import TypedDict, List, Annotated, Optional
 import operator
 
 from langgraph.graph import StateGraph, END
@@ -20,6 +20,9 @@ from safe_math import calculate  # DEC-049：`calculator` 的求值实现 ——
 #    那个口子（`/agent/advanced_chat` 与它的 `/stream` 都走这张图）。
 #    `record_from_response` 是三张图共用的**唯一记账实现**，⛔ 别在本文件里另抄 6 份取用量。
 from token_tracker import check_token_budget, record_from_response, BUDGET_EXCEEDED_MSG
+# 🔴 2026-10-05（批 7 · `N11`）：本图 6 处预算软返回**都保住 `check_token_budget` 这个调用**，
+#    ⛔ 别改成 `check_token_budget_detail` —— 见 `agent_graph.py` 同一处的长注释
+#    （"模块属性 `check_token_budget`"是 4 个测试文件的 monkeypatch 缝）。
 
 # ==================== 初始化模型 ====================
 # ⚠️ 角色 = 「模型轴 chat」+「长度轴 agent(1024)」—— 见 `api/llm_factory.py` 的模块 docstring。
@@ -99,6 +102,17 @@ class AgentState(TypedDict):
     #    ⚠️ 子图（search/calc/date/translate/react）与本图**共用同一个 `AgentState`** ⇒
     #       父图的 `thread_id` 会流进子图节点，⛔ 不必逐个子图再注入一次。
     thread_id: str
+    # 🔴 2026-10-05（批 7 · `N11`）：**预算被拦的原因**，通往【端点层】的唯一通道
+    #    —— 端点据此回 **429**（非流式）/ **error 帧**（流式）。
+    #    ⚠️ 与另外三张图的同名键**是同一个契约**：存**原因**，拼文案由
+    #       `api_v1_agent.agent_budget_intercept_message` 统一做（⛔ 别在节点里拼）。
+    #    ⚠️ 没挂 `operator.add` ⇒ last-write-wins + 落 checkpoint ⇒ **必须每轮清零**。
+    #       📌 本图的清零落在**入口节点 `supervisor`**（`set_entry_point("supervisor")`），
+    #          **它的两个出口都要带上** —— ⛔ 子图里的节点（`search_summarize` 等）
+    #          **不是"每轮必经"**，不许在那里清。
+    #    ⚠️ 实测（2026-10-05 探针）：**子图节点写的普通键【能】传到父图** ⇒ 6 处软返回
+    #       直接写在各自的子图节点里就行，⛔ 不必让外层节点替它回传。
+    budget_intercept: Optional[str]
 
 # ==================== 创建 通用的“记忆注入”工具函数 ====================
 # ⚠️ 2026-09-20 删（D1/pyflakes 报 redefinition）：此处的 `from memory_store import search_user_memory`
@@ -153,7 +167,13 @@ def create_search_subgraph():
         user_name = state.get("user_name", "unknown")
         thread_id = state.get("thread_id", "unknown")
         if not check_token_budget(user_name, estimated_tokens=500):
-            return {"final_output": BUDGET_EXCEEDED_MSG}
+            # 🔴 2026-10-05（批 7 · `N11`）：**同时置 `budget_intercept`** ——
+            #    改前只塞一句话当答案，端点照常回 **HTTP 200** ⇒ 调用方**看不出被拒了**。
+            #    ⚠️ ⛔ **不许在这里 `raise`**（`DEC-078` §二 的 checkpoint 污染实测）。
+            #    ⚠️ 本图（`advanced_agent`）的**清零在 `supervisor`**（它是入口节点），
+            #       ⛔ 不在本节点 —— 这些是**子图节点**，不是"每轮必经"。
+            return {"final_output": BUDGET_EXCEEDED_MSG,
+                    "budget_intercept": BUDGET_EXCEEDED_MSG}
 
         raw = state["messages"][-1].content
         summary_prompt = f"请用一句话总结以下信息：{raw}"
@@ -188,7 +208,13 @@ def create_calculator_subgraph():
         user_name = state.get("user_name", "unknown")
         thread_id = state.get("thread_id", "unknown")
         if not check_token_budget(user_name, estimated_tokens=500):
-            return {"final_output": BUDGET_EXCEEDED_MSG}
+            # 🔴 2026-10-05（批 7 · `N11`）：**同时置 `budget_intercept`** ——
+            #    改前只塞一句话当答案，端点照常回 **HTTP 200** ⇒ 调用方**看不出被拒了**。
+            #    ⚠️ ⛔ **不许在这里 `raise`**（`DEC-078` §二 的 checkpoint 污染实测）。
+            #    ⚠️ 本图（`advanced_agent`）的**清零在 `supervisor`**（它是入口节点），
+            #       ⛔ 不在本节点 —— 这些是**子图节点**，不是"每轮必经"。
+            return {"final_output": BUDGET_EXCEEDED_MSG,
+                    "budget_intercept": BUDGET_EXCEEDED_MSG}
 
         query = state["messages"][-1].content
         # 使用简单 prompt 提取表达式
@@ -240,7 +266,13 @@ def create_translate_subgraph():
         user_name = state.get("user_name", "unknown")
         thread_id = state.get("thread_id", "unknown")
         if not check_token_budget(user_name, estimated_tokens=500):
-            return {"final_output": BUDGET_EXCEEDED_MSG}
+            # 🔴 2026-10-05（批 7 · `N11`）：**同时置 `budget_intercept`** ——
+            #    改前只塞一句话当答案，端点照常回 **HTTP 200** ⇒ 调用方**看不出被拒了**。
+            #    ⚠️ ⛔ **不许在这里 `raise`**（`DEC-078` §二 的 checkpoint 污染实测）。
+            #    ⚠️ 本图（`advanced_agent`）的**清零在 `supervisor`**（它是入口节点），
+            #       ⛔ 不在本节点 —— 这些是**子图节点**，不是"每轮必经"。
+            return {"final_output": BUDGET_EXCEEDED_MSG,
+                    "budget_intercept": BUDGET_EXCEEDED_MSG}
 
         query = state["messages"][-1].content
         # 简单粗暴地翻译成英文
@@ -292,7 +324,10 @@ def create_react_subgraph():
         user_name = state.get("user_name", "unknown")
         thread_id = state.get("thread_id", "unknown")
         if not check_token_budget(user_name, estimated_tokens=500):
-            return {"messages": [AIMessage(content=BUDGET_EXCEEDED_MSG)]}
+            # 🔴 2026-10-05（批 7 · `N11`）：同本图其余软返回 —— 只加 `budget_intercept`，
+            #    ⛔ **不改返回形状**（本子图的出口是 `should_continue` 读 `messages[-1].tool_calls`）。
+            return {"messages": [AIMessage(content=BUDGET_EXCEEDED_MSG)],
+                    "budget_intercept": BUDGET_EXCEEDED_MSG}
 
         # 构建基础 system prompt
         system_prompt = "你是一个能使用工具的智能助理。请根据用户需求自主调用工具完成任务。"
@@ -414,7 +449,28 @@ def build_advanced_agent():
         """分析用户意图，决定路由方向（增强版：注入长期记忆mem0）"""
         user_query = state["messages"][-1].content
 
+        # 🔴 2026-10-04（`DEC-072`）：拦在 `llm.invoke()` **之前**。
+        #    🔴🔴 **超预算时【必须】给 `intent`** —— `route_by_intent` 读的是 `state["intent"]`
+        #        （`:423`）。少了它，langgraph 会当场 `KeyError: 'intent'` ⇒ **500**，
+        #        而不是一句"预算用完了"。给 `"CHAT"` ⇒ 落到兜底分支 `chat_node`，
+        #        而 `chat_node` 自己的守卫也会拦下（同一个人、同样的额度）⇒
+        #        **最终不调任何模型**，用户看到的就是那句话术。
+        #    ⚠️ 这与参照图 `agent_graph_advanced.py:333` 的写法**不同**是**有意的**——
+        #       那张图的路由函数不读 `intent`，所以它不需要给。
+        #    🔴 2026-10-05（批 7 · `N11`）：**门要排在任何花钱的调用之前** ——
+        #       改前 `search_user_memory`（一次 DashScope embedding）在门**之上** ⇒
+        #       预算已被拒的那一轮仍然花掉那笔钱，而取回来的记忆**当场被丢弃**。
+        #       这是本批的判据在 CI（dummy key）里**真打网络**才暴露出来的。
+        #       ⇒ 记忆检索与 `classify_prompt` 的构建整体**下移到门之后**。
+        if not check_token_budget(state.get("user_name", "unknown"), estimated_tokens=500):
+            # 🔴 2026-10-05（批 7 · `N11`）：加 `budget_intercept`。
+            #    ⚠️ **`intent="CHAT"` 一个都不能少** —— `route_by_intent` 读 `state["intent"]`，
+            #       少了它当场 `KeyError` = **500**，而不是一句"预算用完了"。
+            return {"intent": "CHAT", "final_output": BUDGET_EXCEEDED_MSG,
+                    "budget_intercept": BUDGET_EXCEEDED_MSG}
+
         # 从 Mem0 检索相关记忆（user_id 从 state 或配置中获取，这里先写死示例）
+        # ⚠️ 排在门【之后】：`search_user_memory` 会去打一次 embedding（**花钱的**）。
         user_name = state.get("user_name", "default_user")
         memory_space = state.get("memory_space", "default")
         # 构建 Mem0 的 user_id
@@ -426,7 +482,7 @@ def build_advanced_agent():
         memory_context = ""
         if memories:
             memory_context = "\n用户相关记忆：\n" + "\n".join(memories)
-        
+
         classify_prompt = f"""分析以下用户请求，只返回一个单词表示意图：
 - 如果需要搜索、查资料、了解新闻 → SEARCH
 - 如果需要数学计算 → CALCULATOR
@@ -437,16 +493,6 @@ def build_advanced_agent():
 {memory_context}
 用户请求：{user_query}
 意图："""
-        # 🔴 2026-10-04（`DEC-072`）：拦在 `llm.invoke()` **之前**。
-        #    🔴🔴 **超预算时【必须】给 `intent`** —— `route_by_intent` 读的是 `state["intent"]`
-        #        （`:423`）。少了它，langgraph 会当场 `KeyError: 'intent'` ⇒ **500**，
-        #        而不是一句"预算用完了"。给 `"CHAT"` ⇒ 落到兜底分支 `chat_node`，
-        #        而 `chat_node` 自己的守卫也会拦下（同一个人、同样的额度）⇒
-        #        **最终不调任何模型**，用户看到的就是那句话术。
-        #    ⚠️ 这与参照图 `agent_graph_advanced.py:333` 的写法**不同**是**有意的**——
-        #       那张图的路由函数不读 `intent`，所以它不需要给。
-        if not check_token_budget(state.get("user_name", "unknown"), estimated_tokens=500):
-            return {"intent": "CHAT", "final_output": BUDGET_EXCEEDED_MSG}
 
         intent = llm.invoke([HumanMessage(content=classify_prompt)])
         # ⚠️ 记账放在 `state["intent"] = …` **之前**：下面那行是**改 state 本身**（不是返回增量），
@@ -457,6 +503,13 @@ def build_advanced_agent():
             thread_id=state.get("thread_id", "unknown"),
         )
         state["intent"] = intent.content.strip()
+        # 🔴 2026-10-05（批 7 · `N11`）：**正常出口也要清零**（`DEC-078 §四`）——
+        #    `budget_intercept` 是普通 state 键（last-write-wins + 落 checkpoint）
+        #    ⇒ 只清一个出口的话，走**另一个**出口的那一轮会留着上一轮的值
+        #    ⇒ 预算恢复之后那一轮**正常的提问**照样回 429。
+        #    ⚠️ 本节点是**原地改 `state` 再整个返回**（⛔ 不是返回增量）⇒ 清零也写成赋值。
+        #    📌 守卫：`api/test_budget_soft_return.py::test_advanced_agent_上一轮的标志不串轮`
+        state["budget_intercept"] = None
         return state
 
     # 2. 添加对话节点（简单聊天）
@@ -472,7 +525,13 @@ def build_advanced_agent():
         user_name = state.get("user_name", "unknown")
         thread_id = state.get("thread_id", "unknown")
         if not check_token_budget(user_name, estimated_tokens=500):
-            return {"final_output": BUDGET_EXCEEDED_MSG}
+            # 🔴 2026-10-05（批 7 · `N11`）：**同时置 `budget_intercept`** ——
+            #    改前只塞一句话当答案，端点照常回 **HTTP 200** ⇒ 调用方**看不出被拒了**。
+            #    ⚠️ ⛔ **不许在这里 `raise`**（`DEC-078` §二 的 checkpoint 污染实测）。
+            #    ⚠️ 本图（`advanced_agent`）的**清零在 `supervisor`**（它是入口节点），
+            #       ⛔ 不在本节点 —— 这些是**子图节点**，不是"每轮必经"。
+            return {"final_output": BUDGET_EXCEEDED_MSG,
+                    "budget_intercept": BUDGET_EXCEEDED_MSG}
 
         # 构建基础 system prompt
         system_prompt = "你是一个智能助理，请直接回答用户的问题。"

@@ -357,20 +357,30 @@ def build_mcp_agent():
            ⛔ **别照抄** `agent_graph.py` / `agent_checkpointer.py` 那两处 —— 那两处是**同步**
            节点、用同步 `.stream()`；这里改成同步会阻塞事件循环。
         """
-        # 构建带记忆注入的 system prompt
+        user_name = state.get("user_name", "unknown")
+
+        # ⚠️ 预算检查必须在**任何花钱的调用之前** —— 不只是 `llm.invoke()`：
+        #    下面那句 `inject_memories_to_prompt` 会去打一次 DashScope embedding（**也是花钱的**）。
+        #    🔴 2026-10-05（批 7 · `N11`）：改前这两行排在门**之上** ⇒ 预算已被拒的那一轮
+        #       仍然花掉一笔 embedding，而结果**当场被丢弃**（走不到 `messages`）。
+        #       这是本批的判据在 CI（dummy key）里**真打网络**才暴露出来的。
+        #    （2026-09-16 上移；见 docs/decisions/DEC-002）
+        # 预估本次调用消耗（经验值：决策通常消耗200-500 tokens）
+        if not check_token_budget(user_name, estimated_tokens=500):
+            # 🔴 2026-10-05（批 7 · `N11`）：**同时置 `budget_intercept`** ——
+            #    改前只把它当一句正常答案返回，端点照常回 **HTTP 200** ⇒ 调用方看不出被拒了。
+            #    ⚠️ `chat_node` **不是入口节点** ⇒ 清零不在这里（在 `agent_decide`）。
+            #    ⚠️ ⛔ **不许在这里 `raise`**（`DEC-078` §二 的 checkpoint 污染实测）。
+            return {
+                "final_output": "今日Token预算已用完，请明天再试。",
+                "messages": [AIMessage(content="今日Token预算已用完，请明天再试。")],
+                "budget_intercept": "今日Token预算已用完，请明天再试。",
+            }
+
+        # 构建带记忆注入的 system prompt —— 🔴 **必须排在门【之后】**：它要花一次 embedding 的钱。
         system_prompt = "你是一个智能助理，请直接回答用户的问题。"
         # 导入长期记忆mem0模块
         system_prompt = inject_memories_to_prompt(system_prompt, state)
-
-        # ⚠️ 预算检查必须在 llm.invoke() **之前** —— 放在之后的话钱已经花了，只能丢弃结果、拦不住
-        #    （2026-09-16 上移；见 docs/decisions/DEC-002）
-        # 预估本次调用消耗（经验值：决策通常消耗200-500 tokens）
-        user_name = state.get("user_name", "unknown")
-        if not check_token_budget(user_name, estimated_tokens=500):
-            return {
-                "final_output": "今日Token预算已用完，请明天再试。",
-                "messages": [AIMessage(content="今日Token预算已用完，请明天再试。")]
-            }
 
         messages = [SystemMessage(content=system_prompt)] + state["messages"]
         # 🔴 B1：真流式（`astream` + 转发 `config`）。 ⚠️ 用 `+` 聚合（`AIMessageChunk.__add__`），
@@ -429,10 +439,16 @@ def build_mcp_agent():
         # 预估本次调用消耗（经验值：决策通常消耗200-500 tokens）
         user_name = state.get("user_name", "unknown")
         if not check_token_budget(user_name, estimated_tokens=500):
+            # 🔴 2026-10-05（批 7 · `N11`）：本出口**从"清零"翻成"写原因"**。
+            #    ⚠️ `S13` 当时写的是 `**cleared`（= 置 `None`）—— 那是因为当年**只有**
+            #       工具触发那一种拦截（写在 `tool_execute` 里），入口节点这一处
+            #       的任务只是"别让上轮的值串过来"。**本批新增的正是这一种** ⇒
+            #       它必须自己写原因，⛔ 不能再是 `None`。
+            #    📌 语义翻转的守卫：`api/test_budget_soft_return.py` 里那条「软返回时置原因而不是清零」
             return {
-                **cleared,
                 "final_output": "今日Token预算已用完，请明天再试。",
-                "messages": [AIMessage(content="今日Token预算已用完，请明天再试。")]
+                "messages": [AIMessage(content="今日Token预算已用完，请明天再试。")],
+                "budget_intercept": "今日Token预算已用完，请明天再试。",
             }
 
         llm_with_tools = await get_llm_with_mcp_tools()
