@@ -115,11 +115,28 @@ def make_llm(model_role: str, token_role: str, *, temperature: float = 0.0,
 
     Returns:
         **裸 `ChatOpenAI`**。⛔ 不许包成别的类型 —— 见模块 docstring 那张「返回值必须」的表。
+
+    Raises:
+        EnvironmentError: `LLM_API_KEY` 没配（批 6 · `DEC-082`）。**点名那个变量** ——
+            改前是把 `None` 递给 `ChatOpenAI`，报的是 SDK 的通用话，而它提的
+            `OPENAI_API_KEY` 本仓根本不用。
     """
     if model_role not in _MODEL_ROLE_TO_KEY:
         raise ValueError(f"未知的 model_role={model_role!r}；只认 {sorted(_MODEL_ROLE_TO_KEY)}")
     if token_role not in _TOKEN_ROLE_TO_CONST:
         raise ValueError(f"未知的 token_role={token_role!r}；只认 {sorted(_TOKEN_ROLE_TO_CONST)}")
+
+    # 🔴 批 6（`DEC-082`）：缺 key 时**点名**，⛔ 不要把 `None` 递给 `ChatOpenAI`。
+    #   改前那种写法报的是 SDK 那句通用话（`The api_key client option must be set … OPENAI_API_KEY`）——
+    #   它提的 `OPENAI_API_KEY` 本仓**根本不用** ⇒ 照它去设变量，问题不会消失。
+    #   ⚠️ **时机没变**（仍在 import 期构造，调用点没动）—— 本处只改「报什么」；
+    #   真惰性要连 3 张图的模块级 `llm` + `bind_tools` 一起下沉，见 `DEC-082` 的取舍。
+    api_key = _resolve("LLM_API_KEY")
+    if not api_key:
+        raise EnvironmentError(
+            "LLM_API_KEY 未设置 —— 生成/对话模型走 DeepSeek，缺它客户端建不出来。"
+            "检查 .env 或环境变量（见 docs/契约/环境变量.md §4）。"
+        )
 
     import token_config
 
@@ -130,7 +147,7 @@ def make_llm(model_role: str, token_role: str, *, temperature: float = 0.0,
 
     return ChatOpenAI(
         model=_resolve(_MODEL_ROLE_TO_KEY[model_role]),
-        api_key=_resolve("LLM_API_KEY"),
+        api_key=api_key,
         base_url=_resolve("LLM_BASE_URL"),
         temperature=temperature,
         max_tokens=getattr(token_config, _TOKEN_ROLE_TO_CONST[token_role]),

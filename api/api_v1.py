@@ -32,7 +32,8 @@ from permission import get_user_role
 from token_tracker import get_token_budget_info
 from rate_limiter import user_limiter
 from cache import redis_client
-from embedding_client import client
+# ⚠️ 批 6（`DEC-082`）删掉 `from embedding_client import client` —— 它**全仓只有这一处**，
+#    且**从未被使用**；而 `client` 已改成惰性构造，留着这行会让 `api_v1` 直接 ImportError。
 # ⚠️ 2026-10-04 删 `get_weather`（`DEC-065`）：它在本文件**只有** `/tool/benchmark` 一处用，
 #    那条端点已删。⚠️ `calculator` 是**既有未用导入**（`D1` 旧账），⛔ 本 PR 不碰。
 from tools_with_cache import calculator

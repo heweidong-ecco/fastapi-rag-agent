@@ -62,8 +62,11 @@ def validate_config():
         missing.append("DASHSCOPE_API_KEY")
     if not LLM_API_KEY:
         # 🔴 2026-10-02 加（`DEC-045`）：它**不再有 `DASHSCOPE_API_KEY` 兜底** ⇒ 必须显式给。
-        # ⚠️ 实际上先炸的往往是 **import 期**的 `make_llm()`（`ChatOpenAI(api_key=None)`），
-        #    而不是这里 —— 这条的价值是"政策写下来 + 换导入顺序后仍有人拦"。
+        # ⚠️ 实际上先炸的往往是 **import 期**的 `make_llm()`，而不是这里
+        #    —— 这条的价值是"政策写下来 + 换导入顺序后仍有人拦"。
+        # 🔴 2026-10-05（批 6 · `DEC-082`）：`make_llm()` 现在**自己先判** `LLM_API_KEY` 并抛
+        #    **点名它**的 `EnvironmentError`（改前是把 `None` 递给 `ChatOpenAI` ⇒ SDK 那句通用话，
+        #    而那句提的 `OPENAI_API_KEY` 本仓根本不用）。⚠️ **时机没变**：仍在 import 期。
         missing.append("LLM_API_KEY")
     if not POSTGRES_PASSWORD:
         missing.append("POSTGRES_PASSWORD")

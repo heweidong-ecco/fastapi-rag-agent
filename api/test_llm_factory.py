@@ -177,3 +177,41 @@ def test_importing_the_module_does_not_pull_langchain(monkeypatch):
     assert out.stdout.strip() == "False", (
         "import llm_factory 就把 langchain 拉进来了 ⇒ 与 api_v1_rag.py:567 记的教训冲突"
     )
+
+
+# ==================== 缺 key 时要点名（批 6 · `DEC-082`）====================
+
+def test_missing_key_is_reported_by_name_not_by_openai():
+    """缺 `LLM_API_KEY` 时 `make_llm()` 必须**点名那个变量**，⛔ 不是 OpenAI SDK 那句通用话。
+
+    ⚠️ **时机没变**（仍在 import 期构造）—— 本批只改「**报什么**」。为什么不做真惰性
+    （那要动 3 张图的模块级 `llm` + `bind_tools`）⇒ `docs/decisions/DEC-082`。
+
+    判据：在**没有 `.env`、也没设该变量**的子进程里调一次，看报的错里有没有 `LLM_API_KEY`。
+    """
+    import subprocess
+
+    code = (
+        # 逐字复现「CI / 新鲜检出没有 .env」（`ci-local.sh` rsync 掉 .env；`ci.yml` 塞 dummy 绕开的就是这事）
+        "import dotenv; dotenv.load_dotenv = lambda *a, **k: None;"
+        "import sys; sys.path.insert(0, 'api');"
+        # ⚠️ 这里必须是**换行**不是 `;` —— `try:` 是复合语句，跟在 `;` 后面是 SyntaxError
+        "import llm_factory\n"
+        "try:\n"
+        "    llm_factory.make_llm('chat', 'agent')\n"
+        "    print('NO-ERROR')\n"
+        "except Exception as e:\n"
+        "    print(type(e).__name__, '|', str(e))\n"
+    )
+    env = {k: v for k, v in os.environ.items() if k != "LLM_API_KEY"}
+    out = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True,
+        cwd=str(Path(__file__).parent.parent), env=env,
+    )
+    assert out.returncode == 0, out.stderr[-800:]
+    got = out.stdout.strip()
+    assert "NO-ERROR" not in got, "缺 key 居然没报错"
+    assert "LLM_API_KEY" in got, f"报的错没点名缺哪个变量：{got}"
+    assert "api_key client option" not in got, (
+        f"还是那句 OpenAI SDK 的通用话（它提的 `OPENAI_API_KEY` 本项目根本不用）：{got}"
+    )
