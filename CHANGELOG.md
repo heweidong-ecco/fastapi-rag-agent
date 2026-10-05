@@ -1774,6 +1774,42 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- 🔴 **预算拦截：`agent_graph_advanced` 从【软拦截】改成【硬拦截】**（2026-10-05 · `DEC-078` · 待办 `S13`）
+
+  **改前**：超预算 ⇒ 塞一条 `ToolMessage`、`continue` ⇒ 图**照常跑完**、端点**照常 HTTP 200**
+  + 一段"预算不够"的答案。🔴 **「预算拦住了」这句话只对 LLM 成立** ——
+  调用方在响应里**看不出"被拒了"**。
+
+  ⚠️ **裁定原文写的是「抛 `AppException`」—— 照字面做会引入新缺陷**（探针实测，非推断）：
+  在 LangGraph 节点里 `raise` ⇒ checkpoint 停在 `next=('tools',)` + 一条**没人回答的**
+  `AIMessage(tool_calls)` ⇒ **那个 thread 从此废掉**（`agent` 是**入口节点**、每轮都跑，
+  下一轮必撞非法消息序列；OpenAI 口径的 provider 直接 **400**），且失败的 task 会**重跑**。
+  ⚠️ 预算**不是永久的**（日预算午夜重置 · 两级成本闸门管理员可调）⇒ 「我反正不用了」不成立。
+
+  **改法（走 state，⛔ 不在节点里抛）**：新增 `AgentState.budget_intercept`
+  （普通键、**没挂 `operator.add` ⇒ last-write-wins 且落 checkpoint**）——
+  `tool_execute` 被拦时置它，**且本轮每个 `tool_call` 都要留 `ToolMessage`**（⛔ 不许 `break`）；
+  入口节点 `agent_decide` **每轮清零**（**两个出口都带**，否则走另一个出口的那轮会留着上轮的值）
+  ⇒ 端点层转 **429 `QUOTA_EXCEEDED`**（非流式）/ **`{"error": …}` 帧**（流式 ——
+  响应头已发出、状态码改不了，与 `/agent/plan_execute/stream` 同一口径）。
+
+  🔴 **顺带堵掉一个更糟的现状**：`tools → agent` 原是**无条件边** ⇒ 被拦后模型**再调一次、再被拦**
+  …… 直到撞上限。**改前实测 `GraphRecursionError: Recursion limit of 25 reached`**
+  —— 那是在**已经判定"没钱了"之后，又白烧十几轮 LLM** ⇒ 新增 `after_tools` 条件边：**被拦即 `END`**。
+
+  **判据（可打印）**：
+  ```bash
+  venv/bin/python -m pytest api/test_budget_hard_intercept.py -q   # ⇒ 11 passed
+  bash scripts/ci-local.sh                                          # ⇒ 619 passed（基线 608）
+  ```
+  ⭐ **变异自证 7 处全中**（`M1`–`M7`，含"上一轮的拦截标志不会串到下一轮" · "图在 tools 之后不回 agent"）。
+
+  ⚠️ **本轮【不动】、已登记**：**用户日预算**那条软返回（`docs/待办总表.md` **`N11`**）
+  —— `S13` 的通道只带得动被**工具**触发的那类；它是**另一条账**，⛔ 别读成"一起修了"。
+
+  📄 `docs/decisions/DEC-078-预算硬拦截的落点与响应形状.md` ·
+  `docs/specs/agent_graph_advanced.md`（批 2 实施计划）· `api/test_budget_hard_intercept.py`
+
 - ⚠️ **`plan_execute` 的 `max_replans` 提成模块级常量 `MAX_REPLANS`**（2026-10-05 · 待办 `S11`）
 
   原先是写在 `execute_plan_with_replan` **函数体里**的局部变量（`max_replans = 5`），

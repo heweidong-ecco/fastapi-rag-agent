@@ -5,7 +5,7 @@ LangGraph 进阶示例：多分支路由与子图协作
 import os
 import json
 import asyncio
-from typing import TypedDict, List, Annotated
+from typing import TypedDict, List, Annotated, Optional
 import operator
 
 from langgraph.graph import StateGraph, END
@@ -34,6 +34,16 @@ class AgentState(TypedDict):
     user_name: str          # 新增：当前对话的用户名
     memory_space: str       # 新增：当前使用的记忆空间
     thread_id: str          # 新增：当前会话的 thread_id
+    # 🔴 2026-10-05（`S13`）：本轮的预算拦截原因（`None` = 没被拦）。
+    #
+    # **它是「拦没拦住」通往【端点层】的唯一通道** —— 端点据此回 429 / error 帧。
+    # ⛔ **别拿末条 `ToolMessage` 的中文文案当判据**（那是子串判据，`plan_execute` 的 `S10`
+    #    刚把同型写法清掉：改一个字的措辞就静默失效，工具正文里恰好出现那四个字就误判）。
+    #
+    # ⚠️ 它**没有**挂 `operator.add`（不像 `messages`）⇒ **last-write-wins + 落 checkpoint**
+    #    ⇒ **必须每轮清零**（`agent_decide` 开头），否则上一轮被拦会让下一轮的**正常提问**
+    #    也返回 429。📌 守卫：`api/test_budget_hard_intercept.py::test_上一轮的拦截标志不会串到下一轮`
+    budget_intercept: Optional[str]
 
 # ==================== 初始化模型 ====================
 # 🔴 2026-10-01 补（🅗 `S12`）：本处原先**没有 `timeout` / `max_retries`** ——
@@ -233,11 +243,29 @@ async def call_mcp_tool(tool_name: str, arguments: dict) -> str:
 # 新增 工具调用时记录轨迹
 from tool_visualizer import record_tool_start, record_tool_end,record_agent_decision
 async def tool_execute(state: AgentState):
-    """执行节点：通过 MCP Client 调用工具"""
+    """执行节点：通过 MCP Client 调用工具。
+
+    🔴 2026-10-05（`S13`）：**预算拦截从"软"变"硬"**。
+
+    **改前**：被拦时只塞一条 `ToolMessage` 就 `continue` ⇒ 图照常往下走
+    ⇒ `/agent/mcp_chat` **HTTP 200**，只有 **LLM 自己**看得见那句"⚠️ 预算拦截"
+    ⇒ 「预算拦住了」这句话**只对 LLM 成立**（本文件 spec 的 ⚠️③）。
+
+    **改后**：被拦 ⇒ ① 照旧答满本轮的 `ToolMessage`（**序列必须合法**：
+    带 `tool_calls` 的 `AIMessage` 后面少一条回应，真 provider 直接 400）
+    ② 在 state 上写 `budget_intercept` ⇒ 端点层据此回 **429 / error 帧**。
+
+    ⛔ **别改成在这里 `raise`**（哪怕它看着更"硬"）—— 实测会把 checkpoint 留成
+    `next=('tools',)` + 一条**没人回答**的 `AIMessage(tool_calls)` ⇒ **那个 thread 从此废掉**。
+    📄 实测输出与备选评估 ⇒ `docs/decisions/DEC-078`。
+    ⚠️ `record_tool_end` 在**被拦这条路上仍然不写**（追踪里留一条"开了没结束"）——
+    这与改前**一字不差**（原来 `continue` 也不写），⛔ 不是本批引入的回归。
+    """
     last_message = state["messages"][-1]
     tool_messages = []
     user_name = state.get("user_name", "unknown")
     thread_id = state.get("thread_id", "unknown")
+    budget_intercept = None
 
     for tc in last_message.tool_calls:
         tool_name = tc["name"]
@@ -259,6 +287,10 @@ async def tool_execute(state: AgentState):
                 name=tool_name
             )
             tool_messages.append(tool_msg)
+            # ⚠️ **继续跑完这一轮的所有 tool_call**（⛔ 不是 `break`）：本轮有 3 个工具调用，
+            #    只答 2 个 ⇒ 那条 `AIMessage` 悬着 ⇒ 下一轮进来必 400。
+            #    拦截是"这一轮都别做了"，但不做的**每一条都要留下回应**。
+            budget_intercept = reason
             continue
 
         # 通过 MCP Client 调用工具
@@ -271,7 +303,12 @@ async def tool_execute(state: AgentState):
         tool_msg = ToolMessage(content=str(result), tool_call_id=tc["id"], name=tool_name)
         tool_messages.append(tool_msg)
 
-    return {"messages": tool_messages}
+    out = {"messages": tool_messages}
+    # ⚠️ **只在被拦时写**这个键 —— 清零**只有一个地方**（`agent_decide` 开头）。
+    #    "谁能改它"保持单一来源，才讲得清"什么时候它是可信的"。
+    if budget_intercept is not None:
+        out["budget_intercept"] = budget_intercept
+    return out
 
 # ==================== 动态绑定工具到模型 ====================
 async def get_llm_with_mcp_tools():
@@ -374,12 +411,26 @@ def build_mcp_agent():
            只拼 `content` 会把它们丢掉 ⇒ `should_continue` 判不出 `"tools"`
            ⇒ 直接跳去 `chat` 出最终答案，**工具永远不会被执行**，而接口一切正常。
         """
+        # 🔒 2026-10-05（`S13`）：**每一轮开头清零**上轮的预算拦截标志。
+        #
+        # 为什么必须有这一句：`budget_intercept` 是**普通 state 键**
+        # （⛔ 没挂 `operator.add`）⇒ **last-write-wins + 落 checkpoint**
+        # ⇒ 不清零的话，"上一轮被拦"会让**下一轮不需要工具的正常提问也返回 429**。
+        #
+        # ⚠️ 为什么放在**入口节点**：本图 `set_entry_point("agent")` ⇒ 每轮第一个跑的就是它
+        #    ⇒ 这是唯一一个"每轮必然经过"的地方（`tools` 未必跑到）。
+        #    📌 守卫：`api/test_budget_hard_intercept.py::test_上一轮的拦截标志不会串到下一轮`
+        #       （**删掉这一句它必红**）。
+        # ⚠️ **本节点的两个出口都要带上它** —— 只带一个的话，走另一个出口的那一轮会留着上轮的值。
+        cleared = {"budget_intercept": None}
+
         # ⚠️ 预算检查必须在 invoke() **之前** —— 放在之后钱已经花了，只能丢弃结果、拦不住
         #    （2026-09-16 上移；见 docs/decisions/DEC-002）
         # 预估本次调用消耗（经验值：决策通常消耗200-500 tokens）
         user_name = state.get("user_name", "unknown")
         if not check_token_budget(user_name, estimated_tokens=500):
             return {
+                **cleared,
                 "final_output": "今日Token预算已用完，请明天再试。",
                 "messages": [AIMessage(content="今日Token预算已用完，请明天再试。")]
             }
@@ -423,7 +474,8 @@ def build_mcp_agent():
                 tool_name=tool_name,
                 tool_args=tool_args,
             )
-        return {"messages": [response]}
+        # ⚠️ `cleared` 是**另一个出口也要带**的（见本节点开头那段）—— ⛔ 别只留这一处。
+        return {**cleared, "messages": [response]}
 
 
     # ==================== 路由函数 ====================
@@ -434,6 +486,18 @@ def build_mcp_agent():
         # 不需要工具时，去 chat_node 生成最终答案
         return "chat"
 
+    def after_tools(state: AgentState):
+        """`S13`：被预算拦下 ⇒ **本轮到此为止**（⛔ 不回 `agent`）。
+
+        ⚠️ 改前是 `add_edge("tools", "agent")` **无条件**回 `agent` —— 被拦之后
+        `agent` 会**再调一次同一个工具**、再被拦一次 …直到撞上递归上限。
+        🔴 实测（改动前）：被拦的那一轮直接
+        `GraphRecursionError: Recursion limit of 25 reached`
+        —— 且那是在**已经判定"没钱了"之后**又白白烧了十几轮 LLM。
+        📌 守卫：`api/test_budget_hard_intercept.py::test_被拦时图在tools之后直接结束不回agent`
+        """
+        return "blocked" if state.get("budget_intercept") else "continue"
+
      # ==================== 注册节点 ====================
     workflow.add_node("agent", agent_decide)
     workflow.add_node("tools", tool_execute)
@@ -442,8 +506,10 @@ def build_mcp_agent():
     # 条件路由：需要工具 → tools，不需要工具 → chat
     workflow.add_conditional_edges("agent", should_continue, {"tools": "tools", "chat": "chat"})
     
-    # tools 执行完后，回到 agent 继续判断（可能需要更多工具，也可能直接去 chat）
-    workflow.add_edge("tools", "agent")
+    # tools 执行完后，回到 agent 继续判断（可能需要更多工具，也可能直接去 chat）。
+    # 🔴 2026-10-05（`S13`）：**被预算拦下那一轮例外** —— 直接 `END`（理由见 `after_tools`）。
+    workflow.add_conditional_edges(
+        "tools", after_tools, {"blocked": END, "continue": "agent"})
     # chat 节点执行完后，结束
     workflow.add_edge("chat", END)
 
