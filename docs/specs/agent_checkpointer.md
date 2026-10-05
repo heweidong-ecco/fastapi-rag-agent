@@ -26,6 +26,13 @@
   · 🔴 **`purpose` 从 `"query_rewrite"` 改成 `"agent_decision"`** —— 改前那个值**与事实不符**（这个节点是**决策**，不是改写），
     且真库里 `query_rewrite` **0 条** ⇒ **无历史数据要迁**。⚠️ **行为变更**（统计口径跟着变）。
   · 📄 裁定 ⇒ `DEC-072`；📌 判据 ⇒ `api/test_billing_wiring.py`（AST + 行为，14 例；其中 `-k behavior` 那条是**本 bug 的行为层墓碑**）
+- 🔴 **被拦那一轮改【写进 state】（`N11` · 批 7 · 2026-10-05 · `DEC-083`）**：改前软返回返回
+  `{"messages": [AIMessage(BUDGET_EXCEEDED_MSG)]}` ⇒ **HTTP 仍 200**，`/agent/memory_chat` 的调用方
+  **看不出被拒了**。· 现在**两个出口都显式给 `budget_intercept`**：软返回出口（`:99`）写**本轮原因**、
+  正常出口（`:137`）写 **`None`**（清零 —— 入口节点 `agent_decide` 每轮第一个跑）。
+  ⚠️ **本文件的返回形状是"孤例"** —— 它返 `AIMessage`（`should_continue` 读 `messages[-1].tool_calls`），
+  ⛔ **不是 `final_output`** ⇒ 本批**只加键、⛔ 没动返回形状**（动了会动到本图路由）。
+  · 📄 裁定 ⇒ `DEC-083`；📌 判据 ⇒ `api/test_budget_soft_return.py`（21 例）
 
 ## 🟡 做到哪 / 缺什么
 
@@ -55,6 +62,8 @@
 | 🔴 **「`.usage` 和 `usage_metadata` 差不多，写哪个都行」** | ⛔ **差得多** —— `AIMessage` / `AIMessageChunk` 上**只有 `usage_metadata`**，`.usage` **不存在**（`hasattr` **恒为 False**）。<br>写错一个名字的后果是**静默失效**：记账整段被 `if` 跳过，**接口一切正常**，只是**一分钱不记**。本仓**真的栽过**：这条链从建立起就**从未记过一笔**（`DEC-072` `T8` 才写下第一笔）。<br>✅ **统一走 `token_tracker.record_from_response`** —— ⛔ 别在节点里自己 `getattr(response, "usage*")`（那正是两个名字的来源）。 |
 | 🔴 **「`purpose` 随便填一个就行」** | ⛔ **它会进 `token_usage_logs`，是统计口径** —— 改前本节点填的是 `"query_rewrite"`，而它干的是**决策**（改前真库 `query_rewrite` **0 条**是巧合，⛔ 不是"没人用"）。<br>✅ `DEC-072` 起统一成 `"agent_decision"`（与 `agent_graph.py` · 参照图一致）。 |
 | 🔴 **「被预算拦下那次也会记一笔」** | ⛔ **不记** —— 拦在 LLM 调用**之前** ⇒ **没花钱 ⇒ 没有账**。 |
+| 🔴 **「被拦那轮返回的是 `AIMessage`，所以调用方看到的就是那句预算话术」** | ⛔ **2026-10-05 批 7 起不再是** —— 图里**同时写 `budget_intercept`**（`:99`），端点层读到非空 ⇒ **429**（流式 ⇒ error 帧）。⚠️ **`AIMessage` 那条形状本身没改**（`should_continue` 靠着它判路由）。 |
+| 🔴 **「`budget_intercept` 只在被拦时写一下就行」** | ⛔ **正常出口（`:137`）也必须写 `None`** —— 它是**普通 state 键 + 落 checkpoint** ⇒ 只清一个出口的话，走另一个出口的那一轮会**留着上一轮的值**，预算恢复后**正常提问照样 429**。📄 `DEC-078 §四` · `DEC-083` §五 |
 
 ## 关联
 
@@ -62,6 +71,7 @@
 **`DEC-051`**（工具名分派勘误 —— 本模块是**第二处现场**）·
 **`DEC-056` 丙段**（审批门 + `/agent/approve` 按图路由）·
 **`DEC-072`**（**三条链不记账** —— 本模块那条恒假判据（`hasattr(response, "usage")`）在此修掉；配额从**形同虚设**变**真生效**）·
+**`DEC-083`**（**图内预算软返回的出口形状** —— 2026-10-05 批 7：被拦那一轮写 `budget_intercept`，端点转 429）·
 `docs/specs/agent_graph.md`（同款工具与分派表的出处 —— **审批语义也从它引入**）·
 `docs/specs/pending_approvals.md`（**停下来的那个会话记在哪**）·
 `docs/specs/session_key.md`（**checkpoint 键怎么拼**）

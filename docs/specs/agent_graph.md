@@ -24,6 +24,15 @@
   · ⚠️ **拦在调用【之前】** —— 放在 `.stream()` 之后钱已经花了，只能丢结果、拦不住
   · ⚠️ **被拦下那次不记账** —— 没花钱就没有账（与参照图 `agent_graph_advanced.py` 一致）
   · 📄 裁定 ⇒ `DEC-072`；📌 判据 ⇒ `api/test_billing_wiring.py`（AST 形状 + 行为，14 例）· `api/test_token_budget_hookup.py`（`record_from_response` 单元，5 例）
+- 🔴 **被拦那一轮改【写进 state】（`N11` · 批 7 · 2026-10-05 · `DEC-083`）**：改前软返回只返回
+  `{"messages": [AIMessage(BUDGET_EXCEEDED_MSG)]}` ⇒ **HTTP 仍 200**，调用方在响应里**看不出被拒了**。
+  · 现在**两个出口都显式给 `budget_intercept`**：软返回出口写**本轮的原因**、正常出口（`:205`）写 **`None`**（清零）
+  · ⚠️ **清零必须在【入口节点】**（`agent_decide` 是 `set_entry_point("agent")`，每轮第一个跑）——
+    它是**普通 state 键**（⛔ 没挂 `operator.add`）⇒ last-write-wins + **落 checkpoint** ⇒
+    不清零的话**上一轮被拦**会让**下一轮正常提问也回 429**
+  · ⚠️ ⛔ **别改成在节点里 `raise`** —— `DEC-078 §二` 实测：会污染 checkpoint（留下没人回答的
+    `tool_calls`）⇒ 那个 thread **从此每轮必 500**
+  · 📄 裁定 ⇒ `DEC-083`；📌 判据 ⇒ `api/test_budget_soft_return.py`（21 例，含**变异自证 27/27**）
 
 ## 🟡 做到哪 / 缺什么
 
@@ -71,18 +80,21 @@
 | 「搜索工具还是那个 DuckDuckGo」 | ✅ **2026-10-03 起（`DEC-051`）本文件也换成了 `search_tools.web_search`** —— ⛔ 三份实现不齐的反例只剩 `api_v1_rag.py:746`（RAG 侧 `/ws/agent`，见 `DEC-051` 遗留·1） |
 | 🔴 **「`SENSITIVE_TOOLS` 只是个开关，写个大概就行」** | ⛔ **它是【工具名】清单，⛔ 不是变量名** —— 写错一个字母的后果是**静默失效**（那个工具永不审批），**接口一切正常**。本仓**真的栽过**：默认值写成变量名 `search_tool`，**活了三天**（`DEC-051`）。<br>✅ 现在写错**会在启动时炸**，并**列出可用工具名**。 |
 | 🔴 **「`agent_decide` 加个 `config` 参数只是顺手接一下」** | ⛔ **它是真流式的【唯一条件】** —— 不声明、或不转发进模型的**流式**调用，`astream(stream_mode="messages")` **只会吐 1 块**（整段，`on_llm_end` 发的）。<br>⚠️ 而**接口看上去完全正常**：照样 `text/event-stream`、照样有 `data:` 帧 —— **前端逐字显示是前端自己切的**。<br>📌 判据（可打印）：`api/test_agent_sse.py::test_graph_streams_one_chunk_per_token`（数**块数**，⛔ 不看 header） |
-| 🔴 **「节点这么重，该改成 `async def` 吧」** | ⛔ **别改** —— 实测（探针⑧）会让**同步的** `graph.invoke()` 直接抛 `TypeError: No synchronous function provided to "agent"`，<br>而非流式路径（`/agent/langgraph_chat` · `api_v1.py` · `api_v1_rag.py`）**都在用它**。<br>✅ **同步节点 + 同步 `.stream(config)` 就能真流式**，⛔ 不需要 async。守卫 ⇒ `test_non_streaming_invoke_still_works` |
+| 🔴 **「节点这么重，该改成 `async def` 吧」** | ⛔ **别改** —— 实测（探针⑧）会让**同步的** `graph.invoke()` 直接抛 `TypeError: No synchronous function provided to "agent"`，<br>而非流式路径（`/agent/langgraph_chat`）**在用它**。<br>✅ **同步节点 + 同步 `.stream(config)` 就能真流式**，⛔ 不需要 async。守卫 ⇒ `test_non_streaming_invoke_still_works`<br>🔴 **2026-10-05 勘误**：本行原写「（`/agent/langgraph_chat` · `api_v1.py` · `api_v1_rag.py`）**都在用它**」—— **后两个不成立**：<br>它们各只有一句 `from agent_graph import agent_graph`（`api_v1.py:54` · `api_v1_rag.py:66`），**全文再 0 处引用**（`grep -c "agent_graph\." ` 两处都是 **0**）⇒ 是**死导入**，⛔ 不是消费者。<br>📌 判据（可打印）：`grep -rn "agent_graph" api/api_v1.py api/api_v1_rag.py` ⇒ 各 **1 行**（且都是 `import`）。<br>⚠️ **本图真正的非流式消费者只有** `/agent/langgraph_chat`（`api_v1_agent.py:235`）+ `/agent/approve` 的续跑。<br>⛔ **那两个死导入本批【没删】**（删除是"收拾仓库"，要单独裁）—— 只把话说对。 |
 | ⚠️ **「聚合流式块，用 `content += ` 拼起来就行」** | ⛔ **会丢掉 `tool_calls`** —— 它是**碎片化**到达的（name 一块、args 几块）。<br>丢了 ⇒ `should_continue` 判不出 `"approval"` ⇒ **B4 审批静默失效**，而接口返回 `{"status":"answered"}` 一切正常。<br>✅ 必须用 LangChain 自带的 `AIMessageChunk.__add__`（`+`）。守卫 ⇒ `test_agent_decide_preserves_tool_calls` |
 | 🔴 **「图里记账是 `token_tracker` 的事，节点不管」** | ⛔ **反了** —— `token_tracker` 只提供 `record_usage` / `record_from_response`，**"哪个节点调了 LLM"只有图自己知道**。<br>改前本图 **`record_usage` / `check_token_budget` 0 命中** ⇒ 走 `/agent/langgraph_chat` **一分钱不记**，端点上的 B8 会话上限 / B11 全站熔断**对本图等于不存在**（守卫读的计数器它从不写）。<br>✅ **每个调 LLM 的节点，必须同时有 `check_token_budget`（前置）与 `record_from_response`（后置）** —— `api/test_billing_wiring.py` 会按**最内层函数**逐个数，漏一个就红。 |
-| 🔴 **「`user_name` / `thread_id` 是可选装饰，缺了会 KeyError」** | ⛔ **缺了不报错，静默记成 `"unknown"`** —— 一律 `.get(…, "unknown")` 读。旧调用方（`api_v1.py` / `api_v1_rag.py`）**不传这两个键**，用下标会把那些路径当场打挂。<br>⚠️ **两种错各有代价**：用下标 ⇒ **500**（太响）；不记 ⇒ **额度漏算**（太静）。本图选后者。 |
+| 🔴 **「`user_name` / `thread_id` 是可选装饰，缺了会 KeyError」** | ⛔ **缺了不报错，静默记成 `"unknown"`** —— 一律 `.get(…, "unknown")` 读。**历史上有过不传这两个键的调用方**（本图原先的调用点已随 `DEC-072` 补齐），用下标会把那种路径当场打挂。<br>⚠️ **两种错各有代价**：用下标 ⇒ **500**（太响）；不记 ⇒ **额度漏算**（太静）。本图选后者。<br>🔴 **2026-10-05 勘误**：本行原写「旧调用方（`api_v1.py` / `api_v1_rag.py`）不传这两个键」—— **那两处根本不调本图**（死导入，见上一行）⇒ 举错了例子。论点不变，例子已撤。 |
 | 🔴 **「记账要的是 `session_key(user_name, thread_id)`」** | ⛔ **要的是 `thread_id` 原值** —— `session_key()` 是 **checkpoint 键**，与账目无关。端点上写 `sess` 是**错的**（`DEC-072` 修的就是这处）。<br>📌 判据：真库 `token_usage_logs.thread_id` 必须等于**请求里传的那个**（`T8` 端到端实测过）。 |
 | 🔴 **「被预算拦下来那次也该记一笔（记 0 tokens）」** | ⛔ **不记** —— **拦在 LLM 调用【之前】⇒ 没花钱 ⇒ 没有账**。记一笔 0 会污染 `token_usage_logs` 的计数（它是额度权威源）。 |
+| 🔴 **「`budget_intercept` 是给 LLM 看的提示词一部分」** | ⛔ **反了** —— 它是**端点层**的通道：图里只写**原因**，拼成给调用方的话术由 `api_v1_agent.agent_budget_intercept_message()` 统一做（⛔ 别在节点里拼整句）。<br>⚠️ **它必须被【入口节点每轮清零】** —— 普通 state 键 + 落 checkpoint ⇒ 不清零 = 上一轮被拦会让下一轮正常提问也 429。 |
+| 🔴 **「`budget_intercept=None` 与"没这个键"是一回事」** | ⛔ **端点读的是 `.get()`** ⇒ 两者都判成"没被拦"。**但只有显式 `None` 才能把上轮的值冲掉** —— 这就是为什么**两个出口都得给值**（软返回给原因、正常出口给 `None`），⛔ 不是"只给一个出口就行"。 |
 
 ## 关联
 
 `DEC-018`（Agent 目录处置）· **`DEC-048`（审批触发条件改工具白名单 —— 本模块 2026-10-03 那次改动的决策前提）** ·
 **`DEC-051`（**工具名分派与白名单的标识符勘误** —— 本模块 2026-10-03 第二次改动：两条既有 bug + 换搜索工具）** ·
 **`DEC-072`（**三条链不记账** —— 本模块 2026-10-04 接上预算拦 + 记账）** ·
+**`DEC-083`（**图内预算软返回的出口形状** —— 2026-10-05 批 7：被拦那一轮写 `budget_intercept`，端点转 429）** ·
 `ROADMAP` 待办 `T4`/`T5` · `docs/原理/架构.md` §1.3 ·
 `后端补齐清单` **B4**（硬门 D 触发条件）· **`docs/specs/pending_approvals.md`**（`B5` 队列 —— ⚠️ **队列不本模块里**）·
 `docs/specs/api_v1_agent.md` 的「实施计划 ②」

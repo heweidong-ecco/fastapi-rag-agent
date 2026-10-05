@@ -4,7 +4,7 @@ LangGraph Agent 示例：基于图结构的智能助理
 import os
 import json
 import asyncio
-from typing import TypedDict, List, Annotated
+from typing import TypedDict, List, Annotated, Optional
 import operator
 
 from langgraph.graph import StateGraph, END
@@ -19,6 +19,12 @@ from search_tools import web_search  # DEC-051：搜索工具换成 Bing 版（�
 # 🔴 2026-10-04（`DEC-072`）：本图**原先既不拦也不记** —— 一个 LLM 调用点免费跑。
 #    `record_from_response` 是三张图共用的**唯一记账实现**，⛔ 别在本文件里另抄一份取用量。
 from token_tracker import check_token_budget, record_from_response, BUDGET_EXCEEDED_MSG
+# 🔴 2026-10-05（批 7 · `N11`）：**保住 `check_token_budget` 这个调用，⛔ 别改成
+#    `check_token_budget_detail`**（曾试过、已退回）。理由不是"它更好"，是这个**模块属性**
+#    是 4 个测试文件在用的 monkeypatch 缝 —— `test_billing_wiring.py:384` 拿它把本图打成
+#    "恒拦"并断言"末条 = `BUDGET_EXCEEDED_MSG` 且**一笔账都不记**"；`test_agent_stream_chains.py`
+#    用它放行去测真流式。换掉 ⇒ 那些补丁**静默失效**、转而去连真库。
+#    ⇒ 拦截原因取 `BUDGET_EXCEEDED_MSG`（本图本来就拿它当答案文本）。
 
 # ==================== 初始化模型 ====================
 # ⚠️ 角色 = 「模型轴 fast」+「长度轴 agent(1024)」—— 见 `api/llm_factory.py` 的模块 docstring。
@@ -115,6 +121,15 @@ class AgentState(TypedDict):
     #       用下标会当场 `KeyError` 把那些路径打挂。缺身份**只该漏记到 "unknown"，不该 500**。
     user_name: str
     thread_id: str
+    # 🔴 2026-10-05（批 7 · `N11`）：**预算被拦的原因**，通往【端点层】的唯一通道
+    #    —— 端点据此回 **429**（非流式）/ **error 帧**（流式）。
+    #    ⚠️ 与 `agent_graph_advanced.AgentState` 的同名键**是同一个契约**：存**原因**，
+    #       拼文案由端点层的 `api_v1_agent.agent_budget_intercept_message` 统一做（⛔ 别在节点里拼）。
+    #    ⚠️ 它**没有**挂 `operator.add` ⇒ **last-write-wins + 落 checkpoint**
+    #       ⇒ **必须每轮清零**，否则上一轮被拦会让下一轮的**正常提问**也返回 429。
+    #       📌 清零落在**入口节点** `agent_decide`（`set_entry_point("agent")` ⇒ 每轮必经），
+    #          **它的两个出口都要带上**。
+    budget_intercept: Optional[str]
 
 # ==================== 定义节点函数 ====================
 def agent_decide(state: AgentState, config: RunnableConfig):
@@ -154,7 +169,13 @@ def agent_decide(state: AgentState, config: RunnableConfig):
         # ⚠️ 返回 AIMessage 而非 `final_output` —— 本图的出口是 `should_continue` 读
         #    `messages[-1].tool_calls`（见 `:195`）：无 tool_calls ⇒ END。
         #    ⛔ 别忘了记账**在**这里也要有 —— 但拦下来的这次**没花钱**，不该记。
-        return {"messages": [AIMessage(content=BUDGET_EXCEEDED_MSG)]}
+        # 🔴 2026-10-05（批 7 · `N11`）：**同时置 `budget_intercept`** ——
+        #    改前只塞一句话当答案，端点照常回 **HTTP 200** ⇒ 调用方**看不出被拒了**。
+        #    ⚠️ 这是**入口节点**（`set_entry_point("agent")`），所以它既是"清零的那一处"、
+        #       也是"写标志的那一处" —— 本出口写原因，⛔ **不写 `None`**。
+        #    ⚠️ **⛔ 不许在这里 `raise`** —— 实测会把 checkpoint 留成非法序列（`DEC-078` §二）。
+        return {"messages": [AIMessage(content=BUDGET_EXCEEDED_MSG)],
+                "budget_intercept": BUDGET_EXCEEDED_MSG}
 
     response = None
     for chunk in llm_with_tools.stream(state["messages"], config=config):
@@ -176,7 +197,12 @@ def agent_decide(state: AgentState, config: RunnableConfig):
         user_name=user_name, thread_id=thread_id,
     )
     # 返回一个AIMessage，LangGraph会自动将它追加到messages中
-    return {"messages": [response]}
+    # 🔴 2026-10-05（批 7 · `N11`）：**正常出口也要清零**（`DEC-078 §四`）——
+    #    `budget_intercept` 是普通 state 键（last-write-wins + 落 checkpoint）
+    #    ⇒ 只清一个出口的话，走**另一个**出口的那一轮会留着上一轮的值
+    #    ⇒ 预算恢复之后那一轮**正常的提问**照样回 429。
+    #    📌 守卫：`api/test_budget_soft_return.py::test_agent_graph_上一轮的标志不串轮`
+    return {"messages": [response], "budget_intercept": None}
 
 def tool_execute(state: AgentState):
     """

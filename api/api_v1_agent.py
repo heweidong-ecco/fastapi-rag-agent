@@ -88,6 +88,42 @@ import os
 router = APIRouter(prefix="/api/v1")
 
 
+#: 预算拦截时给调用方看的那句话的**前缀**（`N11` · 批 7）。
+#: ⚠️ **由端点层拼、⛔ 不由图里拼** —— 图写进 `budget_intercept` 的是**原因**，
+#:    拼文案只有这一个地方。理由见 `agent_budget_intercept_message` 的 docstring。
+BUDGET_INTERCEPT_PREFIX = "预算拦截，本轮未继续执行："
+
+
+def agent_budget_intercept_message(why: str) -> str:
+    """把图写下的**拦截原因**拼成给调用方看的那句话（**唯一**的拼法）。
+
+    ## 为什么必须有这个函数（⛔ 别在各端点再拼一遍）
+
+    9 条端点（4 非流式 + 4 流式 + `/agent/approve`）都要在读到 `budget_intercept` 时
+    回一句话。⛔ 各拼各的 ⇒ 同一次拦截在不同端点上说法不同，而**调用方看不出这是同一件事**。
+
+    ## 🔴 文案是「**本轮**」口径，⛔ 不是「本次工具调用未执行」
+
+    那句话是 `S13`（2026-10-05 批 2）留下的，当时**只有**工具触发那一种拦截 ——
+    对它是准的。**批 7（`N11`）新增的 10 处软返回里，绝大多数根本没有工具调用**
+    （四张图的**入口节点**在调 LLM **之前**就拦下了：`agent_decide` / `supervisor`）
+    ⇒ 旧文案对它们**不准**（说了一个没发生的事）。
+
+    ⇒ 改成「本轮未继续执行」—— 对**两种**拦截都成立。
+    ⚠️ 代价（选了就要认）：`/agent/mcp_chat` 那条 429 的中文**跟着变了**。
+       而"哪个工具没执行"这个信息**没有丢** —— `check_multilevel_budget` 的 reason 里本来就带
+       （形如「工具 `x` 将超出…」）。📄 裁定 ⇒ `docs/decisions/DEC-083`。
+
+    ⚠️ **`why` 为空时也要能调**（`.get` 可能拿到 `None`）—— 返回一句兜底，⛔ 不返回空串：
+       空的 `{"error": ""}` 跑出去，调用方**比现在还看不懂**。
+    """
+    why = (why or "").strip()
+    if not why:
+        # 图写了标志却没写原因 = 写入方的 bug。⛔ 别静默变成空串 —— 给一句能看懂的话。
+        return BUDGET_INTERCEPT_PREFIX.rstrip("：") + "（未提供原因）"
+    return f"{BUDGET_INTERCEPT_PREFIX}{why}"
+
+
 def summarize_agent_result(result: dict) -> dict:
     """把 LangGraph 的返回态整理成对调用方**有意义**的形状。
 
@@ -206,6 +242,17 @@ async def langgraph_chat(
          "user_name": user_name, "thread_id": thread_id},
         config={"configurable": {"thread_id": sess}}
     )
+    # 🔴 2026-10-05（批 7 · `N11`）：图内软返回的**出口形状** —— 图里预算不够时，
+    #    入口节点在 state 上留下 `budget_intercept`（改前它只塞一句"预算用完了"**当答案**，
+    #    端点照常回 **HTTP 200** ⇒ 调用方**看不出被拒了**）。
+    # ⚠️ **必须在 `summarize_agent_result` 之前 `raise`**：被拦的这一轮**没有停在审批点**
+    #    ⇒ 下面 B5 那一支不许 `register`（否则队列里多一条**永远批不了**的假待办）。
+    # ⛔ 别在节点里 `raise` —— 会把 checkpoint 留成非法序列（`DEC-078` §二 实测）。
+    # 📄 裁定 ⇒ `docs/decisions/DEC-083`。
+    if result.get("budget_intercept"):
+        raise AppException(ErrorCode.QUOTA_EXCEEDED,
+                           agent_budget_intercept_message(result["budget_intercept"]))
+
     summary = summarize_agent_result(result)
 
     # B5 · 待接管队列（`②` Task 2）—— `MemorySaver` 反查不出"谁卡住了"，只能在这里记账。
@@ -309,6 +356,22 @@ async def langgraph_chat_stream(
         #    ⚠️ 骨架把 `collected` 递过来，**这不是"攒块"的口子** —— 它就是上面被否掉的那条路。
         #       要状态，就 `aget_state`。
         state = await agent_graph.aget_state({"configurable": {"thread_id": sess}})
+
+        # 🔴 2026-10-05（批 7 · `N11`）：图内软返回的**出口形状** —— 同 `/agent/mcp_chat/stream`，
+        #    但那边的 **429 这里发不出去**：响应头**已经发出去了**（HTTP 200 + `text/event-stream`）
+        #    ⇒ 只能改发一帧 `{"error": …}`。
+        #    ⛔ **不许照旧发汇总帧** —— 那帧里有 `answer`，读起来就是"这轮正常答完了"。
+        #    ⚠️ 排在 `summarize_agent_result` **之前**：被拦的这一轮**没停在审批点**
+        #       ⇒ 下面 B5 那一支不许 `register`（否则队列里多一条**永远批不了**的假待办）。
+        why = (state.values or {}).get("budget_intercept")
+        if why:
+            msg = agent_budget_intercept_message(why)
+            yield sse_frame({"error": msg}, ensure_ascii=False)
+            yield DONE_FRAME
+            # ⚠️ 挪进了这一支（⛔ 别在末尾再写一处 `persist_turn`）—— 本轮**没答成**。
+            persist_turn(user_name, question, msg, status="error")
+            return
+
         summary = summarize_agent_result(state.values or {})
 
         # B5 · 待接管队列（`②` Task 2）—— 与 `/agent/langgraph_chat` 同款：
@@ -402,6 +465,20 @@ async def approve_agent_action(
        · 连收尾提示都拦不住（模型仍要敏感工具）⇒ `status="error"` + `rounds`，该轮终止、⛔ **不入队**
        ⚠️ 没有上限的后果：模型可**无限**要求敏感工具、人工就得无限批（实测 3 次收敛，但**没有任何机制阻止 30 次**）。
     """
+    # B8 · 会话级 token 上限（`DEC-041`）+ B11 · 全站日级熔断（`①b` Task 4）。
+    # 🔴 2026-10-05（批 7 · `N11`）补 —— 本端点此前是全仓**唯一**既无 B8 也无 B11 的
+    #    **烧钱**端点（R1.3 由中间件覆盖 ⇒ 不是"零门"，但续跑照样烧钱）。
+    #    ⚠️ **两条并列、都要过**（⛔ 别合并）—— 与其余 11 条端点同款。
+    #    ⚠️ 用的是**调用方** `user_name`，⛔ **不是属主 `owner`**（属主要等查完队列才知道）。
+    #       这是一条**新裁决**：谁发请求谁被限，与其余端点一致。📄 ⇒ `DEC-083`。
+    ok, why = check_session_token_budget(user_name, thread_id)
+    if not ok:
+        raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
+
+    ok, why = circuit(global_key())
+    if not ok:
+        raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
+
     # 🔴 丙段（`DEC-056`）：**先按【原 thread_id】查队列定属主，再按属主拼键**。
     #    ⛔ 别按调用方拼 —— admin 会拼出自己那个不存在的桶 ⇒ **永远批不了别人的**（硬门 D 死掉）。
     candidates = find_by_raw_thread_id(thread_id)
@@ -485,6 +562,17 @@ async def approve_agent_action(
             as_node="tools")           # 🔴 同上：⛔ 不传 `as_node` 图就会直接 END（模型不参与）
         result = target.invoke(None, config)
 
+    # 🔴 2026-10-05（批 7 · `N11`）：**续跑的这一轮也可能被预算拦下** —— `agent` 是入口节点、
+    #    每轮都查预算，而放行后图正要从 `approval` 回到它。⛔ 不认这个标志的话，下面那些
+    #    `answer` 拿到的就是那句"预算用完了"的**伪答案**（HTTP 200 + 一个看着跑完了的状态）。
+    #    ⚠️ **先 `resolve` 再 `raise`**：软返回 = 图这一轮**真跑完了**（不是停在审批点）
+    #       ⇒ 不注销就留在队列里变成一条**永远批不了**的假待办。
+    #    📌 判据：`api/test_budget_soft_return.py::test_approve_续跑那一轮被拦时回429`
+    if result.get("budget_intercept"):
+        resolve(sess)
+        raise AppException(ErrorCode.QUOTA_EXCEEDED,
+                           agent_budget_intercept_message(result["budget_intercept"]))
+
     final_message = result["messages"][-1]
 
     # 🔴 B5/B6 修正（2026-10-04 · 端到端验收）：**只有"真的走完了"才许 `resolve()`**。
@@ -508,6 +596,14 @@ async def approve_agent_action(
                 "请不要再调用任何敏感工具，直接根据你已有的信息回答用户。")},
                 as_node="tools")           # 同前：⛔ 不传 `as_node` 图会直接 END（模型不参与）
             forced = target.invoke(None, config)
+            # 🔴 2026-10-05（批 7 · `N11`）：**这是本端点的【第二个】`invoke`**，同样要认标志 ——
+            #    只认头一个的话，走到这条路的用户会拿到 `forced_finish=True` +
+            #    `answer="预算用完了"`（看着像"模型被强制收口了"，其实是根本没跑）。
+            #    📌 判据：`api/test_budget_soft_return.py::test_approve_触顶强制收尾那一轮被拦时回429`
+            if forced.get("budget_intercept"):
+                resolve(sess)
+                raise AppException(ErrorCode.QUOTA_EXCEEDED,
+                                   agent_budget_intercept_message(forced["budget_intercept"]))
             if target.get_state(config).next == ("approval",):
                 # 🔴 连"请收尾"都拦不住 ⇒ 认输：返回 error 且**不再入队**（⛔ 不再无限循环）。
                 #    ⚠️ 这条出口会让该 thread 停在审批点（与"孤儿"同病）——但它是**有界的**；
@@ -615,6 +711,13 @@ async def advanced_agent_chat(
         },
         config={"configurable": {"thread_id": sess}}
     )
+    # 🔴 2026-10-05（批 7 · `N11`）：图内软返回的**出口形状**。本图**6 个出口**都会写
+    #    `budget_intercept`（⛔ 不只是入口 `supervisor`）⇒ 这里一处收口。
+    #    📌 判据：`api/test_budget_soft_return.py::test_advanced_agent_每个软返回出口都置标志`
+    if result.get("budget_intercept"):
+        raise AppException(ErrorCode.QUOTA_EXCEEDED,
+                           agent_budget_intercept_message(result["budget_intercept"]))
+
     return {
         "question": question,
         "answer": result.get("final_output", "处理完成"),
@@ -678,6 +781,17 @@ async def advanced_agent_chat_stream(
         """收尾尾巴：**汇总帧 + `[DONE]`**（状态只从 `aget_state` 取 —— 见 docstring 第 3 条）。"""
         state = await advanced_agent.aget_state({"configurable": {"thread_id": sess}})
         values = state.values or {}
+
+        # 🔴 2026-10-05（批 7 · `N11`）：图内软返回的**出口形状** —— 同
+        #    `/agent/langgraph_chat/stream`（本图有 **6 个**软返回出口，这里一处收口）。
+        why = values.get("budget_intercept")
+        if why:
+            msg = agent_budget_intercept_message(why)
+            yield sse_frame({"error": msg}, ensure_ascii=False)
+            yield DONE_FRAME
+            persist_turn(user_name, question, msg, status="error")
+            return
+
         yield sse_frame({
             "thread_id": thread_id,
             "answer": values.get("final_output", "处理完成"),
@@ -1000,6 +1114,12 @@ async def memory_chat(
          "user_name": user_name, "thread_id": thread_id},
         config=config
     )
+    # 🔴 2026-10-05（批 7 · `N11`）：图内软返回的**出口形状**（同 `/agent/langgraph_chat` 那段，
+    #    含"必须排在 `summarize_agent_result` 之前"的理由）。
+    if result.get("budget_intercept"):
+        raise AppException(ErrorCode.QUOTA_EXCEEDED,
+                           agent_budget_intercept_message(result["budget_intercept"]))
+
     # 🔴 丙段：本端点现在**会停在审批点**（`checkpointer_agent` 的 `interrupt_before=["approval"]`）。
     #    ⇒ 状态判定**复用 `summarize_agent_result`**，⛔ 别再在这里另写一套
     #      （它已经是"停没停在审批点"的**唯一**口径，见其 docstring）。
@@ -1067,6 +1187,18 @@ async def memory_chat_stream(
     async def _complete(collected):
         """收尾尾巴：**登记/清队列 + 汇总帧 + `[DONE]`**（状态只从 `aget_state` 取）。"""
         state = await checkpointer_agent.aget_state({"configurable": {"thread_id": sess}})
+
+        # 🔴 2026-10-05（批 7 · `N11`）：图内软返回的**出口形状** —— 同
+        #    `/agent/langgraph_chat/stream`（含"⛔ 不许照旧发汇总帧"与"排在 `summarize` 之前"
+        #    两条理由），⚠️ 只是换了一张图的 `aget_state`。
+        why = (state.values or {}).get("budget_intercept")
+        if why:
+            msg = agent_budget_intercept_message(why)
+            yield sse_frame({"error": msg}, ensure_ascii=False)
+            yield DONE_FRAME
+            persist_turn(user_name, question, msg, status="error")
+            return
+
         summary = summarize_agent_result(state.values or {})
         # B5 · 与 `/agent/memory_chat` 同款：⚠️ `else` 那支不是可省的 ——
         # 本轮没卡住 ⇒ 清掉上一次的登记，否则同一个 thread 卡过一次就**永远留在队列里变成假待办**。
@@ -1381,11 +1513,13 @@ async def mcp_agent_chat(
     #       `plan_execute` 的 `S10` 刚把同型写法清掉（改一个字就静默失效 / 工具正文碰巧含那四个字就误判）。
     #    ⚠️ `finish_trace` 在这条路上**不写**（追踪里留一条"开了没结束"）——
     #       与上面 B8 / B11 两道门**一致**，是"被拒也要留下尝试痕迹"的有意为之。
+    #    ⚠️ **2026-10-05（批 7 · `N11`）文案改了**：从「本次**工具调用**未执行」改成
+    #       「**本轮**未继续执行」（`agent_budget_intercept_message`）。理由：本批新增的 8 处
+    #       软返回**根本没有工具调用**（入口节点在调 LLM 之前就拦下了）⇒ 旧句对它们不准。
+    #       ⛔ **改既有判据不许静默** —— 声明与代价见 `docs/decisions/DEC-083`。
     if result.get("budget_intercept"):
-        raise AppException(
-            ErrorCode.QUOTA_EXCEEDED,
-            f"预算拦截，本次工具调用未执行：{result['budget_intercept']}",
-        )
+        raise AppException(ErrorCode.QUOTA_EXCEEDED,
+                           agent_budget_intercept_message(result["budget_intercept"]))
 
     final_message = result["messages"][-1]
 
@@ -1469,14 +1603,15 @@ async def mcp_agent_chat_stream(
         #       而这正是软拦截在流式这条路上的形态（改前实测：`answer` = "⚠️ 预算拦截：…"）。
         why = values.get("budget_intercept")
         if why:
-            yield sse_frame({"error": f"预算拦截，本次工具调用未执行：{why}"},
-                            ensure_ascii=False)
+            # ⚠️ **2026-10-05（批 7 · `N11`）文案改了**（同 `/agent/mcp_chat`，理由见那一处）：
+            #    从「本次**工具调用**未执行」改成「**本轮**未继续执行」；
+            #    且**改走共享纯函数**（⛔ 不再就地拼）⇒ 帧与历史**同源**，不会对不上。
+            msg = agent_budget_intercept_message(why)
+            yield sse_frame({"error": msg}, ensure_ascii=False)
             yield DONE_FRAME
             # 🔴 `DEC-055`：留痕排在任何 `yield` 之前的那条约束这里**不适用**（本支不会异常），
             #    但"三条出口都要留痕"照办 —— 这条算 `error`（本轮没答成）。
-            #    ⚠️ 存的文本**与上面那一帧同源**（同一个 `why`）⇒ 帧与历史不会对不上。
-            persist_turn(user_name, question, f"预算拦截，本次工具调用未执行：{why}",
-                         status="error")
+            persist_turn(user_name, question, msg, status="error")
             return
 
         # 预算提醒

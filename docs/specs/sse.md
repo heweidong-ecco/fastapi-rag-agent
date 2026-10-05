@@ -55,7 +55,7 @@
 | ⚠️ **⑦ 这块是不是 token 有办法判** | ⛔ **没有**。而且**不止 LLM 会产块**：实测 `advanced_chat` 的 `supervisor`（它 `return state`）会把它收到的<br>**用户提问原文**当"新消息"发出来 ⇒ 不加白名单，**用户会先看到自己的问题被回显一遍**。<br>⇒ **就按节点名收**（`nodes=` 白名单）。 |
 | 🔴 **⑧ 这里是记账的地方** | ⛔ **不是** —— 本模块只**发帧**，**一行 token 记账都没有**。<br>⚠️ 但要记住一件**极易踩的反向坑**：节点内部把流**聚合成一条消息**去记账时，<br>**必须对【所有】块做 `+`，⛔ 不许跳过 `content` 为空的块** ——<br>实测本仓 provider 把 `usage_metadata` 挂在**最后一块**（`content=''`）上，跳过它**账就没了**，<br>而接口一切正常。判据 ⇒ `fastapi-rag-agent-TODO待办/探针-流式与记账.py`。 |
 | ⚠️ **⑨ `SSE_HEADERS` 可以直接传** | ⛔ **不能** —— `StreamingResponse` 会**持有并改写**自己的 `headers` ⇒ 共享同一个 dict 会让所有响应**串台**。<br>⇒ `sse_response()` 每次都 `dict(SSE_HEADERS)` 复制一份（用例：`test_response_headers_are_copied_not_shared`）。 |
-| 🔴 **⑩ 一个出口 `on_complete` / `on_incomplete` 会都调** | ⛔ **不会 —— 三条出口【恰好各调一个】**：正常跑完 ⇒ 只 `on_complete`；取消 ⇒ 只 `on_incomplete(…, "cancelled")`；异常 ⇒ 只 `on_incomplete(…, "error")`。<br>⚠️ **两个都是【可选】参数，且【默认都不调】** ⇒ 「传了 `on_complete` 就以为留痕有了」在**取消 / 异常**两条路上是**空的**。<br>⚠️ **反过来也成立**：正常收尾时 `on_incomplete` **一次都不调** —— 别在那里 `return` 完就以为它兜底了。<br>⚠️ 两个钩子**都是同步**的（约束① 的理由对它们一样成立）⇒ 想在里面做 `await` 的事（落库 / 调 API）得自己想办法递交给别处。 |
+| 🔴 **⑩ 一个出口 `on_complete` / `on_incomplete` 会都调** | ⛔ **不会 —— 三条出口【恰好各调一个】**：正常跑完 ⇒ 只 `on_complete`；取消 ⇒ 只 `on_incomplete(…, "cancelled")`；异常 ⇒ 只 `on_incomplete(…, "error")`。<br>⚠️ **两个都是【可选】参数，且【默认都不调】** ⇒ 「传了 `on_complete` 就以为留痕有了」在**取消 / 异常**两条路上是**空的**。<br>⚠️ **反过来也成立**：正常收尾时 `on_incomplete` **一次都不调** —— 别在那里 `return` 完就以为它兜底了。<br>⚠️ 两个钩子**都是同步**的（约束① 的理由对它们一样成立）⇒ 想在里面做 `await` 的事（落库 / 调 API）得自己想办法递交给别处。<br>🔴 **且 `on_complete` ≠「这轮答成了」** —— 上游**正常跑完**不等于调用方**拿到答案**：4 条 `/agent/*` 流式端点在 `on_complete` 里读到图的 `budget_intercept` 时会**改发 `{"error": …}` + `[DONE]`**、⛔ **不发汇总帧**（`S13` · 批 7 `N11` ⇒ `DEC-083`）。<br>⇒ 判「答没答成」看**发了哪一帧**，⛔ **别看出现在哪个钩子里**。⚠️ 本层**一个字都不知道**这件事 —— 它由端点自己决定。 |
 
 ## 关联
 
@@ -66,6 +66,7 @@
 | `DEC-052` | 约束③（取消时 ⛔ 不 yield `[DONE]`）· `stream_cancelled_total` |
 | `DEC-050` | 约束⑤（汇总只从图状态取，⛔ 不是攒块）—— **真服务撞出来的** |
 | `DEC-055` | 把 `on_cancel(collected)` 泛化成 `on_incomplete(collected, status)` —— 取消 / 异常**两条出口共用一个同步钩子**（⑥ ⑩ 两行出自它） |
+| `DEC-083` | **图内预算软返回的出口形状**（批 7 · `N11`）—— **4 条 `/agent/*` 流式端点**在 `on_complete` 里可能**只发 error 帧**（⑩ 那条尾巴出自它）· ⛔ 本层未改一行 |
 | `docs/specs/metrics.md` | `track_stream_cancel` / `stream_cancelled_total` 的本尊 |
 | `fastapi-rag-agent-TODO待办/探针-真流式与子图.py` | ⚠️ ⑥ 那张六剧本表（`subgraphs` 开关与产出形状） |
 | `fastapi-rag-agent-TODO待办/探针-流式与记账.py` | ⚠️ ⑧ `usage_metadata` 挂在哪一块上 |
