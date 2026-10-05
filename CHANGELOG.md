@@ -1774,6 +1774,50 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- 🔧 **链接门豁免一处【在 `/tmp` 的历史路径】**（2026-10-05）—— 解开一处**与业务改动无关**的提交阻塞。
+
+  **改前实况**：`bash scripts/check_doc_links.sh` **exit=1**，报 2 处真断链，指向**同一个已消失的**
+  `/tmp/b1-scout-report.md`（`ROADMAP.md:315` · `fastapi-rag-agent-TODO待办/硬门A-Agent端流式勘察-20261003.md:6`）。
+  两处都是**历史叙述**（「它原先是 `/tmp/b1-scout-report.md`（易失），2026-10-04 落仓」）——
+  ⛔ **不是指路**；`/tmp` 被清空后**必然**变成假断链。⚠️ 而 `.claude/hooks/pre-commit-gates.py`
+  会据此**拦下任何 commit**（⛔ 与提交内容无关）。
+
+  **做了**：按 ignore 清单既有的 ⑦ 类（「已移走 / 散文里仍会提到，读者读的是那句话」）加**一条最小豁免**
+  `^/tmp/b1-scout-report\.md$`。
+  🔴 **只豁免【这一个路径】，⛔ 不是豁免 `/tmp/`** —— 放宽成 `^/tmp/` 会让将来任何写进文档的 `/tmp` 假路径
+  **静默通过**（该约束已写在清单里）。🔴 **不改那两处文字**：那是历史事实，本仓规矩「**原始记录不改写**」。
+
+  **决策事项**：① **有** —— 三种处置（加最小路径豁免 / 改写那两处叙述 / 不提交）由**业务方 2026-10-05 选定第一种**；
+  ② CHANGELOG ⇒ 本条。
+
+  📌 判据（可打印）：改前 `bash scripts/check_doc_links.sh; echo $?` ⇒ **1** · 改后 ⇒ **0**（`✅ 没有真断链`）
+
+- 🔴 **给人工审批的"又停下"封顶**（2026-10-05 · `DEC-062` **§六·2 / §九**）—— 业务方裁「**上限 3 轮 · 触顶强制收尾**」。
+
+  **改前实况**：`DEC-062`（2026-10-04）把"放行后模型又要求敏感工具"从**孤儿会话**改成**重新入队**（对），
+  但那条路**没有上限** —— 模型可以**无限**要求敏感工具，人工就得**无限批**。
+  ⚠️ **改对了一件事，同时开了一个新口子**：实测默认 3 次收敛，但**没有任何机制阻止 30 次**。
+
+  **做了什么**（两处，`TDD`：先写 4 条会红的用例）：
+  * `api/pending_approvals.py` —— 登记记录加 **`rounds`** 字段（`register(..., rounds=1)`）+
+    新增 **`approval_round_cap()`**（默认 **3** · env **`MAX_APPROVAL_ROUNDS`** · 非法值回退默认）。
+    ⚠️ **本模块只存不算**，"到没到、到了怎么办"全在下面对应的端点里。
+  * `api/api_v1_agent.py::approve_agent_action` —— 放行后若图**又**停在审批点，先比 `rounds`：
+    **未到** ⇒ 原路重新登记（`rounds + 1`）· **到了** ⇒ ⛔ **不再登记**，改注入一条
+    「已达上限、该工具**未执行**、请**直接作答**」的 `ToolMessage`（`as_node="tools"`）并续跑：
+    * 收尾成功 ⇒ 返回 `status="approved"/"rejected"` + **`forced_finish=True`** + `rounds`
+    * 收尾不住 ⇒ `status="error"` + `rounds`，该轮终止、**不入队**（有界）
+
+  ⚠️ **为什么是"强制收尾"而不是"直接报错"**：模型要求敏感工具是**合法行为**（`DEC-062` §七 否掉过"把第三态当错误"）
+  ⇒ 先**努力把话说圆**，能答就正常返回；只有"连提示都拦不住"才退到 `error` —— **报错是最后一档，不是第一档**。
+
+  ⚠️ **代价（知道再选）**：`error` 那支的会话**停在审批点而队列已注销**（形态上与"孤儿"同病），但它是**有界的**；
+  `rounds` 靠调用点**显式传**（默认 1）⇒ 将来新增"非首次"的登记点**必须显式传**，否则封顶对它是空的。
+
+  📌 判据（可打印）：`venv/bin/python -m pytest api/test_approval_resume.py -q` ⇒ **16 passed**（§⑥ 新增 4 条）
+  · 全量 `bash scripts/ci-local.sh` ⇒ **544 passed / 3 skipped / 31 deselected**（改前 540）
+  📄 `docs/specs/pending_approvals.md` · `docs/specs/api_v1_agent.md` · `docs/契约/环境变量.md` · `docs/契约/接口契约.md`
+
 - 🔴 **关掉三条【不记账】的 LLM 通路**（2026-10-04 · `DEC-072`）—— `agent_graph.py`（`/agent/langgraph_chat`）· `agent_checkpointer.py`（`/agent/memory_chat`）· `agent_graph_advanced_learning.py`（`/agent/advanced_chat`），**共 9 个 LLM 调用点**。
 
   **改前实况**：这三张图**既不查预算、也不记账** ——
