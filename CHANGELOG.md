@@ -1774,6 +1774,27 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- 🔴 **`plan_execute` 的成败判定：从「读中文文案」换成 `StepResult` 结构化返回**（2026-10-05 · `DEC-077` · 待办 `S10`）
+
+  `api/plan_execute.py` 原先靠**中文子串**判成败 —— `if "执行失败（已重试" in step_result`（`:362`）
+  与 `if "执行失败" in step_result`（`:557`）。那条判据与那句**格式化文案**耦合，坏法两种：
+  ① 改一个字的措辞 ⇒ **失败判定静默失效**（看起来在重试、其实没有）；
+  ② 工具**正常返回**的正文里恰好含那四个字 ⇒ 正常结果被判成失败、**凭空触发一次重规划**。
+
+  ⇒ 新增 `StepResult(ok, text, error)`（`frozen` dataclass）；两个 `execute_step_with_*` 改返回它，
+  调用方看 `.ok` 字段。**⛔ 用户可见文案一字未改**（只换判定依据）——
+  ⚠️ `ok` 与 `text` **不总是同向**：质量不达标那条出口仍是 `ok=True`（改前也不触发重规划）。
+
+  ⚠️ **一处会被误读的口径**：`execute_single_step` 的 docstring 写着「失败一律**抛异常**」，
+  而 `execute_step_with_retry` 现在**返回失败对象** —— 两条契约**分管不同层**
+  （真调用那层必须抛，否则重试静默失效；重试**耗尽**那层要做的是把结论**交给上层判定**）。
+  📄 口径澄清与四个备选的评估 ⇒ `docs/decisions/DEC-077-StepResult成败判定的接口选型.md`
+
+  **回归用例 3 条**（`api/test_plan_execute_tools.py`）：决定性那条**改前 RED**（`assert [1] == []`）·
+  反向守卫（防判成恒 `False`）· 类型 + **文案逐字**契约。
+  **变异自证**：把 `:399` 改回子串判定 ⇒ 只有决定性那条转红。
+  **判据**：`bash scripts/ci-local.sh` ⇒ **605 passed**（基线 602 + 3）。
+
 - 🔴 **把「凭据门 / 断链门 / 孤儿门」接进 CI** + 凭据门新增 `--diff` 模式（2026-10-05 · `DEC-076`）——
   收掉「**门挂在别处**」的又一例：四道门全住在 `.claude/hooks/pre-commit-gates.py` 里，
   **`git commit --no-verify` 就能整条绕过**，而 `DEC-074` 当时只把**路由鉴权门**接进了 CI。

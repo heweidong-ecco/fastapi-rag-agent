@@ -24,7 +24,8 @@ Plan-and-Execute 模块
 import os
 import json
 import time
-from typing import List, Dict
+from dataclasses import dataclass
+from typing import List, Dict, Optional
 from llm_factory import make_llm   # ①b Task 5：model / api_key / base_url / max_tokens 的唯一落点
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -126,6 +127,38 @@ def _available_tool_lines() -> str:
 
 class BudgetExceededError(Exception):
     """Token 预算不足 —— 由 `_invoke_llm` 抛出，端点层捕获后转成 QUOTA_EXCEEDED。"""
+
+
+@dataclass(frozen=True)
+class StepResult:
+    """一步执行的结果。
+
+    ## 为什么需要这个类型（🔴 2026-10-05 · `S10`）
+
+    **改前**：成败靠**中文子串**判 —— `if "执行失败（已重试" in step_result`（`:362`）
+    与 `if "执行失败" in step_result`（`:557`）。那条判据与**格式化文案**耦合，两种坏法：
+
+      ① 改一个字的措辞 ⇒ **失败判定静默失效**（看起来在重试，其实没有）
+      ② **工具返回的正文里恰好出现那四个字** ⇒ 正常结果被判成失败、**凭空触发一次重规划**
+         （📌 回归用例：`test_工具正常返回里恰好含那句失败文案时不许触发重规划`）
+
+    ⇒ 现在「成功 / 失败」是**字段**，⛔ 不再是文案的一部分。
+
+    ## ⚠️ `text` 与 `ok` **不总是同向**（⛔ 别以为 `ok=True` 就万事大吉）
+
+    `execute_step_with_quality_check` 有一条出口是「**跑通了、但没通过质量检查**」——
+    它返回 `ok=True`、`text` 里带一句提醒（见该函数末尾）。
+    **「质量差」≠「这一步失败了」** —— 改前它也不触发重规划，行为保持一致。
+
+    ## ⚠️ `text` 是**用户可见**的
+
+    ⛔ 别把它当内部日志改写 —— 它原样进 `results`、原样返回给调用方。
+    """
+
+    ok: bool
+    text: str
+    error: Optional[str] = None
+
 
 
 def _invoke_llm(llm, messages, purpose: str, user_name: str = "unknown",
@@ -359,7 +392,11 @@ def execute_plan_with_replan(plan: List[Dict], user_goal: str = "",
         step_result = execute_step_with_quality_check(step, context, user_goal, user_name)
         
         # 3. 判断是否彻底失败
-        if "执行失败（已重试" in step_result:
+        # 🔴 2026-10-05（`S10`）：原先这里是 `if "执行失败（已重试" in step_result:` ——
+        #    读**中文文案**判成败。⚠️ 它比 `:557` 那处更险：工具的**正常**返回里
+        #    恰好含这串时，会**凭空触发一次重规划**、还把那句正常结果塞进 `replan_context`。
+        #    （📌 回归用例：`test_工具正常返回里恰好含那句失败文案时不许触发重规划`）
+        if not step_result.ok:
             # 更新失败计数
             tool_failure_counts[tool_name] = tool_failure_counts.get(tool_name, 0) + 1
             # 如果同一个工具连续失败超过3次，标记为失效
@@ -375,7 +412,7 @@ def execute_plan_with_replan(plan: List[Dict], user_goal: str = "",
             replan_context = f"""用户原始目标：{user_goal}
 已完成步骤：
 {chr(10).join(results)}
-当前步骤失败：{step_result}
+当前步骤失败：{step_result.text}
 以下工具已失效，请勿使用：{', '.join(failed_tools) if failed_tools else '无'}
 请重新规划剩余步骤，排除已失败的策略和失效工具。"""
             
@@ -389,7 +426,7 @@ def execute_plan_with_replan(plan: List[Dict], user_goal: str = "",
                 continue
             else:
                 # 重规划也失败了，终止执行
-                results.append(f"步骤{step_num}失败且重规划失败：{step_result}")
+                results.append(f"步骤{step_num}失败且重规划失败：{step_result.text}")
                 break
         
         # 4. 成功：重置该工具的失败计数
@@ -397,7 +434,7 @@ def execute_plan_with_replan(plan: List[Dict], user_goal: str = "",
             tool_failure_counts[tool_name] = 0
 
         # 5. 成功：更新上下文和结果
-        result_summary = f"步骤{step_num}完成：{step_result[:200]}"
+        result_summary = f"步骤{step_num}完成：{step_result.text[:200]}"
         results.append(result_summary)
         context += f"\n{result_summary}"
         
@@ -531,10 +568,13 @@ def check_step_quality(step: Dict, step_result: str, user_goal: str, context: st
 
 
 def execute_step_with_quality_check(step: Dict, context: str, user_goal: str,
-                                    user_name: str = "unknown", max_retries: int = 3) -> str:
+                                    user_name: str = "unknown", max_retries: int = 3) -> StepResult:
     """
     执行步骤，并加入质量检查。
     如果结果不达标，会重新生成输入并重试，最多重试 max_retries 次。
+
+    ⚠️ **2026-10-05（`S10`）起返回 `StepResult`**（原先返回 `str`）——
+       成败判定从「读中文文案」换成「看 `.ok` 字段」。见 `StepResult` 的 docstring。
     """
     for attempt in range(max_retries + 1):
         # 1. 动态生成输入（每次重试都可能生成不同的输入）
@@ -552,31 +592,45 @@ def execute_step_with_quality_check(step: Dict, context: str, user_goal: str,
         
         # 2. 执行步骤
         step_result = execute_step_with_retry(step, dynamic_input, context, user_name)
-        
+
         # 3. 如果执行本身失败（工具调用失败），直接返回失败
-        if "执行失败" in step_result:
+        # 🔴 2026-10-05（`S10`）：原先这里是 `if "执行失败" in step_result:` ——
+        #    读**中文文案**判成败，于是**工具正常返回里恰好含这四个字**时，
+        #    连质量检查都被跳过、结果被当成失败。现在看**字段**。
+        if not step_result.ok:
             return step_result
-        
+
         # 4. 质量检查
-        if check_step_quality(step, step_result, user_goal, context, user_name):
+        # ⚠️ 质量检查要的是**正文**（`step_result.text`），不是整个结果对象。
+        # 🔴 `check_step_quality` 收 **5** 个参数 —— 改这里时只换第 2 个实参，⛔ 别顺手删后面三个。
+        if check_step_quality(step, step_result.text, user_goal, context, user_name):
             return step_result
         else:
             print(f"步骤{step['step']} 质量不达标，第{attempt+1}次重试...")
             # 在上下文中加入质量反馈，帮助生成更好的输入
             context += "\n[上一轮结果质量不达标，请调整策略]"  # ⚠️ 2026-09-20 去掉多余的 f（D1/pyflakes：f-string 无占位符）
-    
+
     # 所有重试都不达标，返回最后一次的结果（比什么都不给强）
-    return step_result + "\n[注意：此步骤经过多次重试，质量可能不达标]"
+    # ⚠️ 这里**仍然是 `ok=True`** ——「质量差」不等于「这一步失败了」，
+    #    改前它也不触发重规划（见 `StepResult` 的 docstring）。⛔ 别顺手改成 `ok=False`。
+    return StepResult(
+        ok=True,
+        text=step_result.text + "\n[注意：此步骤经过多次重试，质量可能不达标]",
+    )
 
 def execute_step_with_retry(step: Dict, input_data: str, context: str,
-                            user_name: str = "unknown", max_retries: int = 2) -> str:
+                            user_name: str = "unknown", max_retries: int = 2) -> StepResult:
     """
     带重试机制的单步执行器。
+
+    ⚠️ **2026-10-05（`S10`）起返回 `StepResult`**（原先返回 `str`）。
+       那句 `执行失败（已重试N次）：…` 的**文案一字未改**（用户可见），
+       只是现在**同时**挂在 `.text`（给人看）与 `.ok`（给代码判）上。
     """
     for attempt in range(max_retries + 1):
         try:
             result = execute_single_step(step, input_data, context)
-            return result
+            return StepResult(ok=True, text=result)
         except Exception as e:
             if attempt < max_retries:
                 # 失败时，重新生成输入参数
@@ -584,7 +638,13 @@ def execute_step_with_retry(step: Dict, input_data: str, context: str,
                     step, context + f"\n[上一步尝试失败，原因：{str(e)}]", "", user_name
                 )
             else:
-                return f"执行失败（已重试{max_retries}次）：{str(e)}"
+                # ⚠️ 这句 `text` **用户可见**（原样进 `results`、原样返回给调用方）——
+                #    `S10` 只换**判定依据**，⛔ 不许顺手改它的措辞。
+                return StepResult(
+                    ok=False,
+                    text=f"执行失败（已重试{max_retries}次）：{str(e)}",
+                    error=str(e),          # ← 不带那句格式化前缀的**异常原文**
+                )
 
 
 def execute_single_step(step: Dict, input_data: str, context: str) -> str:

@@ -214,8 +214,12 @@ def test_downgraded_step_keeps_the_real_reason(monkeypatch):
 
     monkeypatch.setitem(P._TOOL_HANDLERS, "calculator", _explode)
     # 每步都判"彻底失败" ⇒ 把同一工具推到 3 连败
-    monkeypatch.setattr(P, "execute_step_with_quality_check",
-                        lambda step, context, goal, name: "执行失败（已重试1次）：假装失败")
+    # ⚠️ `S10`（2026-10-05）起要返回 `StepResult` —— 成败判定换成看 `.ok` 字段了。
+    #    用 `*a, **k` 是为了**同时兼容**将来多传的位置参数（`S9` 已经加过一处）。
+    monkeypatch.setattr(
+        P, "execute_step_with_quality_check",
+        lambda *a, **k: P.StepResult(ok=False, text="执行失败（已重试1次）：假装失败",
+                                     error="假装失败"))
     # 重规划不许真调 LLM：给一份**同样只用 calculator**的计划，把循环推到降级分支
     monkeypatch.setattr(P, "plan_task",
                         lambda ctx: [_step("calculator") for _ in range(5)])
@@ -430,7 +434,10 @@ def test_dynamic_input_receives_the_real_user_name(monkeypatch):
         return "假输入"
 
     monkeypatch.setattr(P, "generate_dynamic_input", _fake_gen)
-    monkeypatch.setattr(P, "execute_step_with_retry", lambda *a, **k: "假结果")
+    # ⚠️ `S10`（2026-10-05）起返回 `StepResult` —— 再返回裸字符串的话，
+    #    调用方读 `.ok` 会 `AttributeError`（那就是**假红**，不是这条用例想测的东西）。
+    monkeypatch.setattr(P, "execute_step_with_retry",
+                        lambda *a, **k: P.StepResult(ok=True, text="假结果"))
     monkeypatch.setattr(P, "check_step_quality", lambda *a, **k: True)
 
     P.execute_step_with_quality_check(
@@ -532,3 +539,99 @@ def test_free_users_real_daily_limit_on_plan_execute_is_known():
         f"⚠️ 若这是【有意】改的，请**重新实测单次消耗**、更新这条用例与 `DEC-029`；\n"
         f"⚠️ 若是【无意】的（比如改了预算表却没意识到会波及这条最贵的接口），那正好——本条就是为这个而设。"
     )
+
+
+# ===========================================================================
+# 🔴 S10 · 成败判定不许读【中文文案】—— 必须看结构化字段
+# ===========================================================================
+def test_工具正常返回里恰好含那句失败文案时不许触发重规划(monkeypatch):
+    """**决定性判据**：工具的**正常**返回文本里恰好出现了那句失败文案时，
+    ⛔ 不许被判成「这一步彻底失败了」。
+
+    🔴 它同时打到 `plan_execute.py` 里的**两处**子串判定：
+       · `:557` `if "执行失败" in step_result:` —— 连**质量检查都被跳过**
+       · `:362` `if "执行失败（已重试" in step_result:` —— **凭空触发一次重规划**
+
+    ⚠️ 为什么必须**驱动真函数**（⛔ 不 monkeypatch `execute_step_with_quality_check`）：
+       把它替换掉，就等于把「被判定的那个值」自己造出来 —— 那样测的是**我的替身**，
+       不是这条路径。这里只让**最外面那层**（LLM / 工具）是假的：
+       `calculator` 的 handler **正常返回**一段含该文案的文本，于是
+       `execute_single_step` → `execute_step_with_retry` → `execute_step_with_quality_check`
+       **全是真的**。
+
+    📌 这正是 `execute_single_step` docstring 里那句话的反面现场 ——
+       「失败一律**抛异常**，不吞成字符串」，而**成败判定却回去读字符串**。
+    """
+    import plan_execute as P
+
+    _MARKER = "搜索结果：`执行失败（已重试3次）：boom` 是重试耗尽的标记"
+    monkeypatch.setitem(P._TOOL_HANDLERS, "calculator", lambda args: _MARKER)
+    monkeypatch.setattr(P, "generate_dynamic_input", lambda *a, **k: "1+1")
+    monkeypatch.setattr(P, "check_step_quality", lambda *a, **k: True)
+
+    replans = []
+    monkeypatch.setattr(P, "plan_task", lambda *a, **k: replans.append(1) or [])
+
+    out = P.execute_plan_with_replan(
+        [{"step": 1, "action": "a", "tool": "calculator"}], "目标", "u1")
+
+    assert replans == [], (
+        "工具**正常返回**的文本里恰好含那句失败文案 ⇒ 被判成「这一步彻底失败」"
+        " ⇒ 触发了一次**凭空的重规划**（还把这句正常结果塞进了 replan_context）。\n"
+        "⇒ 成败必须看 `StepResult.ok`，⛔ 不能读中文文案（改一个字的措辞就静默失效）。\n"
+        f"实际输出：\n{out}"
+    )
+    assert "步骤1完成" in out, f"正常的一步被当成失败处理了：\n{out}"
+
+
+def test_真失败仍然会触发重规划(monkeypatch):
+    """反向守卫：`S10` 之后**失败仍然认得出** —— 防止有人把判定写成**恒 False**。
+
+    ⚠️ **它在改动前后都是绿的**（改前靠文案也认得出）。留着是因为
+       「换成字段」这件事最典型的坏形态就是**恒 False**，而那种坏法
+       ⛔ **上面那条用例发现不了**（它对"被判成失败"更敏感，对"失败被判成成功"不敏感）。
+    """
+    import plan_execute as P
+
+    def _explode(args):
+        raise RuntimeError("boom")
+
+    monkeypatch.setitem(P._TOOL_HANDLERS, "calculator", _explode)
+    monkeypatch.setattr(P, "generate_dynamic_input", lambda *a, **k: "1+1")
+    monkeypatch.setattr(P, "check_step_quality", lambda *a, **k: True)
+
+    replans = []
+    monkeypatch.setattr(P, "plan_task", lambda *a, **k: replans.append(1) or [])
+
+    P.execute_plan_with_replan(
+        [{"step": 1, "action": "a", "tool": "calculator"}], "目标", "u1")
+
+    assert replans == [1], "工具真的炸了，却没触发重规划 ⇒ 失败判定失效了（恒 False？）"
+
+
+def test_重试耗尽返回结构化结果且文案逐字不变(monkeypatch):
+    """`execute_step_with_retry` 重试耗尽时**返回 `StepResult`**，
+    且**用户可见的那句话一字不改**。
+
+    ⚠️ 两半**都要**，⛔ 缺一不可：
+      · 类型那一半 —— 它是「调用方看字段」的前提（`S10` 的**因**）
+      · 文案那一半 —— `S10` **只换判定依据**，⛔ 不许顺手改用户看到的话
+        （⚠️ 那句话会原样进 `results`、原样返回给调用方，是**用户可见**的）
+    """
+    import plan_execute as P
+
+    def _explode(args):
+        raise RuntimeError("boom")
+
+    monkeypatch.setitem(P._TOOL_HANDLERS, "calculator", _explode)
+    monkeypatch.setattr(P, "generate_dynamic_input", lambda *a, **k: "1+1")
+
+    r = P.execute_step_with_retry(
+        {"step": 1, "tool": "calculator"}, "1+1", "", "u1", max_retries=1)
+
+    assert isinstance(r, P.StepResult), (
+        f"重试耗尽返回的是 `{type(r).__name__}` —— 调用方只能回去读文案（`S10` 的原始形态）")
+    assert r.ok is False
+    assert r.error == "boom", f"`error` 该留**异常原文**（不带那句格式化前缀）：{r.error!r}"
+    assert r.text == "执行失败（已重试1次）：boom", (
+        f"用户可见文案被改了：{r.text!r}\n⇒ `S10` 只换判定依据，⛔ 不改用户看到的话。")
