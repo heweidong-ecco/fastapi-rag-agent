@@ -87,6 +87,14 @@ LLM_MAX_RETRIES = 1
 #    ⭐ 换句话说：**单次超时管"别卡死"，总预算管"别没完没了"，两个都要有。**
 PLAN_TOTAL_BUDGET_SECONDS = 120
 
+# 一次 `execute_plan_with_replan` 里最多重规划几次。
+# ⚠️ 2026-10-05（`S11`）从 `execute_plan_with_replan` 的局部变量提上来 ——
+#    原先写死在函数里（`max_replans = 5`），与上面那三个超时的做法**不一致**。
+# ⚠️ **有意【不加 env】**：三个超时都不是 env（硬编码常量）⇒ 保持一致。
+#    📌 想调它就得改代码 —— 因为它同时决定「一次请求最多几次规划调用」，
+#       而那正是**记账与预算**的输入。
+MAX_REPLANS = 5
+
 
 # ==================== 初始化规划专用 LLM ====================
 # ⚠️ 角色 = 「模型轴 chat」+「长度轴 agent(1024)」—— 见 `api/llm_factory.py` 的模块 docstring。
@@ -330,8 +338,8 @@ def execute_plan_with_replan(plan: List[Dict], user_goal: str = "",
     # 新增：工具连续失败计数器和失效工具列表
     tool_failure_counts = {}
     failed_tools = set()
-    # 新增：最大重规划次数
-    max_replans = 5
+    # ⚠️ 2026-10-05（`S11`）：原来这里有一行 `max_replans = 5`（局部变量）——
+    #    已提成**模块级常量 `MAX_REPLANS`**（与三个超时放一起），见文件上部。
     replan_count = 0
 
     # 🔴 2026-09-21 加（③ 的遗留）：**总时长预算**。
@@ -342,7 +350,7 @@ def execute_plan_with_replan(plan: List[Dict], user_goal: str = "",
     t0 = time.time()
     timed_out = False
 
-    while current_plan and replan_count <= max_replans:
+    while current_plan and replan_count <= MAX_REPLANS:
         if time.time() - t0 > PLAN_TOTAL_BUDGET_SECONDS:
             timed_out = True
             break
@@ -449,8 +457,8 @@ def execute_plan_with_replan(plan: List[Dict], user_goal: str = "",
         # 6. 移除已执行的步骤，继续下一个
         current_plan.pop(0)
         
-    if replan_count > max_replans:
-        results.append(f"[系统] 已达到最大重规划次数（{max_replans}次），执行终止。")
+    if replan_count > MAX_REPLANS:
+        results.append(f"[系统] 已达到最大重规划次数（{MAX_REPLANS}次），执行终止。")
     elif timed_out:
         # ⚠️ **如实说明"没跑完"** —— 不能让它看起来像正常结束。
         #    剩余步骤数一起报出来，调用方才知道**结果是不完整的**。

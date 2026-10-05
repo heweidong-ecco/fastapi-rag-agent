@@ -683,3 +683,51 @@ def test_重规划把真实发起人传下去(monkeypatch):
         "⇒ 这次调用的 token 既不受他的预算约束、也不算在他头上（`S9`）。\n"
         "⚠️ 检查是不是又漏传了（本仓已犯过两次：`dynamic_input` 那次 + 重规划这次）。"
     )
+
+
+# ===========================================================================
+# 🔴 S11 · 重规划次数上限必须是【模块级常量】，且循环真的读它
+# ===========================================================================
+def test_重规划次数上限是可配的模块级常量(monkeypatch):
+    """`S11` · `MAX_REPLANS` 是**模块级常量**，且循环**真的按它**停。
+
+    ⚠️ 光断言"有个常量叫 `MAX_REPLANS`"**不够** —— 那只验了名字（本仓纪律：
+       「拿**动作成功**当**结果正确**」的同族）。这里把常量**改成 2**，
+       然后驱动一条「永远失败、永远能重规划」的路径，**数 `plan_task` 被叫了几次**
+       ⇒ 证明**循环读的是它**。
+
+    ⚠️ 期望 **3** = `MAX_REPLANS + 1`：循环条件是 `replan_count <= MAX_REPLANS`，
+       `replan_count` 从 **0** 起算 ⇒ 0/1/2 各进一次循环、每次重规划一次。
+
+    🔴 **每一步必须换一个工具名**（⛔ 别一直用 `"calculator"`）——
+       同一个工具连败 **3** 次会进 `failed_tools`，而那条降级分支
+       是 `pop(0)` + `continue`，**⛔ 根本不调 `plan_task`**。
+       ⇒ 那样数出来的次数**比 `MAX_REPLANS` 小**，用例会以一个**看不懂的理由**红。
+       （📌 同族先例：`test_downgraded_step_keeps_the_real_reason` 就是那条分支的用例。）
+
+    📌 **它钉的是「循环读常量」这个【行为】，⛔ 不是「常量等于 5」这个【值】** ——
+       所以**默认值改了它不该红**（它自己 monkeypatch 成 2）。
+    """
+    import plan_execute as P
+
+    monkeypatch.setattr(P, "MAX_REPLANS", 2)
+    monkeypatch.setattr(P, "execute_step_with_quality_check",
+                        lambda *a, **k: P.StepResult(ok=False, text="炸", error="炸"))
+
+    calls = []
+
+    def _fake_plan_task(ctx, user_name="unknown", on_token=None):
+        calls.append(user_name)
+        # 每次给一份【新】计划；工具名递增 ⇒ 不触发 `failed_tools` 降级 ⇒ 循环不提前 break
+        return [{"step": 1, "action": "a", "tool": f"tool{len(calls)}"}]
+
+    monkeypatch.setattr(P, "plan_task", _fake_plan_task)
+
+    P.execute_plan_with_replan(
+        [{"step": 1, "action": "a", "tool": "tool0"}], "目标", "u1")
+
+    assert len(calls) == 3, (
+        f"`MAX_REPLANS=2` 时应重规划 3 次（0/1/2，循环条件是 `<=`），实际 {len(calls)} 次。\n"
+        "⇒ 要么循环没读模块级常量、要么读的地方漏改了（`S11`）。\n"
+        "   ⚠️ 若实际是 1 次，先查 `failed_tools` 那条降级分支有没有被踩到。"
+    )

@@ -1774,6 +1774,25 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- ⚠️ **`plan_execute` 的 `max_replans` 提成模块级常量 `MAX_REPLANS`**（2026-10-05 · 待办 `S11`）
+
+  原先是写在 `execute_plan_with_replan` **函数体里**的局部变量（`max_replans = 5`），
+  与同一批的三个超时常量（`PLANNER_LLM_TIMEOUT` / `EXECUTOR_LLM_TIMEOUT` / `QUALITY_LLM_TIMEOUT`）
+  **做法不一致**。⇒ 提成模块级 `MAX_REPLANS = 5`，与那三个放一起。
+
+  ⛔ **有意【不加 env】** —— 三个超时都不是 env（硬编码常量），保持一致；
+  且它同时决定「**一次请求最多几次规划调用**」，那正是**记账与预算**的输入。
+
+  **用例**：`test_重规划次数上限是可配的模块级常量` ——
+  ⚠️ 它**钉的是「循环读常量」这个行为，⛔ 不是「常量等于 5」这个值**
+  （所以默认值改了它不该红）。**两半自证**（实测）：
+  ① 默认值 `5 → 3` ⇒ **仍绿**；② 循环写回硬编码 `<= 5` ⇒ **红，且报"实际 6 次"**（= 5+1，
+  正是它在读那个硬编码值）。
+  ⚠️ 用例里**每步必须换一个工具名** —— 同一工具连败 3 次会进 `failed_tools`，
+  而那条降级分支**不调 `plan_task`**，会把次数数少、红得看不懂。
+
+  **判据**：`bash scripts/ci-local.sh` ⇒ **608 passed**（基线 602 + 6）。
+
 - 🔴 **`plan_execute` 重规划补传 `user_name`，并加一道【从 AST 推出来的】守卫**（2026-10-05 · 待办 `S9`）
 
   `api/plan_execute.py` 的重规划那次调用是 `plan_task(replan_context)` —— **漏传 `user_name`** ⇒ 走默认 `"unknown"`。

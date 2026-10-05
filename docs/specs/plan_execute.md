@@ -3,9 +3,9 @@
 | 项 | 内容 |
 |---|---|
 | **状态** | 🟡 **可用** —— 规划 + 逐步**真调用工具**；有超时、有总预算、有重规划、有降级<br>✅ **2026-10-05（批 1 · `S9`/`S10`）**：`⚠️①`（重规划漏传 `user_name`）与 `⚠️②`（成败判定读中文文案）**均已修** ⇒ **`⚠️` 表 6 行里还剩 ③④⑤⑥ 共 4 行**（⚠️ 都是**说明**不是缺陷）<br>⛔ **原「1 处真缺陷 + 5 处会误判」的账已销**（`S11` 见 `🟡 做到哪`）<br>🔵 **2026-10-04（`B1` 剩余 4 条链）：`_invoke_llm` / `plan_task` 各加一个 `on_token` 形参** —— 给 `/agent/plan_execute/stream` 用。<br>· ⚠️ **默认 `None` ⇒ 行为一字符不变**（`on_token is None` 时仍走 `llm.invoke`，`:155`）。<br>· ⚠️ **⛔ 它只让「规划段」能流** —— `execute_plan` / `generate_dynamic_input` / 质量检查**都还是非流式**（业务方 2026-10-04 裁「只流规划段」）⇒ **规划段之后是一长段静默**。<br>· 🔴 **流出的是【正在生成的 JSON 片段】**（提示词要求严格 JSON）⇒ ⛔ 前端别把流到的文本直接渲染成计划，只当"规划中"指示器。<br>· ⭐ **一条实现约束**：聚合循环**必须遍历【所有】块**（含 `content` 为空的）—— provider 把 `usage_metadata` 挂在**最后一块**上，跳过它**账就没了**（实测，探针 `探针-流式与记账.py`）。<br>· 📄 端点在 `docs/specs/api_v1_agent.md` Task 7 · 桥在 `_ThreadTokenBridge`<br>✅ 2026-10-01：三个 `_llm` 接上 `MAX_TOKENS_AGENT`（`B7`）<br>✅ 2026-10-02（`①b` Task 5）：三个 `_llm` **改走 `llm_factory.make_llm("chat", "agent")`**（现于 `:92` / `:279` / `:486`）—— `model`/`api_key`/`base_url`/`max_tokens` 不再写在本地。<br>⚠️ **超时/重试没丢**：`timeout` / `max_retries` 走 `make_llm` 的 `**extra` **逐点透传**，**值一字符未变**（30/20/15 + `LLM_MAX_RETRIES`）。<br>⚠️ `executor_llm` 的 `temperature=0.1` 是**本文件特有的**逐点调参，仍写在调用点上<br>⚠️ **行号口径**：本 spec 的行号为 **2026-10-04 之后**的实测值（`grep -n` 复核）；批 4 之后**执行段整体下移 ~28 行**，⛔ 别拿旧行号去找 |
-| **对外提供** | `plan_task(goal, user_name=…, on_token=None)` · `execute_plan` · `execute_plan_with_replan` · `BudgetExceededError` · 三个计算属性常量（`PLANNER_LLM_TIMEOUT` 等） |
+| **对外提供** | `plan_task(goal, user_name=…, on_token=None)` · `execute_plan` · `execute_plan_with_replan` · `BudgetExceededError` · 🆕 **`StepResult(ok, text, error)`**（2026-10-05 · `S10`）· 四个模块级常量（`PLANNER_LLM_TIMEOUT` 等三个超时 + 🆕 **`MAX_REPLANS`**） |
 | **谁在用** | `api_v1_agent.py` 的 `POST /agent/plan_execute`（`:633` · **唯一生产入口**）· 🆕 `POST /agent/plan_execute/stream`（`:685`，经 `_ThreadTokenBridge`）· `api/test_plan_execute_tools.py`（**26 条**，2026-10-05 由 22 增）· 🆕 `api/test_agent_stream_chains.py` · 🆕 **`api/test_plan_task_user_name_wiring.py`**（AST 守卫） |
-| **规模** | **620 行**（`wc -l` 与 `scripts/spec_status.sh` **一致** —— 本文件末行有换行符；⚠️ 2026-10-04 由 597 增到 620）· ⚠️ **文件内注释极厚**（绝大部分"为什么"已写在里面） |
+| **规模** | **696 行**（`wc -l`；⚠️ 2026-10-05 由 620 增到 696 —— 批 1 的 `S9`/`S10`/`S11` 在**代码与注释**上都加了量）· ⚠️ **文件内注释极厚**（绝大部分"为什么"已写在里面） |
 
 > ⚠️ **本 spec 不复述文件里已有的注释** —— 那会变成"两处真相"。**这里只写【代码与注释里都没有的】**。
 
@@ -27,8 +27,10 @@
   `test_重规划把真实发起人传下去`（行为侧）+ **`api/test_plan_task_user_name_wiring.py`**（AST 守卫）。
   ⚠️ **旧 stub 是 `lambda ctx: [...]`（只接一个参数）⇒ 发现不了漏传** —— 这个形状本身就是那个洞的旁证；
   现已改成收 `user_name`。
-- ⚠️ `max_replans = 5`（`:301`）**写死在函数里**，⛔ 不是模块级常量、也不是 env
-  ⇒ 与三个超时常量（`:69-71`）**做法不一致**
+- ✅ **`max_replans` 已提成模块级常量 `MAX_REPLANS = 5`**（**2026-10-05 · `S11`**，现于 `:96`，与三个超时放一起）
+  ⇒ 原先是**写死在函数里**的局部变量（`max_replans = 5`），与那三个超时**做法不一致**。
+  ⚠️ **有意【不加 env】** —— 三个超时都不是 env（硬编码常量），保持一致。
+  📌 想调它就得改代码：它同时决定「**一次请求最多几次规划调用**」，而那正是**记账与预算**的输入。
 - ⬜ **`_tool_arg_field` 只支持【单一入参】的工具** ⇒ 执行层**实际可用工具比注册表少**（见 ⚠️③）
 
 ## ⚠️ 看代码会误判的地方 ⭐
