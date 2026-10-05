@@ -417,7 +417,15 @@ def execute_plan_with_replan(plan: List[Dict], user_goal: str = "",
 请重新规划剩余步骤，排除已失败的策略和失效工具。"""
             
             # 调用规划器重新生成后续计划
-            new_plan = plan_task(replan_context)
+            # 🔴 2026-10-05（`S9`）：原先这里**漏传 `user_name`** —— `plan_task(replan_context)`
+            #    走默认 `"unknown"`，后果两条：
+            #      · `check_budget_before_call("unknown")` ⇒ **不受该用户的预算约束**
+            #      · `record_usage(user_name="unknown")` ⇒ **算不到他头上**
+            #    ⚠️ 最多 5 次（`MAX_REPLANS`）⇒ 最多 5 次「白跑且不记账」的规划调用。
+            #    📌 **同族的漏传在本文件已犯过两次**（`dynamic_input` 那次见 `:600` 附近）——
+            #       当时**在注释里写了教训**，而这一处照样漏着。⇒ 教训写在注释里不管用，
+            #       现由 `api/test_plan_task_user_name_wiring.py`（从 AST 推出来的门）兜底。
+            new_plan = plan_task(replan_context, user_name)
             
             if new_plan:
                 # 用新计划替换剩余步骤

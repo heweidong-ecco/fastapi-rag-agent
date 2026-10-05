@@ -1774,6 +1774,30 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- 🔴 **`plan_execute` 重规划补传 `user_name`，并加一道【从 AST 推出来的】守卫**（2026-10-05 · 待办 `S9`）
+
+  `api/plan_execute.py` 的重规划那次调用是 `plan_task(replan_context)` —— **漏传 `user_name`** ⇒ 走默认 `"unknown"`。
+  后果两条：`check_budget_before_call("unknown")` ⇒ **不受该用户的预算约束**；
+  `record_usage(user_name="unknown")` ⇒ **算不到他头上**（`token_usage_logs` 里是 `unknown`）。
+  ⚠️ 最多 **5** 次重规划 ⇒ **最多 5 次「白跑且不记账」的规划调用**。
+
+  🔴 **同族的漏传在本仓已是第二次**：2026-09-21 修过 `generate_dynamic_input` 那处，
+  **当时就在注释里写了教训**（「改完要按行号核，别只看替换成功了几处」）—— **而这一处照样漏了 9 天**，
+  直到 2026-09-30 `/specs` 核账才挖出来。⇒ **教训写在注释里不管用。**
+
+  **两条用例**：
+  - `test_重规划把真实发起人传下去` —— 行为侧。⚠️ 旧的 `plan_task` 替身是 `lambda ctx: [...]`
+    （**只收一个参数 ⇒ 只能发现"多传了"，发现不了"漏传"**），**那正是这个洞活到现在的原因**；
+  - 🆕 **`api/test_plan_task_user_name_wiring.py`** —— **AST 守卫**，从代码里推出所有 `plan_task` 调用点，
+    覆盖**直接调用**与**当回调传给 `asyncio.to_thread`**两种写法，没带 `user_name` 就红
+    （📌 同型先例：`api/test_bm25_cache_invalidation_wiring.py` · `DEC-063`）。
+
+  **变异自证**：把调用点改回漏传 ⇒ **两条同时转红**（审计位点名 `plan_execute.py:428`）。
+  ⚠️ **执行中发现计划漏了一处**：`test_downgraded_step_keeps_the_real_reason` 的 `plan_task` 替身
+  也是单参数形状，同样要跟着改（已记进 spec 的批 1 实施计划）。
+
+  **判据**：`bash scripts/ci-local.sh` ⇒ **607 passed**（基线 602 + 5：`S10` 三条 + `S9` 两条）。
+
 - 🔴 **`plan_execute` 的成败判定：从「读中文文案」换成 `StepResult` 结构化返回**（2026-10-05 · `DEC-077` · 待办 `S10`）
 
   `api/plan_execute.py` 原先靠**中文子串**判成败 —— `if "执行失败（已重试" in step_result`（`:362`）

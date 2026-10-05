@@ -221,8 +221,12 @@ def test_downgraded_step_keeps_the_real_reason(monkeypatch):
         lambda *a, **k: P.StepResult(ok=False, text="执行失败（已重试1次）：假装失败",
                                      error="假装失败"))
     # 重规划不许真调 LLM：给一份**同样只用 calculator**的计划，把循环推到降级分支
+    # ⚠️ `S9`（2026-10-05）：签名原来只有 `ctx` 一个参数 —— 那时它**正好**兜住了
+    #    调用点漏传 `user_name`（少传一个 ⇒ 不报错）。修完之后调用点会传两个，
+    #    所以这里必须**跟着收下** `user_name`。
+    #    📌 这条替身**本身就是那个洞的旁证**：它只接一个参数 ⇒ 发现不了漏传。
     monkeypatch.setattr(P, "plan_task",
-                        lambda ctx: [_step("calculator") for _ in range(5)])
+                        lambda ctx, user_name="unknown": [_step("calculator") for _ in range(5)])
 
     out = P.execute_plan_with_replan([_step("calculator") for _ in range(5)], "目标", "u1")
 
@@ -635,3 +639,47 @@ def test_重试耗尽返回结构化结果且文案逐字不变(monkeypatch):
     assert r.error == "boom", f"`error` 该留**异常原文**（不带那句格式化前缀）：{r.error!r}"
     assert r.text == "执行失败（已重试1次）：boom", (
         f"用户可见文案被改了：{r.text!r}\n⇒ `S10` 只换判定依据，⛔ 不改用户看到的话。")
+
+
+# ===========================================================================
+# 🔴 S9 · 重规划那一次 `plan_task` 必须收到【真实发起人】
+# ===========================================================================
+def test_重规划把真实发起人传下去(monkeypatch):
+    """`S9` · 重规划那一次 `plan_task` 必须收到**真实发起人**。
+
+    🔴 改前是 `plan_task(replan_context)`（`:383`）—— 走默认 `"unknown"`，后果两条：
+       · `check_budget_before_call("unknown")` ⇒ **不受该用户的预算约束**
+       · `record_usage(user_name="unknown")` ⇒ **算不到他头上**（`token_usage_logs` 里是 `unknown`）
+       ⚠️ 最多 **5** 次 ⇒ 最多 5 次「白跑且不记账」的规划调用。
+
+    ⚠️ **替身必须收 `user_name` 并记下来** ——
+       上一条同族的用例（`test_dynamic_input_receives_the_real_user_name`）守着 `dynamic_input` 那处漏传；
+       而**重规划这处一直没人守**，原因是它的替身写成了 `lambda ctx: [...]`：
+       **只接一个参数 ⇒ 只能发现"多传了"，发现不了"漏传"**。
+       🔴 **这正是这个洞漏到现在的原因**（`docs/specs/plan_execute.md` ⚠️①）。
+
+    📌 本仓同族前科：那次修的根因是**盲替换命中了注释**，真调用点没改到；
+       而写下来的教训（「改完要按行号核」）**是文字**，没能拦住这一处。
+       ⇒ 所以除本用例之外，另有一道**从 AST 推出来的**守卫：
+          `api/test_plan_task_user_name_wiring.py`。
+    """
+    import plan_execute as P
+
+    seen = []
+
+    def _fake_plan_task(ctx, user_name="unknown", on_token=None):
+        seen.append(user_name)
+        return []          # 空计划 ⇒ 循环 break，不用真跑工具
+
+    monkeypatch.setattr(P, "plan_task", _fake_plan_task)
+    monkeypatch.setattr(P, "execute_step_with_quality_check",
+                        lambda *a, **k: P.StepResult(ok=False, text="炸", error="炸"))
+
+    P.execute_plan_with_replan(
+        [{"step": 1, "action": "a", "tool": "calculator"}], "目标", "someone_real")
+
+    assert seen == ["someone_real"], (
+        f"重规划的 `plan_task` 收到的是 {seen} —— **不是真实发起人**。\n"
+        "⇒ 这次调用的 token 既不受他的预算约束、也不算在他头上（`S9`）。\n"
+        "⚠️ 检查是不是又漏传了（本仓已犯过两次：`dynamic_input` 那次 + 重规划这次）。"
+    )

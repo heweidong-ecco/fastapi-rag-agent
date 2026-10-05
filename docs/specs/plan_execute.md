@@ -2,9 +2,9 @@
 
 | 项 | 内容 |
 |---|---|
-| **状态** | 🟡 **可用** —— 规划 + 逐步**真调用工具**；有超时、有总预算、有重规划、有降级<br>🔴 **但查出 1 处真缺陷 + 5 处"看代码会误判"**（见下）<br>✅ **2026-10-05（批 1）**：`⚠️②`（成败判定读中文文案）**已修** ⇒ ⛔ **还剩 1 处真缺陷 + 4 处会误判**<br>🔵 **2026-10-04（`B1` 剩余 4 条链）：`_invoke_llm` / `plan_task` 各加一个 `on_token` 形参** —— 给 `/agent/plan_execute/stream` 用。<br>· ⚠️ **默认 `None` ⇒ 行为一字符不变**（`on_token is None` 时仍走 `llm.invoke`，`:155`）。<br>· ⚠️ **⛔ 它只让「规划段」能流** —— `execute_plan` / `generate_dynamic_input` / 质量检查**都还是非流式**（业务方 2026-10-04 裁「只流规划段」）⇒ **规划段之后是一长段静默**。<br>· 🔴 **流出的是【正在生成的 JSON 片段】**（提示词要求严格 JSON）⇒ ⛔ 前端别把流到的文本直接渲染成计划，只当"规划中"指示器。<br>· ⭐ **一条实现约束**：聚合循环**必须遍历【所有】块**（含 `content` 为空的）—— provider 把 `usage_metadata` 挂在**最后一块**上，跳过它**账就没了**（实测，探针 `探针-流式与记账.py`）。<br>· 📄 端点在 `docs/specs/api_v1_agent.md` Task 7 · 桥在 `_ThreadTokenBridge`<br>✅ 2026-10-01：三个 `_llm` 接上 `MAX_TOKENS_AGENT`（`B7`）<br>✅ 2026-10-02（`①b` Task 5）：三个 `_llm` **改走 `llm_factory.make_llm("chat", "agent")`**（现于 `:92` / `:279` / `:486`）—— `model`/`api_key`/`base_url`/`max_tokens` 不再写在本地。<br>⚠️ **超时/重试没丢**：`timeout` / `max_retries` 走 `make_llm` 的 `**extra` **逐点透传**，**值一字符未变**（30/20/15 + `LLM_MAX_RETRIES`）。<br>⚠️ `executor_llm` 的 `temperature=0.1` 是**本文件特有的**逐点调参，仍写在调用点上<br>⚠️ **行号口径**：本 spec 的行号为 **2026-10-04 之后**的实测值（`grep -n` 复核）；批 4 之后**执行段整体下移 ~28 行**，⛔ 别拿旧行号去找 |
+| **状态** | 🟡 **可用** —— 规划 + 逐步**真调用工具**；有超时、有总预算、有重规划、有降级<br>✅ **2026-10-05（批 1 · `S9`/`S10`）**：`⚠️①`（重规划漏传 `user_name`）与 `⚠️②`（成败判定读中文文案）**均已修** ⇒ **`⚠️` 表 6 行里还剩 ③④⑤⑥ 共 4 行**（⚠️ 都是**说明**不是缺陷）<br>⛔ **原「1 处真缺陷 + 5 处会误判」的账已销**（`S11` 见 `🟡 做到哪`）<br>🔵 **2026-10-04（`B1` 剩余 4 条链）：`_invoke_llm` / `plan_task` 各加一个 `on_token` 形参** —— 给 `/agent/plan_execute/stream` 用。<br>· ⚠️ **默认 `None` ⇒ 行为一字符不变**（`on_token is None` 时仍走 `llm.invoke`，`:155`）。<br>· ⚠️ **⛔ 它只让「规划段」能流** —— `execute_plan` / `generate_dynamic_input` / 质量检查**都还是非流式**（业务方 2026-10-04 裁「只流规划段」）⇒ **规划段之后是一长段静默**。<br>· 🔴 **流出的是【正在生成的 JSON 片段】**（提示词要求严格 JSON）⇒ ⛔ 前端别把流到的文本直接渲染成计划，只当"规划中"指示器。<br>· ⭐ **一条实现约束**：聚合循环**必须遍历【所有】块**（含 `content` 为空的）—— provider 把 `usage_metadata` 挂在**最后一块**上，跳过它**账就没了**（实测，探针 `探针-流式与记账.py`）。<br>· 📄 端点在 `docs/specs/api_v1_agent.md` Task 7 · 桥在 `_ThreadTokenBridge`<br>✅ 2026-10-01：三个 `_llm` 接上 `MAX_TOKENS_AGENT`（`B7`）<br>✅ 2026-10-02（`①b` Task 5）：三个 `_llm` **改走 `llm_factory.make_llm("chat", "agent")`**（现于 `:92` / `:279` / `:486`）—— `model`/`api_key`/`base_url`/`max_tokens` 不再写在本地。<br>⚠️ **超时/重试没丢**：`timeout` / `max_retries` 走 `make_llm` 的 `**extra` **逐点透传**，**值一字符未变**（30/20/15 + `LLM_MAX_RETRIES`）。<br>⚠️ `executor_llm` 的 `temperature=0.1` 是**本文件特有的**逐点调参，仍写在调用点上<br>⚠️ **行号口径**：本 spec 的行号为 **2026-10-04 之后**的实测值（`grep -n` 复核）；批 4 之后**执行段整体下移 ~28 行**，⛔ 别拿旧行号去找 |
 | **对外提供** | `plan_task(goal, user_name=…, on_token=None)` · `execute_plan` · `execute_plan_with_replan` · `BudgetExceededError` · 三个计算属性常量（`PLANNER_LLM_TIMEOUT` 等） |
-| **谁在用** | `api_v1_agent.py` 的 `POST /agent/plan_execute`（`:633` · **唯一生产入口**）· 🆕 `POST /agent/plan_execute/stream`（`:685`，经 `_ThreadTokenBridge`）· `api/test_plan_execute_tools.py`（**25 条**，2026-10-05 由 22 增）· 🆕 `api/test_agent_stream_chains.py` |
+| **谁在用** | `api_v1_agent.py` 的 `POST /agent/plan_execute`（`:633` · **唯一生产入口**）· 🆕 `POST /agent/plan_execute/stream`（`:685`，经 `_ThreadTokenBridge`）· `api/test_plan_execute_tools.py`（**26 条**，2026-10-05 由 22 增）· 🆕 `api/test_agent_stream_chains.py` · 🆕 **`api/test_plan_task_user_name_wiring.py`**（AST 守卫） |
 | **规模** | **620 行**（`wc -l` 与 `scripts/spec_status.sh` **一致** —— 本文件末行有换行符；⚠️ 2026-10-04 由 597 增到 620）· ⚠️ **文件内注释极厚**（绝大部分"为什么"已写在里面） |
 
 > ⚠️ **本 spec 不复述文件里已有的注释** —— 那会变成"两处真相"。**这里只写【代码与注释里都没有的】**。
@@ -22,9 +22,11 @@
 
 ## 🟡 做到哪 / 缺什么
 
-- 🔴 **`:383` 的重规划调用漏传 `user_name`** —— 见 ⚠️①（**本 spec 新查出**）
-- ⚠️ **重规划那条路的 `user_name` 没有测试覆盖** —— `test_plan_execute_tools.py:221` 的 stub 是
-  `lambda ctx: [...]`（**只接一个参数**）⇒ **它根本发现不了漏传**
+- ✅ **`:383` 的重规划调用漏传 `user_name`** —— **2026-10-05（`S9`）已修**（现于 `:428`，`plan_task(replan_context, user_name)`）。见 ⚠️①
+- ✅ **重规划那条路的 `user_name` 没有测试覆盖** —— **2026-10-05 已补两条**：
+  `test_重规划把真实发起人传下去`（行为侧）+ **`api/test_plan_task_user_name_wiring.py`**（AST 守卫）。
+  ⚠️ **旧 stub 是 `lambda ctx: [...]`（只接一个参数）⇒ 发现不了漏传** —— 这个形状本身就是那个洞的旁证；
+  现已改成收 `user_name`。
 - ⚠️ `max_replans = 5`（`:301`）**写死在函数里**，⛔ 不是模块级常量、也不是 env
   ⇒ 与三个超时常量（`:69-71`）**做法不一致**
 - ⬜ **`_tool_arg_field` 只支持【单一入参】的工具** ⇒ 执行层**实际可用工具比注册表少**（见 ⚠️③）
@@ -33,7 +35,7 @@
 
 | 看代码会以为 | 实际 |
 |---|---|
-| 🔴 **① 「重规划也会算到发起人头上」** | ⛔ **不会** —— `:383` 是 **`plan_task(replan_context)`，漏传了 `user_name`** ⇒ 走默认 `"unknown"`。<br>**后果两条**：<br>· `check_budget_before_call("unknown")` ⇒ **不受该用户的预算约束**<br>· `record_usage(user_name="unknown")` ⇒ **算不到他头上**（`token_usage_logs` 里是 `unknown`）<br>⚠️ **最多 5 次重规划**（`:301`）⇒ **最多 5 次"白跑且不记账"的规划调用**。<br>🔴 **它和 `:551` 附近记录的是同一类缺陷** —— 那里（`dynamic_input`）漏传已修，**并在注释里写了教训「改完要按行号核，别只看替换成功了几处」**。<br>📌 **教训写了，但这个文件里的另一处漏了。** 修的时候**要把 `plan_task(` 全搜一遍**（只有 2 个调用点）。<br>⚠️ **`B1`（2026-10-04）之后多了一个要一起看的地方**：`plan_task(` 现在还有**第 3 个**调用点 —— **端点里的 `/agent/plan_execute/stream`**（走 `asyncio.to_thread`，**那个是传了 `user_name` 的**）⇒ 全搜时应看到 **3 处**。 |
+| ✅ **① 「重规划也会算到发起人头上」** | **2026-10-05（`S9`）已修** —— 原先是 `:383` 的 **`plan_task(replan_context)`，漏传了 `user_name`** ⇒ 走默认 `"unknown"`。<br>**后果两条**：<br>· `check_budget_before_call("unknown")` ⇒ **不受该用户的预算约束**<br>· `record_usage(user_name="unknown")` ⇒ **算不到他头上**（`token_usage_logs` 里是 `unknown`）<br>⚠️ **最多 5 次重规划** ⇒ **最多 5 次"白跑且不记账"的规划调用**。<br>🔴 **它和 `:600` 附近记录的是同一类缺陷** —— 那里（`dynamic_input`）漏传已修，**并在注释里写了教训「改完要按行号核，别只看替换成功了几处」**。<br>📌 **教训写了（是文字），但这个文件里的另一处照样漏了 9 天。** ⇒ 本仓立场「**只有文字就漏，结构才执行**」<br>⇒ 现由 **`api/test_plan_task_user_name_wiring.py`**（**从 AST 推出来**的门，覆盖直接调用 + `asyncio.to_thread` 回调两种写法）兜底。<br>⚠️ **`plan_task(` 全仓 3 处**（2026-10-05 实测）：`:428` · `api_v1_agent.py:836` · `api_v1_agent.py:912` —— **后两处本来就没漏**。 |
 | ✅ **② 「成败判定靠返回值/异常」** | **2026-10-05（`S10`）已修** —— 原先**靠【中文子串匹配】**（`:362` `if "执行失败（已重试" in step_result` · `:557` `if "执行失败" in step_result`）。<br>⚠️ 那条判据与 `:587` 那句**格式化文案**是**耦合**的：改一个字的措辞 ⇒ **失败判定静默失效**；<br>⚠️ 更险的是：**工具的返回内容里恰好出现「执行失败」四个字**，正常结果也会被判成失败、**凭空触发一次重规划**。<br>📌 与文件自己强调的「失败一律**抛异常**不吞成字符串」**方向相反**。<br>⇒ 现在 `execute_step_with_retry` / `execute_step_with_quality_check` **返回 `StepResult(ok, text, error)`**，调用方看 `.ok` 字段。<br>🔴 **`text`（用户可见文案）一字未改** —— `S10` 换的是**判定依据**，⛔ 不是措辞。<br>⚠️ **`ok` 与 `text` 不总是同向**：质量不达标那条出口仍是 `ok=True`（改前也不触发重规划）。<br>📄 回归用例 3 条：`test_工具正常返回里恰好含那句失败文案时不许触发重规划`（决定性）· `test_真失败仍然会触发重规划`（反向守卫）· `test_重试耗尽返回结构化结果且文案逐字不变`（契约） |
 | ⚠️ **③ 「`failed_tools` 把这个工具拉黑了」** | ⛔ **只在【这一次】计划里** —— `failed_tools` / `tool_failure_counts` 都是 `execute_plan_with_replan` 的**局部变量**（`:298-299`）⇒ **不跨请求、不过期**。<br>📌 **这正是 `B11` / `L2` 要做的"模型级黑名单"缺的那一半**（那个需要**跨请求**的状态）。 |
 | ⚠️ **④ 「注册表里 4 个工具都能被执行层用」** | ⚠️ **要看入参是不是单一字段** —— `_tool_arg_field` 只认**恰好一个**字段的工具；否则 `execute_single_step` 抛 `ValueError`（`:611` / `:615`）。<br>⇒ **执行层的可用工具 ⊆ 注册表**。 |
@@ -391,6 +393,21 @@ git commit -m "fix(plan_execute) 成败判定从中文子串换成结构化返�
 **Interfaces:**
 - **Consumes**：`plan_task(user_goal: str, user_name: str = "unknown", on_token=None) -> List[Dict]`（`:208`，**签名不变**，本 Task 只是「调用它时把 `user_name` 传上」）
 - **Consumes**：`P.StepResult`（Task 1）
+
+> ### 🔴 **执行记录：计划漏了一处**（2026-10-05 实际做的时候才发现）
+>
+> 本计划**只列了 `api/test_plan_execute_tools.py` 的两处替身**（`S10` 那两处）。
+> 实际一跑，**`test_downgraded_step_keeps_the_real_reason` 的 `plan_task` 替身也红了** ——
+> 它是 `lambda ctx: [_step("calculator") for _ in range(5)]`，**只收一个参数**
+> ⇒ 调用点改成传两个之后 `TypeError`。
+>
+> ⚠️ **这处漏列本身是个好证据**：那条替身**只接一个参数**，正好**兜住了漏传**
+> （少传一个 ⇒ 不报错）—— 它**就是 `S9` 那个洞能活 9 天的原因**
+> （📌 `🟡 做到哪` 里原本就写着「那条 stub 发现不了漏传」，但计划没把它推成「**所以它也要改**」）。
+> ⇒ 已改成 `lambda ctx, user_name="unknown": ...`。
+>
+> 📌 **教训（与 `S9` 同型）**：清单是照**我读过的**整理的，而**漏掉的往往是"看起来没问题的那处"**。
+> 这也是为什么 `S9` 除了行为用例之外，还要一道**从 AST 推出来的**门。
 
 > ### 🔴 为什么这条值得单开一道门（⛔ 不靠「记得搜一遍」）
 >
