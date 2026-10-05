@@ -1774,6 +1774,89 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- 🔴 **依赖（DB / Redis）不可用时，端点答什么**（2026-10-05 · 批 3 · `N9` + `S8` + `S7` · `DEC-079`）
+
+  三件事，**同一件事的三面** —— 都是「依赖挂了，服务该怎么办」。
+
+  #### 1 · `N9` —— `verify_api_key` 的裸 `get_db()`
+
+  **改前**：`with get_db() as conn:` **前后没有 `try`** ⇒ 库一抖，`psycopg2.Error` 一路冒到
+  **中间件里** —— 而本文件自己写着「**中间件中抛出的异常不会被 `@app.exception_handler` 捕获**」
+  ⇒ 调用方拿到**非结构化的 500**。
+
+  🔴 **`N9` 原文写的是「500 **而不是 401**」—— 两个都不是答案**：
+  库连不上时**我们并不知道那把 key 是真是假** ⇒ 报 401 等于**替用户断言「你的 key 坏了」**，
+  他会去换一把**没问题的** key、然后照样连不上，**永远查不到原因**。
+  ⇒ 照 WS 侧**已裁的 1008 / 1011**取口径（**凭据不行 ⇒ 换 key；认证服务不行 ⇒ 重试**），
+  HTTP 侧的对应值 = **503 `SERVICE_UNAVAILABLE`**
+  （`api/exceptions.py` 里**早就有这个码，此前从未被用过**）。
+
+  **四个落点，两种取向（⛔ 别"统一"）**：
+
+  | 层 | 落点 | 取向 |
+  |---|---|---|
+  | 安全边界 | `deps.get_current_user` | **fail-closed** ⇒ 拦住，但说 **503**（⛔ 不是 401、不是 500） |
+  | 保护措施 | `main.resolve_rate_limit_identity` | **fail-open** ⇒ 返回 `None` ⇒ **本请求不参与用户级限流** |
+  | 成本控制 | `main.resolve_quota_identity`（🆕 抽出） | **fail-open** ⇒ `None` ⇒ 跳过额度检查 |
+  | 限流阀本身 | `rate_limiter`（`S8`） | **fail-open** ⇒ 放行 + ERROR 日志 |
+
+  ⚠️ **限流那个为什么不是「降级到匿名桶」**：`anonymous` 是**一个** 20 容量 / 3 每秒的桶
+  ⇒ 库一挂**所有带 key 的人挤进同一个桶** ⇒ **大面积假 429** ——
+  那等于**把库抖动算到用户头上**，正是 1008/1011 禁止的**归错因**的限流版。
+  ⚠️ **全局限流那一层仍照常生效**（它不依赖身份）。
+
+  #### 2 · `S8` —— Redis 不通 ⇒ 从「全站 500」改成 fail-open
+
+  三处（`is_allowed` / `get_remaining` / `get_limit_info`）各包 `except redis.RedisError`
+  ⇒ **放行 + `logger.error`**（⚠️ **日志必须响**：否则成了「**限流悄悄失效**」，比报错更危险）。
+  ⚠️ 三处**返回值各不相同**（`True` / `capacity` / 满桶）—— `get_remaining` 报 `0` 会让调用方
+  以为"**被限死了**"，而真实情况**恰恰相反**。
+
+  #### 3 · `S7` —— 桶加 TTL（改前**永不过期**）
+
+  `EXPIRE` 进 Lua（走 `ARGV[4]`），值 = `token_config.RATE_LIMIT_BUCKET_TTL`（**60 秒**）。
+  **推导，⛔ 不是拍的**：桶的语义是「**回满即无意义**」，回满耗时 = `capacity/rate`
+  （user 20/3.0 = 6.7 s · global 150/100.0 = 1.5 s）⇒ 60 s 对两个桶都**语义无损**。
+  ⚠️ **收益要说准（⛔ 别写成"堵了 DoS"）**：伪造 key 那个洞 **`B9-b` 早就堵了**
+  （验不过 ⇒ 落匿名桶 ⇒ 造不出新桶）⇒ 现在管的是**卫生**，不是内存耗尽。
+  🔴 **落地时把计划改了**：原计划"两个分支都要写 `EXPIRE`"，实际**把那两个重复分支合并成一条**
+  ⇒ `EXPIRE` **天生只有一条路径**，⛔ 不可能"某个分支忘了加"。
+
+  ⚠️ **捕获范围一律【按类型】**（`psycopg2.Error` / `AppException` / `redis.RedisError`），
+  ⛔ **不是 `except Exception`** —— 宽捕获会把**代码 bug** 伪装成"依赖挂了"，
+  而且会**吞掉** `api/test_rate_limit_identity.py` 的 `_no_db` 守卫（它靠抛 `AssertionError` 抓"谁碰了库"）
+  ⇒ **那道门静默失效**（实测：写成 `except Exception` ⇒ `test_非数据库异常必须照样冒泡` 转红）。
+
+  **判据（可打印）**：
+  ```bash
+  venv/bin/python -m pytest api/test_auth_db_unavailable.py -q        # ⇒ 22 passed
+  venv/bin/python -m pytest api/test_rate_limiter_resilience.py -q    # ⇒ 13 passed（1 条真连 Redis）
+  bash scripts/ci-local.sh                                            # ⇒ 654 passed（基线 619）
+  ```
+  ⭐ **变异自证 17/17**（⚠️ **一次性脚本，⛔ 没入库** —— 与批 1/2 同例；下面记的是**变异名**，
+  将来换实现时按名字重做即可）：`N9` 7 条 —— 捕获范围写歪 / 写成 `except Exception` /
+  报错码退回 401 口径 / **限流中间件不再绕开 `None`** / 额度侧写成宽捕获 /
+  **额度身份不再回退试 JWT** / **额度中间件不再绕开 `None`**；
+  `S7`/`S8` 10 条 —— 脚本里没有 `EXPIRE` / `EXPIRE` 写死 60 不用传入的 TTL /
+  `is_allowed` 不把 TTL 传下去 / 默认 TTL 调到回满时间以下 / `is_allowed` 不再兜底 /
+  写成宽捕获 / **兜底时静默（不写日志）** / `get_remaining` 断连时报 0 /
+  `get_limit_info` 断连时不再兜 / **无脑放行（反向守卫该红）**。
+  🔴 **RED 阶段是实测的**：真 Redis 那条在改前拿到 **`ttl = -1`**（**有键但永不过期**）——
+  `S7` 那个 bug 是**验出来的**，⛔ 不是从代码推出来的。
+
+  ⚠️ **同时更正了三处【已变成假话】的旧记录**（`S8` 之后"没有 `except RedisError` ⇒ 全站 500"不再成立）：
+  `api/test_rag_search.py`（文件头）· `.github/workflows/ci.yml`（redis service 的理由）·
+  `docs/decisions/DEC-013`（补注：**结论「redis 必需」没变，理由换了** ——
+  现在撑住它的是那条**必须问真 Redis 要 `TTL`** 的用例；
+  实测 `REDIS_PORT=6399 pytest api/test_rate_limiter_resilience.py` ⇒ **1 failed, 12 passed**）。
+
+  ⚠️ **本轮【不动】、已看见**：`verify_api_key` 不过滤 `is_active`（**同函数、不同病**，
+  见 `docs/待办总表.md` `G6`）· `N11` 的端点层预算软返回 · `B9` 匿名可打 ·
+  限流响应头"恒多 1"（⚠️④）。**一行 SQL 都没改。**
+
+  📄 `docs/decisions/DEC-079-依赖不可用时端点答什么.md` ·
+  `docs/specs/deps.md`（`N9` 实施计划）· `docs/specs/rate_limiter.md`（`S7`/`S8` 实施计划）
+
 - 🔴 **预算拦截：`agent_graph_advanced` 从【软拦截】改成【硬拦截】**（2026-10-05 · `DEC-078` · 待办 `S13`）
 
   **改前**：超预算 ⇒ 塞一条 `ToolMessage`、`continue` ⇒ 图**照常跑完**、端点**照常 HTTP 200**

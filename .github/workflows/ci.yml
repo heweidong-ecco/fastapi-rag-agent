@@ -7,8 +7,15 @@ name: CI
 # ⚠️ offline-tests 为什么是现在这个样子：
 #   · 跑 **`api/` 全套**，用两个 marker 挡掉跑不了的：
 #       `-m "not integration and not needs_db"` —— 实测 **48 passed / 1 skipped**。
-#   · 🔴 **必须给 redis service** —— 不是可选项。`RateLimitMiddleware` 对每个非公开路径都打 Redis，
-#     且 `rate_limiter.py` 没有 `except RedisError` 兜底 ⇒ **Redis 不通时全站 500**（实测）。
+#   · 🔴 **必须给 redis service** —— 不是可选项。
+#     ⚠️ **理由 2026-10-05 变了（批 3 · `S8`）**：原先写的是「`rate_limiter.py` 没有
+#     `except RedisError` ⇒ Redis 不通时全站 500」。**那句现在是假的** —— `S8` 已加兜底，
+#     Redis 不通改成 **fail-open**（放行 + 一条 ERROR 日志）。
+#     现在这条 service 由**另一件事**撑着：`api/test_rate_limiter_resilience.py` 里
+#     **有一条用例必须问真 Redis 要 `TTL`** —— 那是 `S7`（桶永不过期）唯一的真凭证。
+#     实测（`REDIS_PORT=6399 python -m pytest api/test_rate_limiter_resilience.py`）：
+#     **1 failed, 12 passed** —— 红的正是那条，其余全走替身。
+#     ⛔ **别因为"兜底之后不会 500 了"就把这个 service 删掉** ⇒ 那条用例会红。
 #   · **不需要 postgres** —— 带库的那几处已按 marker 标记（实测：把 `POSTGRES_PORT` 指向死端口，被挡掉后全绿）。
 #   · 环境变量给的是 **dummy 值**：`import main` 在导入期就会构造 OpenAI 客户端，
 #     空 key 会直接抛 OpenAIError（实测）。这些路径在离线用例里**永远不会被真正调用**。

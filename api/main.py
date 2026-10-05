@@ -123,7 +123,7 @@ MIDDLEWARE_EXEMPT_PATHS = frozenset({
 
 
 # ==================== 限流身份解析（2026-09-30 抽出，便于单测） ====================
-def resolve_rate_limit_identity(x_api_key: str | None, auth_header: str | None) -> str:
+def resolve_rate_limit_identity(x_api_key: str | None, auth_header: str | None) -> str | None:
     """从请求头算出**限流用**的用户身份（桶名）。
 
     ⚠️ **抽出来的目的只有一个**：让这段逻辑**能被单测**。
@@ -131,17 +131,42 @@ def resolve_rate_limit_identity(x_api_key: str | None, auth_header: str | None) 
     行为测试会退化成"环境依赖型通过" —— 同 `api/test_public_paths.py` 的取舍。
 
     ⚠️ **本函数只管"限流分桶"，⛔ 不是鉴权** —— 鉴权在 `api/deps.py`，它会真查库。
+
+    🔴 2026-10-05（待办 `N9`）：**返回 `None` = "我现在判不了"**（认证服务不可用），
+       ⛔ **不是 `"anonymous"`**。这两个必须分得开 ——
+
+       * `"anonymous"` = **判了，就是匿名**（用户侧的问题）
+       * `None` = **判不了**（我这边的问题）⇒ 中间件据此让**本次请求不参与用户级限流**
+
+       ⚠️ **为什么不是"降级到匿名桶"**：`anonymous` 是**一个** 20 容量 / 3 每秒的桶 ⇒
+       库一挂，**所有带 key 的人都挤进同一个桶** ⇒ **大面积假 429** ——
+       那正是"**把库抖动算到用户头上**"，与 `docs/specs/deps.md` 里
+       **1008 / 1011** 那条禁止的**归错因**是同一件事的限流版。
     """
     if x_api_key:
         # 🔴 2026-09-30 修（B9-b）：原先这里是 `f"user:{x_api_key[:8]}"` ——
         #    只取**前 8 个字符**，**不查库、不验签** ⇒ 编一个串就拿到一个**全新的桶**，
-        #    换着串发 = **无限刷新限流配额**。实测：与本文件 :211 的 `QuotaMiddleware`
-        #    （那条**验了**）**不一致** —— 同一个文件里两条中间件两种做法。
+        #    换着串发 = **无限刷新限流配额**。实测：与下方 `QuotaMiddleware` 走的
+        #    `resolve_quota_identity`（那条**验了**）**不一致** —— 同一个文件里两条中间件两种做法。
+        #    ⚠️ **原先这里写的是「:211」那种行号** —— 2026-10-05 改掉了：
+        #    行号会烂（本次一改就全错），而**名字**不会。
         #
         # ⚠️ 验不过时**降级到匿名桶，⛔ 不是拒绝** —— 因为**匿名还开着**，
         #    客户端本来就可以不带 key。拒绝会把匿名入口一起关掉，那是**另一个决定**（B9 仍挂着）。
         from auth import verify_api_key
-        verified = verify_api_key(x_api_key)
+
+        # 🔴 2026-10-05（`N9`）：**验不了**（库不可用）与**验不过**是两回事 —— 见 docstring。
+        # ⚠️ **只捕 `AppException`**：`verify_api_key` 声称库不可用时抛的就是它。
+        #    ⛔ 写 `except Exception` 会把 `api/test_rate_limit_identity.py` 的 `_no_db` 守卫
+        #    （靠抛 `AssertionError` 抓"谁碰了库"）**一起吞掉** ⇒ 那道门静默失效。
+        try:
+            verified = verify_api_key(x_api_key)
+        except AppException as exc:
+            logger.bind(request_id=request_id_var.get()).error(
+                f"🔴 认证服务不可用 ⇒ 本次请求【不参与用户级限流】(fail-open)：{exc}"
+            )
+            return None
+
         if verified:
             return f"user:{verified}"
     if auth_header and auth_header.startswith("Bearer "):
@@ -150,6 +175,46 @@ def resolve_rate_limit_identity(x_api_key: str | None, auth_header: str | None) 
         if jwt_user:
             return f"user:{jwt_user}"
     return "anonymous"
+
+
+def resolve_quota_identity(x_api_key: str | None, auth_header: str | None) -> str | None:
+    """从请求头算出**配额用**的用户身份（`QuotaMiddleware`）。返回 `None` = 识别不了。
+
+    ⚠️ **抽出来与 `resolve_rate_limit_identity` 是同一条理由**：让这段逻辑**能被单测**
+    （中间件本体要连库，行为测试会退化成"环境依赖型通过"）。
+    🔴 2026-10-05（待办 `N9`）才抽的 —— 原先它**写在 `dispatch` 里**，那段没法单独测。
+
+    ⚠️ **它与限流那条【故意不同】，⛔ 别顺手"统一"**：
+    那边 `None` 会**跳过用户级限流**；这边 `None` 走的是**这个中间件本来就有**的
+    "未识别身份 ⇒ 原样放行"出口（改动前就写着：「⚠️「匿名可打」是另一个问题（`B9`）」）。
+
+    🔴 2026-10-05（`N9`）：**认证服务不可用（库挂了）⇒ 也返回 `None`**，
+       ⛔ 不是让它抛出去 —— 抛出去会把这个**成本控制**层变成一处新的 500
+       （它所处的位置与限流一样：中间件里的异常**不会被 `AppException` 处理器接住**）。
+       理由见 `auth.verify_api_key` 的 docstring；取向同 `token_tracker` 的 fail-open。
+    """
+    user_name = None
+
+    # 方式一：从X-API-Key获取
+    if x_api_key:
+        from auth import verify_api_key
+        # ⚠️ **只捕 `AppException`**（⛔ 不是 `except Exception`）——
+        #    见 `resolve_rate_limit_identity` 里同一条注释。
+        try:
+            user_name = verify_api_key(x_api_key)
+        except AppException as exc:
+            logger.bind(request_id=request_id_var.get()).error(
+                f"🔴 认证服务不可用 ⇒ 本次【跳过】额度检查 (fail-open)：{exc}"
+            )
+            user_name = None
+
+    # 方式二：从Authorization头获取JWT（⚠️ 保留"API Key 验不过还会试 JWT"这个顺序，
+    #         ⛔ 别改成验不过就直接返回 —— 那是行为变化）
+    if not user_name and auth_header and auth_header.startswith("Bearer "):
+        from jwt_handler import verify_access_token
+        user_name = verify_access_token(auth_header[7:])
+
+    return user_name
 
 
 def _rate_limited_payload(retry_after: int = 60) -> dict:
@@ -189,6 +254,14 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             request.headers.get("X-API-Key"),
             request.headers.get("Authorization"),
         )
+
+        # 🔴 2026-10-05（待办 `N9`）：`None` = **认证服务不可用、身份判不了**
+        #    ⇒ 本次请求**不参与用户级限流**（fail-open）。
+        #    ⛔ **不落匿名桶**（那会把库抖动算到用户头上 ⇒ 大面积假 429）——
+        #    理由与实测见 `resolve_rate_limit_identity` 的 docstring。
+        #    ⚠️ **全局限流（上面那层）仍然照常生效** —— 它不依赖身份。
+        if user_name is None:
+            return await call_next(request)
 
         # 获取用户限流信息（用于响应头）
         # 获取当前限流信息（无论是否被拒绝，都需要构造头部）
@@ -304,24 +377,19 @@ class QuotaMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         
         # 获取用户身份（支持API Key和JWT两种方式）
-        user_name = None
-        
-        # 方式一：从X-API-Key获取
-        x_api_key = request.headers.get("X-API-Key")
-        if x_api_key:
-            from auth import verify_api_key
-            user_name = verify_api_key(x_api_key)
-        
-        # 方式二：从Authorization头获取JWT
-        if not user_name:
-            auth_header = request.headers.get("Authorization")
-            if auth_header and auth_header.startswith("Bearer "):
-                token = auth_header[7:]
-                from jwt_handler import verify_access_token
-                user_name = verify_access_token(token)
-        
+        # 🔴 2026-10-05（`N9`）：**逻辑抽到 `resolve_quota_identity` 了** ——
+        #    原先它内联在这里，**没法单测**（这里要连库；而"库挂了"的用例
+        #    必须能在**不碰库**的前提下跑）。⛔ 行为逐字保留，只是搬了个家。
+        user_name = resolve_quota_identity(
+            request.headers.get("X-API-Key"),
+            request.headers.get("Authorization"),
+        )
+
         # 未识别身份的请求**原样放行**（与改动前一致）——
         # ⚠️「匿名可打」是另一个问题（`B9`），⛔ 本任务不碰它，撤次数配额不应顺带改变匿名行为。
+        # 🔴 2026-10-05（`N9`）：**"库挂了"也走这个出口**（`resolve_quota_identity` 返回 `None`）——
+        #    这个中间件**本来**就把"识别不了"当放行 ⇒ 库里抖一下，⛔ 不该变成全站 500。
+        #    ⚠️ 上面那行 ERROR 日志保证它**不静默**（与 `rate_limiter` 的 fail-open 同一条纪律）。
         if not user_name:
             return await call_next(request)
 

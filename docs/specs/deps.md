@@ -22,9 +22,10 @@
   ⇒ 基线里那条 WS **已消掉**（`scripts/route-auth-baseline.txt` 现只剩 HTTP 的 `/api/v1/`）。
 - ⬜ **WS 的会话桶仍是"每连接"** —— `thread_id = f"ws-{uuid4}"`，重连 = 换桶。
   见 `DEC-075` 遗留·2（全局日级熔断 B11 仍罩着，故未失控）。
-- ⬜ **`verify_api_key` 的 `get_db()` 没有 try**（`DEC-074` 遗留·4）——
-  HTTP 侧库抖动时"带无效 key"会变成 **500 而不是 401**。
-  ⚠️ **WS 侧已绕过这个坑**（`resolve_ws_identity` 自己 try ⇒ 1011），但**HTTP 侧没修**。
+- ✅ ~~**`verify_api_key` 的 `get_db()` 没有 try**~~（`DEC-074` 遗留·4 ⇒ 本表 **`N9`**）
+  —— **2026-10-05 已修**（批 3）：库异常 ⇒ 抛 **`AppException(SERVICE_UNAVAILABLE)`** ⇒ **503**。
+  🔴 **`N9` 原文那句「500 而不是 401」【两个都不是答案】** —— 理由见本节实施计划与 `DEC-079`。
+  ⚠️ **WS 侧本来就用 1011 绕过了这个坑；现在 HTTP 侧的口径与它对齐了**（此前两边不一致）。
 
 ## ⚠️ 看代码会误判的地方
 
@@ -38,6 +39,97 @@
 | 🔴 **「`deps.py` 里鉴权 fail-closed，那 `token_tracker` 怎么 fail-open，统一一下」** | ⛔ **故意相反，别统一**：这里是**安全边界**（放错了 = 匿名进门）；那边是**成本控制**（挡错了 = 全站停摆）。`token_tracker.get_session_token_usage` 的 docstring 里写着同一条。 |
 | 🔴 **「中间件不是已经挡过了吗」** | ⛔ **挡不到 WS** —— `api/main.py` 那两个是 `BaseHTTPMiddleware`，**只看 `scope["type"] == "http"`**。⇒ WS 的鉴权**只能挂在路由自己的依赖上**，这也是它曾经整条裸奔的原因。 |
 | 🔴 **「改了个鉴权函数名而已，跑一下测试就行」** | ⛔ **还要改 `scripts/check_route_auth.py` 的 `AUTH_NAMES`** —— 那个门是靠**函数名字符串**认人的，**名单漂了它会静默放过**（实测：把 `require_ws_user` 从名单里拿掉，两条 WS 立刻被判为"无鉴权"）。 |
+
+# ✅ 实施计划 · 批 3 · `N9`（2026-10-05 立 · **同日做完**）
+
+> **结果**：`api/test_auth_db_unavailable.py` **22 条全绿** · 全量 **654 passed** · **变异自证 17/17**
+> （`N9` 相关 **7 条**；含"**把捕获写宽**"与"**中间件不再照 `None` 办事**"两类）。
+> 📄 **决策（503 的来历 + 四个落点的分工 + 反悔成本）** ⇒ `docs/decisions/DEC-079-依赖不可用时端点答什么.md`
+
+## 🔴 先纠一处：**正确答案既不是 401、也不是 500**
+
+`N9` 行原文写「库一抖动 ⇒ **500 而不是 401**」。⛔ **别照这个字面修** ——
+按本文件上面那条 **1008 / 1011**（WS 侧已裁、业务方过目）：
+
+- **凭据不行** ⇒ 让用户**去换 key**
+- **认证服务不行** ⇒ 让用户**重试，⛔ 别换 key**
+
+库连不上时，**我们并不知道那把 key 是真是假** ⇒ 报 401 = **替用户断言「你的 key 坏了」**，
+而那正是 1008/1011 那条禁止的**归错因**（他去换一把没问题的 key，然后照样连不上）。
+⇒ **HTTP 侧的对应值是 `503 SERVICE_UNAVAILABLE`** —— `api/exceptions.py` 里**早就有这个码，
+只是从来没被用过**。
+
+## 落点：**异常在【源头】抛一次，往哪倒由调用点各自决定**
+
+| 层 | 处 | 取向 | 动作 |
+|---|---|---|---|
+| 源头 | `auth.verify_api_key` | —— | DB 异常 ⇒ **抛 `AppException(SERVICE_UNAVAILABLE)`**，⛔ **不返回 `None`** |
+| 安全边界 | `deps.get_current_user` | **fail-closed** | **不捕获** ⇒ 冒泡 ⇒ 全局处理器 ⇒ **503** |
+| 保护措施 | `main.resolve_rate_limit_identity` | **fail-open** | 捕获 ⇒ **本请求不参与用户级限流**（＋ `logger.error`） |
+| 成本控制 | `main.resolve_quota_identity`（🆕，`QuotaMiddleware` 调它） | **fail-open** | 捕获 ⇒ 身份为 `None` ⇒ **原样放行**（与该中间件既有的「未识别身份就放行」一致） |
+
+⚠️ **第 4 行原来是内联在 `QuotaMiddleware.dispatch` 里的**，本次**抽成模块级函数** `resolve_quota_identity`
+—— 理由与 `resolve_rate_limit_identity` 逐字相同：**让这段逻辑能被单测**（中间件本体要连库）。
+⛔ **行为逐字保留**，包括「**先试 API Key、拿不到身份再试 JWT**」那个顺序（抽错会静默改变带双凭据客户端的配额身份）。
+
+### 为什么是「不参与限流」，⛔ 不是「降级到匿名桶」
+
+降级到匿名桶 = **把库抖动算到用户头上**（`anonymous` 是**一个** 20 容量 / 3 每秒的桶 ⇒
+库一挂，所有带 key 的人都挤进去 ⇒ **大面积假 429**）——
+这正是 1008/1011 那条禁止的**归错因**的限流版。
+
+⇒ `resolve_rate_limit_identity` 的返回值**多一个 `None`**：「**识别不了**」≠「**确实匿名**」。
+✅ **原有 8 条用例（`api/test_rate_limit_identity.py`）一条都不用改，`git status` 干净、8 passed**
+—— 它们用的是 `_no_db`（**库正常**）那条路径
+⇒ `None`（判不了）与 `"anonymous"`（判了就是匿名）**没有互相污染**。
+
+⚠️ **捕获必须【按类型】**（⛔ 不是 `except Exception`）——
+`api/test_rate_limit_identity.py` 的 `_no_db` fixture **靠抛 `AssertionError` 抓「谁碰了库」**；
+写宽了会把它一起吞掉 ⇒ **那道守卫静默失效**（`S8` 那边同理）。
+📌 **实测**：把 `auth` 那处改成 `except Exception` ⇒ `test_非数据库异常必须照样冒泡` 转红（变异 `N9-b`）。
+
+## 用例（🆕 `api/test_auth_db_unavailable.py` · 22 条 · 离线 · ⛔ 不连库/Redis）
+
+**第一组 · 源头与安全边界**
+
+| # | 断言 |
+|---|---|
+| 1 | `verify_api_key` 遇库异常 ⇒ **抛 `AppException(SERVICE_UNAVAILABLE)`**（⛔ **不是返回 `None`**） |
+| 2 | 同族失败（**池耗尽** `pool.PoolError`）⇒ 同一个应答 |
+| 3 | 🔒 **防写宽**：`TypeError`（代码 bug）**必须照样冒泡** |
+| 4-6 | 🔄 **反向守卫**：库**正常**时 —— 查不到 ⇒ `None`；key 有效 ⇒ 用户名；**已过期** ⇒ `None` |
+| 7 | `deps.get_current_user` ⇒ 冒出来的是 `SERVICE_UNAVAILABLE` · 状态码 **503**（⛔ 不是 401、不是 500） |
+| 8 | 🔄 **反向守卫**：**没带** key 仍是 **401**（别被这次改动带偏） |
+
+**第二组 · 两个身份解析函数**
+
+| # | 断言 |
+|---|---|
+| 9 | `resolve_rate_limit_identity` 遇库异常 ⇒ 返回 **`None`**（⛔ 不是 `"anonymous"`） |
+| 10 | 🔄 库正常但**验不过** ⇒ **仍是 `"anonymous"`**（既有裁定不变） |
+| 11 | 🔒 `resolve_rate_limit_identity` 遇到别的异常**不许吞** |
+| 12 | `resolve_quota_identity` 遇库异常 ⇒ 返回 `None`（⇒ 中间件跳过额度检查） |
+| 13 | ⚠️ **必须响**：跳过额度检查时**留下 ERROR 日志** |
+| 14-15 | 🔄 `resolve_quota_identity`：验不过 ⇒ `None`；key 有效 ⇒ 用户名 |
+| 16 | 🔄 没带任何凭据 ⇒ `None` |
+| 17 | 🔒 **行为保持**：API Key **验不过还会去试 JWT**（抽取时最容易丢的顺序） |
+| 18 | 🔒 `resolve_quota_identity` 遇到别的异常**不许吞** |
+
+**第三组 · 接线（⚠️ 只测函数**不够**）**
+
+> 🔴 **为什么单列**：「函数返回 `None`」**不等于**「中间件照 `None` 办了事」——
+> 把 `if user_name is None: return await call_next(request)` 那两行删掉，**第二组照样本全绿**。
+> ⇒ 这组直接调 `dispatch`（`call_next` 用替身），判据是「**碰了不该碰的东西就炸**」：
+> 把 `user_limiter` / `get_token_budget_info` 换成**一碰就抛**。
+
+| # | 断言 |
+|---|---|
+| 19 | `RateLimitMiddleware` 拿到 `None` ⇒ **不碰用户桶**、原样放行（判据：桶的两个方法都换成"一碰就炸"） |
+| 20 | 🔄 身份**正常** ⇒ 用户桶**照常生效**（⛔ 别写成"无脑放行"） |
+| 21 | `QuotaMiddleware` 拿到 `None` ⇒ **不查库**、原样放行 |
+| 22 | 🔄 身份**正常** ⇒ **照常查预算**（⛔ 别把额度层整层关掉） |
+
+---
 
 ## 关联
 

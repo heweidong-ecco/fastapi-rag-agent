@@ -31,10 +31,20 @@ M6 = 「单模块测试闭环」。要定四件事:
 
 | 组件 | `/rag/search` 的 L1/L2 需不需要 |
 |---|---|
-| **Redis** | 🔴 **必需** —— `RateLimitMiddleware` 对每个非公开路径都打 Redis,且 `rate_limiter.py` **没有 `except RedisError`** ⇒ **Redis 不通 = 全站 500**(实测) |
+| **Redis** | 🔴 **必需** —— `RateLimitMiddleware` 对每个非公开路径都打 Redis,且 `rate_limiter.py` **没有 `except RedisError`** ⇒ **Redis 不通 = 全站 500**(实测) <br>⚠️ **2026-10-05 更正后半句**（批 3 · `S8`）：兜底**已经加了**，Redis 不通改成 **fail-open** ⇒ 那句「全站 500」**作为现状是假的**（作为 2026-09-17 的实况仍然真）。<br>⚠️ **但结论（"必需"）不变** —— 见下方补注。 |
 | **Postgres** | ❌ 不需要 —— 断言要么在中间件层、要么在 handler 之前被挡下,要么把库调用 patch 掉了 |
 | **外网 embedding** | ❌ 不需要(L2 用 patch) |
 | **torch** | ❌ 不需要 |
+
+> ⚠️ **2026-10-05 补注（批 3 · `S8` 落地后）** —— 上表「Redis 必需」这条**结论没变，理由换了一个**：
+>
+> 1. `S8` 加了兜底 ⇒ **"没有 redis ⇒ 全站 500" 已不成立**。⛔ 别拿那句老话当现状。
+> 2. **今天撑住这条结论的是另一条用例**：`api/test_rate_limiter_resilience.py::test_新桶在真Redis里真的带上了TTL`
+>    —— 它是 `S7`（桶永不过期）**唯一的真凭证**（读脚本文本只能证明"写了这句"，读不到"真的生效"）。
+> 3. 实测判据（把端口指死）：`REDIS_PORT=6399 venv/bin/python -m pytest api/test_rate_limiter_resilience.py -q`
+>    ⇒ **1 failed, 12 passed**（红的正是那条；其余 12 条走替身，**因此它们本来就是离线用例**）。
+> 4. ⛔ **别因为"兜底之后不 500 了"就把 redis service 删掉** —— 删了第 2 条会红；
+>    而且 L1/L2 会变成**假绿**：兜底生效时**限流那一层整层没生效**，"测得过"≠"测的是真东西"。
 
 ## 备选方案
 
