@@ -71,13 +71,13 @@ class RefreshRequest(BaseModel):
     """JWT Token 刷新请求"""
     refresh_token: str = Field(
         description="用于获取新访问令牌的刷新令牌,之前登录获取的 refresh_token",
-        examples=["eyJhbGciOiJIUzI1NiIs..."]  # 示例令牌片段
+        examples=["<your-refresh-token>"]  # ⛔ 别写成真 JWT 形状:凭据门的 JWT 模式会命中占位符
     )
     model_config = {
         "json_schema_extra": {
             "examples": [
                 {
-                    "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                    "refresh_token": "<your-refresh-token>"
                 }
             ]
         }

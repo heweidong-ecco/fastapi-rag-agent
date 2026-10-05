@@ -67,11 +67,27 @@
 #               这**不是新缺陷**,是与 v5→v6 **同一个形状**的残件(v6 只修了①那条,没修②)。
 #               ⚠️ 它偏偏会在 CI 里现形:CI 的新鲜检出**既没有 .env 也没有 denylist**。
 #
+#   v7 → v8(2026-10-05 · 批 4 · `DEC-080`) 把「**这道门还抓不抓得住**」做成可执行的 `--selftest`:
+#            ⓐ 判定逻辑抽成**唯一一份** `match_re`/`match_lit`,① ② ③ 三处调用点**全部**改走它。
+#               理由:自测若验的是**复制出来的另一份**判定,那等于「**用硬币验硬币**」——
+#               生产那行改坏了,自测照样绿。
+#            ⓑ 新增 `--selftest [N]`:每个模式一个合成样本 × **连跑 N 次**,**任一次漏报即 exit 1**。
+#               ⚠️ 载荷取 **256 KiB**(> 管道缓冲区)—— 这是 v4 那个竞态**唯一的复现条件**。
+#                  **实测**(本机,变异自证):把 `match_re` 改回 `grep -E -q` ⇒ **120/120 次全部漏报**(红);
+#                  而把载荷缩到 4 KiB、同一条 `grep -q` ⇒ **一次都不漏**(绿)
+#                  ⇒ **小样本上的自测永远绿**。承重件是**载荷大小**,⛔ 不是次数。
+#            📌 与 ③-0 自证的分工:③-0 每次跑一遍(挡"机制整体失灵");
+#               `--selftest` 靠"大载荷 × 连跑"专抓**概率性**漏报。**两者缺一不可。**
+#            出处:待办总表 §五·5 · `docs/复盘/2026-09-17-一道硬币做的门.md`
+#
 # 用法:
 #   bash scripts/check_secrets.sh          # 扫 staged 改动(默认,提交前用)
 #   bash scripts/check_secrets.sh --all    # 扫整个工作区
 #   bash scripts/check_secrets.sh --diff origin/main...HEAD
 #                                          # 扫某范围里的新增行(CI 用;**三点**范围)
+#   bash scripts/check_secrets.sh --selftest [N]
+#                                          # 自测**这道门本身**(默认连跑 20 次;⛔ 不扫任何内容)
+#                                          # 退出码:0=每次都抓住 · 1=**有漏报**(门现在是硬币) · 2=用法错
 #
 set -uo pipefail
 
@@ -82,6 +98,102 @@ MODE="${1:-staged}"
 DIFF_RANGE="${2:-}"       # 仅 --diff 模式用;缺了 ⇒ 用法错误(exit 2),见下
 ENV_FILE="$REPO_ROOT/.env"
 DENYLIST="$REPO_ROOT/.secret-denylist"
+
+# ---- ③ 通用模式:不需要知道具体值 -------------------------------------------
+# ⚠️ 本数组定义在【全部调用点之前】—— ③-0 自证与 `--selftest` 都要拿它当唯一真值。
+declare -a PATTERNS=(
+    'sk-[A-Za-z0-9]{16,}'                  # OpenAI/DashScope 风格
+    'ghp_[A-Za-z0-9]{20,}'                 # GitHub PAT
+    'gho_[A-Za-z0-9]{20,}'                 # GitHub OAuth
+    'AKIA[0-9A-Z]{16}'                     # AWS Access Key ID
+    'BEGIN [A-Z ]*PRIVATE KEY'             # PEM 私钥
+    'eyJhbGciOi[A-Za-z0-9_-]{10,}'         # JWT(裸的,不带 Bearer 前缀时也算)
+)
+
+# ---- ③-1 合成样本表:第 k 项 = 【能且只能】被 PATTERNS[k] 抓住的串 ------------
+# ⛔ **一个字面量都不许写成真的"密钥样子"** —— 写成真的，**本文件自己就会命中自己的模式**
+#    （门自噬：提交这个脚本时报红）。⇒ 一律**运行时拼接**。
+declare -a CANARY_SAMPLES=(
+    "sk-$(printf 'D%.0s' {1..20})CANARY"
+    "ghp_$(printf 'B%.0s' {1..24})CANARY"
+    "gho_$(printf 'B%.0s' {1..24})CANARY"
+    "AKIA$(printf 'A%.0s' {1..16})"
+    "BEGIN $(printf 'RSA') PRIVATE KEY"
+    "eyJhbGciOi$(printf 'C%.0s' {1..16})CANARY"
+)
+
+# 🔴 两表必须**一一对应** —— 加了新模式却没加对应样本 ⇒ 自测只测了前一半，
+#    而"只测一半的自测"与"没有自测"在机器痕迹上一样（本仓 `DEC-061`）。
+if [ "${#PATTERNS[@]}" -ne "${#CANARY_SAMPLES[@]}" ]; then
+    echo "⛔ 凭据门: **自测表与模式表不对齐** —— ${#PATTERNS[@]} 个模式 vs ${#CANARY_SAMPLES[@]} 个合成样本"
+    echo "   ⇒ 【不得当作通过】。加模式时**必须同时加**一个能被它抓住的合成样本。"
+    exit 2
+fi
+
+# ---- 判定用的唯一实现（⛔ 全文件只有这一份）----------------------------------
+# ⚠️ 为什么抽成函数：**`--selftest` 验的必须是【生产用的那一行】,不是一份复制品。**
+#    复制一份去测 = "用硬币验硬币" —— 生产那行改坏了,自测照样绿。
+# 🔴 里面**不许用 `grep -q`**（v3→v4 那个坑,见文件头修订史）:
+#    `-q` 命中即退出 ⇒ 上游 `printf` 收到 SIGPIPE(141) ⇒ `pipefail` 把**整条管道**判成失败
+#    ⇒ 真实命中被**静默丢弃**。⚠️ 它是**概率性**的（实测:连跑 20 次,拦 11 次、漏 9 次）。
+#    ⇒ `>/dev/null`（读完再判断,不早退）。📌 判据 = `--selftest`。
+match_re()  { grep -E -- "$1" >/dev/null; }   # stdin=被扫文本 · $1=ERE
+match_lit() { grep -F -- "$1" >/dev/null; }   # stdin=被扫文本 · $1=字面量
+
+# ---- `--selftest`：合成凭据**连跑 N 次**，任一次漏报即 exit 1 ------------------
+# 📄 出处：`docs/复盘/2026-09-17-一道硬币做的门.md` · 待办总表 §五·5。
+# 它回答的是「**这道门现在还抓得住吗**」，⛔ 不是"这次抓到没有"——
+# 两者被混为一谈时,门可以整体失灵而每次都报 ✅。
+if [ "$MODE" = "--selftest" ]; then
+    N="${2:-20}"
+    case "$N" in ''|*[!0-9]*) echo "⛔ 凭据门 --selftest: 次数必须是正整数(收到 '$N')"; exit 2 ;; esac
+    [ "$N" -ge 1 ] || { echo "⛔ 凭据门 --selftest: 次数必须 ≥1"; exit 2; }
+
+    # 🔴 载荷必须**远大于管道缓冲区**，且**金丝雀在前、后面还压着一大堆** ——
+    #    这是 v4 那个竞态的**唯一复现条件**：命中后 `grep -q` 早退，而生产者还没写完 ⇒ SIGPIPE。
+    #    ⛔ **别把它改小**：小样本上生产者早写完了，**那种自测永远绿**（= 测不出"不成立"，`DEC-061`）。
+    #
+    # ⚠️ **生产者用 `cat <文件>`，⛔ 不是 `printf '%s' "$BIG"`** —— 实测（2026-10-05，本机）:
+    #    bash 的 **内建 printf** 写 1 MiB 要 **759 ms**（写小片、走内建路径）,
+    #    而 `cat` 一个同样大的文件只要 **~5 ms** ⇒ 20 次 × 6 模式的差距是 **91s vs 0.6s**。
+    #    ⚠️ 更要紧的是**忠实度**:v4 那次的生产者（`git diff`）是**外部命令**,
+    #    `cat` 同样会在管道破裂时被信号打死 ⇒ **竞态照样复现**（下面的变异自证验的就是这条）。
+    SELFTEST_TMP="$(mktemp -d)"
+    trap 'rm -rf "$SELFTEST_TMP"' EXIT
+    FILLER_FILE="$SELFTEST_TMP/filler"
+    # ⚠️ 256 KiB —— **不是随手取的数**：它必须 > 管道缓冲区（macOS 16 KiB / Linux 64 KiB），
+    #    否则 `cat` 一次 write() 就把整个样本灌进缓冲区、**根本不会阻塞** ⇒ 竞态不复现
+    #    ⇒ 自测变成"永远绿"。256 KiB 对 Linux 那个 64 KiB 还有 4 倍余量。
+    #    实测代价（本机）：20 次 × 6 模式 = **2.9s**；1 MiB 则要 10.4s（余量换不来收益）。
+    yes x | head -c 262144 > "$FILLER_FILE"
+    for k in "${!PATTERNS[@]}"; do
+        printf '%s' "${CANARY_SAMPLES[$k]}" >  "$SELFTEST_TMP/sample.$k"
+        cat "$FILLER_FILE"                >> "$SELFTEST_TMP/sample.$k"
+    done
+    echo "凭据门 · --selftest：${#PATTERNS[@]} 个模式 × 连跑 ${N} 次（每次载荷 $(( $(wc -c < "$SELFTEST_TMP/sample.0") )) 字节）"
+
+    MISS=0
+    for i in $(seq 1 "$N"); do
+        for k in "${!PATTERNS[@]}"; do
+            # ⚠️ 判定走的就是生产那一份 `match_re`（⛔ 不是复制出来的另一份）。
+            if ! cat "$SELFTEST_TMP/sample.$k" | match_re "${PATTERNS[$k]}"; then
+                MISS=$((MISS+1))
+                echo "  ❌ 第 $i 次：模式 ${PATTERNS[$k]} **没抓住**它的合成样本（漏报）"
+            fi
+        done
+    done
+    rm -rf "$SELFTEST_TMP"; trap - EXIT
+
+    if [ "$MISS" -ne 0 ]; then
+        echo "⛔ 凭据门 · --selftest 未通过：${MISS} 次漏报。"
+        echo "   ⇒ **这道门现在是硬币** —— 它报的「没命中」不能采信。"
+        echo "   📄 docs/复盘/2026-09-17-一道硬币做的门.md"
+        exit 1
+    fi
+    echo "✅ 凭据门 · --selftest 通过：每次、每个模式都抓住了合成样本（0 漏报）"
+    exit 0
+fi
+
 
 # 取本次要扫的文本。
 # ⚠️ 只扫【新增行】 —— 泄漏只可能发生在"写进去"的时候。
@@ -144,35 +256,28 @@ else
     echo "[凭据门] 扫描范围: staged 的【新增行】(git diff --cached | grep '^+')"
 fi
 
-# ---- ③ 通用模式:不需要知道具体值 -------------------------------------------
-# ⚠️ 本数组**必须定义在下面"自证"之前** —— 自证要拿它来验匹配机制真的在工作。
-declare -a PATTERNS=(
-    'sk-[A-Za-z0-9]{16,}'                  # OpenAI/DashScope 风格
-    'ghp_[A-Za-z0-9]{20,}'                 # GitHub PAT
-    'gho_[A-Za-z0-9]{20,}'                 # GitHub OAuth
-    'AKIA[0-9A-Z]{16}'                     # AWS Access Key ID
-    'BEGIN [A-Z ]*PRIVATE KEY'             # PEM 私钥
-    'eyJhbGciOi[A-Za-z0-9_-]{10,}'         # JWT(裸的,不带 Bearer 前缀时也算)
-)
-
 # ---- ③-0 自证(positive control) ---------------------------------------------
 # 🔴 2026-09-20 加。**判据能说"没查到"的前提,是它抓得住已知该命中的东西。**
-#    喂一个【运行时拼出来的合成样本】(不是任何真实凭据),断言通用模式抓得住它。
-#    ⛔ **样本必须在运行时拼接** —— 写成字面量的话,**本文件自己就会命中自己的模式**,
-#       导致凭据门在提交这个脚本时报红(门自噬)。
+#    对**每一个**模式,喂它【自己的】合成样本(运行时拼接,见 ③-1),断言抓得住。
+#    ⛔ 样本写成字面量的话,**本文件自己就会命中自己的模式**(门自噬)。
 #    形式化:本段提供 `通过 ⇐ 执行 ∧ ¬命中` 里「**匹配机制确实在工作**」那一半的证据。
 #    ⚠️ 它必须跑在下面"空集即 exit 0"**之前** —— 否则暂存区为空时根本走不到这里。
-CANARY="sk-$(printf 'A%.0s' 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20)CANARY"
-CANARY_HIT=0
-for p in "${PATTERNS[@]}"; do
-    if printf '%s' "$CANARY" | grep -E -- "$p" >/dev/null; then CANARY_HIT=1; break; fi
+# 📌 与 `--selftest` 的分工:**同一张样本表、同一套 `match_*` 实现** ——
+#    本段是「每次跑一遍」（快,挡"机制整体失灵"）;
+#    `--selftest` 是「N 次 × 大载荷」（专抓 v4 那种**概率性**漏报）。缺一不可。
+CANARY_HIT=1
+for k in "${!PATTERNS[@]}"; do
+    if ! printf '%s' "${CANARY_SAMPLES[$k]}" | match_re "${PATTERNS[$k]}"; then
+        CANARY_HIT=0
+        echo "  ❌ 自证失败:模式 ${PATTERNS[$k]} 没抓住它的合成样本"
+    fi
 done
 if [ "$CANARY_HIT" -ne 1 ]; then
     echo "⛔ 凭据门: **自证失败** —— 已知该命中的合成样本没被抓住。"
     echo "   ⇒ **模式匹配机制本身失灵,本次'没命中'不能采信。**"
     exit 2
 fi
-echo "  · 自证通过(合成样本被通用模式抓住;该样本非真实凭据)"
+echo "  · 自证通过(${#PATTERNS[@]} 个模式各自抓住了自己的合成样本;样本非真实凭据)"
 
 # ⚠️ 此处的"空"与上面的"失败"是两回事 —— 前者是【已确认执行且确实为空】。
 if [ -z "$SCAN_TEXT" ]; then
@@ -230,7 +335,7 @@ if [ -f "$ENV_FILE" ]; then
         #    `-q` 命中即退出 ⇒ 上游 `printf` 收到 SIGPIPE(141) ⇒ `set -o pipefail` 让
         #    **整条管道**返回 141 ⇒ `if` 判成"没命中" ⇒ **真实命中被静默丢弃**。
         #    ⚠️ 它是**概率性**的:同一份暂存内容连跑 20 次,拦 11 次、漏 9 次(实测)。
-        if printf '%s' "$SCAN_TEXT" | grep -F -- "$val" >/dev/null; then
+        if printf '%s' "$SCAN_TEXT" | match_lit "$val"; then
             echo "  ❌ 命中: .env 中的 $key"
             HITS=$((HITS+1)); FAILED_NAMES+=("$key")
         fi
@@ -267,7 +372,7 @@ if [ -f "$DENYLIST" ]; then
     while IFS= read -r lit; do
         case "$lit" in ''|\#*) continue ;; esac
         # ⚠️ 同样**不许用 `grep -q`**（理由见第 ① 段那处注释）
-        if printf '%s' "$SCAN_TEXT" | grep -F -- "$lit" >/dev/null; then
+        if printf '%s' "$SCAN_TEXT" | match_lit "$lit"; then
             echo "  ❌ 命中: .secret-denylist 中的某个存量字面量(第 $(grep -nF -- "$lit" "$DENYLIST" | head -1 | cut -d: -f1) 行)"
             HITS=$((HITS+1)); FAILED_NAMES+=("denylist")
         fi
@@ -281,7 +386,7 @@ fi
 #    自证必须先于"空集即 exit 0"执行,否则暂存区为空时根本走不到自证。
 for p in "${PATTERNS[@]}"; do
     # ⚠️ 同样**不许用 `grep -q`**（理由见第 ① 段那处注释）
-    if printf '%s' "$SCAN_TEXT" | grep -E -- "$p" >/dev/null; then
+    if printf '%s' "$SCAN_TEXT" | match_re "$p"; then
         echo "  ❌ 命中通用模式: $p"
         HITS=$((HITS+1)); FAILED_NAMES+=("pattern:$p")
     fi

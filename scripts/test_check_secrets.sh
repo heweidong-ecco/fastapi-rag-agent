@@ -16,6 +16,26 @@
 #
 # 用法: bash scripts/test_check_secrets.sh
 #   exit 0 = 全部通过 · exit 1 = 有用例失败
+#
+# ──────────────────────────────────────────────────────────────────
+# 🔴 2026-10-05 加（批 4 · `DEC-080`）：**先摘掉调用方可能带进来的降级开关**
+#
+#     unset SECRETS_GATE_ALLOW_NO_ENV
+#
+# ⚠️ **实测踩出来的**（把本文件接进 CI 的那一步）：
+#    `ci.yml` 的 env 段里有 `SECRETS_GATE_ALLOW_NO_ENV: "1"` —— CI 的新鲜检出**没有 `.env`**
+#    （gitignore），不显式降级的话凭据门自己就以 exit 2 红掉；`ci-local.sh` 又**逐字**把那段
+#    env 注进它执行的环境。⇒ 本文件在**同一个环境里**被调用时，那条开关会顺着环境进来，
+#    把 **T7「无 .env ⇒ 不得当作通过」直接洗成 exit 0**。
+#    实测两个结果：`本机 17 通过 / 0 失败` ↔ `ci-local 16 通过 / 1 失败`（红的正是 T7）。
+#
+# ⇒ **用例必须自足**：默认环境 = 调用方不额外给东西；**需要降级的用例自己显式设**
+#    （T8 / T17 就是这么写的，⛔ 别改成靠环境）。
+#    ⚠️ 这与文件头那句「为什么用 shim + 临时仓根」是同一条要求：**别让外部环境决定结论**。
+# 📌 判据（可打印）：`SECRETS_GATE_ALLOW_NO_ENV=1 bash scripts/test_check_secrets.sh`
+#    ⇒ 与本文件不带该变量时**结果相同**（都 17 通过 / 0 失败）。
+unset SECRETS_GATE_ALLOW_NO_ENV
+
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -298,6 +318,21 @@ if [ "$rc17" -eq 0 ] \
     ok "T17 🔴 CI 真实形状(无 .env 无 denylist) ⇒ exit 0，覆盖度只许写【③】"
 else
     bad "T17 CI 真实形状 ⇒ exit ${rc17}；含'覆盖 ③' $(printf '%s' "$out17" | grep -c '覆盖 ③') 次 · 含'覆盖 ①' $(printf '%s' "$out17" | grep -c '覆盖 ①') 次"
+fi
+
+# ------------------- T18 🔴 `--selftest`：**这道门自己还抓不抓得住**
+# 📄 出处：待办总表 §五·5 · `docs/复盘/2026-09-17-一道硬币做的门.md`
+# ⚠️ 它与上面 T4 那个"自证"不是一回事：T4 是**每次跑一遍**（挡"机制整体失灵"），
+#    本条是「**大载荷 × 连跑 N 次**」，专抓 v4 那种**概率性**漏报。
+# ⚠️ 冷启动成本 ~1.5s（10 次 × 6 模式 × 256 KiB）—— 这是它唯一"贵"的地方，别嫌。
+# 📌 判据（可打印）：把门里的 `match_re() { grep -E -- "$1" >/dev/null; }` 改成 `grep -E -q`
+#    ⇒ 本条**必红**（实测 120/120 次漏报）。
+GATE_N=10
+out18=$(bash "$GATE" --selftest "$GATE_N" 2>&1); rc18=$?
+if [ "$rc18" -eq 0 ]; then
+    ok "T18 --selftest（${GATE_N} 次）⇒ exit 0（门还抓得住）"
+else
+    bad "T18 --selftest ⇒ exit ${rc18}（0 才对）；$(printf '%s' "$out18" | tail -1)"
 fi
 
 echo

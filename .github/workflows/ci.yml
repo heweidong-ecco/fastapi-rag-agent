@@ -202,9 +202,36 @@ jobs:
           echo "[凭据门] 范围 = ${SECRETS_RANGE}"
           bash scripts/check_secrets.sh --diff "${SECRETS_RANGE}"
 
+          # ⭐ 凭据门的【自测】进 CI（2026-10-05 加，`DEC-076` §5.2 第 6 条 · `DEC-080`）。
+          #   它测的是**门还抓不抓得住**，⛔ 不是门本次抓到了什么 ——
+          #   17 条用例，纯 bash + 系统 python3，无网、无凭据，~1s。
+          #   ⛔ 此前这些用例【只在本地/hook 里跑】⇒ **门自己坏了，CI 是不知道的**
+          #      —— 本仓原话「门挂在别处，就等于没有门」的又一例：自测挂在本地就等于没有自测。
+          #   ⚠️ 夹具是自造的（`mktemp` + 复制门脚本）⇒ 与 CI 有没有 `.env`、有没有降级开关**无关**；
+          #      T17 测的正是 CI 那个真实形状（无 .env、无 .secret-denylist）。
+          bash scripts/test_check_secrets.sh
+
           # ⭐ 文档两道门（2026-10-05 加，`DEC-076`）—— 纯 bash + 系统 python3，无网、无需凭据。
           #   判据是**退出码 + 那一行 ✅**，⛔ 不是"命令跑了"（本仓纪律：拿动作成功当结果正确）。
           bash scripts/check_doc_links.sh
           bash scripts/check_doc_orphans.sh
+
+          # ⭐ 这两道门的【自测】也进 CI（同上，`DEC-080`）—— 断链 5 条 · 孤儿 6 条，各 ~1s。
+          #   ⚠️ 孤儿门那 6 条是 2026-10-05 才有的：本轮把它改成"问 git"（`DEC-076` §5.2 第 2/4 条），
+          #      **改了却没有用例 ⇒ 下次谁改回去都没人知道**。
+          #   🔴 自测里那两个 `env -u GIT_DIR …` 不是多余的（实测过）：`ci-local.sh:252` 会把
+          #      `GIT_DIR`/`GIT_WORK_TREE` 指回主检出，而 `GIT_DIR` **盖过 `git -C`**
+          #      ⇒ 夹具里的 `git add` 会打到**真仓**上（实测：把主检出未提交的改动悄悄暂存）。
+          #      ⛔ 别"顺手优化掉"它们。
+          bash scripts/test_check_doc_links.sh
+          bash scripts/test_check_doc_orphans.sh
+
+          # ⭐ 两个【提醒型】hook 的自测（2026-10-05 加，`DEC-080`）—— 10 条，~1s。
+          #   ⚠️ hook 只在 Claude 会话里跑，**CI 里不会触发它们** —— 那为什么还要在这儿测？
+          #      因为被测的是**脚本本身**（判据 / 路径剪枝 / 不崩），⛔ 不是"CI 里会发生什么"；
+          #      它们是**入库分发给克隆者**的东西，坏掉时在 CI 里看得见，比"等谁哪天编辑 .py 才发现"强。
+          #   🔴 这两个 hook **只从 stdin 读 hook JSON** ⇒ 直接 `python3 x.py` 会"全绿"，
+          #      那是**静默假通过**（`pre-commit-gates.py` 的前科）⇒ 自测**每条都喂真 JSON**。
+          bash scripts/test_remind_hooks.sh
 
           pytest api/ -m "not integration and not needs_db" -v
