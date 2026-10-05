@@ -1820,6 +1820,44 @@ All notable changes to this project will be documented in this file.
   ⇒ 被当**命令替换**执行（`DEC-076: command not found`），且 `${GIT_DIR}` 在 `set -u` 下 unbound
   ⇒ **脚本中途死掉，而外层因末尾有 `echo` 报了 `rc=0`** —— 正是本仓 2026-10-01 记过的那条。
 
+- 🔴 **断链门：把「存在」的口径从【问磁盘】改成【问克隆者拿得到什么】**（2026-10-05 · `DEC-076 §2.9`）——
+  这是**把门接进 CI 之后第一次跑才暴露的**，⛔ 不在原计划里。
+
+  **症状**：同一份豁免清单下，**本机报「✅ 没有真断链」，CI 报「🔴 10 处」**。
+
+  **根因不是内容，是门自己的判据** —— 它用 `os.path.exists()` 判"目标存在吗"，
+  那是在**问磁盘**；而磁盘上有**没入库的东西**：`archive/`（`.gitignore:30`，
+  `DEC-022` 明文写过「**有意设计**」）与 `GIT_CHECKLIST.md`（`.gitignore:27`，
+  `文档地图` §T5 已登记「在盘上但未入库」）。
+  ⇒ **同一个仓在两台机器上给出两个结论。**
+
+  **改法**：判据换成 **`git ls-files`（索引）**，`docs` 枚举 / `alive`·`archived` 索引 /
+  存在性判定**三处一起改**（⛔ 只改一处是半修：索引被本机独有文件喂饱会**反过来掩盖真问题**）。
+  `git` 拿不到时 **`exit 2`**（⛔ 不静默变绿 —— 拿不到 git 就是拿不到判据）。
+
+  **那 10 处的处置**：**没修文档**（本仓规矩：**登记，⛔ 不顺手清**），
+  而是给 `scripts/doc-links-ignore.txt` 加了 **⑪ / ⑪b** 两节，逐条附**可打印的理由与失效判据**：
+  `archive/` 与 `GIT_CHECKLIST.md` 是**有意排除**（判据 `git check-ignore -v …`）；
+  另有一条 `DEC-060` 里的**绝对路径**标为 🔴 **真缺陷、本轮登记不修**。
+
+  **判据（可打印）**：
+  ```bash
+  bash scripts/test_check_doc_links.sh; echo "rc=$?"        # ⇒ 4 通过 / 0 失败（T2 = 本条的回归）
+  bash scripts/check_doc_links.sh >/dev/null; echo $?       # ⇒ 0
+  git check-ignore -v archive/ GIT_CHECKLIST.md             # ⇒ 两行（⇒ ⑪ 那两行豁免还该在）
+  # 本机 vs CI 一致性（造一棵只有已跟踪文件的树跑同一个门 ⇒ 两边的数必须一样）：
+  R="$PWD"; T=$(mktemp -d); git archive HEAD | tar -x -C "$T"
+  cp scripts/check_doc_links.sh scripts/doc-links-ignore.txt "$T/scripts/"
+  bash scripts/check_doc_links.sh 2>&1 | grep -E '^  🔴|没有真断链'
+  ( cd "$T" && env GIT_DIR="$R/.git" GIT_WORK_TREE="$R" \
+      bash "$T/scripts/check_doc_links.sh" 2>&1 | grep -E '^  🔴|没有真断链' )
+  rm -rf "$T"
+  ```
+
+  ⚠️ **顺带记一条**：`scripts/ci-local.sh` **永远复现不了这一族** —— 它 `rsync` 工作树
+  （只排 `.git`/`.env`），会把 `archive/` 一起复制过去 ⇒ 在它眼里"文件都在"。
+  ⇒ **"ci-local 绿"⛔ 不等于"CI 会绿"**，这条边界以前没写下来过。
+
 - 🔴 **把 `DEC-074`/`DEC-075` 有意留下的 4 条遗留【登记进待办总表】+ `ROADMAP` 补齐 `DEC-057`–`075`**（2026-10-05）——
   收掉「**改动做完了、账没记**」这一类：东西在 `DEC` 里写着，**但没人会去翻 DEC**。
 

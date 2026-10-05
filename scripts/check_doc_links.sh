@@ -51,11 +51,36 @@ for a in "$@"; do
 done
 
 python3 - "${MODE}" <<'PY'
-import os, re, sys
+import os, re, subprocess, sys
 from collections import defaultdict
 
 MODE = sys.argv[1]
 REPO = os.getcwd()
+
+# ---------- 0. 「存在」的口径 = 【会不会随 clone 一起下来】 ----------
+# 🔴 2026-10-05（`DEC-076` §2.9）：这里原先是 `os.path.exists()` —— 那是在**问磁盘**。
+#    磁盘上有**没入库的东西**（`archive/`、`GIT_CHECKLIST.md` 都被 `.gitignore` 有意排除，
+#    `DEC-022` 还明文写过「有意设计」）⇒ **同一个仓在两台机器上给出两个结论**：
+#    本机报「✅ 没有真断链」，CI 报 **10 处**。
+#    📌 实测出处：把本门接进 `ci.yml` 后**第一次跑就红了**，10 处全是"指向有意 gitignore 的内容"。
+#    ⇒ 判据改成 **`git ls-files`（索引）**：那才是「克隆者拿得到什么」。
+#    ⚠️ 为什么用索引而不是 HEAD：pre-commit 时刚 `git add` 的新文件**就在索引里**
+#       ⇒ 新加的文件不会被误判成"不存在"。
+_GIT = subprocess.run(["git", "ls-files", "-z"], capture_output=True)
+if _GIT.returncode != 0:
+    print("⛔ 断链门: **无法判定** —— `git ls-files` 失败(exit %d)" % _GIT.returncode)
+    print("   ⇒ 【不得当作通过】。⚠️ 本门判「存在」的口径是【会不会随 clone 一起下来】，")
+    print("     那需要 git；拿不到 git ⇒ 就是拿不到判据（⛔ 不是「没有断链」）。")
+    print("     常见原因：当前目录不是 git 仓 —— 例：ci-local 复制出来的树没带 .git")
+    print("     （那边靠 GIT_DIR/GIT_WORK_TREE 把 git 指回主检出，见 `DEC-076` §2.8）。")
+    sys.exit(2)
+TRACKED = set(_GIT.stdout.decode("utf-8", "surrogateescape").split("\0"))
+TRACKED.discard("")
+
+def tracked(path):
+    """这个路径**会不会随 clone 一起下来** —— ⛔ 不是「磁盘上有没有」。"""
+    rel = os.path.relpath(path, REPO)
+    return (not rel.startswith("..")) and (rel.replace(os.sep, "/") in TRACKED)
 
 # ---------- 1. 收集 .md ----------
 SKIP_DIRS = {".git", "node_modules", "__pycache__", ".pytest_cache", "venv",
@@ -92,7 +117,9 @@ docs = []
 for root, dirs, files in os.walk(REPO):
     dirs[:] = prune(dirs, root)
     for f in files:
-        if f.endswith(".md"):
+        # ⚠️ 只扫【入了库】的 .md —— 与下面的存在性口径保持一致（见 §0）。
+        #    否则本机会去扫那些"只有本机有"的文档（`archive/` 等）⇒ 又是一种口径不一致。
+        if f.endswith(".md") and tracked(os.path.join(root, f)):
             docs.append(os.path.join(root, f))
 docs.sort()
 
@@ -111,6 +138,10 @@ for root, dirs, files in os.walk(REPO):
         if not f.endswith(".md") or f in GENERIC_NAMES:
             continue
         full = os.path.join(root, f)
+        # ⚠️ 索引同样只收【入了库】的 —— 否则"名字提及"那一档会被**本机独有的文件**喂饱，
+        #    反过来掩盖真问题（与 §0 同一条理由）。
+        if not tracked(full):
+            continue
         if in_archive:
             archived.setdefault(f, full)
         else:
@@ -179,7 +210,7 @@ for d in docs:
                     p_strip = os.path.normpath(os.path.join(REPO, cand.split("/", 1)[1]))
 
                 hit = next((p for p in (p_local, p_root, p_strip)
-                            if p and os.path.exists(p)), None)
+                            if p and tracked(p)), None)
                 base = os.path.basename(cand)
                 if hit:
                     buckets["ok"].append((rel_self, lineno, cand, ""))

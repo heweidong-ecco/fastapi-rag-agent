@@ -272,6 +272,9 @@ echo "  ✅ 已对齐 : .env（**已拿掉**）· run 块（**整块照抄 ci.ym
 echo "  🟡 半对齐 : 凭据门（DEC-076）—— 它扫的范围来自**主检出**的 git（见 §3.5）:"
 echo "             GIT_DIR=${GIT_DIR} · 事件=${GITHUB_EVENT_NAME} · 基=${GITHUB_BASE_REF}"
 echo "             ⚠️ 未提交的改动不在此范围内；它比对的是【已提交】的 origin/main...HEAD。"
+echo "             🔴 还有一层：临时副本【保留了 .secret-denylist】⇒ 这里会跑到第 ② 节，"
+echo "                而**真 CI 的新鲜检出里没有它**（也 gitignore）⇒ 那边只跑第 ③ 节。"
+echo "                ⇒ 覆盖度行两边【本来就不一样】（本地 ②③ / CI ③），⛔ 别拿这行对账。"
 if [ "${USE_REDIS}" = "1" ]; then
   echo "             Redis 有得用（复用「${REDIS_CONTAINER}」，端口按 ci.yml 的 6379）"
   echo "  ⛔ 未对齐 : Redis 是【长期容器】—— ⛔ 不是 CI 那种「每次全新空」的一次性 service 容器，"
