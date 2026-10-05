@@ -403,8 +403,10 @@ def validate_approval_config():
     **硬门 D 变成"有地基但从不启用"** —— 而**没有任何报错**，验收时才发现。
     ⇒ 让它**启动就报**，别等到验收。
 
-    📌 同型前科：本仓 `embedding_client.py:10` 的模块级 `OpenAI(api_key=...)`
+    📌 同型前科：本仓 `embedding_client.py` 的模块级 `OpenAI(api_key=...)`
     —— key 为空会**炸掉整条 import 链**（`ROADMAP` 待办 **T1**）。
+    ✅ **2026-10-05（批 6 · `DEC-082`）那条已修**（改惰性 + 缺 key 点名）；
+    ⚠️ 本条（启动校验）**不受影响、仍然要** —— 它拦的是「该配的没配」。
       那条是"**意外**为空就炸"；本条是"**该配的东西没配**就炸"，**方向相反、目的一样**。
     """
     if not SENSITIVE_TOOLS:

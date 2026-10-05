@@ -135,8 +135,13 @@ jobs:
           REDIS_HOST: localhost
           REDIS_PORT: "6379"
           # ⚠️ 以下全部是 **dummy 值**，不是凭据。任务书：
-          #   `import main` 在导入期构造 OpenAI 客户端，空 key 会抛 OpenAIError；
           #   离线用例不会真正调用这些服务，故给个非空占位即可。
+          # 🔴 2026-10-05（批 6 · `DEC-082`）更正本段的理由（原写「`import main` 在导入期构造
+          #   OpenAI 客户端，空 key 会抛 OpenAIError」—— **那半已不成立**）：
+          #   · **embedding 侧已改惰性** ⇒ `import embedding_client` **不再需要** key；
+          #   · ⚠️ **但 LLM 侧仍需要** —— `make_llm()` 仍在 import 期构造 `ChatOpenAI`
+          #     （真惰性未做，见 `DEC-082 §🅔`）⇒ 缺 `LLM_API_KEY` 会在 import 期抛 `EnvironmentError`。
+          #   ⇒ **这组 dummy 现在只为 LLM 侧留着**，⛔ 别因为它还在就以为 embedding 那半没修。
           DASHSCOPE_API_KEY: ci-dummy-not-a-real-key
           LLM_API_KEY: ci-dummy-not-a-real-key
           POSTGRES_PASSWORD: ci-dummy-not-a-real-key

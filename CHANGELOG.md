@@ -1774,6 +1774,36 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- 🔴 **缺 key 时报的是 SDK 那句通用话 ⇒ 改成【点名那个变量】**（2026-10-05 · **批 6** · `T1` · `DEC-082`）
+
+  > **「缺配置」时报的错，必须让人一眼知道缺的是哪个变量。**
+
+  改前两条路都是把 `None` 递给 SDK ⇒ 抛 `The api_key client option must be set … or by setting
+  the OPENAI_API_KEY environment variable` —— 🔴 **它提的 `OPENAI_API_KEY` 本仓根本不用**
+  ⇒ 照它去设变量，**问题不会消失**。
+
+  **① embedding 侧（`api/embedding_client.py`）** —— 模块级 `OpenAI(api_key=DASHSCOPE_API_KEY, …)`
+  改成**惰性单例**（`_client` + `_get_client()`）：**`import` 期不再碰凭据**，
+  缺 key ⇒ `EnvironmentError` **点名 `DASHSCOPE_API_KEY`**（与 `config.validate_config` 同族）。
+  ⚠️ **一处行为变更**：取客户端排在**查缓存之前**（否则"报不报错"取决于缓存状态）。
+  **必须同时删** `api_v1.py:35` 的 `from embedding_client import client`
+  —— 全仓唯一引用、**且从未被使用**；模块级 `client` 一去，留着这行会让 app `ImportError`。
+
+  **② LLM 侧同族（`api/llm_factory.py`）** —— `make_llm()` **只改「报什么」**，⛔ **不做真惰性**：
+  构造时机不变（仍在 import 期），但缺 `LLM_API_KEY` 时抛**点名它**的 `EnvironmentError`。
+  真惰性要连 **3 张图的模块级 `llm` + `bind_tools`** 一起下沉（`agent_graph` ·
+  `agent_checkpointer` · `agent_graph_advanced_learning`）⇒ **与 `DEC-044`「运行时可切」是同一件事**。
+  ⛔ **别读成「两侧都惰性化了」**。
+
+  **③ 先核实，`T1` 原话有一处不准** —— 「key 为空会炸」要**分清两种**：变量**缺失**（`None`）改前
+  **构造期就炸**；**空串**改前**构造得出来**、要到请求时才 401。且 `.env.example` 给的是**非空占位符**
+  ⇒ **照着 example 抄的人不炸**。🔴 **为什么一直没被发现**：`ci.yml` 塞了 dummy key（= **门挂在别处**）。
+
+  **判据（可打印）**：`pytest api/test_embedding_client_lazy.py api/test_llm_factory.py -q` ⇒ **17 passed** ·
+  `bash scripts/ci-local.sh` ⇒ **658 passed, 3 skipped, 退出码 0**（基线 654 ⇒ +4 = 新用例）·
+  `grep -rn "from embedding_client import client" api/` ⇒ **0 命中**。
+  **变异自证 4/4**（逐条退回 ⇒ **恰好那条转红**）。
+
 - ⭐ **`docs/待办总表.md` §五 收尾：三件里两件真做、一件本就是「已做完没销账」**（2026-10-05 · **批 5** · `DEC-081`）
 
   > **批 4 在问「门自己坏了，谁知道」。这一批在问：一条待办，凭什么算「做完了」？**
