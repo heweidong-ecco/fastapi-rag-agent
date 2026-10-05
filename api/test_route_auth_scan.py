@@ -6,13 +6,18 @@
 （`docs/规范/开发规范.md` §1.5）。但它**结构上看不见 WebSocket** ——
 它的收集函数只认 `APIRoute`（`_collect_apiroutes`）。
 
-⚠️ 这条盲区 `DEC-066` 已经**写在文字里**了。但**文字不是门** —— 实测：
+⚠️ 这条盲区 `DEC-066` 已经**写在文字里**了。但**文字不是门** —— 实测（**2026-10-04 当时**）：
 
 ```
 /api/v1/ws/agent    dependant.dependencies == []   # 无鉴权
 /api/v1/ws/test     dependant.dependencies == []   # 无鉴权
                     而该脚本对 /api/v1/ws/* 零输出
 ```
+
+⚠️ **上面那段是【当时的实测记录】，⛔ 不是现在的事实** ——
+2026-10-05（`DEC-075`）`/ws/agent` 已挂 `require_ws_user`，`/ws/test` **已删**。
+⇒ 现在真 app 上只剩 **1 条 WS，且带鉴权**。保留这段是因为它是**盲区存在过的证据**，
+⛔ 别拿它当现状读（`DEC-065` 同型：`DEC-057` 那条墓碑也是保留的当时事实）。
 
 ⇒ 本文件把"看得见"做成结构：**WS 路由也必须进那份「无鉴权路由」清单**。
 
@@ -67,20 +72,23 @@ def test_scanner_sees_websocket_routes():
 
 
 def test_real_websocket_routes_are_protected_now():
-    """🔴 真 app 上那两条 WS **必须都带鉴权** ⇒ 一条都不该出现在「无鉴权」清单里。
+    """🔴 真 app 上那条 WS（`/ws/agent`）**必须带鉴权** ⇒ 不该出现在「无鉴权」清单里。
 
-    与 `api/test_ws_auth.py::test_both_ws_routes_carry_the_auth_dependency` **互补**：
+    与 `api/test_ws_auth.py::test_the_ws_route_carries_the_auth_dependency` **互补**：
     那条钉「路由上挂的是不是 `require_ws_user` 这一条依赖」，
     这条钉「**扫描器**也认账」—— 两条一起才挡得住"挂了但名单里没登记"的漂移。
+
+    ⚠️ **2026-10-05 起是 1 条不是 2 条** —— `/ws/test` 已删（`DEC-075` §十）。
+    删它「不靠这条用例兜着」：兜它的是 `api/test_removed_endpoints.py::test_ws_test_stays_removed`。
     """
     from main import MIDDLEWARE_EXEMPT_PATHS, app
 
     rows, _, n_ws = _scan(app.routes, MIDDLEWARE_EXEMPT_PATHS)
-    assert n_ws == 2, f"真实 WS 路由数变了（现在是 {n_ws}）—— 请人工核一遍再改这条"
+    assert n_ws == 1, f"真实 WS 路由数变了（现在是 {n_ws}）—— 请人工核一遍再改这条"
 
     ws_rows = [p for _, p in rows if p.startswith("/api/v1/ws/")]
     assert ws_rows == [], (
-        f"这两条 WS 又变成无鉴权了：{ws_rows} —— 它们必须挂着 `require_ws_user`（`DEC-075`）"
+        f"这条 WS 又变成无鉴权了：{ws_rows} —— 它必须挂着 `require_ws_user`（`DEC-075`）"
     )
 
 
@@ -115,7 +123,7 @@ def test_http_scan_still_works_after_the_change():
         "`/api/v1/` 从 HTTP 清单里消失了 —— 扫描口径被改坏了"
     )
     assert n_http > 50, f"扫到的 HTTP 路由只有 {n_http} 条，像是没递归进 _IncludedRouter"
-    assert n_http + n_ws == n_http + 2, "自检算式（无意义即为真，仅防手滑）"
+    assert n_http + n_ws == n_http + 1, "自检算式（⚠️ 2026-10-05 起 WS 只剩 1 条 · 见 DEC-075 §十）"
 
 
 # ------------------------------------------------- ② 自证：盲区真实存在过
@@ -124,17 +132,19 @@ def test_old_collector_would_have_missed_websockets():
     """**自证盲区真实存在** —— 不给"我声称它看不见"留余地。
 
     判据：用**只认 `APIRoute`** 的老口径去扫同一个真实 app，
-    两条 WS 必须**一条都扫不到**；而新口径看得见（上面那条已断言）。
+    WS 必须**一条都扫不到**；而新口径看得见（上面那条已断言）。
+
+    ⚠️ **2026-10-05 起真 app 只剩 1 条 WS**（`/ws/test` 已删 · `DEC-075` §十）——
+    样本变少了，但**这条自证仍然成立**：只要 WS 还有一条，老口径就该漏掉它。
     """
     from main import app
 
     http, ws = [], []
     check_route_auth._collect(app.routes, http, ws)
-    assert len(ws) == 2, "前提变了：新口径本该看见 2 条 WS"
+    assert len(ws) == 1, "前提变了：新口径本该看见 1 条 WS"
 
     paths_old = {r.path for r in http}
     assert "/api/v1/ws/agent" not in paths_old
-    assert "/api/v1/ws/test" not in paths_old
 
 
 def test_scanner_flags_an_endpoint_that_drops_auth():

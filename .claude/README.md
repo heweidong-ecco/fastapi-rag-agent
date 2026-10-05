@@ -143,10 +143,13 @@
 > `/api/v1/ws/agent` 与 `/api/v1/ws/test` **一直都在**，只是脚本此前**只认 `APIRoute`、
 > 扫不到 WS**（`DEC-066` 记过这条盲区，但只记在文字里）。
 > ⇒ 现在 WS 也进清单，标签是 **`WS`**。
-> 🟢 **2026-10-05（`DEC-075`）基线 3 → 1 条** —— ⛔ **不是把债藏起来了，是真修好了**：
-> 那 2 条 WS 都挂上了 `deps.require_ws_user`（**首帧认证**）。
+> 🟢 **2026-10-05（`DEC-075`）基线 3 → 1 条** —— ⛔ **不是把债藏起来了**：
+> `/api/v1/ws/agent` **真修好了**（挂上 `deps.require_ws_user`，**首帧认证**）；
+> `/api/v1/ws/test` **同日【已删】**（`DEC-075` §十 —— 纯回声测试桩 · 消费者 = 0）。
+> ⇒ **现表 1 条，且这一条是 HTTP**（⛔ **一条 WS 都不剩**）。
 > ⚠️ 判据别只看条数变少 —— 跑 `venv/bin/python scripts/check_route_auth.py` 直接看
-> **WS 那两行是否消失**（消失 = 已鉴权；如果只是从清单里被删掉，脚本会照样报出来）。
+> 输出里的 **WS 行**：`/ws/agent` 必须**不在**清单里（在 = 又变回匿名了）；
+> ⛔ 而 `/ws/test` 该看的是**它整条路由都没了**（`api/test_removed_endpoints.py::test_ws_test_stays_removed`）。
 > 📌 判据（可打印）：`venv/bin/python scripts/check_route_auth.py` ⇒ **无鉴权路由 1 条（HTTP 1 · WS 0）** ·
 > `venv/bin/python scripts/check_route_auth.py --baseline` ⇒ **与基线一致**。
 

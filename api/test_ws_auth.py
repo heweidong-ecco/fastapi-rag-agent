@@ -298,33 +298,16 @@ def test_ws_agent_body_never_runs_before_auth(deps_mod, monkeypatch):
     assert called == [], "认证未通过，端点体却跑了"
 
 
-def test_ws_test_endpoint_requires_auth_too(deps_mod, monkeypatch):
-    """`/ws/test` 是纯回声、不花钱 —— 但它**同样在公网上**。
-    ⛔ 别把它留成全站唯一一个匿名口子（`DEC-065` 收口的正是这一族）。"""
-    monkeypatch.setattr(deps_mod, "WS_AUTH_TIMEOUT_SECONDS", 0.05)
-    with pytest.raises(WebSocketDisconnect) as ei:
-        with _client().websocket_connect("/api/v1/ws/test") as ws:
-            ws.receive_text()
-    assert ei.value.code == 1008
-
-
-def test_ws_test_endpoint_echoes_only_after_auth(deps_mod, monkeypatch):
-    monkeypatch.setattr(deps_mod, "verify_key", FakeVerifier(result="alice"))
-    with _client().websocket_connect("/api/v1/ws/test") as ws:
-        # ① 首帧必须是认证帧 —— 不发它就等超时（上面那条用例钉的正是这个）
-        ws.send_text(_auth_frame("sk-good"))
-        # ② 认证通过后才回 `ready`
-        assert json.loads(ws.receive_text()) == {"type": "ready", "user": "alice"}
-        # ③ 之后才是业务帧
-        ws.send_text("你好")
-        assert ws.receive_text() == "收到你的消息：你好"
-
-
-def test_both_ws_routes_carry_the_auth_dependency():
-    """结构守卫：**路由表里**这两条必须挂着 `require_ws_user`。
+def test_the_ws_route_carries_the_auth_dependency():
+    """结构守卫：**路由表里**那条 WS 必须挂着 `require_ws_user`。
 
     ⚠️ 它与 `scripts/check_route_auth.py` **不是重复**：那个脚本靠 `AUTH_NAMES` 名单认人
     （名单漂了它就静默失效），这条直接钉**具体那一条依赖**。
+
+    ⚠️ **2026-10-05 起是 1 条不是 2 条** —— `/ws/test` 已删（`DEC-075` §十）。
+    ⛔ **别在这里加回 `/ws/test`** —— 那条路径的守卫在
+    `api/test_removed_endpoints.py::test_ws_test_stays_removed`（它的判据是**不存在**，
+    与这条的判据「存在且挂着鉴权依赖」**恰好相反**，⛔ 别合并）。
     """
     from main import app
 
@@ -337,13 +320,15 @@ def test_both_ws_routes_carry_the_auth_dependency():
         elif type(r).__name__ == "APIWebSocketRoute":
             found[r.path] = r
 
-    for path in ("/api/v1/ws/agent", "/api/v1/ws/test"):
-        assert path in found, f"{path} 不在路由表里（find 到的：{sorted(found)}）"
-        names = {getattr(d.call, "__name__", str(d.call))
-                 for d in (found[path].dependant.dependencies or [])}
-        assert "require_ws_user" in names, (
-            f"{path} 没有挂 require_ws_user —— 它又变成匿名可达了（deps={names}）"
-        )
+    assert set(found) == {"/api/v1/ws/agent"}, (
+        f"WS 路由集合变了：{sorted(found)} —— 新增的请一并在此登记，"
+        f"已删的（如 `/ws/test`）请改用 test_removed_endpoints.py 那条守卫"
+    )
+    deps = found["/api/v1/ws/agent"].dependant.dependencies or []
+    names = {getattr(d.call, "__name__", str(d.call)) for d in deps}
+    assert "require_ws_user" in names, (
+        f"/api/v1/ws/agent 没有挂 require_ws_user —— 它又变成匿名可达了（deps={names}）"
+    )
 
 
 # ===========================================================================

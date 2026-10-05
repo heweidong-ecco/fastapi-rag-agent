@@ -1887,6 +1887,7 @@ All notable changes to this project will be documented in this file.
   ✅ **失败分两类**：**1008** = 你的凭据不行（换 key）· **1011** = 认证服务不可用（重试，**别换 key**）。
   ⚠️ **fail-closed 在这儿、fail-open 在 `token_tracker`，是故意的** —— 一边是安全边界、一边是成本控制，⛔ 别"统一"。
   两条路由（`/ws/agent` · `/ws/test`）都挂；`websocket_callback` 的三个身份参数改**关键字必填**（漏传 = `TypeError`，⛔ 不是静默记 `"unknown"`）。
+  ⚠️ **同日后续**：`/ws/test` **随后又被删掉**（见下方 `DEC-075 §十` 那条）⇒ 本段「两条」是**那一刻**的口径。
 
   **④ 顺带带出的**：`scripts/check_route_auth.py` 的 `AUTH_NAMES` 加 `require_ws_user`（那个门**靠函数名字符串认人**，名单漂了会**静默放过**）；
   基线的**生成器模板**里还写着「`/ws/agent` 整条无鉴权」⇒ ⛔ 跑一次 `--write-baseline` 就会把假话写回去，**已修**（现**幂等**，实测重生成一字不差）。
@@ -1895,10 +1896,12 @@ All notable changes to this project will be documented in this file.
   ```bash
   venv/bin/python -m pytest api/test_ws_auth.py api/test_route_auth_scan.py -q   # ⇒ 40 passed（30 + 10）
   venv/bin/python scripts/check_route_auth.py            # ⇒ 60 条路由 · 无鉴权 1 条（HTTP 1 · WS 0）
+                                                         #   ⚠️ 现在是 59 条 —— 下面 DEC-075 §十 那条删了 1 条 WS
   venv/bin/python scripts/check_route_auth.py --baseline; echo $?   # ⇒ ✅ 与基线一致 · exit 0
   grep -n '"unknown"' api/api_v1_rag.py                  # ⇒ 无输出
   # 证伪三式：① 从 AUTH_NAMES 拿掉 require_ws_user ⇒ 两条 WS 立刻被判无鉴权；
   #           ② 从 /ws/test 摘掉依赖 ⇒ 门报「比基线多了 1 条」；复原后 exit 0；
+  #              ⚠️ 这一式**现在做不了了**（那条路由已删）—— 保留的是当时记录
   #           ③ 关掉扫描器的 WS 分支 ⇒ 5 条断言【各自用自己的话】报红（不是一条红带一片）。
   ```
   · 全量 `bash scripts/ci-local.sh` ⇒ **603 passed / 3 skipped / 31 deselected / 0 failed**
@@ -1912,7 +1915,63 @@ All notable changes to this project will be documented in this file.
 
   📄 `docs/decisions/DEC-075-WS首帧认证.md` · `docs/specs/deps.md`（新建）· `docs/specs/api_v1_rag.md` · `docs/specs/safe_math.md` · `docs/契约/接口契约.md` · `docs/规范/开发规范.md` §1.5
 
+- ⚰️ **删除端点 `WS /api/v1/ws/test`**（2026-10-05 · `DEC-075` **§十**）—— 纯回声的测试桩，**消费者 = 0**。
 
+  业务方原话：「`/api/v1/ws/test` 还有用吗，是否是测试需要，**先核对判断再执行**，
+  如果不需要没用**可以直接删除**」⇒ **先举证、后执行**。
+
+  **判据三条**（与 `DEC-065` 删那 4 条**同一套标准**，⛔ 不是另立一套）：
+  · **消费者 = 0** —— **三处独立扫过**：本仓（`api/static/websocket_test.html` 连的是 `/ws/agent`，**不是它**）·
+    本仓测试（`git log -S 'ws/test' -- 'api/test_*.py'` 在 `DEC-074` **之前零命中**）·
+    仓外 5 个兄弟项目（含 `agent-eval-gate` 的 SUT harness）**全 0**；
+  · **本仓自己早就点名** —— `DEC-055` 的流式出口普查表里就写着它 = **「测试桩」**；
+  · **连唯一可能的用途也没了** —— 它不花钱（纯回声），曾可能充当「**免鉴权的 WS 探活口子**」；
+    ⚠️ 上一条给 WS 补上首帧认证之后**它自己也要凭据** ⇒ 这个口子**不成立**。
+
+  🔴 **判据形态：WS 没有状态码，⛔ 不能照抄 HTTP 那套 `== 404`。** 实测（`TestClient`）：
+
+  | 情形 | `client.websocket_connect(path)` |
+  |---|---|
+  | 路由**不存在** | **建连那一刻**（`__enter__`）就抛 `WebSocketDisconnect` |
+  | 路由**存在且要鉴权** | 建连**成功**；退出上下文时才抛 `WebSocketDisconnect(1000)` |
+
+  ⇒ **「抛了 `WebSocketDisconnect` 就算删干净」是【假判据】** —— 一条**活着的、带鉴权的** WS **也会抛**。
+  这与 `DEC-064`/`DEC-065` 里那个「**不是 200**」**同型**：**判据成立，却什么也没钉住**。
+  ⇒ 取**两个不同可观测量**：**端到端**（建连当场被拒 = 404 在 WS 上的对应物）+ **注册层**（不在 WS 路由集合里）。
+
+  **做法（TDD）**：先写 `api/test_removed_endpoints.py::test_ws_test_stays_removed` ⇒ **看着它红**
+  （`Failed: DID NOT RAISE WebSocketDisconnect`）⇒ 再删路由 ⇒ 绿（该文件 **6 → 7 passed**）。
+  ⚠️ **墓碑里刻意⛔ 不写 `@router.` 字面串**（写 `WS /ws/test`）—— `grep -c '@router\.'` 是**数路由**用的，
+  注释里留同款串会**多数一条**。🔴 **本仓已栽两次**：`DEC-065` 一次，**同一天又栽一次**（本次墓碑初稿写成装饰器字面量 ⇒ 数出 12，应 11）。
+
+  **跟着变的地方**（全找出来改了）：`api/test_ws_auth.py`（−2 条用例 · 1 条改名收窄为 `test_the_ws_route_carries_the_auth_dependency`）·
+  `api/test_route_auth_scan.py`（WS 计数 2→1 · 自检算式 · 模块 docstring 标注"那是当时"）·
+  🟢 `scripts/check_route_auth.py` 的**基线生成模板**（⛔ 不改它，下次 `--write-baseline` 会**把假话写回去**）·
+  `scripts/route-auth-baseline.txt` · `docs/specs/{api_v1_rag,deps}.md` · `docs/契约/接口契约.md`（`ws` 组 2→1 · 合计 **60 → 59**）·
+  `docs/待办总表.md` · `.claude/README.md` · `docs/规范/开发规范.md` §1.5 · `ROADMAP.md`。
+  ⛔ **历史记录一律不动**：`DEC-055` / `DEC-074` / `docs/历史/修复记录-2026-08.md` 记的是**当时**。
+
+  🟢 **顺带修掉一条本 Agent 自己造成的回归**：上一个提交（`21a5f6f`）往本文件插入 `DEC-075` 条目时，
+  **把 `DEC-073` 的标题行吃掉了** ⇒ 那一段正文**没有标题、挂在 `DEC-075` 条目底下**。
+  ⚠️ **它是怎么被发现的**：改这一带时用 `git show 7de9275:CHANGELOG.md` 比对，发现 `DEC-073` 的标题
+  在 `21a5f6f` 里消失。⇒ **判据**：`awk` 扫"顶层条目之前是否有两个以上空行"（孤行正文的机械特征）。
+  📌 教训与本仓「**拿动作成功当结果正确**」同族 —— 当时我只核了"新条目写进去了"，**没核"旧条目还在不在"**。
+
+  📌 判据（可打印）：
+  ```bash
+  venv/bin/python -m pytest api/test_removed_endpoints.py -q -p no:warnings   # ⇒ 7 passed
+  venv/bin/python scripts/check_route_auth.py                                 # ⇒ 无鉴权 1 条（HTTP 1 · WS 0）· 真实路由总数 59
+  venv/bin/python scripts/check_route_auth.py --baseline; echo $?             # ⇒ ✅ 与基线一致 · exit 0
+  grep -c '@router\.' api/api_v1_rag.py                                       # ⇒ 11（10 HTTP + 1 WS）
+  ```
+  · 全量 `bash scripts/ci-local.sh` ⇒ **602 passed / 3 skipped / 31 deselected / 0 failed**
+    （上一条是 603：**−2** 随端点删掉的用例 + **+1** 新增的反向守卫 ⇒ 净 **−1**；算式对得上）。
+  ⛔ **留下的两条守卫判据相反，别合并**：`test_ws_test_stays_removed` 钉「**它不存在**」；
+  `test_the_ws_route_carries_the_auth_dependency` 钉「**`/ws/agent` 存在且挂着 `require_ws_user`**」。
+
+  📄 `docs/decisions/DEC-075-WS首帧认证.md` §十 · `api/test_removed_endpoints.py` · `docs/specs/api_v1_rag.md`
+
+- 🔴 **关掉 RAG 侧【不记账】的 LLM 通路**（2026-10-05 · `DEC-073`）—— **与 `DEC-072` 同型，只是换到 RAG 那一半**：`/rag/search` 与 `/rag/rewrite_search` **改前零闸、零记账**，却**默认就真调 LLM**。
 
   **改前实况**（`grep -c 'record_usage\|record_from_response'`）：
   `api_v1_rag.py` / `rag_pipeline.py` / `answer_with_citations.py` **⇒ 0 / 0 / 0**；

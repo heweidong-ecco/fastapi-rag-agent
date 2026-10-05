@@ -17,8 +17,9 @@
 ## 🟡 做到哪 / 缺什么
 
 - ✅ `DEC-074`：`scripts/check_route_auth.py` 已**接线进 CI + 提交门**（此前只是"有脚本"）。
-- ✅ `DEC-075`：`/api/v1/ws/agent` · `/api/v1/ws/test` 两条都挂上 `require_ws_user`；
-  基线里那 2 条 WS **已消掉**（`scripts/route-auth-baseline.txt` 现只剩 `/api/v1/`）。
+- ✅ `DEC-075`：`/api/v1/ws/agent` 挂上 `require_ws_user`；
+  ⚰️ `/api/v1/ws/test` **同日已删**（`DEC-075` §十 · 纯回声测试桩 · 消费者 = 0）。
+  ⇒ 基线里那条 WS **已消掉**（`scripts/route-auth-baseline.txt` 现只剩 HTTP 的 `/api/v1/`）。
 - ⬜ **WS 的会话桶仍是"每连接"** —— `thread_id = f"ws-{uuid4}"`，重连 = 换桶。
   见 `DEC-075` 遗留·2（全局日级熔断 B11 仍罩着，故未失控）。
 - ⬜ **`verify_api_key` 的 `get_db()` 没有 try**（`DEC-074` 遗留·4）——

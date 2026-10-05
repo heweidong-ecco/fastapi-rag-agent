@@ -12,6 +12,7 @@
 | `GET /api/v1/tool/benchmark` | 2026-10-04 | `DEC-065` |
 | `POST /api/v1/rag/async_ask` | 2026-10-04 | `DEC-065` |
 | `POST /api/v1/rag/parallel_ask` | 2026-10-04 | `DEC-065` |
+| `WS /api/v1/ws/test` | 2026-10-05 | `DEC-075 §十` |
 
 `/rag/ask` 为什么删（摘要）：它是 `tags=["模拟类测试"]` 的桩，却**读真库**，且 `LIMIT` **无 `ORDER BY`**
 ⇒ **结果不可复现**；能力被 `/rag/pg_search` 覆盖（**同鉴权**、**同入参**，且多了 embedding /
@@ -35,9 +36,14 @@
 所以「不是 200」在那时也成立不了什么；而将来若被**加回来并带上鉴权**，回的是 401/403，
 那同样是「它回来了」。**只有 404 才算删干净。**
 
-📌 判据（可打印）：`venv/bin/python -m pytest api/test_removed_endpoints.py -q -p no:warnings` ⇒ **6 passed**
+⭐ **第 7 条（`WS /api/v1/ws/test`）不适用上面那套** —— **WS 没有状态码**。
+它的判据见下（**建连当场被拒** + **不在 WS 路由表里**），⚠️ **别照抄 `== 404`**。
+
+📌 判据（可打印）：`venv/bin/python -m pytest api/test_removed_endpoints.py -q -p no:warnings` ⇒ **7 passed**
 """
+import pytest
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from main import app
 
@@ -175,4 +181,64 @@ def test_rag_parallel_ask_stays_removed():
     assert resp.status_code == 404, (
         f"`/api/v1/rag/parallel_ask` 应已删除（`DEC-065`），却返回了 {resp.status_code} —— "
         "要么它被改回来了（⛔ 先读那份 DEC 里的删除理由再决定），要么本用例的路径写错了"
+    )
+
+
+def _ws_paths(routes) -> set:
+    """走一遍路由表，收所有 WebSocket 路由的路径（递归进 `_IncludedRouter`）。"""
+    out = set()
+    for r in routes:
+        kind = type(r).__name__
+        if kind == "_IncludedRouter":
+            out |= _ws_paths(getattr(r.original_router, "routes", []) or [])
+        elif kind == "APIWebSocketRoute":
+            out.add(r.path)
+    return out
+
+
+def test_ws_test_stays_removed():
+    """`WS /api/v1/ws/test` 已删（`DEC-075`）—— 加回来就该红，⛔ 别默默改回来。
+
+    **为什么删**（判据三条，与 `DEC-065` 删那 4 条**同一套标准**，⛔ 不是另立一套）：
+    ① **消费者 = 0** —— 三处独立扫过：本仓（`api/static/*.html` 连的是 `/ws/agent`，⛔ 不是它）；
+       `git log -S 'ws/test' -- 'api/test_*.py'` ⇒ **本轮之前零命中**（它的全部命中都是
+       `DEC-074`/`DEC-075` 这两轮"把它登记成债"留下的）；**仓外**（`agent-eval-gate` 的 SUT harness
+       等 5 个项目）⇒ 全 0。
+    ② **它是「测试桩」** —— `DEC-055` 的流式出口普查表里就写着 `WS /ws/test` = **「测试桩」**。
+    ③ **它连"测试"都不服务** —— 首帧认证补上之后（`DEC-075`），它**自己也要凭据**，
+       ⇒ 连"免鉴权的探活口子"这个唯一可能的用途**也没了**。
+
+    🔴 **判据形态：WS 没有状态码，所以⛔ 不能照抄 HTTP 那套 `== 404`。**
+    实测（2026-10-05）：
+
+    | 情形 | `client.websocket_connect(path)` 的行为 |
+    |---|---|
+    | 路由**不存在** | **建连那一刻**（`__enter__`）就抛 `WebSocketDisconnect` |
+    | 路由**存在且要鉴权** | 建连**成功**；退出上下文时才抛 `WebSocketDisconnect(1000)` |
+
+    ⚠️ **所以「抛了 `WebSocketDisconnect` 就算删干净」是【假判据】** ——
+    一条活着的、带鉴权的 WS 路由**也会抛**（上面第二行）。
+    那正是 `DEC-064`/`DEC-065` 里那个「不是 200」的同型坑：**判据成立，却什么也没钉住**。
+    ⇒ 本用例取**两个不同的可观测量**，任一成立为"没删干净"：
+    · **端到端**：建连**当场**被拒（⛔ 不是"连上了、随后被关"）—— 这是 404 在 WS 上的对应物；
+    · **路由表**：路径不在 WS 路由集合里。
+    ⚠️ 两者**都取自路由配置**（同源），故**不是两次独立证明** —— 放在一起是为了
+    在"哪里变了"时能一眼看出是**建连层**还是**注册层**出的问题。
+
+    🔴 **⛔ 别把这里改成 `with TestClient(app) as client:`** —— 会触发 lifespan 的
+    `init_pool()` 真连 Postgres ⇒ CI 没有 Postgres ⇒ 红（`DEC-058`）。
+    """
+    from main import app
+
+    client = TestClient(app)
+
+    # ① 端到端：建连当场就被拒
+    conn = client.websocket_connect("/api/v1/ws/test")
+    with pytest.raises(WebSocketDisconnect):
+        conn.__enter__()
+
+    # ② 注册层：路由表里没有这条路径
+    assert "/api/v1/ws/test" not in _ws_paths(app.routes), (
+        "`/api/v1/ws/test` 应已删除（`DEC-075`），却又出现在 WS 路由表里 —— "
+        "要么它被改回来了（⛔ 先读那份 DEC 的删除理由再决定），要么本用例的路径写错了"
     )

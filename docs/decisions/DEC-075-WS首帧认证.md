@@ -113,6 +113,9 @@ grep -n 'record_from_response\|record_usage' api/api_v1_rag.py
 
 ### 4.2 `api/api_v1_rag.py` —— 两条路由挂依赖，**`accept()` 那次删掉**
 
+> ⚠️ **2026-10-05 同日后续**：本节说的「两条」里，`/ws/test` 当天**又被删掉了** ⇒ 见 **§十**。
+> 本节保留的是**那一刻**的记录（当时确实给两条都上了锁）。
+
 ```python
 @router.websocket("/ws/agent")
 async def agent_websocket(websocket: WebSocket,
@@ -225,5 +228,78 @@ grep -n '"unknown"' api/api_v1_rag.py        # ⇒ 应当没有输出
    ⚠️ **WS 侧已绕过这个坑**（`resolve_ws_identity` 自己 try ⇒ 1011），**HTTP 侧没修**。
 3. **`route-auth-remind.py` 的 `ROUTE_FILES` 仍是写死的 4 个文件名**（`DEC-074` 遗留·3，**仍在**）——
    它只是提醒、不是门。
-4. **`/api/v1/ws/test` 的存废**（`DEC-074` 遗留·2，**仍未裁**）——
-   本轮只给它**上了锁**，⛔ **没决定它该不该留**。
+4. ~~**`/api/v1/ws/test` 的存废**（`DEC-074` 遗留·2）~~ ⇒ ✅ **2026-10-05 同日裁定：删**（见 §十）。
+   本轮**先给它上了锁**（上一条实施），**随后另行裁定它的存废** —— 两步是分开做的，
+   ⛔ 不是"边锁边删"：先锁的那一版**可独立成立**（即便它留下，也不能匿名）。
+
+---
+
+## 十 · 同日后续：**删掉 `/api/v1/ws/test`**（业务方 2026-10-05）
+
+> **业务方原话**：「`/api/v1/ws/test` 还有用吗，是否是测试需要，**先核对判断再执行**，
+> 如果不需要没用**可以直接删除**。」
+> ⇒ 这是一条**先举证、后执行**的指令 —— 本节先摆判据，再记执行。
+
+### 10.1 判据（三条，与 `DEC-065` 删那 4 条【同一套标准】，⛔ 不是另立一套）
+
+| # | 判据 | 实测 |
+|---|---|---|
+| ① | **消费者 = 0** | **三处独立扫过**：**本仓**（`api/static/websocket_test.html` 连的是 `/ws/agent`，⛔ 不是它）· **本仓测试**（`git log -S 'ws/test' -- 'api/test_*.py'` 在 `DEC-074` 之前 **零命中** —— 它的全部命中都是 `DEC-074`/`DEC-075` 这两轮"把它登记成债"留下的）· **仓外**（`agent-eval-gate` 的 SUT harness 等 **5 个**兄弟项目，**全 0**） |
+| ② | **本仓自己早就点名** | `DEC-055` 的流式出口普查表里就写着 `WS /ws/test` = **「测试桩」** |
+| ③ | **连它唯一可能的用途也没了** | 它**不花钱**（纯回声），故曾可能被当作「免鉴权的 WS 探活口子」。⚠️ **但 §四给 WS 补上首帧认证之后它自己也要凭据** ⇒ 这个口子**已经不成立** |
+
+⚠️ **②是关键的一条**：`DEC-065` 那批删的也不是"坏东西"，是**本仓自己标为桩/零消费者的东西**。
+
+### 10.2 🔴 判据形态：**WS 没有状态码，所以⛔ 不能照抄 HTTP 那套 `== 404`**
+
+实测（2026-10-05，`TestClient`）：
+
+| 情形 | `client.websocket_connect(path)` 的行为 |
+|---|---|
+| 路由**不存在** | **建连那一刻**（`__enter__`）就抛 `WebSocketDisconnect` |
+| 路由**存在且要鉴权** | 建连**成功**；退出上下文时才抛 `WebSocketDisconnect(1000)` |
+
+🔴 **所以「抛了 `WebSocketDisconnect` 就算删干净」是【假判据】** ——
+一条**活着的、带鉴权的** WS 路由**也会抛**（第二行）。
+这与 `DEC-064`/`DEC-065` 里那个「**不是 200**」**同型**：**判据成立，却什么也没钉住**
+（`/rag/jwt_ask` 删之前本来就是 401 ⇒ 那种写法从第一天起就是绿的）。
+
+⇒ 取下**两个不同的可观测量**（同源，各指一层）：
+
+- **端到端**：建连**当场**被拒 —— 这是 **404 在 WS 上的对应物**；
+- **注册层**：`/api/v1/ws/test` **不在** WS 路由集合里。
+
+### 10.3 执行
+
+- `api/api_v1_rag.py`：删掉整个块，**留一条 ⚰️ 墓碑**（三条理由 + "别改回来"）。
+  🔴 **墓碑里刻意⛔ 不写 `@router.` 字面串**（写 `WS /ws/test`）——
+  本仓判据 `grep -c '@router\.' api/api_v1_rag.py` 是**数路由**用的，
+  注释里留同款串会**多数一条**。⚠️ **本仓已栽过两次**：`DEC-065` 一次，**同一天又栽一次**
+  （本次墓碑初稿写成了装饰器字面量 ⇒ 数出 12，应 11）。判据见 `docs/specs/api_v1_rag.md`。
+- **TDD**：先写 `api/test_removed_endpoints.py::test_ws_test_stays_removed`，
+  **看着它红**（`Failed: DID NOT RAISE WebSocketDisconnect`）⇒ 再删路由 ⇒ 绿。
+- **跟着变的地方**（本轮全找出来改了）：`api/test_ws_auth.py`（−2 条用例 · 1 条改名收窄）·
+  `api/test_route_auth_scan.py`（WS 计数 2→1 · 自检算式 · 模块 docstring）·
+  `scripts/check_route_auth.py` 的**基线生成模板**（⛔ 不改它，下次 `--write-baseline` 会**把假话写回去**）·
+  `scripts/route-auth-baseline.txt` · `docs/specs/api_v1_rag.md` · `docs/specs/deps.md` · `docs/契约/接口契约.md` ·
+  `docs/待办总表.md` · `.claude/README.md` · `ROADMAP.md` · `CHANGELOG.md`。
+
+### 10.4 判据（可打印）
+
+```bash
+venv/bin/python -m pytest api/test_removed_endpoints.py -q -p no:warnings   # ⇒ 7 passed
+venv/bin/python scripts/check_route_auth.py                                 # ⇒ 无鉴权 1 条（HTTP 1 · WS 0）· 真实路由总数 59
+venv/bin/python scripts/check_route_auth.py --baseline                      # ⇒ 与基线一致（exit 0）
+grep -c '@router\.' api/api_v1_rag.py                                       # ⇒ 11（10 HTTP + 1 WS）
+```
+
+### 10.5 留下的守卫（⛔ 别与上一条合并）
+
+`test_ws_test_stays_removed` 的判据是「**它不存在**」；
+`api/test_ws_auth.py::test_the_ws_route_carries_the_auth_dependency` 的判据是
+「**`/ws/agent` 存在且挂着 `require_ws_user`**」—— **两条判据恰好相反，⛔ 别合并。**
+
+⚠️ **代价说清楚**：将来若有人再建一条 WebSocket 路由，**不会有测试自动拉红**叫它去挂鉴权
+—— `test_the_ws_route_carries_the_auth_dependency` 里那句
+`assert set(found) == {"/api/v1/ws/agent"}` **会红**（这是本轮专门加的），
+但它**只说明"WS 集合变了"**，⛔ 不替你判断新那条该不该有鉴权。

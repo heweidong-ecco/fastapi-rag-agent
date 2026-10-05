@@ -965,18 +965,20 @@ async def agent_websocket(websocket: WebSocket, ws_user_name: str = Depends(requ
     except WebSocketDisconnect:
         print("客户端断开连接")
 
-# 测试 WebSocket 基础通信正常端点
-@router.websocket("/ws/test")
-async def test_websocket(websocket: WebSocket, ws_user_name: str = Depends(require_ws_user)):
-    # ⛔ 同样**不要**再 `accept()` —— `require_ws_user` 已经 accept 过了（见那条依赖的 docstring）。
-    # 🔴 `DEC-075`：这条是**纯回声、不花钱**，但它**同样在公网上**。留着它当唯一的匿名口子，
-    #    就是 `DEC-065` 刚收口的那一族（"不花钱所以先放着"）—— 结果全站还剩一条没人管的入口。
-    try:
-        while True:
-            data = await websocket.receive_text()
-            await websocket.send_text(f"收到你的消息：{data}")
-    except WebSocketDisconnect:
-        print("测试客户端断开")
+# ⚰️ 2026-10-05 **删**（`DEC-075` §十）：此处原有 **WS `/ws/test`** ——
+#    一个纯回声的「WebSocket 基础通信」桩，`ecb146b`（首次提交）起就在。
+#    ⚠️ **本墓碑刻意不写那串装饰器字面量**（写成 `WS /ws/test`）——
+#       本文件下面 `DEC-057` 那条墓碑也是这么写的。理由：本仓判据 `grep -c '@router\.' api/api_v1_rag.py`
+#       是**数路由**用的，注释里留同款字面串会让它**多数一条**（`DEC-065` 实测过：带 ⇒ 14，去掉 ⇒ 12）。
+#    删的理由（三条，与 `DEC-065` 删那 4 条**同一套标准**，⛔ 不是另立一套）：
+#      ① **消费者 = 0** —— 本仓没有任何东西连它（`api/static/websocket_test.html` 连的是
+#         `/api/v1/ws/agent`）；`git log -S 'ws/test' -- 'api/test_*.py'` 在 `DEC-074` 之前
+#         **零命中**；仓外（`agent-eval-gate` 等 5 个项目）也全 0。
+#      ② **它本来就是「测试桩」** —— `DEC-055` 的流式出口普查表里就是这么记的。
+#      ③ **连「探活」这个唯一可能的用途也没了** —— `DEC-075` 给它补上首帧认证之后，
+#         它自己也要凭据 ⇒ 留着的唯一理由（免鉴权的 WS 探活口子）已经不成立。
+#    ⚠️ 这是**删除**，⛔ 不是「先隐起来」：`DEC-065` 那批也是直接删。
+#    ⛔ **别改回来** —— `api/test_removed_endpoints.py::test_ws_test_stays_removed` 会红。
 
 # ==================== 测试 接口 ===================
 # ==================== 模拟类 ====================
