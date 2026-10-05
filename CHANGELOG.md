@@ -1774,6 +1774,44 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- 🔴 **把 `DEC-074`/`DEC-075` 有意留下的 4 条遗留【登记进待办总表】+ `ROADMAP` 补齐 `DEC-057`–`075`**（2026-10-05）——
+  收掉「**改动做完了、账没记**」这一类：东西在 `DEC` 里写着，**但没人会去翻 DEC**。
+
+  **为什么算 `Fixed` 而不是 `Added`**：这不是新功能，是**文档与事实不符**（计数写死过期 · 待办表漏登）。
+
+  **① `docs/待办总表.md`**
+  - §二 新登记 **2 项**（`DEC-075` §五·1 / §五·2）：
+    🔴 **WS 的会话桶仍是「每连接」**（`thread_id = f"ws-{uuid4}"` ⇒ 断开重连 = 换新桶；卡在「WS 协议没有客户端上传的会话 id」）·
+    ⚠️ **`calculator` 的间接提示注入面没消失**（`DEC-075` 只是把攻击者从「路人」换成「持合法凭据的用户」；三条方向待业务方选一条）。
+  - §三·附 新登记 **2 项**（`DEC-074` §七 剩下的两条）：**`N9`** `verify_api_key` 的 `get_db()` 没有 `try`（HTTP 侧库抖动 ⇒ 「无效 key」回 **500** 而非 401）·
+    **`N10`** `route-auth-remind.py` 的 `ROUTE_FILES` 仍写死 4 个文件名（提交门第 ⑤ 道已按范围触发，它没跟上）。
+  - 🔴 **⚠️ 本次只做「+2」这个动作，⛔ 没有把全表重数一遍** —— 表头 `8→10` / `21→23` 是**改的差**，**不是复核出来的数**（已把这句话写在表里）。
+    ⚠️ **`DEC-074` §七·5（`api/static/` 三个调试页）我核过、【有意没登记】—— 它不是孤儿**：`trace_viewer.html` 已挂在前端阶段与 `docs/FAQ.md`（对外承诺）。
+
+  **② `ROADMAP.md`** —— §④ 进度树**止步于 `③`**、`DEC-056` 之后一片空白（这是它当初漏登的**成因**）。
+  - §④ 补进 **`DEC-057`–`070` 后端收口批** + **`DEC-071`–`075`「闸是装饰」族**（⚠️ 标了 `073`/`074`/`075` **仍在 PR `#96`**）+ 硬门 D `§六·2` 封顶（`#95` / `503fa19`）。
+  - §② 端点计数**写死成 `62`/12 组、已过期** ⇒ 改成 **`OpenAPI 57` / 路由表 `59`**（HTTP 58 + WS 1），并写明**两组数不是同一件事**（WS 不进 OpenAPI）。
+  - §⑤「下一件事」→ 硬门 D `§六·2` 那条改标 ✅ 已做（PR `#95`）。
+  - 待办总账「二 · 其余卡业务方」**2 → 4**（就是①里登记的那两条又回到这条口径上）。
+
+  **③ `docs/规范/开发规范.md` §2.7** —— 加一条**比较基**勘误（下文「判据」段的由来，🔴 **含我自己第一版诊断错了的经过**）。
+
+  📌 判据（可打印 —— ⚠️ **下面每条都实跑过**）：
+  ```bash
+  # ③ 三方比对：本机 main 落后时打 drift（退出码 1）
+  bash scripts/check_remote_sync.sh main
+  bash scripts/check_remote_sync.sh --self-test   # ⇒ 8/8 —— ⚠️ 【证明】drift/unknown 那几支真的会红，⛔ 不连网
+                                                  #    （本仓立场：一条测不出「不成立」的守卫 = 没有守卫 · `DEC-061`）
+  # ② 端点计数：路由表 59（⚠️ 用 grep，⛔ 别用 tail —— 脚本的日志会把它挤走）
+  venv/bin/python scripts/check_route_auth.py 2>/dev/null | grep '真实路由总数：59'
+  # ① 两条遗留确实在表里（不是在 DEC 里）
+  grep -n 'ws-{' docs/待办总表.md                       # ⇒ :207（§二 第 7 行）
+  grep -n '^| \*\*N9\*\*\|^| \*\*N10\*\*' docs/待办总表.md   # ⇒ :363 :364
+  # 文档门
+  bash scripts/check_doc_links.sh ; bash scripts/check_doc_orphans.sh
+  ```
+  ⚠️ **`DEC-074`/`DEC-075` 那些历史文档【未改】** —— 它们记的是**当时**（本仓规矩：原始记录不改写）。
+
 - 🔧 **链接门豁免一处【在 `/tmp` 的历史路径】**（2026-10-05）—— 解开一处**与业务改动无关**的提交阻塞。
 
   **改前实况**：`bash scripts/check_doc_links.sh` **exit=1**，报 2 处真断链，指向**同一个已消失的**
@@ -1831,6 +1869,193 @@ All notable changes to this project will be documented in this file.
   📌 判据（可打印）：`venv/bin/python -m pytest api/test_approval_resume.py -q` ⇒ **16 passed**（§⑥ 新增 4 条）
   · 全量 `bash scripts/ci-local.sh` ⇒ **544 passed / 3 skipped / 31 deselected**（改前 540）
   📄 `docs/specs/pending_approvals.md` · `docs/specs/api_v1_agent.md` · `docs/契约/环境变量.md` · `docs/契约/接口契约.md`
+
+- 🔴 **把「路由鉴权门」真的接上线 + `PUBLIC_PATHS` 改名**（2026-10-05 · `DEC-074`）—— **两件事，轻重完全不同**。
+
+  **① 改名（零行为变更）**：`api/main.py` 的 `PUBLIC_PATHS` ⇒ **`MIDDLEWARE_EXEMPT_PATHS`**。
+  它不是"公开名单"，只是"**跳过限流/配额两个中间件**"。现成反例就在名单里：
+  `/api/v1/admin/create_user` **在名单内，却要 `require_admin`**（`api/api_v1.py:161`）。
+  ⛔ **历史文档（`docs/decisions/` / 本文件）里的旧名【不改】** —— 那是留痕；对照见 `DEC-074`。
+
+  **② 🔴 接线（这才是重点）**：`scripts/check_route_auth.py`（+基线 + 提醒 hook）**2026-09-30 就建齐了**，
+  但 `grep -n 'check_route_auth' .github/workflows/*.yml scripts/ci-local.sh .claude/hooks/pre-commit-gates.py`
+  ⇒ **三处全空** ⇒ 它**只在 Claude 会话里提醒一句**，`git commit` 与 CI 都不跑
+  ⇒ 本仓原话「**门挂在别处，就等于没有门**」。现在：
+  · **CI**：进 `ci.yml` 跑 pytest 的那个 `run` 块，**排在其前**（块是 `bash -e`，先红的会吃掉后面）；
+  · **提交门**：`.claude/hooks/pre-commit-gates.py` 加**第 ⑤ 道**，触发取 **`api/**.py`（范围）**，
+    ⛔ 不取文件名清单 —— 旧提醒 hook 写死 4 个名字，**新建 `api_v2.py` 就整个漏掉**（`DEC-066` 那个形状）。
+  · ⚠️ **`ci-local.sh` 一行没改** —— 它整块照抄 `ci.yml` 的 `run`（`:136`）⇒ 自动跟上（已实测跑到）。
+
+  **③ 顺带补上扫描盲区**：脚本此前**只认 `APIRoute`** ⇒ `/api/v1/ws/agent`（**真花钱、真没鉴权**）
+  **零输出**。本轮 WS 也进清单（标签 `WS`），基线 **1 → 3 条**。
+  ⚠️ **+2 不是新欠债**：那两条**一直都在**，只是**此前扫不到**。⚠️ **"进清单" ≠ "被保护"** ——
+  中间件**本来就管不到 WS**（`BaseHTTPMiddleware` 只处理 `scope["type"]=="http"`）。
+
+  📌 判据（可打印，⚠️ 别只看绿的那次）：
+  ```bash
+  venv/bin/python -m pytest api/test_route_auth_scan.py -q     # ⇒ 9 passed
+  venv/bin/python scripts/check_route_auth.py                  # ⇒ 60 条路由 · 无鉴权 3 条（HTTP 1 · WS 2）
+  venv/bin/python scripts/check_route_auth.py --baseline; echo $?   # ⇒ ✅ 与基线一致 · exit 0
+  # 证伪：临时加一条无鉴权路由 ⇒ 提交门 exit 2 并点名它（实测 + /__selfcheck_no_auth__）
+  ```
+  · 全量 `bash scripts/ci-local.sh` ⇒ **572 passed / 3 skipped / 31 deselected / 0 failed**（改前 563；**+9 恰为本轮新增用例数**）
+  📄 `docs/decisions/DEC-074-中间件豁免名单改名与路由鉴权门的接线.md` · `docs/specs/main.md` · `docs/规范/开发规范.md` §1.5 · `.claude/README.md`
+
+- 🔴 **`/api/v1/ws/agent` 补上鉴权 + 身份透传 + 记账**（2026-10-05 · `DEC-075`）—— 关掉 `DEC-074` §七 遗留·1/·2 那条债。
+
+  业务方原话：「**`/api/v1/ws/agent` 仍未鉴权**，为什么不做鉴权，我提出的问题就是需要，**如果要用就要做完整**」。
+
+  **① 改前实况**（三件同一条链上）：
+  · `venv/bin/python scripts/check_route_auth.py` ⇒ **无鉴权 3 条，其中 2 条是 WS**；
+    而 `/api/v1/ws/agent` **真花钱**（跑 `executor.ainvoke`，真调 LLM）⇒ **路人连上就能烧钱**；
+  · `grep -n 'ws_user_name' api/api_v1_rag.py` ⇒ `ws_user_name = "unknown"`（**字面量**）；
+  · 🔴 `grep -n 'record_from_response\|record_usage' api/api_v1_rag.py` ⇒ **零命中** ——
+    而它**身上已挂着** `check_session_token_budget`（数据源 = `token_usage_logs` 按 `(user_name, thread_id)` 当天求和）
+    ⇒ **没人写 ⇒ 永远读 0 ⇒ 闸一次都不会触发 = 摆设**。
+    ⚠️ **这正是 `DEC-073` §六 备选 B 明文否掉的形态**：「只补闸、不记账 ⇒ 闸恒不触发 = 白加」。
+    ⇒ 所以本轮**不是只补鉴权** —— 只补鉴权会交付「一个上了锁、里面什么都没接的门」。
+
+  **② 取证（⛔ 四个"想当然"全错）**：`BaseHTTPMiddleware` **只看 `scope["type"]=="http"`** ⇒ **永远看不到 WS**；
+  `new WebSocket(url)` **不能自定义请求头** ⇒ HTTP 那套 `X-API-Key`/`Authorization` **客户端发不出**；
+  `accept()` **之前**关 ⇒ 浏览器**拿不到关闭码**；Starlette 1.6.0 的 `accept()` **不幂等**（第二次 `RuntimeError`，实测）。
+
+  **③ 做法**：`api/deps.py` 新增 `require_ws_user`（依赖）+ `resolve_ws_identity`（**纯函数**，判定与 WebSocket 对象解耦 ⇒ 好测）；
+  `accept()` 由依赖里那**唯一一次**负责，**端点里那次删掉**；
+  失败**抛 `WebSocketException`**（**不自己 close** —— 两帧 close 会 `RuntimeError`），由星型按 MRO 接住并 `close(code=…)`。
+  ✅ **失败分两类**：**1008** = 你的凭据不行（换 key）· **1011** = 认证服务不可用（重试，**别换 key**）。
+  ⚠️ **fail-closed 在这儿、fail-open 在 `token_tracker`，是故意的** —— 一边是安全边界、一边是成本控制，⛔ 别"统一"。
+  两条路由（`/ws/agent` · `/ws/test`）都挂；`websocket_callback` 的三个身份参数改**关键字必填**（漏传 = `TypeError`，⛔ 不是静默记 `"unknown"`）。
+  ⚠️ **同日后续**：`/ws/test` **随后又被删掉**（见下方 `DEC-075 §十` 那条）⇒ 本段「两条」是**那一刻**的口径。
+
+  **④ 顺带带出的**：`scripts/check_route_auth.py` 的 `AUTH_NAMES` 加 `require_ws_user`（那个门**靠函数名字符串认人**，名单漂了会**静默放过**）；
+  基线的**生成器模板**里还写着「`/ws/agent` 整条无鉴权」⇒ ⛔ 跑一次 `--write-baseline` 就会把假话写回去，**已修**（现**幂等**，实测重生成一字不差）。
+
+  📌 判据（可打印，⚠️ 别只看绿的那次）：
+  ```bash
+  venv/bin/python -m pytest api/test_ws_auth.py api/test_route_auth_scan.py -q   # ⇒ 40 passed（30 + 10）
+  venv/bin/python scripts/check_route_auth.py            # ⇒ 60 条路由 · 无鉴权 1 条（HTTP 1 · WS 0）
+                                                         #   ⚠️ 现在是 59 条 —— 下面 DEC-075 §十 那条删了 1 条 WS
+  venv/bin/python scripts/check_route_auth.py --baseline; echo $?   # ⇒ ✅ 与基线一致 · exit 0
+  grep -n '"unknown"' api/api_v1_rag.py                  # ⇒ 无输出
+  # 证伪三式：① 从 AUTH_NAMES 拿掉 require_ws_user ⇒ 两条 WS 立刻被判无鉴权；
+  #           ② 从 /ws/test 摘掉依赖 ⇒ 门报「比基线多了 1 条」；复原后 exit 0；
+  #              ⚠️ 这一式**现在做不了了**（那条路由已删）—— 保留的是当时记录
+  #           ③ 关掉扫描器的 WS 分支 ⇒ 5 条断言【各自用自己的话】报红（不是一条红带一片）。
+  ```
+  · 全量 `bash scripts/ci-local.sh` ⇒ **603 passed / 3 skipped / 31 deselected / 0 failed**
+    （本轮把 `test_route_auth_scan.py` 里 **2 条红**的用例改写成 **3 条** ⇒ 净 **+1**）。
+  ⚠️ **`DEC-074` 那两条用例【红得对】**：它们原拿真 app 那两条 WS 当样本，现在样本已鉴权 ⇒ 换成**合成路由**，
+    真 app 那条改成断言**相反**的事实。⛔ 若继续用真 app，那条测试会**逼着人把鉴权改回去才能绿**（**测试在保护 bug**）。
+
+  🔴 **有意留下的口子（⛔ 别读成遗漏）**：WS 会话桶仍是**每连接**（`thread_id = f"ws-{uuid4}"`）⇒ 重连换桶；
+  **全局日级熔断 B11 仍罩着**，故未失控。⚠️ 另：`safe_math` 那处 `calculator` 的**间接提示注入面没消失** ——
+  攻击者从**路人**换成了**持凭据的用户**，三道闸**一条都不能撤**。
+
+  📄 `docs/decisions/DEC-075-WS首帧认证.md` · `docs/specs/deps.md`（新建）· `docs/specs/api_v1_rag.md` · `docs/specs/safe_math.md` · `docs/契约/接口契约.md` · `docs/规范/开发规范.md` §1.5
+
+- ⚰️ **删除端点 `WS /api/v1/ws/test`**（2026-10-05 · `DEC-075` **§十**）—— 纯回声的测试桩，**消费者 = 0**。
+
+  业务方原话：「`/api/v1/ws/test` 还有用吗，是否是测试需要，**先核对判断再执行**，
+  如果不需要没用**可以直接删除**」⇒ **先举证、后执行**。
+
+  **判据三条**（与 `DEC-065` 删那 4 条**同一套标准**，⛔ 不是另立一套）：
+  · **消费者 = 0** —— **三处独立扫过**：本仓（`api/static/websocket_test.html` 连的是 `/ws/agent`，**不是它**）·
+    本仓测试（`git log -S 'ws/test' -- 'api/test_*.py'` 在 `DEC-074` **之前零命中**）·
+    仓外 5 个兄弟项目（含 `agent-eval-gate` 的 SUT harness）**全 0**；
+  · **本仓自己早就点名** —— `DEC-055` 的流式出口普查表里就写着它 = **「测试桩」**；
+  · **连唯一可能的用途也没了** —— 它不花钱（纯回声），曾可能充当「**免鉴权的 WS 探活口子**」；
+    ⚠️ 上一条给 WS 补上首帧认证之后**它自己也要凭据** ⇒ 这个口子**不成立**。
+
+  🔴 **判据形态：WS 没有状态码，⛔ 不能照抄 HTTP 那套 `== 404`。** 实测（`TestClient`）：
+
+  | 情形 | `client.websocket_connect(path)` |
+  |---|---|
+  | 路由**不存在** | **建连那一刻**（`__enter__`）就抛 `WebSocketDisconnect` |
+  | 路由**存在且要鉴权** | 建连**成功**；退出上下文时才抛 `WebSocketDisconnect(1000)` |
+
+  ⇒ **「抛了 `WebSocketDisconnect` 就算删干净」是【假判据】** —— 一条**活着的、带鉴权的** WS **也会抛**。
+  这与 `DEC-064`/`DEC-065` 里那个「**不是 200**」**同型**：**判据成立，却什么也没钉住**。
+  ⇒ 取**两个不同可观测量**：**端到端**（建连当场被拒 = 404 在 WS 上的对应物）+ **注册层**（不在 WS 路由集合里）。
+
+  **做法（TDD）**：先写 `api/test_removed_endpoints.py::test_ws_test_stays_removed` ⇒ **看着它红**
+  （`Failed: DID NOT RAISE WebSocketDisconnect`）⇒ 再删路由 ⇒ 绿（该文件 **6 → 7 passed**）。
+  ⚠️ **墓碑里刻意⛔ 不写 `@router.` 字面串**（写 `WS /ws/test`）—— `grep -c '@router\.'` 是**数路由**用的，
+  注释里留同款串会**多数一条**。🔴 **本仓已栽两次**：`DEC-065` 一次，**同一天又栽一次**（本次墓碑初稿写成装饰器字面量 ⇒ 数出 12，应 11）。
+
+  **跟着变的地方**（全找出来改了）：`api/test_ws_auth.py`（−2 条用例 · 1 条改名收窄为 `test_the_ws_route_carries_the_auth_dependency`）·
+  `api/test_route_auth_scan.py`（WS 计数 2→1 · 自检算式 · 模块 docstring 标注"那是当时"）·
+  🟢 `scripts/check_route_auth.py` 的**基线生成模板**（⛔ 不改它，下次 `--write-baseline` 会**把假话写回去**）·
+  `scripts/route-auth-baseline.txt` · `docs/specs/{api_v1_rag,deps}.md` · `docs/契约/接口契约.md`（`ws` 组 2→1 · 合计 **60 → 59**）·
+  `docs/待办总表.md` · `.claude/README.md` · `docs/规范/开发规范.md` §1.5 · `ROADMAP.md`。
+  ⛔ **历史记录一律不动**：`DEC-055` / `DEC-074` / `docs/历史/修复记录-2026-08.md` 记的是**当时**。
+
+  🟢 **顺带修掉一条本 Agent 自己造成的回归**：上一个提交（`21a5f6f`）往本文件插入 `DEC-075` 条目时，
+  **把 `DEC-073` 的标题行吃掉了** ⇒ 那一段正文**没有标题、挂在 `DEC-075` 条目底下**。
+  ⚠️ **它是怎么被发现的**：改这一带时用 `git show 7de9275:CHANGELOG.md` 比对，发现 `DEC-073` 的标题
+  在 `21a5f6f` 里消失。⇒ **判据**：`awk` 扫"顶层条目之前是否有两个以上空行"（孤行正文的机械特征）。
+  📌 教训与本仓「**拿动作成功当结果正确**」同族 —— 当时我只核了"新条目写进去了"，**没核"旧条目还在不在"**。
+
+  📌 判据（可打印）：
+  ```bash
+  venv/bin/python -m pytest api/test_removed_endpoints.py -q -p no:warnings   # ⇒ 7 passed
+  venv/bin/python scripts/check_route_auth.py                                 # ⇒ 无鉴权 1 条（HTTP 1 · WS 0）· 真实路由总数 59
+  venv/bin/python scripts/check_route_auth.py --baseline; echo $?             # ⇒ ✅ 与基线一致 · exit 0
+  grep -c '@router\.' api/api_v1_rag.py                                       # ⇒ 11（10 HTTP + 1 WS）
+  ```
+  · 全量 `bash scripts/ci-local.sh` ⇒ **602 passed / 3 skipped / 31 deselected / 0 failed**
+    （上一条是 603：**−2** 随端点删掉的用例 + **+1** 新增的反向守卫 ⇒ 净 **−1**；算式对得上）。
+  ⛔ **留下的两条守卫判据相反，别合并**：`test_ws_test_stays_removed` 钉「**它不存在**」；
+  `test_the_ws_route_carries_the_auth_dependency` 钉「**`/ws/agent` 存在且挂着 `require_ws_user`**」。
+
+  📄 `docs/decisions/DEC-075-WS首帧认证.md` §十 · `api/test_removed_endpoints.py` · `docs/specs/api_v1_rag.md`
+
+- 🔴 **关掉 RAG 侧【不记账】的 LLM 通路**（2026-10-05 · `DEC-073`）—— **与 `DEC-072` 同型，只是换到 RAG 那一半**：`/rag/search` 与 `/rag/rewrite_search` **改前零闸、零记账**，却**默认就真调 LLM**。
+
+  **改前实况**（`grep -c 'record_usage\|record_from_response'`）：
+  `api_v1_rag.py` / `rag_pipeline.py` / `answer_with_citations.py` **⇒ 0 / 0 / 0**；
+  `api_v1_rag.py` 里的预算闸**只有 3 处**（`:23` import · `/rag/stream_search` · `/ws/agent`）
+  ⇒ 这两条链**单请求无上限**，且端点上那两道闸读的计数器**它们从不写** ⇒ **对它们等于不存在**。
+
+  **做了什么**（业务方裁「**非流式三条全做**」）：
+  · **身份透传** —— `rewrite_query` / `expand_query` / `generate_answer_with_citations`
+    各加**必填** keyword `user_name`（⛔ **不给默认值**：给了就是「静默记成 `unknown`」= 假记账）；
+    4 个调用点各传 `user_name=user_id`（复用 `DEC-056` 已有的必填 `user_id`，⛔ 不新拉透传链）；
+  · **补闸** —— `/rag/search` 与 `/rag/rewrite_search` 各加 **B8 + B11 两道**
+    （`unified_search` `:534`/`:538` · `rewrite_search_api` `:480`/`:484`，各带 `thread_id: str = "default"`）；
+  · **记真账** —— 改写/扩展走 `record_usage`（`:75` / `:175`），答案生成走 `record_from_response`
+    （`answer_with_citations.py:68` · `rag_pipeline.py:207`）。
+
+  🔴 **两处「用错入口就静默不记」**（本轮的两条主要陷阱）：
+  · `query_rewriter` 是**全仓唯一**用**裸 `openai.OpenAI`** 的地方 ⇒ 它的响应只有 **`.usage`**、
+    **没有 `usage_metadata`** ⇒ **必须**走 `record_usage`；用 `record_from_response`（判据是 `usage_metadata`）
+    **恒返回 `False`** —— **看起来"接了记账"、测试还能全绿，账本依旧少一笔**。
+  · 答案生成原有两条分支都是 `PROMPT | llm | StrOutputParser()` ——
+    `StrOutputParser` 把 `AIMessage` **剥成 `str`** ⇒ `usage_metadata` **随之丢光** ⇒ 同样静默跳过。
+    ⇒ 两条分支都改成**直调 `llm.invoke(messages)`**，取消息本体。
+
+  ⚠️ **一处【行为变更】**：这两条端点**从无闸变成有闸** —— 超预算的请求现在会**被拒**（`QUOTA_EXCEEDED`；
+  与本仓 fail-open 取向一致：**DB 挂了仍放行**）。⚠️ **签名是必填** ⇒ 漏传的调用方**当场 `TypeError`**。
+
+  ⚠️ **范围要说准（⛔ 别读成"RAG 侧全记上了"）**：`/rag/stream_search` **仍然不记账** ——
+  `llm_factory` 没开 `stream_usage` ⇒ `astream` **不挂 `usage_metadata`**；要记得**顺带开 `stream_usage`**
+  = **改流式帧形态**，与"补记账"是两件事，**单独一轮**。`/rag/hybrid_search` · `/rag/rerank_search`
+  **只跑本地 embedding / Cross-Encoder**，不花 LLM 钱，⛔ **没给它们加闸**。
+
+  ⭐ **自证救回一条【假守卫】**：`test_no_llm_usage_is_swallowed_by_string_output_parser` 第一版挂在
+  「先认出 LLM 调用」之上 —— 而改坏后的形状 `(… | llm | StrOutputParser()).invoke(…)` 是个 **`BinOp`**，
+  识别函数**认不出它** ⇒ 那函数没进循环 ⇒ 断言**空转通过**（`DEC-066` 的**守卫形状盲区**）。
+  ⇒ 已改成「**这份文件里不许出现 `StrOutputParser()` 调用**」，**不依赖任何前置识别**。
+  ⚠️ 它**写在实现之后**、第一遍就绿 —— **只有自证能发现它**。
+
+  **判据（可打印）**：
+  ```bash
+  python -m pytest api/test_rag_billing_wiring.py -q              # ⇒ 19 passed
+  bash scripts/ci-local.sh                                         # ⇒ 563 passed, 3 skipped, 31 deselected, 0 failed
+  # ⚠️ 基线两个数别混：开工时 origin/main(3f37e28) 是 540，同日 #95 合入后(503fa19)是 544
+  #    ⇒ 563 − 544 = +19 = 恰为本轮新增用例数（零回归）
+  # 证伪（四条守卫逐条实测能红，做法见 DEC-073 §八）：把 StrOutputParser 接回去 / 换错记账入口 /
+  #   摘掉 unified_search 的 B8 / 改掉 expand_query 的记账名 ⇒ 各 1 failed
+  ```
 
 - 🔴 **关掉三条【不记账】的 LLM 通路**（2026-10-04 · `DEC-072`）—— `agent_graph.py`（`/agent/langgraph_chat`）· `agent_checkpointer.py`（`/agent/memory_chat`）· `agent_graph_advanced_learning.py`（`/agent/advanced_chat`），**共 9 个 LLM 调用点**。
 

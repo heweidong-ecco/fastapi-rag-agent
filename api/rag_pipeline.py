@@ -11,6 +11,10 @@ from embedding_client import get_embedding
 from db import search_similar_async, bm25_search_async
 from collections import defaultdict
 from llm_factory import make_llm   # ①b Task 5：model / api_key / base_url / max_tokens 的唯一落点
+# 🔴 2026-10-05 记账入口（`DEC-073`）。⚠️ 放文件头是安全的：`token_tracker` 模块级**只** import
+#    标准库 + `token_config`（`db` / `langchain` 都是**函数内**惰性导入）
+#    —— 同一条理由见 `api_v1_rag.py:21-23` 那段注释。
+from token_tracker import record_from_response
 import os
 
 import asyncio
@@ -92,13 +96,13 @@ class RAGPipeline:
         search_queries = [query]
 
         if self.enable_rewrite:
-            rewritten = rewrite_query(query, conversation_history)
+            rewritten = rewrite_query(query, conversation_history, user_name=user_id)
             search_queries = [rewritten]
             pipeline_info["rewritten_query"] = rewritten
 
         if self.enable_expand:
             base = search_queries[0]
-            expanded = expand_query(base, num_variants=3)
+            expanded = expand_query(base, num_variants=3, user_name=user_id)
             search_queries = expanded
             pipeline_info["expanded_queries"] = expanded
 
@@ -176,7 +180,8 @@ class RAGPipeline:
             # 带引用
                 from answer_with_citations import generate_answer_with_citations
                 answer, sources = generate_answer_with_citations(
-                    candidates[:top_k], query, self.answer_llm
+                    candidates[:top_k], query, self.answer_llm,
+                    user_name=user_id,   # 🔴 2026-10-05（`DEC-073`）：身份必须到得了记账点
                 )
                 result["answer"] = answer
                 result["sources"] = sources
@@ -189,14 +194,21 @@ class RAGPipeline:
                 else:
                     system_prompt = "根据上下文回答，可适当补充常识。"
                 from langchain_core.prompts import ChatPromptTemplate
-                from langchain_core.output_parsers import StrOutputParser
                 prompt = ChatPromptTemplate.from_messages([
                     ("system", system_prompt + "\n\n上下文：\n{context}"),
                     ("user", "{question}")
                 ])
-                chain = prompt | self.answer_llm | StrOutputParser()
-                answer = chain.invoke({"context": context_text, "question": query})
-                result["answer"] = answer
+                # 🔴 2026-10-05（`DEC-073`）：⛔ **不再接 `StrOutputParser`** ——
+                #    它把 `AIMessage` **剥成 `str`**，`usage_metadata` 随之丢光 ⇒
+                #    记账**拿不到数**（这正是本轮要修的"零记账"，而测试照常全绿）。
+                #    改为直调 `invoke`，取消息本体。
+                messages = prompt.format_messages(context=context_text, question=query)
+                response = self.answer_llm.invoke(messages)
+                record_from_response(
+                    self.answer_llm, response, "answer_generation",
+                    user_name=user_id, thread_id="default",
+                )
+                result["answer"] = response.content
 
         # 如果过滤后 candidates 为空，generate_answer 即使为 True 也不生成答案（因为没有上下文）
         elif generate_answer and not candidates:

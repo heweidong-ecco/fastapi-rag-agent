@@ -29,6 +29,18 @@ hybrid_search_with_rewrite(query, top_k=5, conversation_history=None, *, user_id
 - ⚠️ **配套**：`bm25_index` 的**入选判据**同期由「分数为正」改成「实词有重合」
   （小语料上 idf 为负 ⇒ 原判据恒假）⇒ `DEC-056` **决策 7**。
 
+## 🔴 2026-10-05 · 把身份继续递到改写器（`DEC-073`）
+
+`hybrid_search_with_rewrite` 里那两处改写调用**跟随上面的 `user_id` 走**：
+
+```
+:128  rewrite_query(query, conversation_history, user_name=user_id)
+:131  expand_query(optimized_query, user_name=user_id)
+```
+
+⚠️ **只此一处改动**，且 ⛔ **不给默认值** —— 目的是让 `query_rewriter` 能把
+真账记到**具体的人**头上；漏传 = `TypeError`（同 `DEC-056` 的取向）。
+
 ## 🟡 做到哪 / 缺什么
 
 - 🔴 **同算法两份实现**（见下）
@@ -47,6 +59,7 @@ hybrid_search_with_rewrite(query, top_k=5, conversation_history=None, *, user_id
 | 「BM25 在这文件里」 | 🔴 **不在这** —— BM25 在 `api/bm25_index.py`（jieba + rank_bm25，带进程内缓存） |
 | 「`user_id` 在这层被用来过滤」 | 🔴 **不是** —— 本文件**只把它往下传**，真正的 `WHERE requested_by = %s` 在 `db.search_similar` 与 `bm25_index.bm25_search`。<br>⇒ **要改过滤，改那两个；要改"谁能调"，改这层的签名**（`DEC-056` 决策 5：共享层承重） |
 | 「传了 `user_id` 就隔离了」 | ⚠️ **要看到它一路到 SQL 才算** —— 中间任何一层把 `user_id` 丢掉（或换成常量），签名看着齐全、隔离却是假的。<br>⇒ 判据是 `api/test_isolation.py` 那 8 条（**已做过证伪**），⛔ 不是"签名里有这个参数" |
+| 「本文件不花 LLM 钱」 | ⚠️ **只有前两个函数不花** —— `hybrid_search_with_rewrite` **无条件**调改写/扩展（`query_rewriter`，**真 LLM 调用**）⇒ `/rag/rewrite_search` 每次都花钱，2026-10-05 起**每次都记账**（`DEC-073`）。 |
 
 > ⭐ **这条是本 spec 最有价值的发现**：
 > **同一个算法三份代码**（`rag_pipeline._rrf_fusion` · 本文件的 `reciprocal_rank_fusion` · 测试里的副本），
@@ -54,4 +67,5 @@ hybrid_search_with_rewrite(query, top_k=5, conversation_history=None, *, user_id
 
 ## 关联
 
-`ROADMAP` 功能现状表 · `docs/说明/测试.md` §六 · `docs/原理/架构.md` §1.2（"同一算法两份实现"）
+`ROADMAP` 功能现状表 · `docs/说明/测试.md` §六 · `docs/原理/架构.md` §1.2（"同一算法两份实现"）·
+`DEC-056`（多用户隔离）· `DEC-073`（RAG 侧关闭零记账）· `docs/specs/query_rewriter.md`

@@ -40,12 +40,16 @@ def _get_cache_key(prefix: str, text: str, extra: str = "") -> str:
     raw = f"{prefix}:{text}:{extra}"
     return "rewrite:" + hashlib.md5(raw.encode()).hexdigest()
 
-def expand_query(original_query: str, num_variants: int = 3) -> list[str]:
+def expand_query(original_query: str, num_variants: int = 3, *, user_name: str) -> list[str]:
     """生成多个不同表述的查询变体，用于扩大检索范围（带缓存）。
 
     ⚠️ 2026-09-20 修：原 docstring 只有「生成查询变体（带缓存）」，
        而函数体里**另有一段孤立的 docstring**（"用于扩大检索范围"）——
        它躺在缓存早退分支之后，是**空操作**。已合并到这里。
+
+    🔴 2026-10-05：加**必填** keyword `user_name`（`DEC-073`）—— 本函数真调 LLM(付费)，
+       ⛔ **不给默认值**：给了就等于允许「静默记成 `"unknown"`」= 假记账
+       （`DEC-072` 明文把 `.get(...,"unknown")` 当反例）。漏传 ⇒ `TypeError`，当场炸。
     """
     cache_key = _get_cache_key("expand", original_query, str(num_variants))
     cached = redis_client.get(cache_key)
@@ -64,6 +68,17 @@ def expand_query(original_query: str, num_variants: int = 3) -> list[str]:
         temperature=0.7,  # 稍高温度以生成多样性
         max_tokens=200
     )
+    # 🔴 2026-10-05 记账（`DEC-073`）：本模块用的是**裸 `openai.OpenAI`** ⇒ 响应带 `.usage`，
+    #    而**没有** `usage_metadata` ⇒ 必须走 `record_usage`，⛔ **不能**用
+    #    `record_from_response`（它的判据是 `usage_metadata`，对裸客户端**恒 False 静默跳过**
+    #    —— 那正是 `DEC-072` 修过的假记账）。紧贴 `create()` 之后：钱已经花了。
+    record_usage(
+        model=response.model,                       # ⛔ 不写死 REWRITE_MODEL：本仓按错单价记过账
+        prompt_tokens=response.usage.prompt_tokens,
+        completion_tokens=response.usage.completion_tokens,
+        purpose="query_expand",
+        user_name=user_name,
+    )
     lines = response.choices[0].message.content.strip().split("\n")
     # 过滤空行，并确保包含原始查询
     variants = [line.strip() for line in lines if line.strip()]
@@ -75,6 +90,11 @@ def expand_query(original_query: str, num_variants: int = 3) -> list[str]:
     redis_client.set(cache_key, json.dumps(result, ensure_ascii=False), ex=CACHE_TTL)
     return result
 
+# 🔴 2026-10-05：这个 import 自建立起就**在，却一次没被调用过**（`DEC-073`）——
+#    「接了一半」的形态：import 在、调用不在，而**接口一切正常**（本仓 `DEC-051` 栽过同款）。
+#    现在 `expand_query` / `rewrite_query` 各调它一次。
+#    ⚠️ 本模块是**全仓唯一**用裸 `openai.OpenAI` 的地方（另 15 处是 `ChatOpenAI`）
+#    ⇒ 记账入口**只能**是 `record_usage`（响应带 `.usage`，**没有** `usage_metadata`）。
 from token_tracker import record_usage # Token统计模块
 
 
@@ -100,7 +120,7 @@ def _history_lines(conversation_history) -> list:
     return lines[-5:]          # 只取最近 5 轮
 
 
-def rewrite_query(original_query: str, conversation_history=None) -> str:
+def rewrite_query(original_query: str, conversation_history=None, *, user_name: str) -> str:
     """优化查询（带缓存）
 
     做什么：补全上下文、转书面语、纠正口语化表达；提供了对话历史时会尝试消解指代。
@@ -109,6 +129,9 @@ def rewrite_query(original_query: str, conversation_history=None) -> str:
     或 `list[str]`（旧形态）—— 两种都由 `_history_lines()` 规整。
 
     ⚠️ 2026-09-20 修：上面"做什么"那句，原先是**函数体中段一个孤立的字符串**（空操作）。
+
+    🔴 2026-10-05：加**必填** keyword `user_name`（`DEC-073`）—— 同 `expand_query`，
+       ⛔ 不给默认值（默认值 = 允许假记账）。
     """
     # 将历史序列化成字符串作为缓存键的一部分
     history_lines = _history_lines(conversation_history)
@@ -144,6 +167,18 @@ def rewrite_query(original_query: str, conversation_history=None) -> str:
     )
 
     result = (response.choices[0].message.content or "").strip()
+
+    # 🔴 2026-10-05 记账（`DEC-073`）：紧贴 `create()` 之后、**空值早退之前** ——
+    #    下面那条「改写成空 ⇒ 回退原问题」的分支**也要先记**：钱已经花了，
+    #    回退只影响**返回什么**，不影响**账上花了多少**。
+    #    ⛔ 用 `record_usage` 不用 `record_from_response`，理由同 `expand_query`（裸客户端）。
+    record_usage(
+        model=response.model,                       # ⛔ 不写死 REWRITE_MODEL
+        prompt_tokens=response.usage.prompt_tokens,
+        completion_tokens=response.usage.completion_tokens,
+        purpose="query_rewrite",
+        user_name=user_name,
+    )
 
     # 改写成空必须**回退到原问题**:否则会拿「空查询」去检索 → 召回到无关文档 →
     # 被判「资料中没有」而拒答。静默降级比报错更危险 —— 这里不再静默(留告警)。

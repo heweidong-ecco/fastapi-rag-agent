@@ -147,4 +147,23 @@ jobs:
           except OSError as e:
               print(f"[ci-config] redis 6379     = 不通 ({e})")
           PY
+          # ⭐ 路由鉴权门（2026-10-05 加，`DEC-074`）—— ⚠️ **必须排在 pytest 前面**。
+          #   理由：本块是 `bash -e` 语义，**先红的那条会吃掉后面**。
+          #   pytest 动辄几分钟且本仓红过多次；这条只要 ~10s ⇒ 放前面，
+          #   保证「新引入了没鉴权的路由」**一定会被跑**，而不是"pytest 挂了所以没轮到它"。
+          #
+          #  🔴 为什么它此前【形同虚设】：脚本 2026-09-30 就建好了，也挂了 hook，
+          #     但**这里是空的**（`grep -n check_route_auth .github/workflows/ci.yml` ⇒ 无）。
+          #     ⇒ 它只在"Claude 会话里改路由文件"时提醒一句 —— 正是本仓
+          #       「**门挂在别处，就等于没有门**」那句原话的又一例。
+          #  ⚠️ 判据不是"跑过了"，是 **exit 0 且打印「✅ 与基线一致」**（见脚本末尾）。
+          #
+          #  ⛔ 别写成 `venv/bin/python … || python …` —— 那样**检查失败（exit 1）会掉进
+          #     第二个解释器再跑一遍**，把红灯洗成绿灯（或反过来撞出假的 ImportError）。
+          #     ⇒ 先**只选解释器**，再跑一次检查。
+          #  ⛔ 也别写成 `[ -x … ] && PY_ROUTE=…` —— 本块跑在 `bash -e` 下，
+          #     条件为假时**整条 AND-list 返回非零 ⇒ 脚本当场退出**（经典 set -e 坑）。
+          PY_ROUTE=python
+          if [ -x venv/bin/python ]; then PY_ROUTE=venv/bin/python; fi
+          "$PY_ROUTE" scripts/check_route_auth.py --baseline
           pytest api/ -m "not integration and not needs_db" -v

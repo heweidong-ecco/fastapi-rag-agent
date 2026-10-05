@@ -53,7 +53,7 @@
 ❌ 比基线【多了 1 条】—— 新引入了没鉴权的路由：
      + /api/v1/debug/cache_stats
 ⇒ 要么给它加 `Depends(get_current_user_hybrid)`（或 require_admin），
-   要么确认它确实该公开 —— 后者请同时把它加进 `main.PUBLIC_PATHS`。
+   要么确认它确实该无鉴权 —— 后者请跑 `--write-baseline` 把它写进基线并注明理由。
 ```
 
 > ### 为什么要有它（**这是本仓一条教训的落地**）
@@ -125,7 +125,7 @@
 ├── README.md                     ← 本文件：门的一览
 ├── settings.json                 ← 注册 hook（⛔ 不要 gitignore 它）
 ├── hooks/
-│   ├── pre-commit-gates.py       ← 提交前四道门（凭据/链接/孤儿/模块spec）
+│   ├── pre-commit-gates.py       ← 提交前五道门（凭据/链接/孤儿/模块spec/路由鉴权）
 │   ├── spec-remind.py            ← 改 api/*.py 后提醒更新 spec（①·5）
 │   └── route-auth-remind.py      ← 🆕 改路由文件后查「有没有没鉴权的」（①·6）
 └── commands/
@@ -134,12 +134,23 @@
 ```
 
 **配套脚本**（不在 `.claude/` 里，在 `scripts/`）：
-`check_route_auth.py`（无鉴权路由清单 + 基线比对）· `route-auth-baseline.txt`（基线，**现为 1 条** —— 见下）
+`check_route_auth.py`（无鉴权路由清单 + 基线比对，**现也含 WebSocket**）· `route-auth-baseline.txt`（基线，**现为 1 条** —— 见下）
 
 > 🔴 **2026-10-04（`DEC-065`）基线由 10 条降到 1 条** —— `S1`/`S2`/`S14` 那 9 条**已收口**
 > （5 条加 `require_admin` · 4 条**端点删除**）。**仅剩 `/api/v1/`**（`main.py` 的根路径，
 > ⚠️ **是否有意公开仍未裁**）。
-> 📌 判据（可打印）：`venv/bin/python scripts/check_route_auth.py` ⇒ **无鉴权路由 1 条** ·
+> 🔴 **2026-10-05（`DEC-074`）基线 1 → 3 条** —— **+2 不是新欠债，是补齐口径**：
+> `/api/v1/ws/agent` 与 `/api/v1/ws/test` **一直都在**，只是脚本此前**只认 `APIRoute`、
+> 扫不到 WS**（`DEC-066` 记过这条盲区，但只记在文字里）。
+> ⇒ 现在 WS 也进清单，标签是 **`WS`**。
+> 🟢 **2026-10-05（`DEC-075`）基线 3 → 1 条** —— ⛔ **不是把债藏起来了**：
+> `/api/v1/ws/agent` **真修好了**（挂上 `deps.require_ws_user`，**首帧认证**）；
+> `/api/v1/ws/test` **同日【已删】**（`DEC-075` §十 —— 纯回声测试桩 · 消费者 = 0）。
+> ⇒ **现表 1 条，且这一条是 HTTP**（⛔ **一条 WS 都不剩**）。
+> ⚠️ 判据别只看条数变少 —— 跑 `venv/bin/python scripts/check_route_auth.py` 直接看
+> 输出里的 **WS 行**：`/ws/agent` 必须**不在**清单里（在 = 又变回匿名了）；
+> ⛔ 而 `/ws/test` 该看的是**它整条路由都没了**（`api/test_removed_endpoints.py::test_ws_test_stays_removed`）。
+> 📌 判据（可打印）：`venv/bin/python scripts/check_route_auth.py` ⇒ **无鉴权路由 1 条（HTTP 1 · WS 0）** ·
 > `venv/bin/python scripts/check_route_auth.py --baseline` ⇒ **与基线一致**。
 
 > 🔴 **`.claude/` 必须入库**（本仓实测：**没有被 `.gitignore` 挡**）。
@@ -180,6 +191,14 @@ scripts/check_secrets.sh            ← 能改
 
 ## 变更记录
 
+- **2026-10-05** 🔴 **提交门 ④ → ⑤（`DEC-074`）**：加**路由鉴权门**。
+  缘由：那个脚本 2026-09-30 建好后，**CI 里没有、提交门里也没有**
+  （`grep -n check_route_auth .github/workflows/*.yml scripts/ci-local.sh .claude/hooks/pre-commit-gates.py` ⇒ 三处全空）
+  ⇒ 它**只在 Claude 会话里提醒一句** ⇒ 「**门挂在别处，就等于没有门**」的又一例。
+  同时把 **WS 补进扫描口径**（此前只认 `APIRoute`）。
+  ⚠️ 触发取 **`api/**.py`（范围）**而非文件名清单 —— 旧提醒 hook 写死 4 个名字，
+  **新建 `api_v2.py` 就漏**。代价：动了 api 代码的提交多 ~10s（实测 9.95s）。
+  📄 `docs/decisions/DEC-074-中间件豁免名单改名与路由鉴权门的接线.md` · `docs/规范/开发规范.md` §1.5
 - **2026-09-30** 加第 ③ 道门（**①·6 `route-auth-remind.py`** + `scripts/check_route_auth.py` + 基线）。
   起因：核 `api_v1.py` 时**手工扫无鉴权路由，第一版扫出 0 条**（踩了 `_IncludedRouter`）——
   **而那个坑仓里早写着**（`api/test_public_paths.py:17-20`），**当天踩了两次**。

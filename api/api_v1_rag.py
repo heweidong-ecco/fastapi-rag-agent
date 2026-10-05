@@ -38,6 +38,9 @@ from schemas import (
 # ⚠️ `require_admin` **保持原样**（本文件从未用过它）—— 那是**既有**的未使用导入，
 #    归 `docs/待办总表.md` 的 **T6**（103 个未使用导入 · 业务方裁「先挂起」）管，⛔ 本次不顺手清理。
 from deps import get_current_user_hybrid, require_admin
+# `DEC-075`：WebSocket 的首帧认证依赖 —— ⛔ 它与上面那两个**不能互换**（浏览器 WS
+# 不能自定义请求头，`X-API-Key` / `Authorization` 送不上来）。
+from deps import require_ws_user
 from db import get_db, insert_document,insert_batch_documents
 from db import search_similar  # 🔴 2026-10-03 乙段（DEC-056）：stream_search 改走共享层
 from embedding_client import get_embedding
@@ -469,9 +472,22 @@ async def rerank_search_api(
 @router.post("/rag/rewrite_search")
 async def rewrite_search_api(
     req: QuestionRequest,
+    thread_id: str = "default",       # 🔴 2026-10-05 加（B8 需要会话维度）—— 同 `/rag/stream_search`
     user_name: str = Depends(get_current_user_hybrid),
 ):
     """带查询改写的混合检索（**只在该用户自己的文档内**）"""
+    # 🔴🔴 2026-10-05（`DEC-073`）：本端点**此前零闸** —— 而它**无条件**真调 LLM
+    #     （`hybrid_search_with_rewrite` 里改写 + 扩展各一次）⇒
+    #     ① 单条请求**无上限** ② B8 会话上限 / B11 全站熔断读的计数器它从不写 ⇒ 对它等于不存在。
+    #     ⚠️ **两道都要**，与 `/rag/stream_search` 的现状并列（B8 按会话 / B11 按全站，⛔ 别合并）。
+    ok, why = check_session_token_budget(user_name, thread_id)   # B8
+    if not ok:
+        raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
+
+    ok, why = circuit(global_key())                              # B11
+    if not ok:
+        raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
+
     docs = hybrid_search_with_rewrite(req.question, req.top_k, user_id=user_name)
     return {
         "question": req.question,
@@ -500,6 +516,7 @@ PIPELINE_FACTORIES = {
 async def unified_search(
     req: QuestionRequest,
     mode: SearchMode = "accurate_norerank",
+    thread_id: str = "default",       # 🔴 2026-10-05 加（B8 需要会话维度）—— 同 `/rag/stream_search`
     user_name: str = Depends(get_current_user_hybrid),
 ):
     """
@@ -513,6 +530,18 @@ async def unified_search(
 
     ⚠️ `mode` 是**受限枚举**，取值只有上面四个；传别的值会得到 **422**，而不是被静默兜底。
     """
+    # 🔴🔴 2026-10-05（`DEC-073`）：本端点**此前零闸** —— 而默认 mode `accurate_norerank`
+    #     **本身就开着改写**（真调 LLM）⇒ 单条请求无上限、账本也收不到数据。
+    #     ⚠️ 位置在 `PIPELINE_FACTORIES[mode]()` **之前** —— 那是本端点第一处真花钱的地方之前。
+    #     ⚠️ **两道都要**（B8 按会话 / B11 按全站），同 `/rag/stream_search` 的现状。
+    ok, why = check_session_token_budget(user_name, thread_id)   # B8
+    if not ok:
+        raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
+
+    ok, why = circuit(global_key())                              # B11
+    if not ok:
+        raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
+
     # 🔴 2026-09-17 修：此处原先是一个**裸 `else`** —— 任何拼错的 mode（如 `fst`）
     # 都不报错，而是**静默换成 `accurate_norerank`**（多跑一次查询改写 = 多花钱、多延迟）。
     # 现在：`mode` 声明为 `SearchMode`（`Literal`），非法值由 FastAPI 在进入函数体之前挡成 422；
@@ -773,10 +802,13 @@ from datetime import datetime
 #    现整段搬进 get_agent_executor()，**首次使用时才建**，之后复用（与原先单例语义一致）。
 #    ⚠️ 工具 docstring 与 prompt 文本**逐字未改** —— 那是给 LLM 看的接口。
 _agent_executor = None
+# `DEC-075`：与 `_agent_executor` **同一个单例里**的 LLM —— 记账要用它的 `model_name`。
+# ⛔ 别让记账去猜模型名（`DEC-072`：本仓因写死 `"qwen-turbo"` 按错的单价记过账）。
+_agent_llm = None
 
 def get_agent_executor():
     """惰性构造 WebSocket Agent（首次调用时才建，之后复用）。"""
-    global _agent_executor
+    global _agent_executor, _agent_llm
     if _agent_executor is None:
         # ⚠️ 全部放在函数内：导入期不拉 langchain
         from langchain.agents import create_tool_calling_agent, AgentExecutor
@@ -788,6 +820,7 @@ def get_agent_executor():
         #一 初始化模型
         # ⚠️ 角色 = 「模型轴 chat」+「长度轴 answer(2000)」—— 见 `api/llm_factory.py` 的模块 docstring。
         llm = make_llm("chat", "answer")
+        _agent_llm = llm
         #二 定义工具
         @tool
         async def search(query: str) -> str:
@@ -805,8 +838,11 @@ def get_agent_executor():
             #    旧判据只认「`ast.Call` 的 `func` 是裸名 `eval`」，而本行写的是
             #    `asyncio.to_thread(eval, expression)`（`eval` 是**实参**）⇒ **两道守卫都看不见它**，
             #    但**命令真的跑了**（实测：返回值 `'0'`，`touch` 的文件真被创建）。
-            #    ⚠️ 本行**匿名可达**（`/api/v1/ws/agent` 整条没有鉴权，`DEC-041` 遗留·1），
-            #    而 `expression` 是 **LLM 生成**的，LLM 的上下文含用户提问 / 搜索结果 ⇒ 间接提示注入面。
+            #    ⚠️ 本行**曾经**匿名可达（`/api/v1/ws/agent` 整条没有鉴权，`DEC-041` 遗留·1）——
+            #    ✅ **2026-10-05（`DEC-075`）已修**：整条链现在要过首帧认证（`require_ws_user`）。
+            #    ⛔ 但**别因此放松这道闸**：`expression` 仍是 **LLM 生成**的，
+            #    而 LLM 的上下文含用户提问 / 搜索结果 ⇒ **间接提示注入面依旧存在**
+            #    （攻击者是自己有合法凭据的用户，不是路人）。
             #    实现与三道闸见 `api/safe_math.py`；接线由 `api/test_safe_math_wiring.py` 守。
             return await asyncio.to_thread(calculate, expression)
 
@@ -837,18 +873,28 @@ def get_agent_executor():
         _agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
     return _agent_executor
 
-@router.websocket("/ws/agent")
-async def agent_websocket(websocket: WebSocket):
-    await websocket.accept()
 
-    # B8 · 会话级 token 上限（`DEC-041`）—— 本条的 key 是**每个连接**：
-    # ⚠️ 本条 WS **整条没有鉴权**（`DEC-041` 遗留·1），没有用户身份 ⇒ `user_name` 只能是 `"unknown"`。
-    #    ⇒ 会话 key 在这里**退化成"每连接"**：一个连接 = 一个会话，
-    #      与服务端「连接即会话」的直觉一致（客户端断了重连就是新会话）。
-    #    ⚠️ 正因为如此，本链的额度**是按连接算的，不是按人** —— 换连接 = 换桶。
-    #       ⛔ 这不是"漏洞"，是**没有身份就谈不上按人计**；根因（WS 无鉴权）记在 DEC-041 遗留里。
+def get_agent_llm():
+    """取与 `get_agent_executor()` **同一个单例**里的 LLM（记账要用它的 `model_name`）。"""
+    get_agent_executor()
+    return _agent_llm
+
+
+@router.websocket("/ws/agent")
+async def agent_websocket(websocket: WebSocket, ws_user_name: str = Depends(require_ws_user)):
+    # ⛔ **不要在这里 `await websocket.accept()`** —— `require_ws_user` 已经 accept 过了，
+    #    而星型 1.6.0 的 `accept()` **不幂等**（第二次会 RuntimeError，实测）。
+    #
+    # 🔴 **身份来自上面那个依赖**（`DEC-075`）—— 本条 WS 此前**整条没有鉴权**
+    #    （`DEC-041` 遗留·1）：真花钱（LangChain Agent + chat LLM + `web_search`）
+    #    却匿名可达。端点体要**认证通过之后**才会被执行 —— 判据见
+    #    `api/test_ws_auth.py::test_ws_agent_body_never_runs_before_auth`。
+    #
+    # B8 · 会话级 token 上限（`DEC-041`）—— key = `(user_name, thread_id)`。
+    # ⚠️ `thread_id` 这里**仍是每连接一个**（`ws-<uuid>`）：WS 没有客户端传上来的会话 id
+    #    ⇒ 重连接 = 新桶。**这是已知的、有意留下的口子**，见 `DEC-075` 遗留·2
+    #    （全局日级熔断 B11 仍然罩着，故不因它而失控）。
     ws_session_id = f"ws-{uuid.uuid4().hex}"
-    ws_user_name = "unknown"
 
     try:
         while True:
@@ -884,13 +930,19 @@ async def agent_websocket(websocket: WebSocket):
                 "content": f"收到问题：{user_message}，开始分析..."
             }))
             
-            # 创建回调实例
-            callback = WebSocketAgentCallback(websocket)
-            
             try:
                 # 使用回调的 ainvoke（create_tool_calling_agent 的输入键是 "input"，输出键是 "output"）
                 # 惰性取单例：首次打开 WS 时才构造 Agent
                 executor = get_agent_executor()
+                # 🔴 创建回调实例 —— **必须带身份**（`DEC-075`）：
+                #    它现在**同时负责记账**（`on_llm_end`），而账要记到**认证出来的那个人**头上。
+                #    ⛔ 三个都是必填 keyword：漏传 = `TypeError`（响亮），⛔ 不是静默记成 `"unknown"`。
+                callback = WebSocketAgentCallback(
+                    websocket,
+                    user_name=ws_user_name,
+                    thread_id=ws_session_id,
+                    llm=get_agent_llm(),
+                )
                 result = await executor.ainvoke(
                     {"input": user_message},
                     config={"callbacks": [callback]}
@@ -913,16 +965,20 @@ async def agent_websocket(websocket: WebSocket):
     except WebSocketDisconnect:
         print("客户端断开连接")
 
-# 测试 WebSocket 基础通信正常端点
-@router.websocket("/ws/test")
-async def test_websocket(websocket: WebSocket):
-    await websocket.accept()
-    try:
-        while True:
-            data = await websocket.receive_text()
-            await websocket.send_text(f"收到你的消息：{data}")
-    except WebSocketDisconnect:
-        print("测试客户端断开")
+# ⚰️ 2026-10-05 **删**（`DEC-075` §十）：此处原有 **WS `/ws/test`** ——
+#    一个纯回声的「WebSocket 基础通信」桩，`ecb146b`（首次提交）起就在。
+#    ⚠️ **本墓碑刻意不写那串装饰器字面量**（写成 `WS /ws/test`）——
+#       本文件下面 `DEC-057` 那条墓碑也是这么写的。理由：本仓判据 `grep -c '@router\.' api/api_v1_rag.py`
+#       是**数路由**用的，注释里留同款字面串会让它**多数一条**（`DEC-065` 实测过：带 ⇒ 14，去掉 ⇒ 12）。
+#    删的理由（三条，与 `DEC-065` 删那 4 条**同一套标准**，⛔ 不是另立一套）：
+#      ① **消费者 = 0** —— 本仓没有任何东西连它（`api/static/websocket_test.html` 连的是
+#         `/api/v1/ws/agent`）；`git log -S 'ws/test' -- 'api/test_*.py'` 在 `DEC-074` 之前
+#         **零命中**；仓外（`agent-eval-gate` 等 5 个项目）也全 0。
+#      ② **它本来就是「测试桩」** —— `DEC-055` 的流式出口普查表里就是这么记的。
+#      ③ **连「探活」这个唯一可能的用途也没了** —— `DEC-075` 给它补上首帧认证之后，
+#         它自己也要凭据 ⇒ 留着的唯一理由（免鉴权的 WS 探活口子）已经不成立。
+#    ⚠️ 这是**删除**，⛔ 不是「先隐起来」：`DEC-065` 那批也是直接删。
+#    ⛔ **别改回来** —— `api/test_removed_endpoints.py::test_ws_test_stays_removed` 会红。
 
 # ==================== 测试 接口 ===================
 # ==================== 模拟类 ====================

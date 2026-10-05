@@ -125,10 +125,10 @@ def hybrid_search_with_rewrite(
     4. 对所有变体的结果再次做 RRF 融合。
     """
     # 第一步：查询优化
-    optimized_query = rewrite_query(query, conversation_history)
+    optimized_query = rewrite_query(query, conversation_history, user_name=user_id)
 
     # 第二步：查询扩展
-    query_variants = expand_query(optimized_query)
+    query_variants = expand_query(optimized_query, user_name=user_id)
 
     # 第三步：对每个变体分别检索，收集所有结果
     all_docs = []  # [(doc_content, rrf_score), ...]
