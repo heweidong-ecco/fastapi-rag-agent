@@ -1792,6 +1792,20 @@ All notable changes to this project will be documented in this file.
 
   📌 判据（可打印）：改前 `bash scripts/check_doc_links.sh; echo $?` ⇒ **1** · 改后 ⇒ **0**（`✅ 没有真断链`）
 
+- 🔴 **删掉 ignore 清单 ⑨ 段里 4 行【已过期】的豁免**（2026-10-05）—— 补上清单**自己立的规矩**欠下的账。
+
+  **清单原话**：「⚠️ 约束（必须遵守，否则这一节会掩盖真问题）…… 2. 🔴 **文件一旦建好，就【删掉对应的这一行】**」。
+  实测这 4 个目标**早已建好**却没删：
+  `docs/specs/token_config.md` · `docs/specs/breaker.md` · `docs/specs/pending_approvals.md` · `docs/decisions/DEC-040-额度统一到token一套.md`。
+  ⇒ 那 4 份文件里的**路径写错会被静默放过**（含本仓同日刚改过的 `docs/specs/pending_approvals.md`）。
+  只留 `docs/specs/permission.md`（**逐条实跑核实**：`docs/specs/` 下至今无此文件）。
+
+  ⚠️ **为什么要动手核**：本 Agent 第一遍是**凭印象数的，只报了 3 个**（漏了 `DEC-040`）；
+  逐条 `-e` 重跑才是 **4 个**。⇒ 教训与 `docs/复盘/2026-09-29-结果为空就断言能力不存在.md` **同族**：
+  那条讲「**空结果 / 短列表不能当"不存在"**」，这条是它的**镜像** —— **短列表也不能当"数全了"**。
+  📌 判据（可打印，**跑法已写进清单 ⑨ 段**）：`sed -n '/── ⑨/,/^@file:/p' scripts/doc-links-ignore.txt | grep -o 'docs/[^ $]*' | while read -r f; do [ -e "$f" ] && echo "该删: $f"; done` ⇒ **空**
+  · `bash scripts/check_doc_links.sh` ⇒ **exit=0**（删豁免后**没有**翻出新的真断链）
+
 - 🔴 **给人工审批的"又停下"封顶**（2026-10-05 · `DEC-062` **§六·2 / §九**）—— 业务方裁「**上限 3 轮 · 触顶强制收尾**」。
 
   **改前实况**：`DEC-062`（2026-10-04）把"放行后模型又要求敏感工具"从**孤儿会话**改成**重新入队**（对），

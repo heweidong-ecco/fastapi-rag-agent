@@ -118,12 +118,17 @@ userkey_from_test\.md$       # 2026-09-29 已移出本仓 → Product-external/�
 # ⚠️ **约束（必须遵守，否则这一节会掩盖真问题）**：
 #   1. 只列**当前确实不存在**的目标 —— 不拿它当"路径写错的挡箭牌"
 #   2. 🔴 **文件一旦建好，就【删掉对应的这一行】** —— 留着 = 以后再写错也查不出来
-#      判据（可打印）：`ls docs/specs/token_config.md docs/decisions/DEC-040-*.md`
-^docs/specs/token_config\.md$
-^docs/specs/permission\.md$
-^docs/specs/breaker\.md$
-^docs/specs/pending_approvals\.md$
-^docs/decisions/DEC-040-额度统一到token一套\.md$
+#
+# 🔴 **2026-10-05：上面第 2 条欠了 4 行**（本轮按它的判据逐条实跑才发现的）：
+#    原先这节列了 5 个目标，其中 **4 个早已建好**却**没删** ⇒ 那 4 份文件里的
+#    **路径写错会被静默放过**（含本仓刚改过的 `docs/specs/pending_approvals.md`）。
+#    ⇒ 已删这 4 行，只留 [1] 一个**至今确实不存在**的目标。
+#    ⚠️ **教训与 `docs/复盘/2026-09-29-结果为空就断言能力不存在.md` 同族**（那条讲「**空结果 / 短列表
+#       不能当"不存在"**」；这条是它的镜像：**短列表也不能当"数全了"**）——
+#       判据要**逐条跑**：凭印象数会**数少**（本 Agent 第一遍只报了 3 个，逐条重跑才是 4 个）。
+#       📌 跑法（把 ⑨ 段里所有目标逐个 `-e` 核一遍）：
+#          sed -n '/── ⑨/,/^@file:/p' scripts/doc-links-ignore.txt | grep -o 'docs/[^ $]*' | while read f; do [ -e "$f" ] && echo "该删: $f"; done
+^docs/specs/permission\.md$      # [1] 至今确实不存在（`docs/specs/` 下无 permission.md）
 
 # ══════════════════════════════════════════════════════════════════
 # 二 · 按【来源文件】整份豁免
