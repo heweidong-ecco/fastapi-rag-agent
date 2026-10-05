@@ -58,10 +58,20 @@
 #            📌 **教训(比缺陷本身重要)**:修"某条路径"时,必须回头问
 #               「**同一个形状还有别的入口吗?**」—— 否则下一轮评审还会抓到同型残件。
 #               （本次就是:同一份文件里,同一个形状,连着两版各修掉一条。）
+#   v6 → v7(2026-10-05 · `DEC-076`) 两件事,都是为了**把本门接进 CI**:
+#            ⓐ 新增 `--diff <range>` 模式(**三点**范围)。CI 里没有"暂存区"这个东西,
+#               `--all` 又扫**存量行**(当场命中 2 处良性示例 ⇒ 恒红)且语义不是"本 PR 新增"。
+#               ⇒ 只扫 `git diff <base>...<head>` 的新增行;范围取不到即 exit 2(⛔ 不静默变绿)。
+#            ⓑ 🔴 **修掉结论行的【覆盖度过度声明】** —— 见下方 COV_ENV/COV_DENY 处注释:
+#               原先写死 `覆盖 ①②③`,而没有 `.secret-denylist` 时 ② 整节根本没跑。
+#               这**不是新缺陷**,是与 v5→v6 **同一个形状**的残件(v6 只修了①那条,没修②)。
+#               ⚠️ 它偏偏会在 CI 里现形:CI 的新鲜检出**既没有 .env 也没有 denylist**。
 #
 # 用法:
 #   bash scripts/check_secrets.sh          # 扫 staged 改动(默认,提交前用)
 #   bash scripts/check_secrets.sh --all    # 扫整个工作区
+#   bash scripts/check_secrets.sh --diff origin/main...HEAD
+#                                          # 扫某范围里的新增行(CI 用;**三点**范围)
 #
 set -uo pipefail
 
@@ -69,6 +79,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
 MODE="${1:-staged}"
+DIFF_RANGE="${2:-}"       # 仅 --diff 模式用;缺了 ⇒ 用法错误(exit 2),见下
 ENV_FILE="$REPO_ROOT/.env"
 DENYLIST="$REPO_ROOT/.secret-denylist"
 
@@ -97,6 +108,27 @@ if [ "$MODE" = "--all" ]; then
     fi
     SCAN_TEXT="$ALL_OUT"
     echo "[凭据门] 扫描范围: 整个工作区(全部内容)"
+elif [ "$MODE" = "--diff" ]; then
+    # 🔴 CI 走的一支(2026-10-05 加,`DEC-076`)。范围语法 **<base>...<head>(三点)**。
+    #    · `git diff A...B` 的基取 merge-base(A,B) ⇒ 只含"本分支相对分叉点引入的改动"。
+    #    · ⛔ 两点 `A..B`:在 git diff 里等价于 `git diff A B` = 端点对端点 ——
+    #      主干自己前进的那部分会混成"删除行",语义就不是"本 PR 的新增行"了。
+    #    · ⛔ 基提交取不到(浅克隆 / 范围写错)时 git diff 会失败 ⇒ 下面 exit 2(**响亮的红**)。
+    #      这正是要的:**不许把"没扫成"静默压成"空 diff = 通过"**(v4→v5 的同一条教训)。
+    if [ -z "$DIFF_RANGE" ]; then
+        echo "⛔ 凭据门: **用法错误** —— --diff 需要一个范围参数(例:--diff origin/main...HEAD)"
+        echo "   ⇒ 【不得当作通过】。"
+        exit 2
+    fi
+    DIFF_OUT="$(git diff "$DIFF_RANGE" -U0)"
+    DIFF_RC=$?
+    if [ "$DIFF_RC" -ne 0 ]; then
+        echo "⛔ 凭据门: **扫描没有执行** —— git diff $DIFF_RANGE 失败(exit $DIFF_RC)"
+        echo "   ⇒ 【不得当作通过】。⚠️ 常见原因:范围写错 / 浅克隆里取不到基提交。"
+        exit 2
+    fi
+    SCAN_TEXT="$(printf '%s' "$DIFF_OUT" | grep -E '^\+' | grep -vE '^\+\+\+' || true)"
+    echo "[凭据门] 扫描范围: $DIFF_RANGE 的【新增行】(git diff <range> | grep '^+')"
 else
     DIFF_OUT="$(git diff --cached -U0)"
     DIFF_RC=$?
@@ -146,6 +178,10 @@ echo "  · 自证通过(合成样本被通用模式抓住;该样本非真实凭�
 if [ -z "$SCAN_TEXT" ]; then
     if [ "$MODE" = "--all" ]; then
         echo "[凭据门] 工作区没有可扫内容 —— **扫过了,确实为空**。"
+    elif [ "$MODE" = "--diff" ]; then
+        # ⚠️ 范围里只有删除行是【好事】(删密钥不该拦,v1→v2 的教训);
+        #    但必须说清"git diff 确已成功执行",别让它与"没扫成"混为一谈。
+        echo "[凭据门] 范围 $DIFF_RANGE 没有新增行(或全是删除行) —— **git diff 已确认执行成功($DIFF_RANGE)**,确实没有要扫的内容。"
     else
         echo "[凭据门] staged 区为空(或全是删除行/重命名) —— **git diff 已确认执行成功**,确实没有要提交的内容。"
     fi
@@ -155,6 +191,14 @@ fi
 HITS=0
 FAILED_NAMES=()
 COVERAGE_PARTIAL=0     # 1 = 有节点未执行(仅允许在显式降级时置位；见 ① 段)
+# 🔴 2026-10-05 加(`DEC-076`):**覆盖度必须按【实际执行了哪几节】拼,⛔ 不许写死**。
+#    前科:结论行写死「覆盖 ①②③」,而没有 .secret-denylist 时 ② 整节没跑 ——
+#    实测输出与"三节全跑了"不可区分。⚠️ 而 **CI 恰恰就是"没有 denylist"的那个环境**
+#    (`.secret-denylist` 与 `.env` 一样被 gitignore)⇒ 那句话会在 CI 里变成谎话。
+#    📌 与 v5→v6 同一条教训:修"某条路径"时要问「同一个形状还有别的入口吗」——
+#       这次是"**没跑的那一节也被算进覆盖里**"。
+COV_ENV=0              # 1 = ① 真实凭据那一节确实执行了
+COV_DENY=0             # 1 = ② 存量黑名单那一节确实执行了
 
 # ---- ① 真实凭据:从 .env 现读(报告只写【名字】,绝不写值)----------------------
 #
@@ -173,6 +217,7 @@ NON_SECRET_KEY_RE='(_HOST|_PORT|_DB|_URL|_MODEL_|_CONN|_USER_NAME|_EXPIRE_)'
 SKIPPED_KEYS=()
 
 if [ -f "$ENV_FILE" ]; then
+    COV_ENV=1          # 本节确实执行了 —— 覆盖度按事实记,见结论段
     while IFS='=' read -r key val; do
         case "$key" in ''|\#*) continue ;; esac
         # 非机密键:跳过,但**记下来待会儿打印**(不静默排除)
@@ -218,6 +263,7 @@ fi
 # ---- ② 存量黑名单:历次已泄漏/已作废的字面量 --------------------------------
 # ⚠️ 该文件**必须**在 .gitignore 里 —— 它装的是"绝不能再进仓库"的值本身
 if [ -f "$DENYLIST" ]; then
+    COV_DENY=1         # 本节确实执行了 —— 覆盖度按事实记,见结论段
     while IFS= read -r lit; do
         case "$lit" in ''|\#*) continue ;; esac
         # ⚠️ 同样**不许用 `grep -q`**（理由见第 ① 段那处注释）
@@ -243,9 +289,14 @@ done
 
 # ---- ④ 结论 -----------------------------------------------------------------
 echo ""
+# 🔴 覆盖度**按实际执行拼**（③ 是必跑的真值,①② 看本节有没有跑）。⛔ 不许写死。
+COVERED=""
+if [ "$COV_ENV" -eq 1 ]; then COVERED="${COVERED}①"; fi
+if [ "$COV_DENY" -eq 1 ]; then COVERED="${COVERED}②"; fi
+COVERED="${COVERED}③"
 # ⚠️ 结论必须带【覆盖度】—— 否则"三节跑了两节"与"三节全跑了"在输出上不可区分。
 if [ "$COVERAGE_PARTIAL" -eq 1 ]; then
-    echo "⚠️ 覆盖度: ① 未执行(无 .env) —— 本次结果**仅覆盖 ② ③**"
+    echo "⚠️ 覆盖度: ① 未执行(无 .env) —— 本次结果**仅覆盖 ${COVERED}**"
 fi
 if [ "$HITS" -gt 0 ]; then
     echo "⛔ 凭据门: 未通过 —— $HITS 处命中: ${FAILED_NAMES[*]}"
@@ -255,9 +306,9 @@ if [ "$HITS" -gt 0 ]; then
 fi
 if [ "$COVERAGE_PARTIAL" -eq 1 ]; then
     # ⚠️ 只有【显式降级】才走到这里;把"部分"两个字写在结论行上,不许省。
-    echo "⚠️ 凭据门: 通过 (**部分覆盖** —— ① 真实凭据未检查)"
+    echo "⚠️ 凭据门: 通过 (**部分覆盖** —— 真实凭据未检查,实际只覆盖 ${COVERED})"
     echo "   ⇒ 「通过 ⇐ 执行 ∧ ¬命中」**未完全成立**;这是你显式设了 SECRETS_GATE_ALLOW_NO_ENV=1 的结果。"
     exit 0
 fi
-echo "✅ 凭据门: 通过 —— 0 命中(覆盖 ①②③)"
+echo "✅ 凭据门: 通过 —— 0 命中(覆盖 ${COVERED})"
 exit 0

@@ -76,8 +76,10 @@
 #    而且 ci.yml 里那段"打印生效配置"（2026-10-01 加）**也被当场执行**，不用等推上去才发现写错。
 # 2. **环境变量也从 ci.yml 读**（同一块 step 的 `env:`）—— 不在本脚本里另抄一份。
 #    两份清单必然漂移（本仓已立此立场：「一份内容只在一处」）。
-# 3. **临时目录里没有 `.git`** —— 已核过 `api/` 不下调 git。若将来有测试要 git，
-#    它会**响亮地失败**，而不是静默跳过。
+# 3. **临时目录里没有 `.git`** —— 已核过 `api/` 不下调 git。
+#    ⚠️ **2026-10-05 起这条有了例外**：`DEC-076` 把**凭据门**接进了 ci.yml 的 run 块，
+#    而它要 `git diff <range>`。⇒ 见 §3.5：**显式**把 `GIT_DIR`/`GIT_WORK_TREE` 指回主检出，
+#    并按 `pull_request` 事件给出范围。⛔ 不加 `.git` 进来；也⛔ 不放过这条门。
 # 4. **本脚本不替代 CI** —— 它是**把发现提前**，⛔ 不是"本地绿了就不用看 CI"。
 #
 set -euo pipefail
@@ -240,6 +242,24 @@ rsync -a \
   --exclude='node_modules' --exclude='htmlcov' \
   "${REPO_ROOT}/" "${TMP}/"
 
+# ---------- 3.5 让【依赖 git 的门】在临时副本里也能跑 ----------
+# 🔴 2026-10-05 加（DEC-076）：ci.yml 的 run 块现在含**凭据门**，而它要 `git diff <range>`；
+#    临时副本是靠 rsync 复制的、**没有 `.git`** ⇒ 它会以 exit 2（"扫描没有执行"）红掉。
+#    ⛔ 这不是"绕过门" —— 门判的仍是**真实**的提交范围，只是把 git 指回主检出。
+#    ⛔ 也**不是**「删掉 rsync 的 `--exclude='.git'`」：那每次要复制几十 MB，还会把
+#       `.git/worktrees` 的元数据一起卷进来。
+#    ⚠️ 必须排在下面的横幅【之前】—— 横幅要回显这几个变量，而本脚本是 `set -u`。
+export GIT_DIR="${REPO_ROOT}/.git"
+export GIT_WORK_TREE="${REPO_ROOT}"
+# 让 run 块走【PR 那支】取范围（与 CI 的 pull_request 事件一致）。
+# ⚠️ `origin/main` 是本机视图、可能陈旧 ⇒ 范围只可能【偏大】（多扫 = 更安全），**不会漏扫**。
+# ⚠️ 已知局限：**若你本地正停在 `main` 上**，HEAD == origin/main ⇒ 范围为空、门"没得扫"。
+#    那时它报的 ✅ 是**真的**（确实没有本分支新增行），但**不等于**你刚改的东西被扫过 ——
+#    那些改动还在工作区/暂存区里。⇒ 想在 `main` 上核对未提交的改动，用不带参数的
+#    `bash scripts/check_secrets.sh`（扫暂存区）。
+export GITHUB_EVENT_NAME=pull_request
+export GITHUB_BASE_REF=main
+
 # ---------- 4. 自证 + 横幅 ----------
 [ ! -e "${TMP}/.env" ] || { echo "❌ 临时目录里居然有 .env —— rsync 排除没生效。" >&2; exit 2; }
 
@@ -249,6 +269,9 @@ echo "  仓        : ${REPO_ROOT}"
 echo "  临时副本  : ${TMP}"
 echo "  解释器    : ${PY}  ($("${PY}" -V 2>&1))"
 echo "  ✅ 已对齐 : .env（**已拿掉**）· run 块（**整块照抄 ci.yml**）"
+echo "  🟡 半对齐 : 凭据门（DEC-076）—— 它扫的范围来自**主检出**的 git（见 §3.5）:"
+echo "             GIT_DIR=${GIT_DIR} · 事件=${GITHUB_EVENT_NAME} · 基=${GITHUB_BASE_REF}"
+echo "             ⚠️ 未提交的改动不在此范围内；它比对的是【已提交】的 origin/main...HEAD。"
 if [ "${USE_REDIS}" = "1" ]; then
   echo "             Redis 有得用（复用「${REDIS_CONTAINER}」，端口按 ci.yml 的 6379）"
   echo "  ⛔ 未对齐 : Redis 是【长期容器】—— ⛔ 不是 CI 那种「每次全新空」的一次性 service 容器，"

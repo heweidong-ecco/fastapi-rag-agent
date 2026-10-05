@@ -77,6 +77,13 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
+        with:
+          # 🔴 凭据门用 `<base>...<head>`(**三点**)⇒ 需要 merge-base,而默认浅克隆(depth=1)里
+          #    既没有 `origin/main` 也没有共同祖先 ⇒ `git diff` 直接报错(门 exit 2)。
+          #    ⛔ 不要改成 `git fetch --depth=1 origin main`:depth=1 与 HEAD **无共同祖先**。
+          #    ⚠️ 只影响检出;⛔ 不动 setup-python 那套 pip 缓存(它是按 requirements.txt 键的)。
+          #    代价可忽略:本仓实测 130 commit / 376 文件 / `size-pack: 0`。
+          fetch-depth: 0
 
       - name: 安装 Python
         uses: actions/setup-python@v5
@@ -128,6 +135,12 @@ jobs:
           POSTGRES_PASSWORD: ci-dummy-not-a-real-key
           JWT_SECRET_KEY: ci-dummy-not-a-real-key
           LOGIN_PASSWORD: ci-dummy-not-a-real-key
+          # 🔴 2026-10-05 加（`DEC-076`）：CI 的新鲜检出里【没有 .env】也【没有 .secret-denylist】
+          #   （两者都被 gitignore）⇒ 凭据门只会跑【③ 通用模式】那一节。
+          #   显式降级为【部分覆盖】：结论行会按实际执行写明覆盖了哪几节（见 `COV_ENV`/`COV_DENY`）。
+          #   ⛔ 不设它 ⇒ 门会以 exit 2（"扫描未完整执行"）红掉 —— 那正是它的设计（不许假装全查过）。
+          #   ⚠️ 这个 env: 块被 scripts/ci-local.sh **逐字读取**注入 ⇒ 本地与 CI 自动同步,不会漂移。
+          SECRETS_GATE_ALLOW_NO_ENV: "1"
         run: |
           # ⭐ 先打印【本次实际生效的配置】。
           #   2026-10-01 那次 CI 红（`assert 0.003 >= 0.008`），我是靠反推
@@ -166,4 +179,25 @@ jobs:
           PY_ROUTE=python
           if [ -x venv/bin/python ]; then PY_ROUTE=venv/bin/python; fi
           "$PY_ROUTE" scripts/check_route_auth.py --baseline
+
+          # ⭐ 凭据门进 CI（2026-10-05 加，`DEC-076`）—— 判据是 exit 0；命中 exit 1；
+          #   ⛔ 无法判定 / 没扫成 = exit 2（**2 不许当成通过**）。
+          #   范围【分事件】：push 到主干只可能是合并（主干有分支保护）⇒ `HEAD~1...HEAD`
+          #   无论 squash 还是 merge，都**正好等于那个 PR 的全部改动**。
+          #   ⛔ 别用固定的 `origin/main`：push 到 main 时它已被更新成 == HEAD ⇒ 范围为空 = 假绿。
+          #   ⛔ 本块【不许写 GitHub 表达式】—— scripts/ci-local.sh 要**逐字执行**这块 run，
+          #      表达式在那条路上不会被求值。⚠️ 本文件里那个「双大括号」的字符组合**计数恒为 0**
+          #      —— 连注释里都不许写它，否则判据 `grep -c` 会从 0 变成 1，把本判据自己搅浑。
+          SECRETS_RANGE="HEAD~1...HEAD"
+          if [ "${GITHUB_EVENT_NAME:-}" = "pull_request" ] && [ -n "${GITHUB_BASE_REF:-}" ]; then
+            SECRETS_RANGE="origin/${GITHUB_BASE_REF}...HEAD"
+          fi
+          echo "[凭据门] 范围 = ${SECRETS_RANGE}"
+          bash scripts/check_secrets.sh --diff "${SECRETS_RANGE}"
+
+          # ⭐ 文档两道门（2026-10-05 加，`DEC-076`）—— 纯 bash + 系统 python3，无网、无需凭据。
+          #   判据是**退出码 + 那一行 ✅**，⛔ 不是"命令跑了"（本仓纪律：拿动作成功当结果正确）。
+          bash scripts/check_doc_links.sh
+          bash scripts/check_doc_orphans.sh
+
           pytest api/ -m "not integration and not needs_db" -v

@@ -1774,6 +1774,52 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- 🔴 **把「凭据门 / 断链门 / 孤儿门」接进 CI** + 凭据门新增 `--diff` 模式（2026-10-05 · `DEC-076`）——
+  收掉「**门挂在别处**」的又一例：四道门全住在 `.claude/hooks/pre-commit-gates.py` 里，
+  **`git commit --no-verify` 就能整条绕过**，而 `DEC-074` 当时只把**路由鉴权门**接进了 CI。
+
+  **为什么算 `Fixed` 而不是 `Added`**：这不是加功能，是**接线**（门早就在，只是没接到 CI 上），
+  外加修掉一句**与事实不符的声明**（覆盖度过度声明 · 见下）。
+
+  **① 三道门进 `ci.yml`** —— 追加进**已有的 `offline-tests` 的 `run:` 块**，排在 `pytest` **之前**。
+  ⛔ 不新建 job：两个 job 的**名字就是分支保护的必需检查**，改 `run:` 块不碰分支保护（`DEC-074` 同法）。
+  检出加 `fetch-depth: 0`（三点范围要 merge-base；默认浅克隆取不到 —— 本仓仅 126 commit，代价可忽略）。
+
+  **② 凭据门新增 `--diff <base>...<head>`** —— CI 只扫**本 PR 的新增行**。
+  ⛔ 不用 `--all`：它扫**存量行**，**当场命中 2 处良性示例**
+  （`docs/说明/部署.md:45` 的 `sk-xxxx` 占位符 · `api/schemas.py:74,80` 的 JWT 示例串）⇒ **恒红**；
+  且它的语义根本不是"本 PR 引入了什么"。⚠️ 三点而非两点：`git diff A..B` 是**端点对端点**。
+  范围取不到 ⇒ **exit 2**（⛔ 不许静默压成"空 diff = 通过"）。
+
+  **③ 修掉覆盖度过度声明** —— 结论行原先**写死** `覆盖 ①②③`，而**没有 `.secret-denylist` 时 ② 整节没跑**。
+  ⚠️ **这不是新缺陷，是 v5→v6 的同型残件**（v6 修了 ① 那条，没回头问「同一个形状还有别的入口吗」）。
+  🔴 而 **CI 恰恰是"两样都没有"的那个环境** ⇒ 那句话会在 CI 里变成谎话。
+  现在按**实际执行**拼，CI 里的结论行是 **`覆盖 ③`**。
+
+  🔴 **残留边界（⛔ 不许读成"全好了"）**：`.env` 与 `.secret-denylist` **都被 gitignore**、进不了仓
+  ⇒ **CI 的凭据门实际只跑第 ③ 节（通用模式）**。防护语义是「**PR 的新增行里没有明显密钥形状**」，
+  ⛔ **不是**「和这个仓库的真实凭据逐字比过」。
+
+  📄 决策/备选/反悔成本/边界全表 ⇒ `docs/decisions/DEC-076-三门进CI与凭据门diff模式.md`
+
+  📌 判据（可打印 —— ⚠️ **下面每条都实跑过**）：
+  ```bash
+  # ① 接线确实在 CI 里（不是在 hook 里）
+  grep -n 'check_secrets.sh --diff\|check_doc_links.sh\|check_doc_orphans.sh\|fetch-depth' .github/workflows/ci.yml
+  grep -n 'SECRETS_RANGE\|SECRETS_GATE_ALLOW_NO_ENV' .github/workflows/ci.yml
+  grep -c '\${{' .github/workflows/ci.yml          # ⇒ 0 —— run 块内不许有 GH 表达式（ci-local 要逐字执行）
+  # ② 凭据门 17 条用例全绿（含负控 T12：范围内合成泄漏 ⇒ exit 1；T17：CI 形状 ⇒ 覆盖 ③）
+  bash scripts/test_check_secrets.sh; echo "rc=$?"   # ⇒ 17 通过 / 0 失败, rc=0
+  # ③ 两道文档门：绿 + 【负控】（⚠️ 负控文件必须 `git add` —— 两门都按【已跟踪】的文件枚举）
+  #    造 `docs/zzz-负控-删我.md`(断链) 与 `docs/说明/zzz-负控-删我.md`(孤儿) ⇒ 两门各 exit 1 ⇒ 删掉回 0
+  # ④ ci-local 逐字跑整块 run ⇒ 日志里能看到三道门 + 602 passed
+  bash scripts/ci-local.sh --no-redis 2>&1 | grep -n '凭据门\|没有真断链\|全部有归属'
+  ```
+
+  ⚠️ **跑出来才知道的（⛔ 读代码看不出来）**：`ci-local.sh` 里我第一版把 `` `DEC-076` `` 写在**双引号内**
+  ⇒ 被当**命令替换**执行（`DEC-076: command not found`），且 `${GIT_DIR}` 在 `set -u` 下 unbound
+  ⇒ **脚本中途死掉，而外层因末尾有 `echo` 报了 `rc=0`** —— 正是本仓 2026-10-01 记过的那条。
+
 - 🔴 **把 `DEC-074`/`DEC-075` 有意留下的 4 条遗留【登记进待办总表】+ `ROADMAP` 补齐 `DEC-057`–`075`**（2026-10-05）——
   收掉「**改动做完了、账没记**」这一类：东西在 `DEC` 里写着，**但没人会去翻 DEC**。
 
