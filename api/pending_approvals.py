@@ -23,9 +23,34 @@ import time
 _lock = threading.Lock()
 _pending: dict[str, dict] = {}
 
+# 一次会话允许的人工审批轮次上限（`DEC-062 §六·2` · 业务方 2026-10-05 裁「上限 3 轮」）。
+# ⚙️ 可用 env `MAX_APPROVAL_ROUNDS` 覆盖 —— 见 `approval_round_cap()`。
+_DEFAULT_MAX_APPROVAL_ROUNDS = 3
+
+
+def approval_round_cap() -> int:
+    """一次会话允许的**人工审批轮次上限**（`DEC-062 §六·2`，默认 **3**）。
+
+    🔴 **为什么要有它**：放行后模型**又**要求敏感工具时会**重新入队**（`B5/B6` 修正，对），
+       但**没有任何上限** ⇒ 模型可以无限要求、人工就得无限批（实测 3 次收敛，但**没有任何机制阻止 30 次**）。
+
+    ⚙️ `MAX_APPROVAL_ROUNDS`（env）可调；**非法值回退到默认**（⛔ 不抛 —— 启动时为一个数值配置炸掉服务不值当，
+       与 `DEC-051` 那个"名字写错 ⇒ 静默失效"不同：这里**退化成的是保守的默认值而非零行为**）。
+    """
+    import os
+    raw = os.getenv("MAX_APPROVAL_ROUNDS")
+    if raw is None:
+        return _DEFAULT_MAX_APPROVAL_ROUNDS
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        return _DEFAULT_MAX_APPROVAL_ROUNDS
+    return n if n >= 1 else _DEFAULT_MAX_APPROVAL_ROUNDS
+
 
 def register(session_key: str, user_name: str, tool_calls: list, *,
-             raw_thread_id: str | None = None, graph: str = "agent_graph") -> None:
+             raw_thread_id: str | None = None, graph: str = "agent_graph",
+             rounds: int = 1) -> None:
     """登记一个卡在审批的会话。同一键重复登记 ⇒ **覆盖**（⛔ 不产生两条）。
 
     🔴 **2026-10-03（`DEC-056` 丙段）**：第一个形参由「裸 `thread_id`」改成**会话键**
@@ -45,6 +70,10 @@ def register(session_key: str, user_name: str, tool_calls: list, *,
          而 `/agent/memory_chat` 走的是 `checkpointer_agent` ⇒ 光给它加审批门，
          **那个会话会永远停在审批点、没人放行**（比不加门还糟）。
          ⚠️ 默认值 `"agent_graph"` 只是**兼容老调用点**；新调用点**一律显式写**。
+
+    `rounds`：这条会话**第几轮**停在审批点（首次 = 1，每次"放行后又停"由 `/agent/approve` +1）。
+      🔴 **必须是显式计数的**（`DEC-062 §六·2`）：`/agent/approve` 靠它判**到了上限没有**，
+         到上限就**不再入队**、改为强制收尾 —— ⛔ 否则模型可以无限要求敏感工具。
     """
     with _lock:
         _pending[session_key] = {
@@ -53,6 +82,7 @@ def register(session_key: str, user_name: str, tool_calls: list, *,
             "user_name": user_name,
             "graph": graph,
             "tool_calls": list(tool_calls or []),
+            "rounds": rounds,
             "since": time.time(),
         }
 
