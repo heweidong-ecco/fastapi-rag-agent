@@ -48,6 +48,7 @@ AUTH_NAMES = {
     "get_current_user_jwt",      # JWT
     "require_admin",             # 管理员
     "check_budget",              # 预算检查（它内部就依赖身份）
+    "require_ws_user",           # 🆕 WebSocket 首帧认证（DEC-075）
 }
 
 
@@ -157,11 +158,13 @@ def main() -> int:
             "# 🔴 2026-10-04（DEC-065）后本表只剩 /api/v1/（main.py 根路径，一个 ping）；\n"
             "#    表里原先指的 S1/S2/S14 三条【已闭合】⇒ ⛔ 别再去表里找它们。\n"
             "#    这一条的建议是【留公开】，但仍未正式裁定 ⇒ 见 docs/specs/api_v1.md 末节。\n"
-            "# 🔴 2026-10-05（DEC-074）起本表**含 WebSocket** —— 原先这里只有 HTTP，\n"
-            "#    于是 /api/v1/ws/agent（真花钱、真没鉴权）【一条都扫不到】。现补上：\n"
-            "#      /api/v1/ws/agent  —— DEC-041 遗留·1：整条无鉴权，身份写死 \"unknown\"；\n"
-            "#                            自带 B8（按连接）+ B11（全站）两道闸\n"
-            "#      /api/v1/ws/test   —— 纯回声（收什么发什么），不调 LLM、不查库\n"
+            "# 🔴 2026-10-05（DEC-074）本表**开始含 WebSocket** —— 原先这里只有 HTTP，\n"
+            "#    于是 /api/v1/ws/agent（真花钱、真没鉴权）【一条都扫不到】。当时补上后为 3 条。\n"
+            "# 🟢 2026-10-05（DEC-075）那 **2 条 WS 已【真修好】**（不是挪走）：\n"
+            "#      /api/v1/ws/agent —— 首帧认证（deps.require_ws_user）；顺带把身份透传给记账，\n"
+            "#                          账不再记在写死的 \"unknown\" 头上\n"
+            "#      /api/v1/ws/test  —— 纯回声，同样挂上了 require_ws_user（不花钱 ≠ 该匿名）\n"
+            "#    ⇒ 现为 **1 条**。⛔ 那两条**别再加回这里** —— 加回来等于把它们重新变成匿名可达。\n"
             "# ⛔ 变多 = 新引入了没鉴权的路由 ⇒ 该拦；变少 = 修好了 ⇒ 重新生成基线。\n"
             + "\n".join(sorted(paths)) + "\n",
             encoding="utf-8",

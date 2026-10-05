@@ -134,7 +134,7 @@
 ```
 
 **配套脚本**（不在 `.claude/` 里，在 `scripts/`）：
-`check_route_auth.py`（无鉴权路由清单 + 基线比对，**现也含 WebSocket**）· `route-auth-baseline.txt`（基线，**现为 3 条** —— 见下）
+`check_route_auth.py`（无鉴权路由清单 + 基线比对，**现也含 WebSocket**）· `route-auth-baseline.txt`（基线，**现为 1 条** —— 见下）
 
 > 🔴 **2026-10-04（`DEC-065`）基线由 10 条降到 1 条** —— `S1`/`S2`/`S14` 那 9 条**已收口**
 > （5 条加 `require_admin` · 4 条**端点删除**）。**仅剩 `/api/v1/`**（`main.py` 的根路径，
@@ -143,7 +143,11 @@
 > `/api/v1/ws/agent` 与 `/api/v1/ws/test` **一直都在**，只是脚本此前**只认 `APIRoute`、
 > 扫不到 WS**（`DEC-066` 记过这条盲区，但只记在文字里）。
 > ⇒ 现在 WS 也进清单，标签是 **`WS`**。
-> 📌 判据（可打印）：`venv/bin/python scripts/check_route_auth.py` ⇒ **无鉴权路由 3 条（HTTP 1 · WS 2）** ·
+> 🟢 **2026-10-05（`DEC-075`）基线 3 → 1 条** —— ⛔ **不是把债藏起来了，是真修好了**：
+> 那 2 条 WS 都挂上了 `deps.require_ws_user`（**首帧认证**）。
+> ⚠️ 判据别只看条数变少 —— 跑 `venv/bin/python scripts/check_route_auth.py` 直接看
+> **WS 那两行是否消失**（消失 = 已鉴权；如果只是从清单里被删掉，脚本会照样报出来）。
+> 📌 判据（可打印）：`venv/bin/python scripts/check_route_auth.py` ⇒ **无鉴权路由 1 条（HTTP 1 · WS 0）** ·
 > `venv/bin/python scripts/check_route_auth.py --baseline` ⇒ **与基线一致**。
 
 > 🔴 **`.claude/` 必须入库**（本仓实测：**没有被 `.gitignore` 挡**）。

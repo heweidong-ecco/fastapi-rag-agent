@@ -28,7 +28,7 @@ import importlib.util
 from pathlib import Path
 
 import pytest
-from fastapi import APIRouter
+from fastapi import APIRouter, WebSocket
 
 _p = Path(__file__).resolve().parent.parent / "scripts" / "check_route_auth.py"
 _spec = importlib.util.spec_from_file_location("_check_route_auth", _p)
@@ -44,30 +44,61 @@ def _scan(routes, exempt=frozenset()):
 # ---------------------------------------------------------------- ① 真 app
 
 def test_scanner_sees_websocket_routes():
-    """WS 路由必须出现在「无鉴权」清单里 —— 这正是改动前它看不见的那两条。"""
+    """扫描口径必须覆盖 WS —— 用**合成**路由钉死，⛔ 不拿真 app 那两条当样本。
+
+    ⚠️ **为什么不用真 app 当样本了**（2026-10-05 · `DEC-075`）：
+    2026-10-04 写这条时，`/api/v1/ws/agent` 与 `/api/v1/ws/test` **都是无鉴权的**，
+    于是「扫描器看得见 WS」与「它俩在清单里」恰好是同一件事。
+    ✅ 现在它俩**已经有鉴权**（`require_ws_user`）⇒ **样本没了**。
+
+    🔴 若继续拿真 app 当样本，这条会**逼着人把鉴权改回去才能绿** ——
+    测试在保护 bug（本仓 `DEC-065` 记过同型：留着一个永远绿/反向的用例比删掉更坏）。
+    ⇒ 样本换成**合成**路由；真 app 那条改成断言**相反**的事实（见下一条）。
+    """
+    api = APIRouter()
+
+    @api.websocket("/ws-synth-no-auth")
+    async def _ws_no_auth(websocket: WebSocket):  # pragma: no cover —— 只建路由，不连
+        pass
+
+    rows, _, n_ws = _scan(api.routes, frozenset())
+    assert n_ws == 1, f"合成 WS 路由没被收进 ws 桶（n_ws={n_ws}）"
+    assert ("WS", "/ws-synth-no-auth") in rows, "无鉴权的 WS 路由没进清单"
+
+
+def test_real_websocket_routes_are_protected_now():
+    """🔴 真 app 上那两条 WS **必须都带鉴权** ⇒ 一条都不该出现在「无鉴权」清单里。
+
+    与 `api/test_ws_auth.py::test_both_ws_routes_carry_the_auth_dependency` **互补**：
+    那条钉「路由上挂的是不是 `require_ws_user` 这一条依赖」，
+    这条钉「**扫描器**也认账」—— 两条一起才挡得住"挂了但名单里没登记"的漂移。
+    """
     from main import MIDDLEWARE_EXEMPT_PATHS, app
 
-    rows, n_http, n_ws = _scan(app.routes, MIDDLEWARE_EXEMPT_PATHS)
-    paths = {p for _, p in rows}
-
+    rows, _, n_ws = _scan(app.routes, MIDDLEWARE_EXEMPT_PATHS)
     assert n_ws == 2, f"真实 WS 路由数变了（现在是 {n_ws}）—— 请人工核一遍再改这条"
-    for p in ("/api/v1/ws/agent", "/api/v1/ws/test"):
-        assert p in paths, (
-            f"{p} 没进「无鉴权」清单 —— 要么给它加鉴权依赖，"
-            f"要么它已经带鉴权了（那就该从清单里消失，⛔ 不该是「扫不到」）"
-        )
+
+    ws_rows = [p for _, p in rows if p.startswith("/api/v1/ws/")]
+    assert ws_rows == [], (
+        f"这两条 WS 又变成无鉴权了：{ws_rows} —— 它们必须挂着 `require_ws_user`（`DEC-075`）"
+    )
 
 
 def test_websocket_rows_are_labelled_as_websocket():
-    """WS 行的方法标签必须是 `WS` —— 否则读清单的人会以为它是个 HTTP 端点。"""
-    from main import MIDDLEWARE_EXEMPT_PATHS, app
+    """WS 行的方法标签必须是 `WS` —— 标 `GET` 会让读清单的人以为它是个 HTTP 端点。"""
+    api = APIRouter()
 
-    rows, _, _ = _scan(app.routes, MIDDLEWARE_EXEMPT_PATHS)
-    ws_rows = [(m, p) for m, p in rows if p.startswith("/api/v1/ws/")]
-    assert ws_rows, "一条 WS 行都没有 —— 本文件的其余断言会空转"
-    assert all(m == "WS" for m, _ in ws_rows), (
-        f"WS 行的方法标签不是 WS: {ws_rows}"
-    )
+    @api.websocket("/ws-synth")
+    async def _ws(websocket: WebSocket):  # pragma: no cover —— 只建路由，不连
+        pass
+
+    @api.get("/http-synth")
+    async def _http():  # pragma: no cover —— 只建路由，不请求
+        return {}
+
+    rows, _, _ = _scan(api.routes, frozenset())
+    assert ("WS", "/ws-synth") in rows, f"WS 行标签不对：{rows}"
+    assert ("GET", "/http-synth") in rows, "HTTP 那半也要照旧带动词（别为了 WS 把它改坏）"
 
 
 def test_http_scan_still_works_after_the_change():
