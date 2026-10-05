@@ -1832,6 +1832,54 @@ All notable changes to this project will be documented in this file.
   · 全量 `bash scripts/ci-local.sh` ⇒ **544 passed / 3 skipped / 31 deselected**（改前 540）
   📄 `docs/specs/pending_approvals.md` · `docs/specs/api_v1_agent.md` · `docs/契约/环境变量.md` · `docs/契约/接口契约.md`
 
+- 🔴 **关掉 RAG 侧【不记账】的 LLM 通路**（2026-10-05 · `DEC-073`）—— **与 `DEC-072` 同型，只是换到 RAG 那一半**：`/rag/search` 与 `/rag/rewrite_search` **改前零闸、零记账**，却**默认就真调 LLM**。
+
+  **改前实况**（`grep -c 'record_usage\|record_from_response'`）：
+  `api_v1_rag.py` / `rag_pipeline.py` / `answer_with_citations.py` **⇒ 0 / 0 / 0**；
+  `api_v1_rag.py` 里的预算闸**只有 3 处**（`:23` import · `/rag/stream_search` · `/ws/agent`）
+  ⇒ 这两条链**单请求无上限**，且端点上那两道闸读的计数器**它们从不写** ⇒ **对它们等于不存在**。
+
+  **做了什么**（业务方裁「**非流式三条全做**」）：
+  · **身份透传** —— `rewrite_query` / `expand_query` / `generate_answer_with_citations`
+    各加**必填** keyword `user_name`（⛔ **不给默认值**：给了就是「静默记成 `unknown`」= 假记账）；
+    4 个调用点各传 `user_name=user_id`（复用 `DEC-056` 已有的必填 `user_id`，⛔ 不新拉透传链）；
+  · **补闸** —— `/rag/search` 与 `/rag/rewrite_search` 各加 **B8 + B11 两道**
+    （`unified_search` `:534`/`:538` · `rewrite_search_api` `:480`/`:484`，各带 `thread_id: str = "default"`）；
+  · **记真账** —— 改写/扩展走 `record_usage`（`:75` / `:175`），答案生成走 `record_from_response`
+    （`answer_with_citations.py:68` · `rag_pipeline.py:207`）。
+
+  🔴 **两处「用错入口就静默不记」**（本轮的两条主要陷阱）：
+  · `query_rewriter` 是**全仓唯一**用**裸 `openai.OpenAI`** 的地方 ⇒ 它的响应只有 **`.usage`**、
+    **没有 `usage_metadata`** ⇒ **必须**走 `record_usage`；用 `record_from_response`（判据是 `usage_metadata`）
+    **恒返回 `False`** —— **看起来"接了记账"、测试还能全绿，账本依旧少一笔**。
+  · 答案生成原有两条分支都是 `PROMPT | llm | StrOutputParser()` ——
+    `StrOutputParser` 把 `AIMessage` **剥成 `str`** ⇒ `usage_metadata` **随之丢光** ⇒ 同样静默跳过。
+    ⇒ 两条分支都改成**直调 `llm.invoke(messages)`**，取消息本体。
+
+  ⚠️ **一处【行为变更】**：这两条端点**从无闸变成有闸** —— 超预算的请求现在会**被拒**（`QUOTA_EXCEEDED`；
+  与本仓 fail-open 取向一致：**DB 挂了仍放行**）。⚠️ **签名是必填** ⇒ 漏传的调用方**当场 `TypeError`**。
+
+  ⚠️ **范围要说准（⛔ 别读成"RAG 侧全记上了"）**：`/rag/stream_search` **仍然不记账** ——
+  `llm_factory` 没开 `stream_usage` ⇒ `astream` **不挂 `usage_metadata`**；要记得**顺带开 `stream_usage`**
+  = **改流式帧形态**，与"补记账"是两件事，**单独一轮**。`/rag/hybrid_search` · `/rag/rerank_search`
+  **只跑本地 embedding / Cross-Encoder**，不花 LLM 钱，⛔ **没给它们加闸**。
+
+  ⭐ **自证救回一条【假守卫】**：`test_no_llm_usage_is_swallowed_by_string_output_parser` 第一版挂在
+  「先认出 LLM 调用」之上 —— 而改坏后的形状 `(… | llm | StrOutputParser()).invoke(…)` 是个 **`BinOp`**，
+  识别函数**认不出它** ⇒ 那函数没进循环 ⇒ 断言**空转通过**（`DEC-066` 的**守卫形状盲区**）。
+  ⇒ 已改成「**这份文件里不许出现 `StrOutputParser()` 调用**」，**不依赖任何前置识别**。
+  ⚠️ 它**写在实现之后**、第一遍就绿 —— **只有自证能发现它**。
+
+  **判据（可打印）**：
+  ```bash
+  python -m pytest api/test_rag_billing_wiring.py -q              # ⇒ 19 passed
+  bash scripts/ci-local.sh                                         # ⇒ 563 passed, 3 skipped, 31 deselected, 0 failed
+  # ⚠️ 基线两个数别混：开工时 origin/main(3f37e28) 是 540，同日 #95 合入后(503fa19)是 544
+  #    ⇒ 563 − 544 = +19 = 恰为本轮新增用例数（零回归）
+  # 证伪（四条守卫逐条实测能红，做法见 DEC-073 §八）：把 StrOutputParser 接回去 / 换错记账入口 /
+  #   摘掉 unified_search 的 B8 / 改掉 expand_query 的记账名 ⇒ 各 1 failed
+  ```
+
 - 🔴 **关掉三条【不记账】的 LLM 通路**（2026-10-04 · `DEC-072`）—— `agent_graph.py`（`/agent/langgraph_chat`）· `agent_checkpointer.py`（`/agent/memory_chat`）· `agent_graph_advanced_learning.py`（`/agent/advanced_chat`），**共 9 个 LLM 调用点**。
 
   **改前实况**：这三张图**既不查预算、也不记账** ——

@@ -2,7 +2,11 @@
 带引用溯源的答案生成模块
 """
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import StrOutputParser
+
+# 🔴 2026-10-05 记账入口（`DEC-073`）。⚠️ 本模块**原先**还 import 了 `StrOutputParser` ——
+#    它把 `AIMessage` 剥成 `str`，`usage_metadata`（`record_from_response` 的唯一判据，
+#    见 `DEC-072`）随之丢光 ⇒ 记账静默收不到数。已删。
+from token_tracker import record_from_response
 
 CITATION_PROMPT = ChatPromptTemplate.from_messages([
     ("system", """你是一个严谨的问答助手。请严格根据以下上下文回答用户的问题。
@@ -23,15 +27,21 @@ CITATION_PROMPT = ChatPromptTemplate.from_messages([
     ("user", "{question}")
 ])
 
-def generate_answer_with_citations(contexts: list[dict], question: str, llm) -> tuple[str, list[dict]]:
+def generate_answer_with_citations(
+    contexts: list[dict], question: str, llm, *,
+    user_name: str, thread_id: str = "default",
+) -> tuple[str, list[dict]]:
     """
     生成带引用标注的答案，并返回来源信息列表。
-    
+
     参数:
         contexts: 检索到的文档块列表，每个包含 id, content, source 等字段
         question: 用户问题
         llm: 语言模型实例
-    
+        user_name: 🔴 **必填** —— 记账归属（`DEC-073`）。⛔ 不给默认值：
+            给了就等于允许「静默记成 `"unknown"`」= 假记账（`DEC-072` 明文的反例）。
+        thread_id: 会话标识（B8 会话级上限用）
+
     返回:
         (带引用标注的答案文本, 来源信息列表)
     """
@@ -49,10 +59,15 @@ def generate_answer_with_citations(contexts: list[dict], question: str, llm) -> 
     context_text = "\n\n".join(context_text_parts)
     
     # 调用 LLM 生成
-    chain = CITATION_PROMPT | llm | StrOutputParser()
-    answer = chain.invoke({
-        "context": context_text,
-        "question": question
-    })
-    
-    return answer, sources
+    # 🔴 2026-10-05（`DEC-073`）：⛔ **不再接 `StrOutputParser`** —— 把 `AIMessage` 剥成 `str`
+    #    会让 `usage_metadata` 丢光，`record_from_response` 随即**静默跳过**（一笔不记）。
+    #    改为直调 `invoke`（与 `rag_pipeline.search_async` 的普通生成分支同款）。
+    messages = CITATION_PROMPT.format_messages(context=context_text, question=question)
+    response = llm.invoke(messages)
+    # 紧贴调用之后记账：钱已经花了，⛔ 不放在 return 之前靠"顺序碰巧"。
+    record_from_response(
+        llm, response, "answer_generation",
+        user_name=user_name, thread_id=thread_id,
+    )
+
+    return response.content, sources

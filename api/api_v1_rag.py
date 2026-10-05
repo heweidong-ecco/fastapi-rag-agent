@@ -469,9 +469,22 @@ async def rerank_search_api(
 @router.post("/rag/rewrite_search")
 async def rewrite_search_api(
     req: QuestionRequest,
+    thread_id: str = "default",       # 🔴 2026-10-05 加（B8 需要会话维度）—— 同 `/rag/stream_search`
     user_name: str = Depends(get_current_user_hybrid),
 ):
     """带查询改写的混合检索（**只在该用户自己的文档内**）"""
+    # 🔴🔴 2026-10-05（`DEC-073`）：本端点**此前零闸** —— 而它**无条件**真调 LLM
+    #     （`hybrid_search_with_rewrite` 里改写 + 扩展各一次）⇒
+    #     ① 单条请求**无上限** ② B8 会话上限 / B11 全站熔断读的计数器它从不写 ⇒ 对它等于不存在。
+    #     ⚠️ **两道都要**，与 `/rag/stream_search` 的现状并列（B8 按会话 / B11 按全站，⛔ 别合并）。
+    ok, why = check_session_token_budget(user_name, thread_id)   # B8
+    if not ok:
+        raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
+
+    ok, why = circuit(global_key())                              # B11
+    if not ok:
+        raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
+
     docs = hybrid_search_with_rewrite(req.question, req.top_k, user_id=user_name)
     return {
         "question": req.question,
@@ -500,6 +513,7 @@ PIPELINE_FACTORIES = {
 async def unified_search(
     req: QuestionRequest,
     mode: SearchMode = "accurate_norerank",
+    thread_id: str = "default",       # 🔴 2026-10-05 加（B8 需要会话维度）—— 同 `/rag/stream_search`
     user_name: str = Depends(get_current_user_hybrid),
 ):
     """
@@ -513,6 +527,18 @@ async def unified_search(
 
     ⚠️ `mode` 是**受限枚举**，取值只有上面四个；传别的值会得到 **422**，而不是被静默兜底。
     """
+    # 🔴🔴 2026-10-05（`DEC-073`）：本端点**此前零闸** —— 而默认 mode `accurate_norerank`
+    #     **本身就开着改写**（真调 LLM）⇒ 单条请求无上限、账本也收不到数据。
+    #     ⚠️ 位置在 `PIPELINE_FACTORIES[mode]()` **之前** —— 那是本端点第一处真花钱的地方之前。
+    #     ⚠️ **两道都要**（B8 按会话 / B11 按全站），同 `/rag/stream_search` 的现状。
+    ok, why = check_session_token_budget(user_name, thread_id)   # B8
+    if not ok:
+        raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
+
+    ok, why = circuit(global_key())                              # B11
+    if not ok:
+        raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
+
     # 🔴 2026-09-17 修：此处原先是一个**裸 `else`** —— 任何拼错的 mode（如 `fst`）
     # 都不报错，而是**静默换成 `accurate_norerank`**（多跑一次查询改写 = 多花钱、多延迟）。
     # 现在：`mode` 声明为 `SearchMode`（`Literal`），非法值由 FastAPI 在进入函数体之前挡成 422；

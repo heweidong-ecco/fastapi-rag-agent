@@ -215,8 +215,10 @@ def offline_retrieval(monkeypatch):
     monkeypatch.setattr(rag_pipeline, "get_embedding", lambda text, model=None: [0.0] * 1536)
     monkeypatch.setattr(rag_pipeline, "search_similar_async", fake_similar)
     monkeypatch.setattr(rag_pipeline, "bm25_search_async", fake_bm25)
-    monkeypatch.setattr(rag_pipeline, "rewrite_query", lambda q, h=None: q)
-    monkeypatch.setattr(rag_pipeline, "expand_query", lambda q, num_variants=3: [q])
+    # ⚠️ 2026-10-05（`DEC-073`）：两个桩必须吃下 `user_name` —— 真函数的签名是
+    #    `(*, user_name: str)`（必填 keyword）。⛔ 别把真签名改回去来迁就桩。
+    monkeypatch.setattr(rag_pipeline, "rewrite_query", lambda q, h=None, *, user_name: q)
+    monkeypatch.setattr(rag_pipeline, "expand_query", lambda q, num_variants=3, *, user_name: [q])
     monkeypatch.setattr(rag_pipeline, "rerank_async", fake_rerank)
 
 
