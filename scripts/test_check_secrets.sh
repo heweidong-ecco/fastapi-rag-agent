@@ -16,6 +16,26 @@
 #
 # 用法: bash scripts/test_check_secrets.sh
 #   exit 0 = 全部通过 · exit 1 = 有用例失败
+#
+# ──────────────────────────────────────────────────────────────────
+# 🔴 2026-10-05 加（批 4 · `DEC-080`）：**先摘掉调用方可能带进来的降级开关**
+#
+#     unset SECRETS_GATE_ALLOW_NO_ENV
+#
+# ⚠️ **实测踩出来的**（把本文件接进 CI 的那一步）：
+#    `ci.yml` 的 env 段里有 `SECRETS_GATE_ALLOW_NO_ENV: "1"` —— CI 的新鲜检出**没有 `.env`**
+#    （gitignore），不显式降级的话凭据门自己就以 exit 2 红掉；`ci-local.sh` 又**逐字**把那段
+#    env 注进它执行的环境。⇒ 本文件在**同一个环境里**被调用时，那条开关会顺着环境进来，
+#    把 **T7「无 .env ⇒ 不得当作通过」直接洗成 exit 0**。
+#    实测两个结果：`本机 17 通过 / 0 失败` ↔ `ci-local 16 通过 / 1 失败`（红的正是 T7）。
+#
+# ⇒ **用例必须自足**：默认环境 = 调用方不额外给东西；**需要降级的用例自己显式设**
+#    （T8 / T17 就是这么写的，⛔ 别改成靠环境）。
+#    ⚠️ 这与文件头那句「为什么用 shim + 临时仓根」是同一条要求：**别让外部环境决定结论**。
+# 📌 判据（可打印）：`SECRETS_GATE_ALLOW_NO_ENV=1 bash scripts/test_check_secrets.sh`
+#    ⇒ 与本文件不带该变量时**结果相同**（都 17 通过 / 0 失败）。
+unset SECRETS_GATE_ALLOW_NO_ENV
+
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -70,6 +90,44 @@ EOF
     if [ "$gbroken" = yes ]; then
         printf '#!/bin/bash\nexit 2\n' > "$dir/grep"; chmod +x "$dir/grep"
     fi
+}
+
+# 造 shim 目录 —— 给 `--diff <range>` 用（2026-10-05 加 · `DEC-076`）。
+# ⚠️ 上面那个 make_shims() 只匹配 *"diff --cached"*，而 `--diff` 发出去的是
+#    `git diff <range> -U0`（**三点**范围），匹配不上 ⇒ 落到它自己的 `*)` 分支去【真跑 git】。
+# 🔴 这里**故意只认三点范围** `*"..."*`，⛔ 不写成 `*"diff "*`：
+#    `*"diff "*` 会把 `git diff --cached` **也**接住 ⇒ 用例在"`--diff` 还没实现"时
+#    **撞巧变绿**（落进 staged 分支照样拿到 payload）⇒ 那就不算"因该原因而红"了。
+#    只认 `...` ⇒ 实现前这些用例必红（真跑 git 会失败），实现后才绿。
+# $1=目录 · $2=行为：ok/empty/delonly/fail · $3=ok 时那行"新增行"的内容
+make_diff_shims() {
+    local dir="$1" dmode="$2" payload="${3:-+benign line}"
+    mkdir -p "$dir"
+    # 🔴 这个 heredoc **不加引号**（要展开 `$dmode`/`$payload`）⇒ 体内 **反引号会被当命令替换执行**、
+    #    **裸 `$` 会被当变量展开**。⛔ 体内一律不许出现反引号；`$*` 必须写成 `\$*`。
+    #    📌 这条是**实测踩出来的**（2026-10-05）：本函数体内一句**注释**里写了 `` `git diff --cached` ``，
+    #    生成 shim 时它被真的执行了 ⇒ 整个暂存区 diff(59.5KB)被塞进 shim 正文、
+    #    把 `case` 结构冲烂 ⇒ shim 一跑就是 **bash 语法错误 = exit 2**
+    #    ⇒ T11–T17 集体假红（而 T13/T15 那两条"期望 exit 2"的用例**反倒撞巧变绿**）。
+    #    ⚠️ 与 `scripts/ci-local.sh` 那次(双引号里的反引号被执行 · `DEC-076`)是**同一个坑**。
+    cat > "$dir/git" <<EOF
+#!/bin/bash
+case "\$*" in
+  *"..."*)
+    case "$dmode" in
+      ok)      printf '%s\n' '$payload'; exit 0 ;;
+      empty)   exit 0 ;;
+      delonly) printf -- '--- a/x\n+++ b/x\n-old-secret-line\n'; exit 0 ;;
+      fail)    echo "fatal: bad revision" >&2; exit 128 ;;
+    esac ;;
+  # 🔴 未预期的调用（实现前 = 门还在发「diff --cached」）⇒ 回**良性空**，⛔ 不回真 git。
+  #    回真 git 会"以失败告终"也报 exit 2 ⇒ 与「范围取不到」的 2 **分不开** ⇒
+  #    T13/T15 那类断言 exit 2 的用例就会**撞巧变绿**。回良性空则：
+  #    门一路跑到结论行 ⇒ T16 能真的测到那句覆盖度声明（红在正确的地方）。
+  *) echo "[shim] ⚠️ 未预期的 git 调用: \$*" >&2; exit 0 ;;
+esac
+EOF
+    chmod +x "$dir/git"
 }
 
 # 跑门，回显退出码。$1=仓根 · $2=shim 目录 · $3=门的模式参数(可空)
@@ -175,6 +233,107 @@ R10="$TMP/r10"; S10="$TMP/s10"; make_root "$R10" yes yes; make_shims "$S10" ok n
 rc=$(run_gate "$R10" "$S10" "--all")
 [ "$rc" -eq 0 ] && ok "T10 --all 下无匹配(rc=1) ⇒ exit 0（合法的空，未矫枉过正）" \
                 || bad "T10 --all 下无匹配 ⇒ exit ${rc}（应为 0 —— 把 git grep 的 rc=1 当成了出错）"
+
+# =====================================================================
+# T11–T16：【--diff <range>】模式（2026-10-05 加 · `DEC-076` · 为把凭据门接进 CI）
+# ⚠️ 合成样本一律**运行时拼接** —— 写字面量会让本文件【自己命中自己的模式】(门自噬)，
+#    这条纪律文件开头已有；下面 T12 就是那个负控。
+# =====================================================================
+
+# ------------------- T11 --diff 干净范围(只有普通新增行) ⇒ exit 0
+# ⚠️ 与 T8 同理，**必须附带断言文案** —— 只看退出码分不开"这真走了 --diff"
+#    与"它落回 staged 模式、又恰好扫了个空"。
+# ⛔ 锚点必须是**范围字符串本身**：'新增行' 三个字 **staged 分支也有**（见 112 行），
+#    拿它当锚点等于没锚（本条第一版就是这么错的）。
+R11="$TMP/r11"; S11="$TMP/s11"; make_root "$R11" yes yes; make_diff_shims "$S11" ok '+print("hello")'
+out11=$(run_gate_out "$R11" "$S11" "--diff origin/main...HEAD"); rc=$?
+if [ "$rc" -eq 0 ] && printf '%s' "$out11" | grep -qF "origin/main...HEAD"; then
+    ok "T11 --diff 干净范围 ⇒ exit 0（该绿的不红），且确认扫描范围就是传入的那个范围"
+else
+    bad "T11 --diff 干净范围 ⇒ exit ${rc}；输出回显了传入范围? $(printf '%s' "$out11" | grep -cF 'origin/main...HEAD') 次"
+fi
+
+# ------------------- T12 【负控】范围内含合成泄漏 ⇒ exit 1（证明新增行【确实被扫】）
+# ⛔ 若本条变绿(exit 0)，说明"范围没扫到东西"被静默当成了通过 —— 正是要防的假绿。
+DTOK="ghp_$(printf 'C%.0s' 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20)"
+R12="$TMP/r12"; S12="$TMP/s12"; make_root "$R12" yes yes; make_diff_shims "$S12" ok "+token=$DTOK"
+rc=$(run_gate "$R12" "$S12" "--diff origin/main...HEAD")
+[ "$rc" -eq 1 ] && ok "T12 --diff 范围内合成泄漏 ⇒ exit 1（新增行确实被扫 —— 负控）" \
+                || bad "T12 --diff 范围内合成泄漏 ⇒ exit ${rc}（应为 1；0 = 新增行没被扫/静默空跑）"
+
+# ------------------- T13 范围取不到(浅克隆/范围写错) ⇒ exit 2（⛔ 不许静默变绿）
+# ⚠️ 同样要看文案：'扫描没有执行' 是**这一支**的话；别的分支出错也报 2，靠码分不开。
+R13="$TMP/r13"; S13="$TMP/s13"; make_root "$R13" yes yes; make_diff_shims "$S13" fail
+out13=$(run_gate_out "$R13" "$S13" "--diff origin/main...HEAD"); rc=$?
+if [ "$rc" -eq 2 ] && printf '%s' "$out13" | grep -q "扫描没有执行"; then
+    ok "T13 --diff 范围取不到 ⇒ exit 2（⛔ 没扫成 ≠ 通过），且确认是【扫描没有执行】那一支"
+else
+    bad "T13 --diff 范围取不到 ⇒ exit ${rc}（应为 2；0 = 把'没扫成'当成了通过）；文案含'扫描没有执行'? $(printf '%s' "$out13" | grep -c '扫描没有执行') 次"
+fi
+
+# ------------------- T14 范围里【只有删除行】⇒ exit 0（未把"合法的空"判成失败）
+R14="$TMP/r14"; S14="$TMP/s14"; make_root "$R14" yes yes; make_diff_shims "$S14" delonly
+out14=$(run_gate_out "$R14" "$S14" "--diff origin/main...HEAD"); rc=$?
+if [ "$rc" -eq 0 ] && printf '%s' "$out14" | grep -qF "origin/main...HEAD"; then
+    ok "T14 --diff 只有删除行 ⇒ exit 0（删密钥是好事，不该拦）"
+else
+    bad "T14 --diff 只有删除行 ⇒ exit ${rc}（应为 0）；走了 --diff 那支? $(printf '%s' "$out14" | grep -cF 'origin/main...HEAD') 次"
+fi
+
+# ------------------- T15 --diff 缺范围参数 ⇒ exit 2（用法错误不得当作通过）
+# ⚠️ 同上，要认那句「用法错误」—— 否则"缺参数"和"范围取不到"全都是 2，测不出是哪一条。
+R15="$TMP/r15"; S15="$TMP/s15"; make_root "$R15" yes yes; make_diff_shims "$S15" ok
+out15=$(run_gate_out "$R15" "$S15" "--diff"); rc=$?
+if [ "$rc" -eq 2 ] && printf '%s' "$out15" | grep -q "用法错误"; then
+    ok "T15 --diff 缺范围 ⇒ exit 2（用法错误不得当作通过）"
+else
+    bad "T15 --diff 缺范围 ⇒ exit ${rc}（应为 2）；文案含'用法错误'? $(printf '%s' "$out15" | grep -c '用法错误') 次"
+fi
+
+# ------------------- T16 【覆盖度】有 .env、无 denylist ⇒ 只许声明 覆盖 ①③
+# 测的是【过度声明的回归】：CI 恰恰是那个【没有 .secret-denylist】的环境(它被 gitignore)。
+R16="$TMP/r16"; S16="$TMP/s16"; make_root "$R16" yes no; make_diff_shims "$S16" ok
+out16=$(run_gate_out "$R16" "$S16" "--diff origin/main...HEAD")
+if printf '%s' "$out16" | grep -q "覆盖 ①③" && ! printf '%s' "$out16" | grep -q "覆盖 ①②③"; then
+    ok "T16 无 denylist ⇒ 结论声明【覆盖 ①③】，⛔ 不再谎称覆盖 ②"
+else
+    bad "T16 无 denylist ⇒ 覆盖度声明错：含'覆盖 ①③' $(printf '%s' "$out16" | grep -c '覆盖 ①③') 次 · 含'覆盖 ①②③' $(printf '%s' "$out16" | grep -c '覆盖 ①②③') 次"
+fi
+
+# ------------------- T17 🔴【**CI 的真实形状**】无 .env + 无 denylist + 降级开关
+# ⚠️ T16 测的是"**有** .env、没 denylist" ⇒ `覆盖 ①③`。
+#    **CI 不是这个形状** —— 它的新鲜检出里 **`.env` 和 `.secret-denylist` 都没有**（都被 gitignore）
+#    ⇒ 覆盖度只能是 **`③`**。
+#    📌 本条是**实测逼出来的**：我原先在 `DEC-076` 里把 CI 的覆盖度写成了 `①③`（**错了**），
+#       真跑一遍 CI 形状才发现是 `③`。⇒ 这条测的就是那个真形状，⛔ 别再按想象写。
+#    ⚠️ **诚实交代**：本条**第一次跑就是绿的**（实现先于它）—— 它不是 TDD 先红后绿，
+#       是**给一个我刚刚描述错的配置上的回归钉**。
+R17="$TMP/r17"; S17="$TMP/s17"; make_root "$R17" no no; make_diff_shims "$S17" ok
+out17=$(PATH="$S17:$PATH" SECRETS_GATE_ALLOW_NO_ENV=1 bash "$R17/scripts/check_secrets.sh" \
+        --diff origin/main...HEAD 2>&1); rc17=$?
+if [ "$rc17" -eq 0 ] \
+   && printf '%s' "$out17" | grep -q "覆盖 ③" \
+   && ! printf '%s' "$out17" | grep -q "覆盖 ①" \
+   && ! printf '%s' "$out17" | grep -q "覆盖 ①②③"; then
+    ok "T17 🔴 CI 真实形状(无 .env 无 denylist) ⇒ exit 0，覆盖度只许写【③】"
+else
+    bad "T17 CI 真实形状 ⇒ exit ${rc17}；含'覆盖 ③' $(printf '%s' "$out17" | grep -c '覆盖 ③') 次 · 含'覆盖 ①' $(printf '%s' "$out17" | grep -c '覆盖 ①') 次"
+fi
+
+# ------------------- T18 🔴 `--selftest`：**这道门自己还抓不抓得住**
+# 📄 出处：待办总表 §五·5 · `docs/复盘/2026-09-17-一道硬币做的门.md`
+# ⚠️ 它与上面 T4 那个"自证"不是一回事：T4 是**每次跑一遍**（挡"机制整体失灵"），
+#    本条是「**大载荷 × 连跑 N 次**」，专抓 v4 那种**概率性**漏报。
+# ⚠️ 冷启动成本 ~1.5s（10 次 × 6 模式 × 256 KiB）—— 这是它唯一"贵"的地方，别嫌。
+# 📌 判据（可打印）：把门里的 `match_re() { grep -E -- "$1" >/dev/null; }` 改成 `grep -E -q`
+#    ⇒ 本条**必红**（实测 120/120 次漏报）。
+GATE_N=10
+out18=$(bash "$GATE" --selftest "$GATE_N" 2>&1); rc18=$?
+if [ "$rc18" -eq 0 ]; then
+    ok "T18 --selftest（${GATE_N} 次）⇒ exit 0（门还抓得住）"
+else
+    bad "T18 --selftest ⇒ exit ${rc18}（0 才对）；$(printf '%s' "$out18" | tail -1)"
+fi
 
 echo
 echo "结果: $PASS 通过 / $FAIL 失败"

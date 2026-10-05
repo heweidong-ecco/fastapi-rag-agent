@@ -28,7 +28,19 @@
             "type": "command",
             "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/route-auth-remind.py\"",
             "timeout": 60,
-            "statusMessage": "路由鉴权提醒（改了 api_v1*/main.py 才跑）"
+            "statusMessage": "路由鉴权提醒（改了 api 下的路由文件才跑）"
+          },
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/py-compile-remind.py\"",
+            "timeout": 30,
+            "statusMessage": "改完 .py 当场编译一次（待办总表 §五·4）"
+          },
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/claim-evidence-remind.py\"",
+            "timeout": 10,
+            "statusMessage": "写「不存在 / 唯一」前先出一条命令（待办总表 §五·1）"
           }
         ]
       }

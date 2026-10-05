@@ -101,3 +101,16 @@ GLOBAL_LIMIT_RATE = _float("GLOBAL_LIMIT_RATE", 100.0)      # 全局：每秒补
 GLOBAL_LIMIT_CAPACITY = _int("GLOBAL_LIMIT_CAPACITY", 150)  # 全局：桶容量（突发上限）
 USER_LIMIT_RATE = _float("USER_LIMIT_RATE", 3.0)            # 单用户：每秒补充
 USER_LIMIT_CAPACITY = _int("USER_LIMIT_CAPACITY", 20)       # 单用户：桶容量
+
+# 🔴 2026-10-05（🅗 S7）：限流桶在 Redis 里的存活秒数。**改前是【永不过期】**。
+#
+# 推导（⛔ 不是拍的）：桶的语义是「**回满即无意义**」——回满了，留着它和新建一个
+# 完全等价。回满耗时 = capacity / rate：
+#     user_limiter    20 / 3.0   =  6.7 秒
+#     global_limiter 150 / 100.0 =  1.5 秒
+# 而 `EXPIRE` 写在**每次请求都会跑**的 Lua 里 ⇒ 它其实是「**空闲** TTL 秒才过期」，
+# 而**空闲的桶必然已经回满** ⇒ 取 60 秒对两个桶都**语义无损**（比最大的那个还大 9 倍）。
+# ⚠️ 守卫：`api/test_rate_limiter_resilience.py::test_桶的TTL必须覆盖回满时间`
+#    —— 将来谁把 capacity 调大 / rate 调小到回满超过 TTL，**那条会转红**。
+RATE_LIMIT_BUCKET_TTL = _int("RATE_LIMIT_BUCKET_TTL", 60)
+

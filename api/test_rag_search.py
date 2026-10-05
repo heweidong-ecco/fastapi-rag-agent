@@ -11,8 +11,15 @@
 | **L2** 行为 | **mode→pipeline 分派** · RRF 真融合 · `top_k` 传递 · 响应形状 | redis + patch 6 个缝 | ✅ |
 | **L3** 集成 | 真 pgvector + 真 BM25 + 真 DashScope embedding | postgres + 外网 | ❌ `@pytest.mark.integration` |
 
-🔴 **为什么 L1/L2 需要 redis**：`RateLimitMiddleware` 对**每个非公开路径**都打 Redis，
-且 `rate_limiter.py` 没有 `except RedisError` ⇒ **Redis 不通时全站 500**（实测）。
+🔴 **为什么 L1/L2 需要 redis**：`RateLimitMiddleware` 对**每个非公开路径**都打 Redis。
+
+> ⚠️ **2026-10-05 更正（批 3 · `S8`）**：这里原写「`rate_limiter.py` 没有 `except RedisError`
+> ⇒ **Redis 不通时全站 500**（实测）」。**那句现在是假的** —— `S8` 已加兜底，
+> Redis 不通改成 **fail-open**（放行 + ERROR 日志）⇒ L1/L2 在这一层**不再会 500**。
+> ⚠️ **但"要 redis"这个前提本身没变**：中间件仍然每个非公开路径都**拨** Redis，
+> 只是拨不通时不再炸。⛔ **别据此把 redis 从这套用例里撤掉** ——
+> 「测得过」与「测的是真东西」是两件事：兜底一旦生效，**限流那一层其实整层没生效**，
+> 这时候绿的 L1/L2 是**假绿**。
 Postgres **不需要** —— L1/L2 的断言要么在中间件层、要么在 handler 之前就被挡下，
 要么把库调用 patch 掉了，handler 之外的库连接一次都不发生。
 

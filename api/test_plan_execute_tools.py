@@ -214,11 +214,19 @@ def test_downgraded_step_keeps_the_real_reason(monkeypatch):
 
     monkeypatch.setitem(P._TOOL_HANDLERS, "calculator", _explode)
     # 每步都判"彻底失败" ⇒ 把同一工具推到 3 连败
-    monkeypatch.setattr(P, "execute_step_with_quality_check",
-                        lambda step, context, goal, name: "执行失败（已重试1次）：假装失败")
+    # ⚠️ `S10`（2026-10-05）起要返回 `StepResult` —— 成败判定换成看 `.ok` 字段了。
+    #    用 `*a, **k` 是为了**同时兼容**将来多传的位置参数（`S9` 已经加过一处）。
+    monkeypatch.setattr(
+        P, "execute_step_with_quality_check",
+        lambda *a, **k: P.StepResult(ok=False, text="执行失败（已重试1次）：假装失败",
+                                     error="假装失败"))
     # 重规划不许真调 LLM：给一份**同样只用 calculator**的计划，把循环推到降级分支
+    # ⚠️ `S9`（2026-10-05）：签名原来只有 `ctx` 一个参数 —— 那时它**正好**兜住了
+    #    调用点漏传 `user_name`（少传一个 ⇒ 不报错）。修完之后调用点会传两个，
+    #    所以这里必须**跟着收下** `user_name`。
+    #    📌 这条替身**本身就是那个洞的旁证**：它只接一个参数 ⇒ 发现不了漏传。
     monkeypatch.setattr(P, "plan_task",
-                        lambda ctx: [_step("calculator") for _ in range(5)])
+                        lambda ctx, user_name="unknown": [_step("calculator") for _ in range(5)])
 
     out = P.execute_plan_with_replan([_step("calculator") for _ in range(5)], "目标", "u1")
 
@@ -430,7 +438,10 @@ def test_dynamic_input_receives_the_real_user_name(monkeypatch):
         return "假输入"
 
     monkeypatch.setattr(P, "generate_dynamic_input", _fake_gen)
-    monkeypatch.setattr(P, "execute_step_with_retry", lambda *a, **k: "假结果")
+    # ⚠️ `S10`（2026-10-05）起返回 `StepResult` —— 再返回裸字符串的话，
+    #    调用方读 `.ok` 会 `AttributeError`（那就是**假红**，不是这条用例想测的东西）。
+    monkeypatch.setattr(P, "execute_step_with_retry",
+                        lambda *a, **k: P.StepResult(ok=True, text="假结果"))
     monkeypatch.setattr(P, "check_step_quality", lambda *a, **k: True)
 
     P.execute_step_with_quality_check(
@@ -531,4 +542,192 @@ def test_free_users_real_daily_limit_on_plan_execute_is_known():
         f"  （token 预算 {ROLE_TOKEN_BUDGET['free']} ÷ 实测单次 {_MEASURED_PLAN_EXECUTE_TOKENS}）\n"
         f"⚠️ 若这是【有意】改的，请**重新实测单次消耗**、更新这条用例与 `DEC-029`；\n"
         f"⚠️ 若是【无意】的（比如改了预算表却没意识到会波及这条最贵的接口），那正好——本条就是为这个而设。"
+    )
+
+
+# ===========================================================================
+# 🔴 S10 · 成败判定不许读【中文文案】—— 必须看结构化字段
+# ===========================================================================
+def test_工具正常返回里恰好含那句失败文案时不许触发重规划(monkeypatch):
+    """**决定性判据**：工具的**正常**返回文本里恰好出现了那句失败文案时，
+    ⛔ 不许被判成「这一步彻底失败了」。
+
+    🔴 它同时打到 `plan_execute.py` 里的**两处**子串判定：
+       · `:557` `if "执行失败" in step_result:` —— 连**质量检查都被跳过**
+       · `:362` `if "执行失败（已重试" in step_result:` —— **凭空触发一次重规划**
+
+    ⚠️ 为什么必须**驱动真函数**（⛔ 不 monkeypatch `execute_step_with_quality_check`）：
+       把它替换掉，就等于把「被判定的那个值」自己造出来 —— 那样测的是**我的替身**，
+       不是这条路径。这里只让**最外面那层**（LLM / 工具）是假的：
+       `calculator` 的 handler **正常返回**一段含该文案的文本，于是
+       `execute_single_step` → `execute_step_with_retry` → `execute_step_with_quality_check`
+       **全是真的**。
+
+    📌 这正是 `execute_single_step` docstring 里那句话的反面现场 ——
+       「失败一律**抛异常**，不吞成字符串」，而**成败判定却回去读字符串**。
+    """
+    import plan_execute as P
+
+    _MARKER = "搜索结果：`执行失败（已重试3次）：boom` 是重试耗尽的标记"
+    monkeypatch.setitem(P._TOOL_HANDLERS, "calculator", lambda args: _MARKER)
+    monkeypatch.setattr(P, "generate_dynamic_input", lambda *a, **k: "1+1")
+    monkeypatch.setattr(P, "check_step_quality", lambda *a, **k: True)
+
+    replans = []
+    monkeypatch.setattr(P, "plan_task", lambda *a, **k: replans.append(1) or [])
+
+    out = P.execute_plan_with_replan(
+        [{"step": 1, "action": "a", "tool": "calculator"}], "目标", "u1")
+
+    assert replans == [], (
+        "工具**正常返回**的文本里恰好含那句失败文案 ⇒ 被判成「这一步彻底失败」"
+        " ⇒ 触发了一次**凭空的重规划**（还把这句正常结果塞进了 replan_context）。\n"
+        "⇒ 成败必须看 `StepResult.ok`，⛔ 不能读中文文案（改一个字的措辞就静默失效）。\n"
+        f"实际输出：\n{out}"
+    )
+    assert "步骤1完成" in out, f"正常的一步被当成失败处理了：\n{out}"
+
+
+def test_真失败仍然会触发重规划(monkeypatch):
+    """反向守卫：`S10` 之后**失败仍然认得出** —— 防止有人把判定写成**恒 False**。
+
+    ⚠️ **它在改动前后都是绿的**（改前靠文案也认得出）。留着是因为
+       「换成字段」这件事最典型的坏形态就是**恒 False**，而那种坏法
+       ⛔ **上面那条用例发现不了**（它对"被判成失败"更敏感，对"失败被判成成功"不敏感）。
+    """
+    import plan_execute as P
+
+    def _explode(args):
+        raise RuntimeError("boom")
+
+    monkeypatch.setitem(P._TOOL_HANDLERS, "calculator", _explode)
+    monkeypatch.setattr(P, "generate_dynamic_input", lambda *a, **k: "1+1")
+    monkeypatch.setattr(P, "check_step_quality", lambda *a, **k: True)
+
+    replans = []
+    monkeypatch.setattr(P, "plan_task", lambda *a, **k: replans.append(1) or [])
+
+    P.execute_plan_with_replan(
+        [{"step": 1, "action": "a", "tool": "calculator"}], "目标", "u1")
+
+    assert replans == [1], "工具真的炸了，却没触发重规划 ⇒ 失败判定失效了（恒 False？）"
+
+
+def test_重试耗尽返回结构化结果且文案逐字不变(monkeypatch):
+    """`execute_step_with_retry` 重试耗尽时**返回 `StepResult`**，
+    且**用户可见的那句话一字不改**。
+
+    ⚠️ 两半**都要**，⛔ 缺一不可：
+      · 类型那一半 —— 它是「调用方看字段」的前提（`S10` 的**因**）
+      · 文案那一半 —— `S10` **只换判定依据**，⛔ 不许顺手改用户看到的话
+        （⚠️ 那句话会原样进 `results`、原样返回给调用方，是**用户可见**的）
+    """
+    import plan_execute as P
+
+    def _explode(args):
+        raise RuntimeError("boom")
+
+    monkeypatch.setitem(P._TOOL_HANDLERS, "calculator", _explode)
+    monkeypatch.setattr(P, "generate_dynamic_input", lambda *a, **k: "1+1")
+
+    r = P.execute_step_with_retry(
+        {"step": 1, "tool": "calculator"}, "1+1", "", "u1", max_retries=1)
+
+    assert isinstance(r, P.StepResult), (
+        f"重试耗尽返回的是 `{type(r).__name__}` —— 调用方只能回去读文案（`S10` 的原始形态）")
+    assert r.ok is False
+    assert r.error == "boom", f"`error` 该留**异常原文**（不带那句格式化前缀）：{r.error!r}"
+    assert r.text == "执行失败（已重试1次）：boom", (
+        f"用户可见文案被改了：{r.text!r}\n⇒ `S10` 只换判定依据，⛔ 不改用户看到的话。")
+
+
+# ===========================================================================
+# 🔴 S9 · 重规划那一次 `plan_task` 必须收到【真实发起人】
+# ===========================================================================
+def test_重规划把真实发起人传下去(monkeypatch):
+    """`S9` · 重规划那一次 `plan_task` 必须收到**真实发起人**。
+
+    🔴 改前是 `plan_task(replan_context)`（`:383`）—— 走默认 `"unknown"`，后果两条：
+       · `check_budget_before_call("unknown")` ⇒ **不受该用户的预算约束**
+       · `record_usage(user_name="unknown")` ⇒ **算不到他头上**（`token_usage_logs` 里是 `unknown`）
+       ⚠️ 最多 **5** 次 ⇒ 最多 5 次「白跑且不记账」的规划调用。
+
+    ⚠️ **替身必须收 `user_name` 并记下来** ——
+       上一条同族的用例（`test_dynamic_input_receives_the_real_user_name`）守着 `dynamic_input` 那处漏传；
+       而**重规划这处一直没人守**，原因是它的替身写成了 `lambda ctx: [...]`：
+       **只接一个参数 ⇒ 只能发现"多传了"，发现不了"漏传"**。
+       🔴 **这正是这个洞漏到现在的原因**（`docs/specs/plan_execute.md` ⚠️①）。
+
+    📌 本仓同族前科：那次修的根因是**盲替换命中了注释**，真调用点没改到；
+       而写下来的教训（「改完要按行号核」）**是文字**，没能拦住这一处。
+       ⇒ 所以除本用例之外，另有一道**从 AST 推出来的**守卫：
+          `api/test_plan_task_user_name_wiring.py`。
+    """
+    import plan_execute as P
+
+    seen = []
+
+    def _fake_plan_task(ctx, user_name="unknown", on_token=None):
+        seen.append(user_name)
+        return []          # 空计划 ⇒ 循环 break，不用真跑工具
+
+    monkeypatch.setattr(P, "plan_task", _fake_plan_task)
+    monkeypatch.setattr(P, "execute_step_with_quality_check",
+                        lambda *a, **k: P.StepResult(ok=False, text="炸", error="炸"))
+
+    P.execute_plan_with_replan(
+        [{"step": 1, "action": "a", "tool": "calculator"}], "目标", "someone_real")
+
+    assert seen == ["someone_real"], (
+        f"重规划的 `plan_task` 收到的是 {seen} —— **不是真实发起人**。\n"
+        "⇒ 这次调用的 token 既不受他的预算约束、也不算在他头上（`S9`）。\n"
+        "⚠️ 检查是不是又漏传了（本仓已犯过两次：`dynamic_input` 那次 + 重规划这次）。"
+    )
+
+
+# ===========================================================================
+# 🔴 S11 · 重规划次数上限必须是【模块级常量】，且循环真的读它
+# ===========================================================================
+def test_重规划次数上限是可配的模块级常量(monkeypatch):
+    """`S11` · `MAX_REPLANS` 是**模块级常量**，且循环**真的按它**停。
+
+    ⚠️ 光断言"有个常量叫 `MAX_REPLANS`"**不够** —— 那只验了名字（本仓纪律：
+       「拿**动作成功**当**结果正确**」的同族）。这里把常量**改成 2**，
+       然后驱动一条「永远失败、永远能重规划」的路径，**数 `plan_task` 被叫了几次**
+       ⇒ 证明**循环读的是它**。
+
+    ⚠️ 期望 **3** = `MAX_REPLANS + 1`：循环条件是 `replan_count <= MAX_REPLANS`，
+       `replan_count` 从 **0** 起算 ⇒ 0/1/2 各进一次循环、每次重规划一次。
+
+    🔴 **每一步必须换一个工具名**（⛔ 别一直用 `"calculator"`）——
+       同一个工具连败 **3** 次会进 `failed_tools`，而那条降级分支
+       是 `pop(0)` + `continue`，**⛔ 根本不调 `plan_task`**。
+       ⇒ 那样数出来的次数**比 `MAX_REPLANS` 小**，用例会以一个**看不懂的理由**红。
+       （📌 同族先例：`test_downgraded_step_keeps_the_real_reason` 就是那条分支的用例。）
+
+    📌 **它钉的是「循环读常量」这个【行为】，⛔ 不是「常量等于 5」这个【值】** ——
+       所以**默认值改了它不该红**（它自己 monkeypatch 成 2）。
+    """
+    import plan_execute as P
+
+    monkeypatch.setattr(P, "MAX_REPLANS", 2)
+    monkeypatch.setattr(P, "execute_step_with_quality_check",
+                        lambda *a, **k: P.StepResult(ok=False, text="炸", error="炸"))
+
+    calls = []
+
+    def _fake_plan_task(ctx, user_name="unknown", on_token=None):
+        calls.append(user_name)
+        # 每次给一份【新】计划；工具名递增 ⇒ 不触发 `failed_tools` 降级 ⇒ 循环不提前 break
+        return [{"step": 1, "action": "a", "tool": f"tool{len(calls)}"}]
+
+    monkeypatch.setattr(P, "plan_task", _fake_plan_task)
+
+    P.execute_plan_with_replan(
+        [{"step": 1, "action": "a", "tool": "tool0"}], "目标", "u1")
+
+    assert len(calls) == 3, (
+        f"`MAX_REPLANS=2` 时应重规划 3 次（0/1/2，循环条件是 `<=`），实际 {len(calls)} 次。\n"
+        "⇒ 要么循环没读模块级常量、要么读的地方漏改了（`S11`）。\n"
+        "   ⚠️ 若实际是 1 次，先查 `failed_tools` 那条降级分支有没有被踩到。"
     )

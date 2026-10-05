@@ -2,10 +2,10 @@
 
 | 项 | 内容 |
 |---|---|
-| **状态** | 🟡 **可用** —— 基于 Redis 的令牌桶，**全局 + 用户两层**<br>🔴 **但它有 3 个"看代码看不出来"的性质**（见下 ⚠️ 节）—— 其中 2 条是本 spec 新查出来的 |
-| **对外提供** | `TokenBucketLimiter`（`is_allowed` / `get_remaining` / `get_limit_info`）· 两个模块级实例 `global_limiter` · `user_limiter` |
-| **谁在用** | `main.py:21` 的 `RateLimitMiddleware`（**唯一的生产消费者**）· `api_v1.py:31` 的 `/debug/*` 查询端点 |
-| **规模** | 140 行 |
+| **状态** | 🟡 **可用** —— 基于 Redis 的令牌桶，**全局 + 用户两层**<br>🔴 它曾有 **3 个"看代码看不出来"的性质** ⇒ **2026-10-05（批 3 · `S7`/`S8`）起 ②③ 已修、① 早于 2026-09-30 已修**（`B9-b`）<br>⚠️ **但 ⚠️ 节还在** —— ①④⑤ 仍然是"看代码会误判"的（其中 ④ 是**已知未修**），⛔ 别因为"②③修了"就当整节过时了 |
+| **对外提供** | `TokenBucketLimiter`（`is_allowed` / `get_remaining` / `get_limit_info`，**三处都 fail-open**）· 两个模块级实例 `global_limiter` · `user_limiter` · `_TOKEN_BUCKET_LUA`（**2026-10-05 提成模块级常量** —— 提出来才测得到，见 `S7`） |
+| **谁在用** | `main.py` 的 `RateLimitMiddleware`（**唯一的生产消费者**）· `api_v1.py` 的 `/debug/*` 查询端点 |
+| **规模** | 🔴 **别写死行数** —— 跑 `wc -l api/rate_limiter.py`（2026-10-05 时为 **210**） |
 
 ## ✅ 做了什么
 
@@ -17,24 +17,30 @@
 
 ## 🟡 做到哪 / 缺什么
 
-- 🔴 **桶【永不过期】** —— 全文 **0 个 `EXPIRE` / `TTL`** ⇒ Redis 里 `rate_limit:*` 键**永久累积**（见 ⚠️②）
-- 🔴 **Redis 不通 ⇒ 非公开路径【全站 500】** —— 没有 `except RedisError`（见 ⚠️③）
-- 🔴 **零单测** —— `docs/说明/测试.md:185` 自述「**前者间接**、后者零覆盖」；
-  它只被 `test_rag_search.py` 的 L1/L2 **间接**依赖（那两条**必须真连 Redis**）
+- ✅ ~~**桶【永不过期】**~~ ⇒ **2026-10-05 已修**（`S7`）：Lua 里加了 `EXPIRE`（走 `ARGV[4]`），
+  值来自 `token_config.RATE_LIMIT_BUCKET_TTL`（**推导过**：`capacity/rate` 的若干倍）。
+  ⚠️ **存量键仍是永久的** —— 本次只让**新写入**带上 TTL。见 ⚠️②
+- ✅ ~~**Redis 不通 ⇒ 非公开路径【全站 500】**~~ ⇒ **2026-10-05 已修**（`S8`）：三处各包
+  `except redis.RedisError` ⇒ **fail-open + `logger.error`**。见 ⚠️③
+- ✅ ~~**零单测**~~ ⇒ **2026-10-05 起 13 条**（`api/test_rate_limiter_resilience.py`）。
+  ⚠️ **12 条离线**（替身）、**1 条必须真连 Redis**（`test_新桶在真Redis里真的带上了TTL` ——
+  它是 `S7` 唯一的真凭证）。实测：`REDIS_PORT=6399 pytest api/test_rate_limiter_resilience.py`
+  ⇒ **1 failed, 12 passed**
+  ⚠️ `docs/说明/测试.md` 里那句「前者间接、后者零覆盖」**已过时**
 - ✅ ~~⚠️ **限流参数写死在代码里**（`:129/132`），⛔ 不是 env~~ ⇒ **2026-10-01 已收口**（`🅗 S6`）：
   两个 `TokenBucketLimiter` 的 `rate`/`capacity` 改从 **`api/token_config.py`** 取
   （`GLOBAL_LIMIT_RATE` / `GLOBAL_LIMIT_CAPACITY` / `USER_LIMIT_RATE` / `USER_LIMIT_CAPACITY`）。
   ⚠️ **默认值逐字相同 ⇒ 行为不变**；📌 它**不是热加载**（`token_config` 只读 env，改值仍要重启）
-- ⚠️ **死导入**：`Request` / `HTTPException` / `os`（`:3-4`）**全都没用到**
+- ✅ ~~**死导入**：`Request` / `HTTPException` / `os`~~ ⇒ **2026-10-05 已删**（批 3 顺手）
 
 ## ⚠️ 看代码会误判的地方 ⭐
 
 | 看代码会以为 | 实际 |
 |---|---|
 | 🔴 **① 形参 `user_name` 是"用户名"** | ⛔ **不是** —— 它是**桶名**。实际传进来的有 `"global"`（`:153`）· `"anonymous"` · `"user:<真实用户名>"`。<br>⚠️ **2026-09-30（B9-b）之前**，`"user:..."` 那段是 **`X-API-Key` 的前 8 个字符**，**不验签** ⇒ **编一个串就换一个桶**。<br>📌 **所以本文件的 `user_name` 一词是误导性的** —— 读它时请替换成"桶名"。<br>（B9-b 已修：验不过 ⇒ 落 `anonymous` 桶。见 `docs/specs/main.md`） |
-| 🔴 **② 「桶会自动过期」** | ⛔ **不会**。全文**只有 `HSET`、没有 `EXPIRE`** ⇒ 键**永久留在 Redis**。<br>🔴 **与 ① 叠加后是个真问题**：**修 B9-b 之前**，任意伪造的 key 都能造一个**新桶** ⇒ **Redis 键无限增长** ⇒ 那不只是"刷限流"，是**内存耗尽型的 DoS**。<br>✅ **B9-b 把它堵住了**（伪造 key 现在落匿名桶）——⚠️ **但存量键仍在、且新键依然不过期**。⬜ **是否该加 `EXPIRE`？未裁。** |
-| 🔴 **③ 「Redis 挂了只是限流失效，请求照过」** | ⛔ **反了 —— 是非公开路径【全站 500】**。<br>**这不是推断**：`api/test_rag_search.py:15` 早就写着「**`rate_limiter.py` 没有 `except RedisError` ⇒ Redis 不通时全站 500（实测）**」。<br>⚠️ **而且拿不到结构化错误** —— `main.py:186` 的注释写明「**中间件中抛出的异常不会被 `@app.exception_handler(AppException)` 捕获**」（会落到 `ServerErrorMiddleware` 的通用处理器）。<br>⛔ **与 `token_tracker` 的取舍【故意相反】**：那边查库失败是 **fail-open**（放行）；这边是 **fail-closed 且炸成全站 500**。**两者都不是"显然对"**，但**至少该是有意识的**。 |
-| ⚠️ **④ `get_limit_info()` 给的是"此刻的剩余"** | ⛔ **不是** —— 它算的是**消费【前】**的值：`main.py:175` 调它、`:179` 才调 `is_allowed`；而放行分支（`:203-208`）**用的就是那个 `info`**，**没有重算**。<br>⇒ **响应头 = 上一个状态的剩余**，⛔ 不是本次请求之后的。 |
+| ✅ **② 「桶会自动过期」—— 2026-10-05 起【会了】** | 改前：全文**只有 `HSET`、没有 `EXPIRE`** ⇒ 键**永久留在 Redis**。**现已加**（`S7`）。<br>⚠️ **存量键不会因此消失** —— 本次改的是**写入路径**；已经在 Redis 里的 `rate_limit:*` **仍然是永久的**（要么让它自然被下一次写入刷新出 TTL，要么手工清）。<br>⚠️ **收益要说准（⛔ 别写成"堵了 DoS"）**：**B9-b 早把伪造 key 堵住了**（验不过 ⇒ 落匿名桶 ⇒ 造不出新桶）⇒ `EXPIRE` 现在管的是**卫生**（离网用户 / `anonymous` / `global` 各一个），**不是内存耗尽**。 |
+| ✅ **③ 「Redis 挂了只是限流失效，请求照过」—— 2026-10-05 起【真的是这样了】** | 改前：⛔ **反了 —— 是非公开路径【全站 500】**（**实测**：`api/test_rag_search.py` 早就写着这条）。<br>**现已改成 fail-open**（`S8`）：`is_allowed` / `get_remaining` / `get_limit_info` 三处各包 `except redis.RedisError` ⇒ **放行 + `logger.error`**。<br>⚠️ **`logger.error` 不是装饰** —— 没有它就成了「**限流悄悄失效**」，比报到错更危险。<br>⛔ **与 `token_tracker` 的取舍【仍故意相反】**：那边查**库**失败也是 fail-open，但**安全边界（`deps.py` 鉴权）依然 fail-closed** —— 三者都**有意识**（口径见 `DEC-079`）。 |
+| ⚠️ **④ `get_limit_info()` 给的是"此刻的剩余"** | ⛔ **不是** —— 它算的是**消费【前】**的值：`RateLimitMiddleware.dispatch` 里**先**调 `user_limiter.get_limit_info(user_name)`、**再**调 `is_allowed`；而放行分支**用的就是那个 `info`**，**没有重算**。<br>⇒ **响应头 = 上一个状态的剩余**，⛔ 不是本次请求之后的。<br>⚠️ **本次没修**（本批只加容错与过期）—— 见末表。<br>📌 **原先这里写的是 `main.py:175`/`:179`/`:203-208` 三个行号** —— 2026-10-05 换成**函数名**：行号一改就全烂（本次编辑就让它全错），而名字不会。 |
 
 > ### ✅ ④ 的实测（2026-09-30 · **服务真跑着时验的**）
 >
@@ -68,6 +74,79 @@
 > ⇒ **先量、再写**（同 `docs/复盘/2026-09-30-本地绿当成了不依赖.md`）。
 | ⚠️ **⑤ 「两个 limiter 是分开的两层，互不影响」** | ✅ **对，但有个隐含前提**：`global_limiter.is_allowed("global")` 用的是**同一个 `TokenBucketLimiter` 类**、只是桶名不同 ⇒ **全局那层也是"每人一份"的算法**，只是所有人共用一个叫 `global` 的桶。<br>⇒ 它**不是**"全站总速率的另一种实现"，**就是同一个桶**。 |
 
+# ✅ 实施计划 · 批 3 · `S7` + `S8`（2026-10-05 立 · **同日做完**）
+
+> **结果**：`api/test_rate_limiter_resilience.py` **13 条全绿** · 全量 **654 passed** ·
+> **变异自证 17/17**（其中 `S7`/`S8` 相关 **10 条** —— ⚠️ **一次性脚本，⛔ 没入库**，
+> 名字与预期红点逐条记在 `CHANGELOG` 的同名条目里）。
+> 🔴 **RED 阶段是实测的**：真 Redis 那条在改前拿到 **`ttl = -1`**（**有键但永不过期**）——
+> `S7` 那个 bug 是**验出来的**，⛔ 不是从代码推出来的。
+> 📄 **决策（含 `S8` 的取向与四个落点的分工）** ⇒ `docs/decisions/DEC-079-依赖不可用时端点答什么.md`
+
+> **方向早就裁过了**（见上「三条"要不要做"」表，业务方 2026-09-30）：**① 要加 `EXPIRE`** ·
+> **② fail-open + 必须响的日志**。本节只把它落成可执行的步骤 + 定下**唯一那个没定的值**（TTL 取多少）。
+> ⛔ **不再重新论证方向。**
+
+## 步骤
+
+| # | 事项 | 落点 |
+|---|---|---|
+| 1 | ✅ `EXPIRE` 进 Lua 脚本 | `_TOKEN_BUCKET_LUA`（**已提成模块级常量**）<br>🔴 **实际做法与计划不同**：原计划是"**两个分支都要写**"，落地时**把那两个重复分支合并成了一条**（改前 `tokens>=1` 与 `else` 各写一遍 `HSET`+`return`）⇒ **`EXPIRE` 天生只有一条路径**，⛔ 不可能出现"某个分支忘了加" |
+| 2 | ✅ TTL 常量收进 `token_config.py`（与 `*_LIMIT_RATE/CAPACITY` 同处 —— `S6` 先例） | `RATE_LIMIT_BUCKET_TTL`（默认 **60**） |
+| 3 | ✅ 三处各包 `except redis.RedisError` ⇒ **放行 + `logger.error`** | `is_allowed` / `get_remaining` / `get_limit_info` |
+| 4 | ✅ 用例（**离线 · ⛔ 不连 Redis**） | 🆕 `api/test_rate_limiter_resilience.py`（13 条，**其中 1 条真连 Redis** —— 见下） |
+
+⚠️ **第 4 条的偏差**：计划写的是"**全部离线**"，落地时发现 **`S7` 只有一条真凭证** ——
+「`EXPIRE` 真的生效了」**没法靠读脚本证明**（读文本只能证明"写了这句"）。
+⇒ 加了 `test_新桶在真Redis里真的带上了TTL`（问 Redis 要 `TTL`；键名带 `uuid4` 隔离、`finally` 里删）。
+📌 **本仓已有同一取舍**：`api/test_rag_search.py` 的 L1/L2 同样必须真连 Redis。
+
+## `S7` · TTL 取多少 —— **本计划唯一的取值决定**
+
+**推导，⛔ 不是拍的**：桶的语义是「**回满即无意义**」（回满了，留着它和新建一个完全等价）。
+回满耗时 = `capacity / rate`：
+
+| 桶 | capacity / rate | 回满耗时 |
+|---|---|---:|
+| `user_limiter` | 20 / 3.0 | **6.7 s** |
+| `global_limiter` | 150 / 100.0 | **1.5 s** |
+
+TTL 只要 **≫ 回满耗时**，语义就完全不变 —— 因为 **`EXPIRE` 写在每次请求都会跑的 Lua 里**
+⇒ 它是「**空闲** TTL 秒才过期」；而**空闲的桶必然已经回满**。
+
+⇒ **取 60 秒**（`RATE_LIMIT_BUCKET_TTL`，env 可调）：比 `user_limiter` 的回满时间大 **9 倍**。
+🔒 **配一条推导型守卫**：`ttl >= ceil(capacity / rate)`，**对两个实例各算一次**
+（⛔ 不写死 60）—— 将来谁把 `capacity` 调大、`rate` 调小到回满超过 TTL，**它立刻转红**。
+
+⚠️ **`S7` 的收益要说准（⛔ 别写成"堵了 DoS"）**：**B9-b 已经把伪造 key 堵住了**
+（验不过 ⇒ 落 `anonymous` ⇒ 攻击者**造不出新桶**）。所以 `EXPIRE` 现在管的是
+**「用过的键不会永久留着」**（离网用户 / `anonymous` / `global` 各一个）——
+**是卫生问题，不是内存耗尽**。⛔ 别把两条混成一条说。
+
+## `S8` · fail-open 三处各自的返回值（**要各写各的**，⛔ 不能统一返回一个值）
+
+| 处 | Redis 不通时返回 | 为什么 |
+|---|---|---|
+| `is_allowed` | `True`（放行） | 限流是**保护**，不是边界 ⇒ 失效的代价 ≪ 全站 500 |
+| `get_remaining` | `self.capacity`（满桶） | 它是**只读展示**；报 0 会让调用方以为"被限死了" |
+| `get_limit_info` | `{remaining: capacity, reset: now, limit: capacity}` | 同上，且响应头要能算出来 |
+
+⚠️ **日志会按请求刷**（Redis 一直不通就一直打）—— **有意如此**：
+「限流悄悄失效」比「日志吵」危险得多（本 spec ⚠️③ 的 ④ 条）。
+⚠️ **捕获范围 = `redis.RedisError`**（含 `ConnectionError` / `TimeoutError` / `ResponseError`）。
+⛔ **别写 `except Exception`** —— 那会把**代码 bug**（如 `TypeError`）也伪装成"Redis 不通"。
+
+## 本轮**不动**（已看见，⛔ 别读成"一起修了"）
+
+| 处 | 现状 |
+|---|---|
+| ⚠️④「响应头 = 消费**前**的剩余」（恒多 1） | 仍是那样。本批**只加容错与过期**，⛔ **不碰取值时机**（那会动到响应头的口径，是另一条账） |
+| ⚠️④ 里「第 1、2 次都是 19」那个未解释现象 | ⬜ 仍未解释（原样留着，**没验过的不写结论**） |
+| `Request` / `HTTPException` / `os` 三个死导入 | ✅ **已删**（它们就在要改的那几行旁边，且 `pyflakes` 已在报） |
+| 桶的 `last_time` 那两行死变量 | ✅ 2026-09-20 已删（⚠️ 曾误报为 `N16`「桶不回填」，**已撤回** —— 见 `get_limit_info` 里的注释） |
+
+---
+
 ## 关联
 
 | 文档 | 说明 |
@@ -77,14 +156,16 @@
 | `后端补齐清单` **B9** | 匿名按 IP 分桶 · 配额对匿名生效（⏸ **已挂起，挂了钩子**） |
 | `后端补齐清单` **B9-b** | ✅ **已实施** —— `X-API-Key` 分桶加验签（本文件 ⚠️① 的修复） |
 | `docs/说明/测试.md` §六 | 覆盖缺口：「**前者间接**、后者零覆盖」 |
-| `api/test_rag_search.py:15` | ⚠️ 上面 ⚠️③ 那条实测的**原始出处** —— **它一直在仓里** |
+| `api/test_rag_search.py`（文件头） | ⚠️ 上面 ⚠️③ 那条实测的**原始出处** —— **它一直在仓里**。<br>🔴 **2026-10-05 已就地更正**：那里原写「没有 `except RedisError` ⇒ 全站 500」，**`S8` 之后那句是假的** ⇒ 加了更正块（⛔ 不是删掉 —— 它是**当时的实况**）。<br>⚠️ **同型更正另做了两处**：`.github/workflows/ci.yml`（redis service 的理由）· `docs/decisions/DEC-013`（补注：结论「必需」没变，理由换了） |
+| 🆕 `api/test_rate_limiter_resilience.py` | `S7` + `S8` 的 **13 条**用例（含**唯一**那条真 Redis 的 TTL 凭证） |
+| 🆕 `docs/decisions/DEC-079` | **`S8` 的取向**（fail-open）+ **四个落点的 fail-open/fail-closed 分工** + 同批的 `N9` |
 
 > ### ✅ 三条"要不要做"—— **2026-09-30 业务方已裁**
 >
 > | # | 问题 | 裁定 | 落点 |
 > |---|---|---|---|
-> | **1** | **该不该给桶加 `EXPIRE`？** | ✅ **要** | `is_allowed` 的 Lua 里加 `redis.call('EXPIRE', KEYS[1], <TTL>)`<br>⚠️ **TTL 取多少？** 桶的语义是"回满即无意义" ⇒ 建议 `capacity/rate` 的若干倍；⬜ **具体值待定** |
-> | **2** | **Redis 不通时 fail-open 还是 fail-closed？** | ✅ **已裁：fail-open + 必须响的日志**（业务方 2026-09-30 同意） | `is_allowed` / `get_limit_info` / `get_remaining` 三处各包 `except redis.RedisError` ⇒ **放行 + `logger.error`** |
+> | **1** | **该不该给桶加 `EXPIRE`？** | ✅ **要** ⇒ **2026-10-05 已实施**（`S7`） | Lua 里 `redis.call('EXPIRE', KEYS[1], ARGV[4])`<br>⚠️ **TTL 取多少？** ⇒ ✅ **已定 = 60 秒**（`RATE_LIMIT_BUCKET_TTL`）—— **推导过程见本节「`S7` · TTL 取多少」**，⛔ 不是拍的 |
+> | **2** | **Redis 不通时 fail-open 还是 fail-closed？** | ✅ **已裁：fail-open + 必须响的日志**（业务方 2026-09-30 同意）⇒ **2026-10-05 已实施**（`S8`） | `is_allowed` / `get_limit_info` / `get_remaining` 三处各包 `except redis.RedisError` ⇒ **放行 + `logger.error`** |
 > | **3** | **限流参数该不该收进 `token_config.py`？** | ✅ **要进** | `global_limiter` / `user_limiter` 的 `rate` / `capacity` 改从 `token_config` 取<br>⚠️ **`token_config.py` 还没建**（那是计划 ①a 的 Task 2）⇒ **本条并进 ①a 的 Task 2**，⛔ 别另开一轮 |
 >
 > #### 🔵 ② 的理由（我方建议的完整论证，⬜ 待点头）

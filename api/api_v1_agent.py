@@ -1372,6 +1372,21 @@ async def mcp_agent_chat(
         },
         config={"configurable": {"thread_id": sess}}
     )
+
+    # 🔴 2026-10-05（`S13`）：预算**硬**拦截 —— 图里被拦下的工具会在 state 上留
+    #    `budget_intercept`（`agent_graph_advanced.tool_execute`）⇒ 在这里变成 **429**。
+    #    ⚠️ 改前是**软**拦截：图正常跑完、HTTP 200，那句"⚠️ 预算拦截"只有 LLM 看得见
+    #       ⇒ **调用方在响应里看不出"被拒了"**。
+    #    ⛔ 别改成去认末条 `ToolMessage` 的中文文案 —— 那是**子串判据**，
+    #       `plan_execute` 的 `S10` 刚把同型写法清掉（改一个字就静默失效 / 工具正文碰巧含那四个字就误判）。
+    #    ⚠️ `finish_trace` 在这条路上**不写**（追踪里留一条"开了没结束"）——
+    #       与上面 B8 / B11 两道门**一致**，是"被拒也要留下尝试痕迹"的有意为之。
+    if result.get("budget_intercept"):
+        raise AppException(
+            ErrorCode.QUOTA_EXCEEDED,
+            f"预算拦截，本次工具调用未执行：{result['budget_intercept']}",
+        )
+
     final_message = result["messages"][-1]
 
     # 记录工具 结束追踪
@@ -1441,10 +1456,29 @@ async def mcp_agent_chat_stream(
            与 `/agent/mcp_chat`（它取 `result["messages"][-1].content`）**同源**（`DEC-050`）。
         """
         state = await mcp_agent.aget_state({"configurable": {"thread_id": sess}})
-        messages = (state.values or {}).get("messages") or []
+        values = state.values or {}
+        messages = values.get("messages") or []
         answer = getattr(messages[-1], "content", "") if messages else ""
         # 记录工具 结束追踪
         finish_trace(user_name, thread_id, answer)
+
+        # 🔴 2026-10-05（`S13`）：预算**硬**拦截 —— 同 `/agent/mcp_chat`，但那边的 429 这里发不出去：
+        #    响应头**已经发出去了**（HTTP 200 + `text/event-stream`）⇒ 只能改发一帧 `{"error": …}`
+        #    （与 `/agent/plan_execute/stream` 同一口径）。
+        #    ⛔ **不许照旧发汇总帧** —— 那帧里有 `answer`，读起来就是"这轮正常答完了"，
+        #       而这正是软拦截在流式这条路上的形态（改前实测：`answer` = "⚠️ 预算拦截：…"）。
+        why = values.get("budget_intercept")
+        if why:
+            yield sse_frame({"error": f"预算拦截，本次工具调用未执行：{why}"},
+                            ensure_ascii=False)
+            yield DONE_FRAME
+            # 🔴 `DEC-055`：留痕排在任何 `yield` 之前的那条约束这里**不适用**（本支不会异常），
+            #    但"三条出口都要留痕"照办 —— 这条算 `error`（本轮没答成）。
+            #    ⚠️ 存的文本**与上面那一帧同源**（同一个 `why`）⇒ 帧与历史不会对不上。
+            persist_turn(user_name, question, f"预算拦截，本次工具调用未执行：{why}",
+                         status="error")
+            return
+
         # 预算提醒
         warning_info = check_budget_warning(user_name)
         yield sse_frame({

@@ -6,7 +6,7 @@
 - 触发：`ROADMAP.md` `③` Task 4（2026-10-03 · `DEC-050`）只开了**第一条**流式路由
   （`/agent/langgraph_chat/stream`）⇒ **硬门 A「该流的流」的缺口没关掉**。
   业务方 2026-10-04 就本条裁了三件事（见 §一）。
-- 计划全文：`~/.claude/plans/misty-wandering-bee.md`（`B1 剩余 4 条链 · Agent 端真流式 + api/sse.py 共享层`）
+- 计划全文：**仓外 · 机器本地、未入库** —— 本机 `~/.claude/plans/` 下那份会话计划（`B1 剩余 4 条链 · Agent 端真流式 + api/sse.py 共享层`）
 - 规划时的**改动面普查**：`fastapi-rag-agent-TODO待办/硬门A-Agent端流式勘察-20261003.md`
 
 ---

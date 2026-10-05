@@ -1,7 +1,11 @@
 import uuid
 import hashlib
 from datetime import datetime, timedelta
+
+import psycopg2
+
 from db import get_db
+from exceptions import AppException, ErrorCode
 from config import LOGIN_USER_NAME, LOGIN_PASSWORD, TEST_USER_PASSWORD
 
 def generate_api_key() -> str:
@@ -64,16 +68,42 @@ def verify_api_key(api_key: str):
     """
     验证API Key是否有效。
     返回该Key对应的user_name，如果无效则返回None。
+
+    🔴 2026-10-05（待办 `N9`）：**库不可用 ⇒ 抛 `AppException(SERVICE_UNAVAILABLE)`**，
+       ⛔ **不是返回 `None`**。
+
+       * 返回 `None` 会让调用方（`deps.get_current_user`）报 **401** ——
+         那等于**替用户断言「你的 key 坏了」**：他会去换一把**没问题的** key，
+         然后照样连不上，而且**永远查不到原因**。
+       * 改前是裸的 `with get_db()` ⇒ 库一抖就是**非结构化的 500**。
+
+       ⇒ 与 WS 侧**已裁**的 **1008 / 1011** 同一条口径（`docs/specs/deps.md` 的 ⚠️ 表）：
+         **凭据不行 ⇒ 换 key；认证服务不行 ⇒ 重试、⛔ 别换 key。**
+         HTTP 侧的对应值就是 **503 `SERVICE_UNAVAILABLE`**
+         （`api/exceptions.py` 里**早就有这个码，此前从未被用过**）。
+       ⚠️ `N9` 原文写的是「500 **而不是 401**」—— **两个都不是答案**，理由见上。
+
+    ⚠️ 捕获范围 = **`psycopg2.Error`**（连接被拒、池耗尽 `PoolError` 都是它的子类），
+       ⛔ **不是 `except Exception`** —— 写成宽捕获会把**代码 bug** 伪装成"库挂了"，
+       而且会**吞掉** `api/test_rate_limit_identity.py` 的 `_no_db` 守卫
+       （它靠抛 `AssertionError` 抓"谁碰了库"）⇒ **那道门静默失效**。
+       🔒 守卫：`api/test_auth_db_unavailable.py::test_非数据库异常必须照样冒泡`。
     """
     hashed = hash_api_key(api_key)
-    with get_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT user_name, expires_at FROM api_keys WHERE key_hash = %s",
-                (hashed,)
-            )
-            row = cur.fetchone()
-    
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT user_name, expires_at FROM api_keys WHERE key_hash = %s",
+                    (hashed,)
+                )
+                row = cur.fetchone()
+    except psycopg2.Error as exc:
+        raise AppException(
+            ErrorCode.SERVICE_UNAVAILABLE,
+            f"认证服务不可用（数据库连接失败），请稍后重试。原因：{type(exc).__name__}",
+        ) from exc
+
     if row is None:
         return None
     

@@ -1774,6 +1774,337 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- 🔴 **门自身的可靠性：4 个自测进 CI · 孤儿门改问 git · 判据由【清单】改【形状】**（2026-10-05 · **批 4** · `DEC-080`）
+
+  > **前几批在"加门"，这一批在问：门自己坏了，谁知道？**
+
+  **① 4 个自测进 `ci.yml`** —— 此前它们**只在本地 / hook 里跑**，而"门挂在别处就等于没有门"
+  （`2026-09-16-八个PR跳过了留痕门.md`）**对自测同样成立**：
+  `test_check_secrets.sh` **18** · `test_check_doc_links.sh` **5** ·
+  `test_check_doc_orphans.sh` **6** · **`test_remind_hooks.sh` 10**（本批新建）。
+  ⚠️ `DEC-076` §5.2 原登记只写了 2 个 —— **实为 4 个**。
+
+  **② 孤儿门：候选集从【问磁盘】改成【问 `git ls-files`】+ 三态退出码** ——
+  原来拿不到 git 时它把「**没能判定**」**压成「没有孤儿」**（**静默假绿**）；
+  现在 `0` 通过 / `1` 有孤儿 / **`2` 无法判定（⛔ 不算通过）**。同批补 `.claude/worktrees/` 剪枝
+  （⚠️ 按**路径前缀**，⛔ 不是按目录名 —— 后者会排掉仓里任何真叫 `worktrees` 的目录）。
+
+  **③ 🔴 `N10`：路由提醒 hook 的判据由【文件名清单】改成【形状】** —— 改前写死 4 个名字，
+  **新建第 5 个路由文件时它静默不跑**；而"**静默不跑**"与"跑过了没发现问题"在机器痕迹上**完全一样**（`DEC-061`）。
+  现按内容判（`APIRouter(` / `@router.` / `@app.`）⇒ **新建文件自动覆盖，⛔ 不需要谁记得改清单**。
+  ⚠️ **同型错误本仓已犯两次**（另一次 `DEC-074`）。
+
+  **④ 两个新提醒 hook**（`docs/待办总表.md` **§五·4 / §五·1**）——
+  `py-compile-remind.py`（改完 `.py` **当场编译那一个文件**）·
+  `claim-evidence-remind.py`（写「**不存在 / 是唯一的**」前**先出一条命令**，⛔ 散文"我查过了"不算证据）。
+  ⛔ **两者都不是门**（`PostToolUse` 拦不住已发生的编辑）⇒ 别拿它们论证本批的价值。
+
+  **⑤ `--all` 的 2 处假阳性：在【源头】改，⛔ 不开豁免口子** ——
+  豁免清单放宽 ⇒ 以后**真命中也会被它盖住**（同一个 `--all` 从"2 处假阳性"变成"2 处**永远不报**"）。
+  ⇒ `bash scripts/check_secrets.sh --all | tail -1` 现为 **0 命中**。
+
+  🔴 **两个真缺陷是跑 `ci-local` 才照出来的（本地全绿）** ——
+  ① 孤儿门自测的夹具**会把主检出未提交的改动悄悄暂存**（`ci-local.sh:252` 的 `GIT_DIR` **盖过 `git -C`**）；
+  ② `SECRETS_GATE_ALLOW_NO_ENV=1` 从 `ci.yml` 的 env 段**继承进自测**，把"无 `.env`"那条**洗成绿**。
+  ⇒ 两处都靠**自测自己先摘掉调用方的环境**修，⛔ 不是让 CI 迁就。
+  📌 判据：`bash scripts/ci-local.sh` ⇒ **退出码 0**（全量 **654 passed, 3 skipped**）。
+
+  ⚠️ **本批只关掉 `docs/待办总表.md` §五 的 1 / 4 / 5** —— **2 / 3 / 6 仍在**；
+  `DEC-076` §5.2 那 6 条**逐条已回填**（6/6 收口），但 ⛔ **表外的遗留没有重数**。
+
+- 🔴 **`N9` 那句原文的【错口径】改掉**（2026-10-05 · 记录更正 · `DEC-079`）—— **代码一行没动**
+
+  业务方 2026-10-05：「🔴 一处【需要你知道】的偏离：**改**。」
+  ⇒ 「改」的对象是**记录**，不是代码 —— 批 3 已经把行为改成 **503**（`DEC-079` §二给过理由）。
+
+  **问题**：`N9` 原文写「库一抖动 ⇒ **500 而不是 401**」——
+  这句在**三处**仍以**"现状 / 待办"**的口气立着，读者会以为**要修成 401**：
+
+  | 处 | 原文口气 | 改成 |
+  |---|---|---|
+  | `docs/待办总表.md` N9 行（**左列**，即"问题描述"） | 就回 **500 而不是 401**（实测） | 就回 **500**（实测）+ ⚠️ **当时的期望「401」也不是答案** ⇒ 已裁 **503**（见右列） |
+  | `DEC-074` 遗留·4 | 「…变成 **500 而不是 401**。⛔ 单独立项」 | 补 ✅ **已立项 `N9` 并收口（`DEC-079`）⇒ 503**（⛔ 不是 401 也不是 500） |
+  | `DEC-075` 遗留·2 | 「HTTP 侧库抖动时…**500 而不是 401**」「**HTTP 侧没修**」 | 补 ✅ **已收口** + 🔴 **两侧口径现在一致**（**WS 1011 / HTTP 503** —— 同一个判断、各自的表达） |
+
+  🔴 **为什么「401」也是错的**（不只是"500 不对"）：库连不上时我们**并不知道那把 key 是真是假**
+  ⇒ 报 401 = **替用户断言「你的 key 坏了」**，他会去换一把**没问题的** key、然后**照样连不上**。
+  📄 完整裁定 ⇒ `docs/decisions/DEC-079-依赖不可用时端点答什么.md` §二。
+
+  📌 **判据（可打印）**：`grep -rn '而不是 401' --exclude-dir=.git --exclude-dir=venv .`
+  ⇒ 剩下的**每一条**都必须带「**两个都不是答案**」的批注（那是**引用原文**，⛔ 不是待办）。
+  ⚠️ **`api/auth.py:84` · `docs/specs/deps.md:51` · `api/test_auth_db_unavailable.py:10` 本来就写了这句话**，
+  ⇒ 本条目**没动它们**（它们是对的，且从第一批起就写了「⛔ 别照字面修」）。
+
+- 🔴 **依赖（DB / Redis）不可用时，端点答什么**（2026-10-05 · 批 3 · `N9` + `S8` + `S7` · `DEC-079`）
+
+  三件事，**同一件事的三面** —— 都是「依赖挂了，服务该怎么办」。
+
+  #### 1 · `N9` —— `verify_api_key` 的裸 `get_db()`
+
+  **改前**：`with get_db() as conn:` **前后没有 `try`** ⇒ 库一抖，`psycopg2.Error` 一路冒到
+  **中间件里** —— 而本文件自己写着「**中间件中抛出的异常不会被 `@app.exception_handler` 捕获**」
+  ⇒ 调用方拿到**非结构化的 500**。
+
+  🔴 **`N9` 原文写的是「500 **而不是 401**」—— 两个都不是答案**：
+  库连不上时**我们并不知道那把 key 是真是假** ⇒ 报 401 等于**替用户断言「你的 key 坏了」**，
+  他会去换一把**没问题的** key、然后照样连不上，**永远查不到原因**。
+  ⇒ 照 WS 侧**已裁的 1008 / 1011**取口径（**凭据不行 ⇒ 换 key；认证服务不行 ⇒ 重试**），
+  HTTP 侧的对应值 = **503 `SERVICE_UNAVAILABLE`**
+  （`api/exceptions.py` 里**早就有这个码，此前从未被用过**）。
+
+  **四个落点，两种取向（⛔ 别"统一"）**：
+
+  | 层 | 落点 | 取向 |
+  |---|---|---|
+  | 安全边界 | `deps.get_current_user` | **fail-closed** ⇒ 拦住，但说 **503**（⛔ 不是 401、不是 500） |
+  | 保护措施 | `main.resolve_rate_limit_identity` | **fail-open** ⇒ 返回 `None` ⇒ **本请求不参与用户级限流** |
+  | 成本控制 | `main.resolve_quota_identity`（🆕 抽出） | **fail-open** ⇒ `None` ⇒ 跳过额度检查 |
+  | 限流阀本身 | `rate_limiter`（`S8`） | **fail-open** ⇒ 放行 + ERROR 日志 |
+
+  ⚠️ **限流那个为什么不是「降级到匿名桶」**：`anonymous` 是**一个** 20 容量 / 3 每秒的桶
+  ⇒ 库一挂**所有带 key 的人挤进同一个桶** ⇒ **大面积假 429** ——
+  那等于**把库抖动算到用户头上**，正是 1008/1011 禁止的**归错因**的限流版。
+  ⚠️ **全局限流那一层仍照常生效**（它不依赖身份）。
+
+  #### 2 · `S8` —— Redis 不通 ⇒ 从「全站 500」改成 fail-open
+
+  三处（`is_allowed` / `get_remaining` / `get_limit_info`）各包 `except redis.RedisError`
+  ⇒ **放行 + `logger.error`**（⚠️ **日志必须响**：否则成了「**限流悄悄失效**」，比报错更危险）。
+  ⚠️ 三处**返回值各不相同**（`True` / `capacity` / 满桶）—— `get_remaining` 报 `0` 会让调用方
+  以为"**被限死了**"，而真实情况**恰恰相反**。
+
+  #### 3 · `S7` —— 桶加 TTL（改前**永不过期**）
+
+  `EXPIRE` 进 Lua（走 `ARGV[4]`），值 = `token_config.RATE_LIMIT_BUCKET_TTL`（**60 秒**）。
+  **推导，⛔ 不是拍的**：桶的语义是「**回满即无意义**」，回满耗时 = `capacity/rate`
+  （user 20/3.0 = 6.7 s · global 150/100.0 = 1.5 s）⇒ 60 s 对两个桶都**语义无损**。
+  ⚠️ **收益要说准（⛔ 别写成"堵了 DoS"）**：伪造 key 那个洞 **`B9-b` 早就堵了**
+  （验不过 ⇒ 落匿名桶 ⇒ 造不出新桶）⇒ 现在管的是**卫生**，不是内存耗尽。
+  🔴 **落地时把计划改了**：原计划"两个分支都要写 `EXPIRE`"，实际**把那两个重复分支合并成一条**
+  ⇒ `EXPIRE` **天生只有一条路径**，⛔ 不可能"某个分支忘了加"。
+
+  ⚠️ **捕获范围一律【按类型】**（`psycopg2.Error` / `AppException` / `redis.RedisError`），
+  ⛔ **不是 `except Exception`** —— 宽捕获会把**代码 bug** 伪装成"依赖挂了"，
+  而且会**吞掉** `api/test_rate_limit_identity.py` 的 `_no_db` 守卫（它靠抛 `AssertionError` 抓"谁碰了库"）
+  ⇒ **那道门静默失效**（实测：写成 `except Exception` ⇒ `test_非数据库异常必须照样冒泡` 转红）。
+
+  **判据（可打印）**：
+  ```bash
+  venv/bin/python -m pytest api/test_auth_db_unavailable.py -q        # ⇒ 22 passed
+  venv/bin/python -m pytest api/test_rate_limiter_resilience.py -q    # ⇒ 13 passed（1 条真连 Redis）
+  bash scripts/ci-local.sh                                            # ⇒ 654 passed（基线 619）
+  ```
+  ⭐ **变异自证 17/17**（⚠️ **一次性脚本，⛔ 没入库** —— 与批 1/2 同例；下面记的是**变异名**，
+  将来换实现时按名字重做即可）：`N9` 7 条 —— 捕获范围写歪 / 写成 `except Exception` /
+  报错码退回 401 口径 / **限流中间件不再绕开 `None`** / 额度侧写成宽捕获 /
+  **额度身份不再回退试 JWT** / **额度中间件不再绕开 `None`**；
+  `S7`/`S8` 10 条 —— 脚本里没有 `EXPIRE` / `EXPIRE` 写死 60 不用传入的 TTL /
+  `is_allowed` 不把 TTL 传下去 / 默认 TTL 调到回满时间以下 / `is_allowed` 不再兜底 /
+  写成宽捕获 / **兜底时静默（不写日志）** / `get_remaining` 断连时报 0 /
+  `get_limit_info` 断连时不再兜 / **无脑放行（反向守卫该红）**。
+  🔴 **RED 阶段是实测的**：真 Redis 那条在改前拿到 **`ttl = -1`**（**有键但永不过期**）——
+  `S7` 那个 bug 是**验出来的**，⛔ 不是从代码推出来的。
+
+  ⚠️ **同时更正了三处【已变成假话】的旧记录**（`S8` 之后"没有 `except RedisError` ⇒ 全站 500"不再成立）：
+  `api/test_rag_search.py`（文件头）· `.github/workflows/ci.yml`（redis service 的理由）·
+  `docs/decisions/DEC-013`（补注：**结论「redis 必需」没变，理由换了** ——
+  现在撑住它的是那条**必须问真 Redis 要 `TTL`** 的用例；
+  实测 `REDIS_PORT=6399 pytest api/test_rate_limiter_resilience.py` ⇒ **1 failed, 12 passed**）。
+
+  ⚠️ **本轮【不动】、已看见**：`verify_api_key` 不过滤 `is_active`（**同函数、不同病**，
+  见 `docs/待办总表.md` `G6`）· `N11` 的端点层预算软返回 · `B9` 匿名可打 ·
+  限流响应头"恒多 1"（⚠️④）。**一行 SQL 都没改。**
+
+  📄 `docs/decisions/DEC-079-依赖不可用时端点答什么.md` ·
+  `docs/specs/deps.md`（`N9` 实施计划）· `docs/specs/rate_limiter.md`（`S7`/`S8` 实施计划）
+
+- 🔴 **预算拦截：`agent_graph_advanced` 从【软拦截】改成【硬拦截】**（2026-10-05 · `DEC-078` · 待办 `S13`）
+
+  **改前**：超预算 ⇒ 塞一条 `ToolMessage`、`continue` ⇒ 图**照常跑完**、端点**照常 HTTP 200**
+  + 一段"预算不够"的答案。🔴 **「预算拦住了」这句话只对 LLM 成立** ——
+  调用方在响应里**看不出"被拒了"**。
+
+  ⚠️ **裁定原文写的是「抛 `AppException`」—— 照字面做会引入新缺陷**（探针实测，非推断）：
+  在 LangGraph 节点里 `raise` ⇒ checkpoint 停在 `next=('tools',)` + 一条**没人回答的**
+  `AIMessage(tool_calls)` ⇒ **那个 thread 从此废掉**（`agent` 是**入口节点**、每轮都跑，
+  下一轮必撞非法消息序列；OpenAI 口径的 provider 直接 **400**），且失败的 task 会**重跑**。
+  ⚠️ 预算**不是永久的**（日预算午夜重置 · 两级成本闸门管理员可调）⇒ 「我反正不用了」不成立。
+
+  **改法（走 state，⛔ 不在节点里抛）**：新增 `AgentState.budget_intercept`
+  （普通键、**没挂 `operator.add` ⇒ last-write-wins 且落 checkpoint**）——
+  `tool_execute` 被拦时置它，**且本轮每个 `tool_call` 都要留 `ToolMessage`**（⛔ 不许 `break`）；
+  入口节点 `agent_decide` **每轮清零**（**两个出口都带**，否则走另一个出口的那轮会留着上轮的值）
+  ⇒ 端点层转 **429 `QUOTA_EXCEEDED`**（非流式）/ **`{"error": …}` 帧**（流式 ——
+  响应头已发出、状态码改不了，与 `/agent/plan_execute/stream` 同一口径）。
+
+  🔴 **顺带堵掉一个更糟的现状**：`tools → agent` 原是**无条件边** ⇒ 被拦后模型**再调一次、再被拦**
+  …… 直到撞上限。**改前实测 `GraphRecursionError: Recursion limit of 25 reached`**
+  —— 那是在**已经判定"没钱了"之后，又白烧十几轮 LLM** ⇒ 新增 `after_tools` 条件边：**被拦即 `END`**。
+
+  **判据（可打印）**：
+  ```bash
+  venv/bin/python -m pytest api/test_budget_hard_intercept.py -q   # ⇒ 11 passed
+  bash scripts/ci-local.sh                                          # ⇒ 619 passed（基线 608）
+  ```
+  ⭐ **变异自证 7 处全中**（`M1`–`M7`，含"上一轮的拦截标志不会串到下一轮" · "图在 tools 之后不回 agent"）。
+
+  ⚠️ **本轮【不动】、已登记**：**用户日预算**那条软返回（`docs/待办总表.md` **`N11`**）
+  —— `S13` 的通道只带得动被**工具**触发的那类；它是**另一条账**，⛔ 别读成"一起修了"。
+
+  📄 `docs/decisions/DEC-078-预算硬拦截的落点与响应形状.md` ·
+  `docs/specs/agent_graph_advanced.md`（批 2 实施计划）· `api/test_budget_hard_intercept.py`
+
+- ⚠️ **`plan_execute` 的 `max_replans` 提成模块级常量 `MAX_REPLANS`**（2026-10-05 · 待办 `S11`）
+
+  原先是写在 `execute_plan_with_replan` **函数体里**的局部变量（`max_replans = 5`），
+  与同一批的三个超时常量（`PLANNER_LLM_TIMEOUT` / `EXECUTOR_LLM_TIMEOUT` / `QUALITY_LLM_TIMEOUT`）
+  **做法不一致**。⇒ 提成模块级 `MAX_REPLANS = 5`，与那三个放一起。
+
+  ⛔ **有意【不加 env】** —— 三个超时都不是 env（硬编码常量），保持一致；
+  且它同时决定「**一次请求最多几次规划调用**」，那正是**记账与预算**的输入。
+
+  **用例**：`test_重规划次数上限是可配的模块级常量` ——
+  ⚠️ 它**钉的是「循环读常量」这个行为，⛔ 不是「常量等于 5」这个值**
+  （所以默认值改了它不该红）。**两半自证**（实测）：
+  ① 默认值 `5 → 3` ⇒ **仍绿**；② 循环写回硬编码 `<= 5` ⇒ **红，且报"实际 6 次"**（= 5+1，
+  正是它在读那个硬编码值）。
+  ⚠️ 用例里**每步必须换一个工具名** —— 同一工具连败 3 次会进 `failed_tools`，
+  而那条降级分支**不调 `plan_task`**，会把次数数少、红得看不懂。
+
+  **判据**：`bash scripts/ci-local.sh` ⇒ **608 passed**（基线 602 + 6）。
+
+- 🔴 **`plan_execute` 重规划补传 `user_name`，并加一道【从 AST 推出来的】守卫**（2026-10-05 · 待办 `S9`）
+
+  `api/plan_execute.py` 的重规划那次调用是 `plan_task(replan_context)` —— **漏传 `user_name`** ⇒ 走默认 `"unknown"`。
+  后果两条：`check_budget_before_call("unknown")` ⇒ **不受该用户的预算约束**；
+  `record_usage(user_name="unknown")` ⇒ **算不到他头上**（`token_usage_logs` 里是 `unknown`）。
+  ⚠️ 最多 **5** 次重规划 ⇒ **最多 5 次「白跑且不记账」的规划调用**。
+
+  🔴 **同族的漏传在本仓已是第二次**：2026-09-21 修过 `generate_dynamic_input` 那处，
+  **当时就在注释里写了教训**（「改完要按行号核，别只看替换成功了几处」）—— **而这一处照样漏了 9 天**，
+  直到 2026-09-30 `/specs` 核账才挖出来。⇒ **教训写在注释里不管用。**
+
+  **两条用例**：
+  - `test_重规划把真实发起人传下去` —— 行为侧。⚠️ 旧的 `plan_task` 替身是 `lambda ctx: [...]`
+    （**只收一个参数 ⇒ 只能发现"多传了"，发现不了"漏传"**），**那正是这个洞活到现在的原因**；
+  - 🆕 **`api/test_plan_task_user_name_wiring.py`** —— **AST 守卫**，从代码里推出所有 `plan_task` 调用点，
+    覆盖**直接调用**与**当回调传给 `asyncio.to_thread`**两种写法，没带 `user_name` 就红
+    （📌 同型先例：`api/test_bm25_cache_invalidation_wiring.py` · `DEC-063`）。
+
+  **变异自证**：把调用点改回漏传 ⇒ **两条同时转红**（审计位点名 `plan_execute.py:428`）。
+  ⚠️ **执行中发现计划漏了一处**：`test_downgraded_step_keeps_the_real_reason` 的 `plan_task` 替身
+  也是单参数形状，同样要跟着改（已记进 spec 的批 1 实施计划）。
+
+  **判据**：`bash scripts/ci-local.sh` ⇒ **607 passed**（基线 602 + 5：`S10` 三条 + `S9` 两条）。
+
+- 🔴 **`plan_execute` 的成败判定：从「读中文文案」换成 `StepResult` 结构化返回**（2026-10-05 · `DEC-077` · 待办 `S10`）
+
+  `api/plan_execute.py` 原先靠**中文子串**判成败 —— `if "执行失败（已重试" in step_result`（`:362`）
+  与 `if "执行失败" in step_result`（`:557`）。那条判据与那句**格式化文案**耦合，坏法两种：
+  ① 改一个字的措辞 ⇒ **失败判定静默失效**（看起来在重试、其实没有）；
+  ② 工具**正常返回**的正文里恰好含那四个字 ⇒ 正常结果被判成失败、**凭空触发一次重规划**。
+
+  ⇒ 新增 `StepResult(ok, text, error)`（`frozen` dataclass）；两个 `execute_step_with_*` 改返回它，
+  调用方看 `.ok` 字段。**⛔ 用户可见文案一字未改**（只换判定依据）——
+  ⚠️ `ok` 与 `text` **不总是同向**：质量不达标那条出口仍是 `ok=True`（改前也不触发重规划）。
+
+  ⚠️ **一处会被误读的口径**：`execute_single_step` 的 docstring 写着「失败一律**抛异常**」，
+  而 `execute_step_with_retry` 现在**返回失败对象** —— 两条契约**分管不同层**
+  （真调用那层必须抛，否则重试静默失效；重试**耗尽**那层要做的是把结论**交给上层判定**）。
+  📄 口径澄清与四个备选的评估 ⇒ `docs/decisions/DEC-077-StepResult成败判定的接口选型.md`
+
+  **回归用例 3 条**（`api/test_plan_execute_tools.py`）：决定性那条**改前 RED**（`assert [1] == []`）·
+  反向守卫（防判成恒 `False`）· 类型 + **文案逐字**契约。
+  **变异自证**：把 `:399` 改回子串判定 ⇒ 只有决定性那条转红。
+  **判据**：`bash scripts/ci-local.sh` ⇒ **605 passed**（基线 602 + 3）。
+
+- 🔴 **把「凭据门 / 断链门 / 孤儿门」接进 CI** + 凭据门新增 `--diff` 模式（2026-10-05 · `DEC-076`）——
+  收掉「**门挂在别处**」的又一例：四道门全住在 `.claude/hooks/pre-commit-gates.py` 里，
+  **`git commit --no-verify` 就能整条绕过**，而 `DEC-074` 当时只把**路由鉴权门**接进了 CI。
+
+  **为什么算 `Fixed` 而不是 `Added`**：这不是加功能，是**接线**（门早就在，只是没接到 CI 上），
+  外加修掉一句**与事实不符的声明**（覆盖度过度声明 · 见下）。
+
+  **① 三道门进 `ci.yml`** —— 追加进**已有的 `offline-tests` 的 `run:` 块**，排在 `pytest` **之前**。
+  ⛔ 不新建 job：两个 job 的**名字就是分支保护的必需检查**，改 `run:` 块不碰分支保护（`DEC-074` 同法）。
+  检出加 `fetch-depth: 0`（三点范围要 merge-base；默认浅克隆取不到 —— 本仓仅 126 commit，代价可忽略）。
+
+  **② 凭据门新增 `--diff <base>...<head>`** —— CI 只扫**本 PR 的新增行**。
+  ⛔ 不用 `--all`：它扫**存量行**，**当场命中 2 处良性示例**
+  （`docs/说明/部署.md:45` 的 `sk-xxxx` 占位符 · `api/schemas.py:74,80` 的 JWT 示例串）⇒ **恒红**；
+  且它的语义根本不是"本 PR 引入了什么"。⚠️ 三点而非两点：`git diff A..B` 是**端点对端点**。
+  范围取不到 ⇒ **exit 2**（⛔ 不许静默压成"空 diff = 通过"）。
+  > ✅ **2026-10-05（批 4 · `DEC-080`）那 2 处已经修掉了** —— 在上游改的（占位符别写成真 key /
+  > 真 JWT 的形状），⛔ **不是往豁免清单里开口子**（放宽清单 ⇒ 以后真命中也会被它盖住）。
+  > ⇒ 现在 `bash scripts/check_secrets.sh --all` 是 **0 命中**：本段"**恒红**"这句**只对当时那个版本成立**。
+
+  **③ 修掉覆盖度过度声明** —— 结论行原先**写死** `覆盖 ①②③`，而**没有 `.secret-denylist` 时 ② 整节没跑**。
+  ⚠️ **这不是新缺陷，是 v5→v6 的同型残件**（v6 修了 ① 那条，没回头问「同一个形状还有别的入口吗」）。
+  🔴 而 **CI 恰恰是"两样都没有"的那个环境** ⇒ 那句话会在 CI 里变成谎话。
+  现在按**实际执行**拼，CI 里的结论行是 **`覆盖 ③`**。
+
+  🔴 **残留边界（⛔ 不许读成"全好了"）**：`.env` 与 `.secret-denylist` **都被 gitignore**、进不了仓
+  ⇒ **CI 的凭据门实际只跑第 ③ 节（通用模式）**。防护语义是「**PR 的新增行里没有明显密钥形状**」，
+  ⛔ **不是**「和这个仓库的真实凭据逐字比过」。
+
+  📄 决策/备选/反悔成本/边界全表 ⇒ `docs/decisions/DEC-076-三门进CI与凭据门diff模式.md`
+
+  📌 判据（可打印 —— ⚠️ **下面每条都实跑过**）：
+  ```bash
+  # ① 接线确实在 CI 里（不是在 hook 里）
+  grep -n 'check_secrets.sh --diff\|check_doc_links.sh\|check_doc_orphans.sh\|fetch-depth' .github/workflows/ci.yml
+  grep -n 'SECRETS_RANGE\|SECRETS_GATE_ALLOW_NO_ENV' .github/workflows/ci.yml
+  grep -c '\${{' .github/workflows/ci.yml          # ⇒ 0 —— run 块内不许有 GH 表达式（ci-local 要逐字执行）
+  # ② 凭据门 17 条用例全绿（含负控 T12：范围内合成泄漏 ⇒ exit 1；T17：CI 形状 ⇒ 覆盖 ③）
+  bash scripts/test_check_secrets.sh; echo "rc=$?"   # ⇒ 17 通过 / 0 失败, rc=0
+  # ③ 两道文档门：绿 + 【负控】（⚠️ 负控文件必须 `git add` —— 两门都按【已跟踪】的文件枚举）
+  #    造 `docs/zzz-负控-删我.md`(断链) 与 `docs/说明/zzz-负控-删我.md`(孤儿) ⇒ 两门各 exit 1 ⇒ 删掉回 0
+  # ④ ci-local 逐字跑整块 run ⇒ 日志里能看到三道门 + 602 passed
+  bash scripts/ci-local.sh --no-redis 2>&1 | grep -n '凭据门\|没有真断链\|全部有归属'
+  ```
+
+  ⚠️ **跑出来才知道的（⛔ 读代码看不出来）**：`ci-local.sh` 里我第一版把 `` `DEC-076` `` 写在**双引号内**
+  ⇒ 被当**命令替换**执行（`DEC-076: command not found`），且 `${GIT_DIR}` 在 `set -u` 下 unbound
+  ⇒ **脚本中途死掉，而外层因末尾有 `echo` 报了 `rc=0`** —— 正是本仓 2026-10-01 记过的那条。
+
+- 🔴 **断链门：把「存在」的口径从【问磁盘】改成【问克隆者拿得到什么】**（2026-10-05 · `DEC-076 §2.9`）——
+  这是**把门接进 CI 之后第一次跑才暴露的**，⛔ 不在原计划里。
+
+  **症状**：同一份豁免清单下，**本机报「✅ 没有真断链」，CI 报「🔴 10 处」**。
+
+  **根因不是内容，是门自己的判据** —— 它用 `os.path.exists()` 判"目标存在吗"，
+  那是在**问磁盘**；而磁盘上有**没入库的东西**：`archive/`（`.gitignore:30`，
+  `DEC-022` 明文写过「**有意设计**」）与 `GIT_CHECKLIST.md`（`.gitignore:27`，
+  `文档地图` §T5 已登记「在盘上但未入库」）。
+  ⇒ **同一个仓在两台机器上给出两个结论。**
+
+  **改法**：判据换成 **`git ls-files`（索引）**，`docs` 枚举 / `alive`·`archived` 索引 /
+  存在性判定**三处一起改**（⛔ 只改一处是半修：索引被本机独有文件喂饱会**反过来掩盖真问题**）。
+  `git` 拿不到时 **`exit 2`**（⛔ 不静默变绿 —— 拿不到 git 就是拿不到判据）。
+
+  **那 10 处的处置**：**没修文档**（本仓规矩：**登记，⛔ 不顺手清**），
+  而是给 `scripts/doc-links-ignore.txt` 加了 **⑪ / ⑪b** 两节，逐条附**可打印的理由与失效判据**：
+  `archive/` 与 `GIT_CHECKLIST.md` 是**有意排除**（判据 `git check-ignore -v …`）；
+  另有一条 `DEC-060` 里的**绝对路径**标为 🔴 **真缺陷、本轮登记不修**。
+
+  **判据（可打印）**：
+  ```bash
+  bash scripts/test_check_doc_links.sh; echo "rc=$?"        # ⇒ 4 通过 / 0 失败（T2 = 本条的回归）
+  bash scripts/check_doc_links.sh >/dev/null; echo $?       # ⇒ 0
+  git check-ignore -v archive/ GIT_CHECKLIST.md             # ⇒ 两行（⇒ ⑪ 那两行豁免还该在）
+  # 本机 vs CI 一致性（造一棵只有已跟踪文件的树跑同一个门 ⇒ 两边的数必须一样）：
+  R="$PWD"; T=$(mktemp -d); git archive HEAD | tar -x -C "$T"
+  cp scripts/check_doc_links.sh scripts/doc-links-ignore.txt "$T/scripts/"
+  bash scripts/check_doc_links.sh 2>&1 | grep -E '^  🔴|没有真断链'
+  ( cd "$T" && env GIT_DIR="$R/.git" GIT_WORK_TREE="$R" \
+      bash "$T/scripts/check_doc_links.sh" 2>&1 | grep -E '^  🔴|没有真断链' )
+  rm -rf "$T"
+  ```
+
+  ⚠️ **顺带记一条**：`scripts/ci-local.sh` **永远复现不了这一族** —— 它 `rsync` 工作树
+  （只排 `.git`/`.env`），会把 `archive/` 一起复制过去 ⇒ 在它眼里"文件都在"。
+  ⇒ **"ci-local 绿"⛔ 不等于"CI 会绿"**，这条边界以前没写下来过。
+
 - 🔴 **把 `DEC-074`/`DEC-075` 有意留下的 4 条遗留【登记进待办总表】+ `ROADMAP` 补齐 `DEC-057`–`075`**（2026-10-05）——
   收掉「**改动做完了、账没记**」这一类：东西在 `DEC` 里写着，**但没人会去翻 DEC**。
 
