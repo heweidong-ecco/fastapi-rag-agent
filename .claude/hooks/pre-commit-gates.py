@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-PreToolUse hook —— **`git commit` 之前，自动跑本仓的三道门**。
+PreToolUse hook —— **`git commit` 之前，自动跑本仓的五道门**。
 
 ## 为什么要它（这不是"再提醒一次"，是补一个结构性缺口）
 
@@ -15,15 +15,17 @@ PreToolUse hook —— **`git commit` 之前，自动跑本仓的三道门**。
 * 改完文档**没跑链接检查**（一路靠"我记得"）
 * 新建文档**没登记 `docs/文档地图.md`**（脚本有了，但没人跑它）
 
-## 三道门
+## 五道门
 
 | # | 门 | 脚本 | 拦住什么 |
 |---|---|---|---|
 | ① | **凭据门** | `scripts/check_secrets.sh` | PUBLIC 仓里混进明文凭据（**进了历史就改不掉**） |
 | ② | **链接检查** | `scripts/check_doc_links.sh` | 文档里指向不存在的路径（**当天已犯 4 次**） |
 | ③ | **孤儿检查** | `scripts/check_doc_orphans.sh` | 建了文档**但没人指向它**（索引挂空） |
+| ④ | **模块 spec 门**（内联） | — | 新增 `api/*.py` 模块却没有 `docs/specs/<模块>.md` |
+| ⑤ | **路由鉴权门** | `scripts/check_route_auth.py --baseline` | 新引入了**没有鉴权依赖**的路由（含 WebSocket）|
 
-⚠️ **三道都会【跳过本次提交】吗** —— 不是，见下面「克制」。
+⚠️ **五道都会【跳过本次提交】吗** —— 不是，见下面「克制」。
 
 ## 行为
 
@@ -89,17 +91,61 @@ def new_modules_without_spec(repo: str):
     return bad
 
 
-def is_doc_only(repo: str) -> bool:
-    """本次 staged 是否【只有文档/脚本】改动（那就不必要求 spec）。"""
+def staged_files(repo: str):
+    """本次 staged 的文件列表；**git 跑不起来时返回 `None`**（与"空列表"是两回事）。"""
     try:
         r = subprocess.run(["git", "diff", "--cached", "--name-only"],
                            cwd=repo, capture_output=True, text=True, timeout=30)
     except Exception:
-        return False
-    files = [x.strip() for x in r.stdout.splitlines() if x.strip()]
+        return None
+    if r.returncode != 0:
+        return None
+    return [x.strip() for x in r.stdout.splitlines() if x.strip()]
+
+
+def is_doc_only(repo: str) -> bool:
+    """本次 staged 是否【只有文档/脚本】改动（那就不必要求 spec）。"""
+    files = staged_files(repo)
     if not files:
         return False
     return not any(f.endswith(".py") for f in files)
+
+
+# ── 第 ⑤ 道门：路由鉴权（`DEC-074`，2026-10-05 加）──
+# 判据脚本 `scripts/check_route_auth.py --baseline`（含 WS，见该脚本 docstring）。
+#
+# 🔴 它 2026-09-30 就存在、也挂了提醒 hook，**但从没进过 CI，也没进过这道提交门**
+#    ⇒ 只在"改路由文件"时提醒一句。本仓原话：**门挂在别处，就等于没有门**。
+#
+# ⚠️ **触发条件取"任何 api/ 下的产品 .py"**，⛔ 不取具体文件名清单 ——
+#    提醒 hook 那边写的是 `{"main.py","api_v1.py","api_v1_rag.py","api_v1_agent.py"}`，
+#    **新建一个 `api_v2.py` 就整个漏掉**（`DEC-066`「守卫的形状盲区」）。
+#    这里用**范围**而不是**名字**，正是为了不留那个形状。
+#    ⚠️ 代价：本仓多数提交都会动 api/*.py ⇒ 每次提交多 ~10s（实测 9.95s）。
+#       这是**有意**拿时间换"不会被忘"；CI 那边无条件跑，是真正的兜底。
+def api_product_files_staged(repo: str):
+    """staged 里 `api/**.py` 的**产品**文件（排除测试与 conftest）。`None` = git 失败。"""
+    files = staged_files(repo)
+    if files is None:
+        return None
+    out = []
+    for f in files:
+        if not (f.startswith("api/") and f.endswith(".py")):
+            continue
+        base = os.path.basename(f)
+        if base.startswith("test_") or base in NOT_A_MODULE:
+            continue
+        out.append(f)
+    return out
+
+
+def _python_for(repo: str) -> str:
+    """优先用仓里的 venv 解释器（能 import 得起 `main`），否则退回 `python3`。"""
+    for rel in (("venv", "bin", "python"), ("venv", "Scripts", "python.exe")):
+        p = os.path.join(repo, *rel)
+        if os.path.exists(p):
+            return p
+    return "python3"
 
 
 def main() -> int:
@@ -156,8 +202,30 @@ def main() -> int:
     doc_only = is_doc_only(repo)
     spec_bad = None if doc_only else new_modules_without_spec(repo)
 
+    # ── 第 ⑤ 道门：路由鉴权（`DEC-074`）──
+    # 三种状态必须分清（同第 ④ 道门的教训：**别把正常说成故障**）：
+    #   []        ⇒ 本次没动 api/ 产品代码            → ⏭
+    #   [文件…]   ⇒ 跑检查：exit 0 过 / 非 0 拦       → ✅ / 🔴
+    #   None      ⇒ git **真失败**                    → ⚠️ 跳过
+    route_files = api_product_files_staged(repo)
+    route_bad = None          # None = 没跑；否则为 CompletedProcess（非 0 即拦）
+    if route_files:
+        script = os.path.join(repo, "scripts", "check_route_auth.py")
+        if not os.path.exists(script):
+            route_files = None
+        else:
+            try:
+                r = subprocess.run(
+                    [_python_for(repo), script, "--baseline"],
+                    cwd=repo, capture_output=True, text=True, timeout=180)
+            except Exception:
+                route_files = None          # 跑不起来 ⇒ 只跳过，⛔ 不阻止（同「四条克制」②）
+            else:
+                if r.returncode != 0:
+                    route_bad = r
+
     # ── 有门没过 ⇒ 阻止 ──
-    if failed or spec_bad:
+    if failed or spec_bad or route_bad:
         print("", file=sys.stderr)
         print("⛔ 提交前的门【未通过】—— 已阻止本次 commit。", file=sys.stderr)
         if spec_bad:
@@ -169,6 +237,18 @@ def main() -> int:
             print("   ⇒ 为什么硬拦：**没有 spec 的模块，别人不知道它存在、也不知道做到哪。**",
                   file=sys.stderr)
             print("   ⇒ 建 spec 的模板见 docs/specs/README.md（**⭐ 关键节是「看代码会误判的地方」**）",
+                  file=sys.stderr)
+        if route_bad is not None:
+            print("", file=sys.stderr)
+            print("──── 路由鉴权门（新端点必须带鉴权依赖）────", file=sys.stderr)
+            for line in (route_bad.stdout or "").splitlines()[-25:]:
+                print("   " + line, file=sys.stderr)
+            for line in (route_bad.stderr or "").splitlines()[-10:]:
+                print("   " + line, file=sys.stderr)
+            print("", file=sys.stderr)
+            print("   ⇒ 判据全文见 scripts/check_route_auth.py 的 docstring；",
+                  file=sys.stderr)
+            print("     基线 = scripts/route-auth-baseline.txt（⛔ 它不是「允许清单」）。",
                   file=sys.stderr)
         for name, r in failed:
             print("", file=sys.stderr)
@@ -193,9 +273,15 @@ def main() -> int:
         parts.append("模块spec门 ✅")
     elif spec_bad is None:
         parts.append("模块spec门 ⚠️ 跳过（git 读不到 staged）")
+    if route_files:
+        parts.append("路由鉴权门 ✅")
+    elif route_files == []:
+        parts.append("路由鉴权门 ⏭ 本次没动 api/ 产品代码")
+    else:
+        parts.append("路由鉴权门 ⚠️ 跳过（脚本不在 / 跑不起来 / git 读不到 staged）")
     if skipped:
         parts.append("⚠️ 跳过：" + " · ".join(skipped))
-    print(f"🔒 提交前四道门：{' ｜ '.join(parts) or '（无门可跑）'}", file=sys.stderr)
+    print(f"🔒 提交前五道门：{' ｜ '.join(parts) or '（无门可跑）'}", file=sys.stderr)
     return 0
 
 

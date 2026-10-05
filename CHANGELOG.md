@@ -1832,6 +1832,37 @@ All notable changes to this project will be documented in this file.
   · 全量 `bash scripts/ci-local.sh` ⇒ **544 passed / 3 skipped / 31 deselected**（改前 540）
   📄 `docs/specs/pending_approvals.md` · `docs/specs/api_v1_agent.md` · `docs/契约/环境变量.md` · `docs/契约/接口契约.md`
 
+- 🔴 **把「路由鉴权门」真的接上线 + `PUBLIC_PATHS` 改名**（2026-10-05 · `DEC-074`）—— **两件事，轻重完全不同**。
+
+  **① 改名（零行为变更）**：`api/main.py` 的 `PUBLIC_PATHS` ⇒ **`MIDDLEWARE_EXEMPT_PATHS`**。
+  它不是"公开名单"，只是"**跳过限流/配额两个中间件**"。现成反例就在名单里：
+  `/api/v1/admin/create_user` **在名单内，却要 `require_admin`**（`api/api_v1.py:161`）。
+  ⛔ **历史文档（`docs/decisions/` / 本文件）里的旧名【不改】** —— 那是留痕；对照见 `DEC-074`。
+
+  **② 🔴 接线（这才是重点）**：`scripts/check_route_auth.py`（+基线 + 提醒 hook）**2026-09-30 就建齐了**，
+  但 `grep -n 'check_route_auth' .github/workflows/*.yml scripts/ci-local.sh .claude/hooks/pre-commit-gates.py`
+  ⇒ **三处全空** ⇒ 它**只在 Claude 会话里提醒一句**，`git commit` 与 CI 都不跑
+  ⇒ 本仓原话「**门挂在别处，就等于没有门**」。现在：
+  · **CI**：进 `ci.yml` 跑 pytest 的那个 `run` 块，**排在其前**（块是 `bash -e`，先红的会吃掉后面）；
+  · **提交门**：`.claude/hooks/pre-commit-gates.py` 加**第 ⑤ 道**，触发取 **`api/**.py`（范围）**，
+    ⛔ 不取文件名清单 —— 旧提醒 hook 写死 4 个名字，**新建 `api_v2.py` 就整个漏掉**（`DEC-066` 那个形状）。
+  · ⚠️ **`ci-local.sh` 一行没改** —— 它整块照抄 `ci.yml` 的 `run`（`:136`）⇒ 自动跟上（已实测跑到）。
+
+  **③ 顺带补上扫描盲区**：脚本此前**只认 `APIRoute`** ⇒ `/api/v1/ws/agent`（**真花钱、真没鉴权**）
+  **零输出**。本轮 WS 也进清单（标签 `WS`），基线 **1 → 3 条**。
+  ⚠️ **+2 不是新欠债**：那两条**一直都在**，只是**此前扫不到**。⚠️ **"进清单" ≠ "被保护"** ——
+  中间件**本来就管不到 WS**（`BaseHTTPMiddleware` 只处理 `scope["type"]=="http"`）。
+
+  📌 判据（可打印，⚠️ 别只看绿的那次）：
+  ```bash
+  venv/bin/python -m pytest api/test_route_auth_scan.py -q     # ⇒ 9 passed
+  venv/bin/python scripts/check_route_auth.py                  # ⇒ 60 条路由 · 无鉴权 3 条（HTTP 1 · WS 2）
+  venv/bin/python scripts/check_route_auth.py --baseline; echo $?   # ⇒ ✅ 与基线一致 · exit 0
+  # 证伪：临时加一条无鉴权路由 ⇒ 提交门 exit 2 并点名它（实测 + /__selfcheck_no_auth__）
+  ```
+  · 全量 `bash scripts/ci-local.sh` ⇒ **572 passed / 3 skipped / 31 deselected / 0 failed**（改前 563；**+9 恰为本轮新增用例数**）
+  📄 `docs/decisions/DEC-074-中间件豁免名单改名与路由鉴权门的接线.md` · `docs/specs/main.md` · `docs/规范/开发规范.md` §1.5 · `.claude/README.md`
+
 - 🔴 **关掉 RAG 侧【不记账】的 LLM 通路**（2026-10-05 · `DEC-073`）—— **与 `DEC-072` 同型，只是换到 RAG 那一半**：`/rag/search` 与 `/rag/rewrite_search` **改前零闸、零记账**，却**默认就真调 LLM**。
 
   **改前实况**（`grep -c 'record_usage\|record_from_response'`）：

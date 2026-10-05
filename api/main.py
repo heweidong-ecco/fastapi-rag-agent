@@ -98,14 +98,24 @@ async def log_and_track_request(request: Request, call_next):
     return response
 
 # 新增 令牌桶 在 main.py 中集成限流中间件：
-# ==================== 公开路径（限流 / 配额中间件共用）====================
+# ============ 中间件豁免路径（限流 / 配额两个中间件共用）============
+#
+# 🔴 2026-10-05 改名：原名 `PUBLIC_PATHS` **会误导**（`DEC-074`）。
+#    它**从来没表示"公开"** —— 只表示"**跳过下面这两个中间件**"。
+#    最刺眼的现成反例：`/api/v1/admin/create_user` **在这个名单里，但它要 `require_admin`**
+#    （`api_v1.py:161`，非管理员 403）⇒ 旧名字直接与事实相反。
+#
+# ⛔ **这个名单与"该端点要不要鉴权"【完全无关】** ——
+#    要不要身份，由**该端点自己的依赖**决定（`Depends(get_current_user*)` / `require_admin`）。
+#    ⇒ 判断一条端点"公不公开"，⛔ 别读这个名单，去跑 `scripts/check_route_auth.py`。
+#
 # ⚠️ 2026-09-16 修正：原名单写的是 `/auth/login`、`/auth/refresh`、`/admin/create_user`，
 #    但三个 router **都带 `/api/v1` 前缀**（api_v1.py:53 / api_v1_rag.py:44 / api_v1_agent.py:37），
 #    真实路径是 `/api/v1/auth/login` —— **名单对不上，等于没跳过**。
 #    后果：登录/刷新/建用户实际会打到 Redis 限流；Redis 抖动时登录返回 500 而非按预期放行。
 #    两个中间件原先**各写一份**（其中一处注释还写着"与另一处保持一致"）—— 现提取为单一常量，
 #    并加了一条测试断言"名单里的 API 路径必须真的存在于 app.routes"（见 test_public_paths.py）。
-PUBLIC_PATHS = frozenset({
+MIDDLEWARE_EXEMPT_PATHS = frozenset({
     "/", "/docs", "/redoc", "/docs/oauth2-redirect", "/openapi.json",
     "/health", "/ready", "/metrics",
     "/api/v1/auth/login", "/api/v1/auth/refresh", "/api/v1/admin/create_user",
@@ -161,9 +171,9 @@ def _rate_limited_payload(retry_after: int = 60) -> dict:
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """限流中间件：对所有受保护接口生效"""
     async def dispatch(self, request: Request, call_next):
-        # 跳过公开接口（名单见模块级 PUBLIC_PATHS —— 原先这里与 QuotaMiddleware 各写一份）
+        # 跳过豁免名单里的路径（名单见模块级 MIDDLEWARE_EXEMPT_PATHS —— 原先这里与 QuotaMiddleware 各写一份）
         # 健康检查/就绪/指标必须豁免，否则被限流会导致 K8s/Docker 健康探针误判为不健康
-        if request.url.path in PUBLIC_PATHS:
+        if request.url.path in MIDDLEWARE_EXEMPT_PATHS:
             return await call_next(request)
         # ----- 第一层：全局限流（所有请求共享） -----
         if not global_limiter.is_allowed("global"):
@@ -289,8 +299,8 @@ class QuotaMiddleware(BaseHTTPMiddleware):
     """按【用户】【每天】的 **token 上限** 检查（`R1.3`），超出返回 429。"""
     
     async def dispatch(self, request: Request, call_next):
-        # 跳过公开接口（名单见模块级 PUBLIC_PATHS —— 原先这里与 RateLimitMiddleware 各写一份）
-        if request.url.path in PUBLIC_PATHS:
+        # 跳过豁免名单里的路径（名单见模块级 MIDDLEWARE_EXEMPT_PATHS —— 原先这里与 RateLimitMiddleware 各写一份）
+        if request.url.path in MIDDLEWARE_EXEMPT_PATHS:
             return await call_next(request)
         
         # 获取用户身份（支持API Key和JWT两种方式）

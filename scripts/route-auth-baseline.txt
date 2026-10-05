@@ -1,8 +1,15 @@
 # 无鉴权路由基线（scripts/check_route_auth.py --write-baseline 生成）
-# 每一行 = 一条「不在 PUBLIC_PATHS、且没有鉴权依赖」的路由。
+# 每一行 = 一条「不在 MIDDLEWARE_EXEMPT_PATHS、且没有鉴权依赖」的路由。
 # ⚠️ 这份基线【不是「允许清单」】—— 它是「已知的债」，见 docs/待办总表.md 🅗。
 # 🔴 2026-10-04（DEC-065）后本表只剩 /api/v1/（main.py 根路径，一个 ping）；
 #    表里原先指的 S1/S2/S14 三条【已闭合】⇒ ⛔ 别再去表里找它们。
 #    这一条的建议是【留公开】，但仍未正式裁定 ⇒ 见 docs/specs/api_v1.md 末节。
+# 🔴 2026-10-05（DEC-074）起本表**含 WebSocket** —— 原先这里只有 HTTP，
+#    于是 /api/v1/ws/agent（真花钱、真没鉴权）【一条都扫不到】。现补上：
+#      /api/v1/ws/agent  —— DEC-041 遗留·1：整条无鉴权，身份写死 "unknown"；
+#                            自带 B8（按连接）+ B11（全站）两道闸
+#      /api/v1/ws/test   —— 纯回声（收什么发什么），不调 LLM、不查库
 # ⛔ 变多 = 新引入了没鉴权的路由 ⇒ 该拦；变少 = 修好了 ⇒ 重新生成基线。
 /api/v1/
+/api/v1/ws/agent
+/api/v1/ws/test

@@ -9,7 +9,7 @@
 
 本测试**不需要 Redis、不需要 DB** —— 只断言"名单"与"真实路由"的关系。
 """
-from main import app, PUBLIC_PATHS
+from main import app, MIDDLEWARE_EXEMPT_PATHS
 
 
 def _all_route_paths() -> set:
@@ -31,7 +31,7 @@ def test_public_paths_api_entries_exist_in_routes():
     以后改路由前缀（比如加版本号），这条测试会自动抓到，不用人记得改。
     """
     routes = _all_route_paths()
-    api_entries = [p for p in PUBLIC_PATHS if p.startswith("/api/")]
+    api_entries = [p for p in MIDDLEWARE_EXEMPT_PATHS if p.startswith("/api/")]
 
     # ⚠️ 防"空集通过"：旧名单里**一条 /api/ 路径都没有**，
     #    若只断言 `missing 为空`，旧名单会**恒过**（空集当然没有 missing）——
@@ -79,21 +79,21 @@ def test_old_prefix_less_paths_must_not_come_back():
     因此是最容易在后续改动里被"改回去"的形态 —— 这条测试就是防这个。
     """
     for wrong in ("/auth/login", "/auth/refresh", "/admin/create_user"):
-        assert wrong not in PUBLIC_PATHS, (
+        assert wrong not in MIDDLEWARE_EXEMPT_PATHS, (
             f"{wrong} 缺 /api/v1 前缀、永远不会匹配真实路由 —— 这正是本测试要防的回归"
         )
 
 
 def test_login_and_refresh_are_public():
     """登录/刷新必须在名单里 —— 否则会被挤进 `anonymous` 限流桶（3 次/秒共享）"""
-    assert "/api/v1/auth/login" in PUBLIC_PATHS
-    assert "/api/v1/auth/refresh" in PUBLIC_PATHS
+    assert "/api/v1/auth/login" in MIDDLEWARE_EXEMPT_PATHS
+    assert "/api/v1/auth/refresh" in MIDDLEWARE_EXEMPT_PATHS
 
 
 def test_probe_endpoints_are_public():
     """健康探针必须豁免限流/配额，否则 K8s/Docker 探针可能收到 429 被误判为不健康"""
     for p in ("/health", "/ready", "/metrics"):
-        assert p in PUBLIC_PATHS
+        assert p in MIDDLEWARE_EXEMPT_PATHS
 
 
 def test_public_paths_is_shared_by_both_middlewares():
@@ -106,8 +106,8 @@ def test_public_paths_is_shared_by_both_middlewares():
     import inspect
     src = inspect.getsource(main)
     assert "public_paths = [" not in src, (
-        "QuotaMiddleware 里又出现了局部的 public_paths 列表 —— 应该统一用模块级 PUBLIC_PATHS"
+        "QuotaMiddleware 里又出现了局部的 public_paths 列表 —— 应该统一用模块级 MIDDLEWARE_EXEMPT_PATHS"
     )
-    assert src.count("request.url.path in PUBLIC_PATHS") >= 2, (
-        "两个中间件都应引用 PUBLIC_PATHS"
+    assert src.count("request.url.path in MIDDLEWARE_EXEMPT_PATHS") >= 2, (
+        "两个中间件都应引用 MIDDLEWARE_EXEMPT_PATHS"
     )
