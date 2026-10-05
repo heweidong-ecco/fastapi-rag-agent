@@ -40,9 +40,16 @@
     🔴 **改前推的是 `AIMessage`** —— **那是错的**（理由见「看代码会误判」表那条）。
   · 🔴 **返回第三态 `status="pending_approval"`** —— 批了/拒了，但模型**又要**一个敏感工具 ⇒ 图**再次**停在审批点
     ⇒ 这里**重新登记**（⛔ 不再无条件注销）。调用方按**与首次触发相同**的方式再走一遍本接口。
-  · ⭐ **续跑形状被测试钉住**：`api/test_approval_resume.py`（**12 条** · **纯离线 · 进 CI**）——
+  · 🔴 **轮次上限（2026-10-05 · `DEC-062 §六·2` · 业务方裁「上限 3 轮」）** —— 上面那条"重新登记"**自带封顶**：
+    登记时记 `rounds`（首次 **1**，每"放行后又停" **+1**）；到上限（**`approval_round_cap()`**，默认 **3**，
+    env **`MAX_APPROVAL_ROUNDS`**）就**不再登记** ⇒ 注入一条"已达上限、请直接作答"的 `ToolMessage` 并续跑：
+    · 收尾成功 ⇒ `status="approved"/"rejected"` + **`forced_finish=True`** + `rounds`
+    · 收尾不住（模型仍要敏感工具）⇒ `status="error"` + `rounds`，该轮终止、⛔ **不入队**
+    ⚠️ 没有它：模型可**无限**要求敏感工具、人工得无限批（实测 3 次收敛，但**没有机制阻止 30 次**）。
+  · ⭐ **续跑形状被测试钉住**：`api/test_approval_resume.py`（**16 条** · **纯离线 · 进 CI**）——
     `invoke` 必须是 **`None`**（= 从 checkpoint 继续，⛔ 不是新开一轮）、`config` 必须是**请求里那个 thread_id**
     · §⑤ 六条是**真图 + 假 LLM**，钉「state 里没有孤儿 `tool_calls`」/「模型真的被叫醒」/「又停下就重新入队」
+    · 🆕 §⑥ 四条钉**轮次上限**：首次 = 1 · 每次 +1 · 触顶强制收尾（`forced_finish`）· 收尾不住则 `error` 且不入队
 - 🔵 **待接管队列（`②` Task 2 · `B5` · 2026-10-03）**：新增 **`GET /agent/pending`** —— 列出**当前在等接管的会话**
   （事实来源 = 新模块 **`api/pending_approvals.py`**，⛔ **不是从 checkpoint 反查** —— `MemorySaver` **没有"列出全部 thread"的 API**）。
   `langgraph_chat` 在拿到 `summary` 后**登记 / 注销**；⚠️ **`approve_agent_action` 改前【每条 return 前】都注销，`DEC-062`（2026-10-04）起不是了** ——
@@ -128,6 +135,8 @@ RAG 那条的骨架**没有图**，答案只能从 `collected` 取；Agent 这�
 | 🔴 **「`edited_answer` 就是"把答案改一下再返回"」** | ⛔ **不止** —— 它**先写进 graph state**，**再从 checkpoint 续跑**。<br>⚠️ **差别在哪**：审批之后图**还要去 `agent`** ⇒ 只把改写当返回值吐出去，**后续节点看不到它**（改写等于没改） |
 | 🔴🔴 **「改写/拒绝时往 state 里塞 `AIMessage` 就行」**（**改前 spec 就是这么写的，2026-10-04 已推翻**） | ⛔ **`AIMessage` 是错的**，`HumanMessage` 也是错的 —— **必须是 `ToolMessage`（按 `tool_call_id` 配对）且显式传 `as_node="tools"`**。<br>🔴 **为什么**（`DEC-062`，全部真机实测）：`interrupt_before=["approval"]` 停在审批点时，state 末尾是**一条带 `tool_calls` 的 `AIMessage`**，它**必须**由每个 `tool_call_id` 各一条 `ToolMessage` 闭合。<br>· 塞 `AIMessage`/`HumanMessage` ⇒ 那个配对**永远不闭合** ⇒ 真模型**下一轮直接 400**（`must be followed by tool messages`）—— **而单测看不出来**（假图不校验结构、假 `invoke` 不会有"下一轮"）。<br>· 塞 `AIMessage` 还有第二重错：`update_state` 会**按消息类型推 `as_node`** ⇒ `AIMessage` 被认成 `agent` 的输出 ⇒ **条件边重算 ⇒ 图当场 END**（实测 `approve` **0.017s**、`answer` = 输入原文、`tools`/`agent` 一个都没跑）。<br>· ⚠️ **反直觉**：**只塞对 `ToolMessage` 也不够** —— 不传 `as_node` 时它被推成 `agent` ⇒ **照样 END**（实测 `next=()`）。⇒ **两件事都要做**。<br>📌 判据 ⇒ `api/test_approval_resume.py` §⑤（真图 + 假 LLM）· 端到端 **22/22**（`DEC-062`） |
 | 🔴 **「批完就从待接管队列里注销了」** | ⚠️ **改前是这样的，`DEC-062` 起不是** —— 只有**图真的走完**（`get_state().next != ("approval",)`）才 `resolve()`。<br>⚠️ **为什么**：模型放行后**又要**一个敏感工具是**常见行为**（实测连续 3 次）⇒ 无条件注销 = 图还停着、队列已空 = 🔴 **孤儿会话**（`/agent/pending` 查不到、「再批」报"没有等待审批的任务"、同 thread 再问 **500**）。<br>📌 判据 ⇒ `test_resume_that_stops_again_is_re_registered` · `test_resume_that_finishes_clears_the_queue` |
+| 🔴 **「模型可以无限要求敏感工具，人工无限批」** | ⛔ **2026-10-05 起封顶**（`DEC-062 §六·2`）：`rounds` 到 **`approval_round_cap()`**（默认 3 · env `MAX_APPROVAL_ROUNDS`）就**不再登记**，改注入"请直接作答"的 `ToolMessage` 收尾。<br>⚠️ **别读成"一律报错"** —— **先努力收尾**（成功 ⇒ `forced_finish=True` + 正常答案）；只有"连提示都拦不住"才 `status="error"`。📌 判据 ⇒ `api/test_approval_resume.py` §⑥（4 条） |
+| ⚠️ **「`rounds` 是给人看的」** | ⛔ **是封顶依据** —— `/agent/approve` 拿 `candidates[0]["rounds"]` 比上限。⚠️ **`register` 默认 `rounds=1`** ⇒ 只有"放行后又停"那条路会 `+1`（首登记本就该是 1）；**新登记点若不代表首次，必须显式传 `rounds`** |
 | ⚠️ **「审批状态是持久化的」** | ⚠️ **默认不是** —— `agent_graph.py:300` 用的是 `MemorySaver()`（**进程内存**）⇒ **重启即丢**。只有设了 `AGENT_CHECKPOINT_BACKEND=sqlite` 才落盘 |
 | 🔴 **「`check_budget` 就是会话上限」** | ⛔ **不是** —— `check_budget`（`:1240`）判的是**用户【每日】token 预算**。**会话级是另一个函数**（`check_session_token_budget`，B8 · 2026-10-01）。两者**并存**，⚠️ `/agent/mcp_chat` 上**两条都挂** |
 | 🔴 **「会话上限没拦住 = 没生效」** | ⚠️ **先看 `thread_id` 是不是默认值** —— 会话 key = **`user_name` + `thread_id`**（`DEC-041` 决策二）。<br>4 个端点的 `thread_id` 默认 `"default"` ⇒ **同一个人的**多次默认调用**共用**一个桶（**不同人不会互相踩** —— 这正是决策二加 `user_name` 的原因）。<br>⚠️ 但**换个 `thread_id` 就是换个桶** ⇒ 这是**设计如此**，不是漏拦<br>✅ **2026-10-03 起两条轴终于一致了** —— **checkpoint 那条轴**原先按**裸 `thread_id`** 走（`DEC-056` §二 根因），现在也拼 `user_name`（丙段）。⚠️ 但**拼法不同**（这条是 `f"{user}:{thread}"`，那条是长度前缀）⇒ ⛔ 别以为能互推 |

@@ -25,6 +25,7 @@ import agent_graph_advanced_learning
 from pending_approvals import (
     list_pending, register, resolve,
     find_by_raw_thread_id,            # 丙段：按原 thread_id 反查**属主**
+    approval_round_cap,               # 轮次上限（`DEC-062 §六·2`）
 )
 # 角色（`DEC-046`）—— `/agent/approve` 的「本人或 admin」判据走这里，
 # ⛔ 别在本文件另写 `user_name == "admin"`（那就又多一处口径）。
@@ -392,6 +393,14 @@ async def approve_agent_action(
        ⇒ 图**再次**停在审批点 ⇒ 这里**重新登记**（⛔ 不再无条件注销 —— 那会让会话变**孤儿**：
        `/agent/pending` 查不到、再批报"没有等待审批的任务"、同 thread 再问 500）。
        调用方要按**与首次触发时相同**的方式处理它（再走一遍本接口）。
+
+    🔴 **轮次上限（`DEC-062 §六·2` · 业务方 2026-10-05 裁「上限 3 轮」）**：上面那条"重新登记"
+       **自带一个上限** —— 登记时记着 `rounds`，每"放行后又停" `+1`；到上限（`approval_round_cap()`，
+       默认 **3**，env `MAX_APPROVAL_ROUNDS` 可改）就**不再登记**，改为注入一条
+       "已达上限、请直接作答"的 `ToolMessage` 并**续跑**，让图自己收尾：
+       · 收尾成功 ⇒ `status="approved"/"rejected"` + **`forced_finish=True`** + `rounds`
+       · 连收尾提示都拦不住（模型仍要敏感工具）⇒ `status="error"` + `rounds`，该轮终止、⛔ **不入队**
+       ⚠️ 没有上限的后果：模型可**无限**要求敏感工具、人工就得无限批（实测 3 次收敛，但**没有任何机制阻止 30 次**）。
     """
     # 🔴 丙段（`DEC-056`）：**先按【原 thread_id】查队列定属主，再按属主拼键**。
     #    ⛔ 别按调用方拼 —— admin 会拼出自己那个不存在的桶 ⇒ **永远批不了别人的**（硬门 D 死掉）。
@@ -487,10 +496,43 @@ async def approve_agent_action(
     #    📄 判据 ⇒ `api/test_approval_resume.py::test_resume_that_stops_again_is_re_registered`
     after = target.get_state(config)
     if after.next == ("approval",):
-        # 又停在审批点 ⇒ **重新入队**（按**属主**登记，⛔ 不是按调用方 —— 批的人可能是 admin）。
-        # ⚠️ `raw_thread_id` 用**请求里那个原值**（⛔ 不是拼过的 `sess`）—— `register` 的契约要求原值。
+        # 又停在审批点 ⇒ 按**轮次上限**分两路（`DEC-062 §六·2` · 业务方 2026-10-05 裁「上限 3 轮」）。
         new_calls = list(getattr(after.values["messages"][-1], "tool_calls", None) or [])
-        register(sess, owner, new_calls, raw_thread_id=thread_id, graph=graph_name)
+        rounds = candidates[0].get("rounds", 1)
+        if rounds >= approval_round_cap():
+            # 🔴 触顶：⛔ **不再入队**（否则模型可无限要求敏感工具、人工无限批）。
+            #    改为注入一条「已达上限，请直接作答」的裁定并**续跑**，让图自己收尾。
+            target.update_state(config, values={"messages": _tool_rulings(
+                new_calls,
+                "【人工接管】已达人工审批次数上限，该工具**未被执行**。"
+                "请不要再调用任何敏感工具，直接根据你已有的信息回答用户。")},
+                as_node="tools")           # 同前：⛔ 不传 `as_node` 图会直接 END（模型不参与）
+            forced = target.invoke(None, config)
+            if target.get_state(config).next == ("approval",):
+                # 🔴 连"请收尾"都拦不住 ⇒ 认输：返回 error 且**不再入队**（⛔ 不再无限循环）。
+                #    ⚠️ 这条出口会让该 thread 停在审批点（与"孤儿"同病）——但它是**有界的**；
+                #       不这么做，"封顶"就退化成了"换个姿势继续无限循环"。
+                resolve(sess)
+                return {
+                    "status": "error",
+                    "thread_id": thread_id,
+                    "message": (f"人工审批已达上限（{approval_round_cap()} 轮），"
+                                "模型仍要求敏感工具 —— 该轮已终止，⛔ 未重新入队。"),
+                    "rounds": rounds,
+                }
+            resolve(sess)
+            return {
+                "status": "approved" if approved else "rejected",
+                "thread_id": thread_id,
+                "answer": forced["messages"][-1].content,
+                "requested_by": user_name,
+                "forced_finish": True,      # 触顶强制收尾（调用方可据此提示"模型被强制收口"）
+                "rounds": rounds,
+            }
+        # 未到上限 ⇒ **重新入队**（按**属主**登记，⛔ 不是按调用方 —— 批的人可能是 admin）。
+        # ⚠️ `raw_thread_id` 用**请求里那个原值**（⛔ 不是拼过的 `sess`）—— `register` 的契约要求原值。
+        register(sess, owner, new_calls, raw_thread_id=thread_id, graph=graph_name,
+                 rounds=rounds + 1)
         return {
             "status": "pending_approval",       # 第三态：批了，但它**又**停下来了
             "thread_id": thread_id,
@@ -499,6 +541,7 @@ async def approve_agent_action(
                 {"name": tc.get("name"), "args": tc.get("args")} for tc in new_calls
             ],
             "requested_by": user_name,
+            "rounds": rounds + 1,
         }
 
     # 走到这里 = 图**真的走完了** ⇒ 注销（否则它会**永远留在队列里**；`resolve` 幂等，重复调不抛）。

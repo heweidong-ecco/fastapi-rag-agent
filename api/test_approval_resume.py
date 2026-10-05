@@ -417,3 +417,70 @@ def test_resume_that_finishes_clears_the_queue(monkeypatch):
     _approve_real(monkeypatch, graph, thread_id="clean-1")
     left = [r for r in pa.list_pending() if r.get("raw_thread_id") == "clean-1"]
     assert not left, f"会话已经跑完，队列里还留着它：{left}"
+
+
+# ==================== ⑥ 审批轮次上限（DEC-062 §六·2） ====================
+#
+# 🔴 **要修的是什么**：`DEC-062 §六·2` —— `approve` 放行后模型**又**要求敏感工具时会
+#    **重新入队**（`B5/B6` 修正，对），但**没有任何上限** ⇒ 模型可以无限要求，人工就得无限批。
+#    实测里 3 次就收敛了，但**没有任何机制阻止 30 次**。
+#
+# ✅ **裁定（业务方 2026-10-05）**：**上限 3 轮 · 触顶强制收尾** ——
+#    到上限后再停 ⇒ ⛔ **不再入队**，改为注入一条「已达上限，请直接作答」的裁定并续跑；
+#    **若仍停** ⇒ 返回 `error` 且**不再入队**（⛔ 否则"封顶"就退化成了"换个姿势继续无限循环"）。
+
+
+def test_first_stop_registers_round_one(monkeypatch):
+    """首次登记 ⇒ 轮次 = **1**。
+
+    ⚠️ 这条钉的是**计数的起点** —— 起点错了，整个上限就**差一档**，而且**不报错**。
+    """
+    graph, _ = _real_graph(monkeypatch, ["tool", "text"])
+    _stop_at_approval(graph, "rounds-1")
+    rec = [r for r in pa.list_pending() if r.get("raw_thread_id") == "rounds-1"]
+    assert rec, "首次停在审批点后队列里没有它"
+    assert rec[0].get("rounds") == 1, f"首次登记的轮次不是 1：{rec}"
+
+
+def test_each_requeue_bumps_the_round(monkeypatch):
+    """每次都停在审批点 ⇒ 轮次必须**逐次 +1**（否则上限永远够不着）。"""
+    graph, _ = _real_graph(monkeypatch, ["tool", "tool", "text"])
+    _stop_at_approval(graph, "bump-1")                                # rounds = 1
+    out1 = _approve_real(monkeypatch, graph, thread_id="bump-1")      # 又停 ⇒ rounds = 2
+    assert out1.get("status") == "pending_approval", out1
+    rec = [r for r in pa.list_pending() if r.get("raw_thread_id") == "bump-1"]
+    assert rec, "重新入队后队列里没有它"
+    assert rec[0].get("rounds") == 2, f"重新入队后轮次没有 +1：{rec}"
+
+
+def test_cap_forces_finish_instead_of_requeueing(monkeypatch):
+    """🔴 到上限之后再停 ⇒ ⛔ **不再入队**，改为**注入收尾裁定 + 续跑**，让会话真的走完。
+
+    剧本：模型连续 4 次要求敏感工具，第 5 次才收口。
+    ⇒ 人工批 3 次（= 上限）后第 4 次停 = **触顶** ⇒ 强制收尾。
+    """
+    graph, _ = _real_graph(monkeypatch, ["tool", "tool", "tool", "tool", "text"])
+    _stop_at_approval(graph, "cap-1")                                 # rounds = 1
+    assert _approve_real(monkeypatch, graph, thread_id="cap-1").get("status") == "pending_approval"
+    assert _approve_real(monkeypatch, graph, thread_id="cap-1").get("status") == "pending_approval"
+    out = _approve_real(monkeypatch, graph, thread_id="cap-1")        # 触顶 ⇒ 强制收尾
+    assert out.get("forced_finish") is True, f"触顶时没有强制收尾：{out}"
+    assert out.get("status") == "approved", out
+    left = [r for r in pa.list_pending() if r.get("raw_thread_id") == "cap-1"]
+    assert not left, f"触顶强制收尾后不该再入队，队列里还有：{left}"
+    assert graph.get_state(_cfg("cap-1")).next == (), "强制收尾后图仍没有走完"
+
+
+def test_cap_gives_up_if_the_model_still_asks(monkeypatch):
+    """🔴 反面：触顶收尾后模型**还是**要敏感工具 ⇒ 返回 `error`、⛔ **不再入队**。
+
+    ⚠️ 没有这一条，"封顶"就可能退化成"换个姿势继续无限循环"。
+    """
+    graph, _ = _real_graph(monkeypatch, ["tool"])                     # 永远要求
+    _stop_at_approval(graph, "giveup-1")
+    _approve_real(monkeypatch, graph, thread_id="giveup-1")
+    _approve_real(monkeypatch, graph, thread_id="giveup-1")
+    out = _approve_real(monkeypatch, graph, thread_id="giveup-1")
+    assert out.get("status") == "error", f"触顶且模型仍要求工具时应报 error：{out}"
+    left = [r for r in pa.list_pending() if r.get("raw_thread_id") == "giveup-1"]
+    assert not left, f"放弃之后不许再入队（否则又是无限循环）：{left}"
