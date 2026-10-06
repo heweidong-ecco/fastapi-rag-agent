@@ -1885,6 +1885,40 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- 🔴 **启动自检 `ensure_admin_exists` 问的，和认证侧不是同一个问题**（2026-10-06 · `DEC-087`）
+
+  > **日志说「管理员账户已存在」，而一把能用的 key 都没有。**
+  > 与 `DEC-083` / `DEC-084` 同族（"两处都成功，合起来是错的"）；这一笔的形态是**两处口径漂移**。
+
+  自检数的是**行数**（`SELECT COUNT(*) FROM api_keys WHERE user_name = 'admin'`），
+  而认证侧 `verify_api_key` 要的是 `COALESCE(is_active, 1) = 1` **且**未过期。
+  ⇒ 跑一次 `scripts/issue_api_key.py admin --revoke`（它**按用户名撤**，撤的是该用户名下的**全部行**）之后：
+  自检看到 **1** ⇒ 日志「管理员账户已存在，跳过自动创建」，而认证侧真能通过的 **0**
+  ⇒ **admin 锁死，而日志说一切正常。**
+
+  🔴 **近失就在当天，不在假设里**：2026-10-06 本机真跑过那个 `--revoke`（连带撤掉了 `id=2` 那把
+  2026-09-10 建的主 key），当时靠**手工** `UPDATE api_keys SET is_active = 1 WHERE id = 2;` 才复原 ——
+  **没有那一下，重启后 admin 就锁死，而日志里没有一行提示。**
+
+  **改了什么**（`api/auth.py` **一个文件**）：把两处已经漂移的口径**收成一处** ——
+  新常量 `ACTIVE_PREDICATE`（`is_active` 那半）与新函数 `_is_expired()`（过期那半），
+  `verify_api_key` 与 `ensure_admin_exists` **共用**（⚠️ 认证侧产出的 SQL **逐字符没变**）。
+  自检改分三支：有可用的 ⇒ 跳过（**原样**）· 名下 **0 行** ⇒ 自动建（**原样**）·
+  **有行但全不可用 ⇒ `error` 响亮告警 + 给出可照做的命令，⛔ 不自动补发**
+  （自动补发会把操作员那次「撤销」在**下一次重启静默还原**，并把新 key 的**明文打进日志**）。
+
+  ⚠️ 过期那半判在 **Python 侧**，⛔ **不在 SQL 里写 `expires_at > NOW()`** —— `expires_at` 存的是
+  **naive 本地时间**（`datetime.now()` 写进去的），而库里的 `NOW()` 是 `timestamptz`（容器按 UTC）
+  ⇒ 在 SQL 里比会**差 8 小时**（本仓踩过的"两套时区混进同一个量"）。
+
+  📌 判据（可打印）：`venv/bin/python -m pytest api/test_auth_ensure_admin_exists.py -q` ⇒ **8 passed**
+  （**先写用例、先跑出 5 红**，之后才动产品代码）· 同族旧用例
+  `api/test_auth_api_key_active.py api/test_auth_db_unavailable.py api/test_auth.py` ⇒ **32 passed** ·
+  全量 `venv/bin/python -m pytest api/ -m "not integration and not needs_db" -q` ⇒
+  **720 passed, 3 skipped, 31 deselected**（**712 → 720，+8 就是本批**）· `bash scripts/ci-local.sh` ⇒ **退出码 0**。
+  📄 全文（含 A/B/C 三个备选 · 为什么否掉"自动补发" · 反悔成本 · 真库端到端三支）
+  ⇒ `docs/decisions/DEC-087-启动自检必须问和认证同一个问题.md`
+
 - 🔴 **`/rag/stream_search` 的流式答案【从建立起一笔账都没记过】**（2026-10-06 · `DEC-084`）
 
   > **门在，锁坏了** —— 与 `DEC-072` / `DEC-073` 同族，这是这一族在这一侧的**最后一笔**。

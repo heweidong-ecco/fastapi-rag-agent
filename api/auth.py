@@ -16,6 +16,34 @@ def hash_api_key(api_key: str) -> str:
     """对API Key进行哈希，数据库中只存储哈希值"""
     return hashlib.sha256(api_key.encode()).hexdigest()
 
+
+#: 🔴 「一把 key 能不能拿去认证」的 **SQL 侧唯一口径**（`is_active` 那一半）。
+#:
+#:    `verify_api_key`（按 key_hash 查一把）与 `ensure_admin_exists`（启动自检）
+#:    **必须共用这一句** —— ⛔ 别在两处各写一遍。
+#:
+#:    **2026-10-06 的缺陷就是这么来的**：自检只 `COUNT(*)` **行数**，不看 `is_active`
+#:    ⇒ `scripts/issue_api_key.py admin --revoke`（按用户名撤，撤的是该用户名下的**全部行**）
+#:    之后，自检照样报「管理员账户已存在，跳过自动创建」，而认证侧一把都过不去
+#:    ⇒ **admin 锁死，而日志说一切正常**。裁定见 `docs/decisions/DEC-087`。
+#:    守卫 ⇒ `api/test_auth_ensure_admin_exists.py::test_两条路径的_is_active_口径是同一句`
+#:
+#:    ⚠️ **必须 `COALESCE`** —— 迁移 `828721f77ef2` 建列时是 `nullable=True`，
+#:    `is_active IS NULL` 的老行会被 `is_active = 1` **静默排除**（`DEC-085` 契约 D）。
+ACTIVE_PREDICATE = "COALESCE(is_active, 1) = 1"
+
+
+def _is_expired(expires_at, now=None) -> bool:
+    """🔴 过期判据的**唯一口径**（`is_active` 之外的另一半）—— 同样两处共用。
+
+    ⚠️ 在 **Python 侧**比，⛔ 不在 SQL 里写 `expires_at > NOW()`：本仓 `expires_at` 存的是
+       **naive 本地时间**（`create_user_api_key` 用 `datetime.now()` 写进去的），
+       而库里的 `NOW()` 是 timestamptz（容器按 UTC）⇒ 在 SQL 里比会**差 8 小时**，
+       正好是本仓踩过的「两套时区混在一个量里」那一族。
+    """
+    return expires_at < (now if now is not None else datetime.now())
+
+
 def create_user_api_key(user_name: str, expire_days: int = 30) -> str:
     """
     为新用户生成API Key并存入数据库。
@@ -37,23 +65,62 @@ def create_user_api_key(user_name: str, expire_days: int = 30) -> str:
 # 创建管理员身份的代码
 def ensure_admin_exists(logger=None):
     """
-    应用启动时检查管理员账户是否存在。
-    如果不存在，则自动创建一个有效期10年的管理员账户，
-    并通过日志打印初始 API Key（仅此一次机会获取）。
+    应用启动时检查**管理员还有没有能用的凭据**。
+
+    三种情形（🔴 第 3 种是 2026-10-06 补的 —— 此前它会被**误当成第 1 种**）：
+
+    | # | 库里的状态 | 行为 |
+    |---|---|---|
+    | 1 | 名下有**能用**的 key | 静默跳过（`info`）—— 既有行为，一个字没改 |
+    | 2 | 名下**一行都没有** | 首次启动：自动建一把、打印明文（仅此一次） |
+    | 3 | **有行，但没有一行能用** | ⛔ **不自动补发**，只打**响亮告警**（`error`） |
+
+    🔴 **为什么第 3 种不能自动补发**：`scripts/issue_api_key.py <user> --revoke` 是
+       **按用户名撤**的，撤的是该用户名下的**全部行**。若这里自动补发，
+       操作员那次「撤销」就会被**下一次重启静默还原**，而且新 key 的**明文会打进日志**
+       （正是我们花力气清掉的那类残渣）。⇒ **决定权留给人**，告警里给出可照做的命令。
+
+    ⚠️ 「能用」= `ACTIVE_PREDICATE` **且**未过期 —— 与 `verify_api_key` **同一口径**
+       （⛔ 别再写成只数行数：那正是 `DEC-087` 修掉的那条缺陷）。
+
+    ⚠️ **本函数必须在 `create_table()` 之后调用**（`api/main.py` 的 startup 顺序）：
+       它要读的 `is_active` 列在**老库**里是靠 `create_table()` 里那句 `ALTER`
+       补上的（`DEC-086`）⇒ 顺序反了就是 `UndefinedColumn`，**应用直接起不来**。
+       守卫 ⇒ `api/test_auth_ensure_admin_exists.py::test_自检在建表之后调用`
     """
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT COUNT(*) FROM api_keys WHERE user_name = 'admin'")
-            count = cur.fetchone()[0]
-    
-    if count > 0:
+            total = cur.fetchone()[0]
+            # 「能用」那半句 —— ⛔ 必须与 verify_api_key 同一句谓词（见 ACTIVE_PREDICATE）
+            cur.execute(
+                "SELECT expires_at FROM api_keys "
+                f"WHERE user_name = 'admin' AND {ACTIVE_PREDICATE}"
+            )
+            usable = sum(1 for (expires_at,) in cur.fetchall() if not _is_expired(expires_at))
+
+    if usable > 0:
         if logger:
             logger.info("管理员账户已存在，跳过自动创建")
         return None
-    
+
+    if total > 0:
+        # 有行、但一把都用不了（全被撤销 / 全过期）⇒ 响，但⛔ 不替操作员做决定
+        if logger:
+            logger.error("=" * 60)
+            logger.error(
+                "🔴 管理员账户【存在，但一把能用的 key 都没有】：名下一共 %d 行，"
+                "没有一行能通过认证（被 --revoke 撤销，或已过期）。", total
+            )
+            logger.error("⇒ 不会自动补发：那会把你的撤销决定静默还原，并把新 key 明文打进日志。")
+            logger.error("⇒ 要恢复，请显式发一把（明文只显示这一次，接着存好）：")
+            logger.error("     python scripts/issue_api_key.py admin --days 3650")
+            logger.error("=" * 60)
+        return None
+
     # 创建管理员，有效期10年
     api_key = create_user_api_key("admin", expire_days=3650)
-    
+
     if logger:
         logger.warning("=" * 60)
         logger.warning("首次启动：已自动创建管理员账户")
@@ -61,7 +128,7 @@ def ensure_admin_exists(logger=None):
         logger.warning(f"管理员 API Key: {api_key}")
         logger.warning("请立即复制并安全保存此 Key，它仅显示这一次！")
         logger.warning("=" * 60)
-    
+
     return api_key
 
 def verify_api_key(api_key: str):
@@ -101,8 +168,10 @@ def verify_api_key(api_key: str):
                     #    ⇒ 老 key 集体失效，而用户只看到一句"凭据无效"（查不到点上）。
                     #    ⚠️ "现网有没有 NULL 行"**没验过**（当时库没起）—— 正因为没验过才必须防。
                     #    守卫 ⇒ `api/test_auth_api_key_active.py::test_a_null_is_active_row_still_authenticates`
+                    # ⚠️ 2026-10-06（`DEC-087`）：那半句抽成了 `ACTIVE_PREDICATE`，
+                    #    因为 `ensure_admin_exists` 也必须用它 —— 两处各写一遍正是缺陷成因。
                     "SELECT user_name, expires_at FROM api_keys "
-                    "WHERE key_hash = %s AND COALESCE(is_active, 1) = 1",
+                    f"WHERE key_hash = %s AND {ACTIVE_PREDICATE}",
                     (hashed,)
                 )
                 row = cur.fetchone()
@@ -114,11 +183,12 @@ def verify_api_key(api_key: str):
 
     if row is None:
         return None
-    
+
     user_name, expires_at = row
-    if expires_at < datetime.now():
+    # 🔴 过期判据同样只此一处（`DEC-087`）—— ⛔ 别在这里另写一遍比较
+    if _is_expired(expires_at):
         return None
-    
+
     return user_name
 
 
