@@ -39,6 +39,14 @@
   .card[hidden] { display:none; }
   .card .src { font-weight:600; }
   .card .src-meta { color:var(--muted); font-size:12px; margin:2px 0 6px; }
+  /* 🔴 `DEC-090` · `R3.2`：熔断卡片。**与 `.card` 分开一个元素** ——
+     引用卡片由 `_openIndex` 驱动、每次重画都被清空，两者抢一个容器会互相抹掉。 */
+  .breaker { border:1px solid #e6b800; border-left:4px solid #e6b800; border-radius:6px;
+             padding:12px; margin-top:8px; background:#fffbe6; font-size:13px; }
+  .breaker[hidden] { display:none; }
+  .breaker .bk-title { font-weight:600; font-size:14px; margin-bottom:6px; }
+  .breaker .bk-row { display:flex; gap:8px; margin:3px 0; }
+  .breaker .bk-k { flex:0 0 5.5em; color:var(--muted); }
   #composer { border-top:1px solid var(--line); padding:12px; display:flex; gap:8px; }
   #q { flex:1; padding:10px; font-size:15px; border:1px solid var(--line); border-radius:6px; }
   button { padding:10px 18px; font-size:15px; cursor:pointer; border-radius:6px;
@@ -116,7 +124,14 @@ function showApp() {
 function explainStatus(status) {
   if (status === 401 || status === 403) return { msg: 'API Key 无效或已过期', relogin: true };
   if (status === 503) return { msg: '认证服务不可用，请稍后重试（⛔ 不是你的 key 的问题）', relogin: false };
-  if (status === 429) return { msg: '今日额度已用完 / 会话额度已用完', relogin: false };
+  // 🔴 429 走【卡片】而不是一行字（`R3.2` · `DEC-090`）。改前这里是**一句话把两种
+  //    熔断并排写在一起**（中间用「/」连起来）—— 而两者恢复条件完全不同：
+  //      全站级只能等跨天；会话级**开个新会话立刻能继续**。
+  //    写一行必然把两种说成一种 ⇒ **把人引到错误的处置上**（本仓 `N9` 同一条道理）。
+  //    ⚠️ 是哪一种，由后端 429 body 里的 `scope` 说了算（`code` 两者相同，分不出来）。
+  //    ⛔ **别在注释里把那句原话抄一遍** —— `sse.test.js` 有条结构型守卫按**子串**扫
+  //       整个前端（本行上一版就是这么把守卫绊红的，实测）。
+  if (status === 429) return { msg: '', relogin: false, breaker: true };
   return { msg: `请求失败（HTTP ${status}）`, relogin: false };
 }
 
@@ -173,7 +188,7 @@ function showEmptyLog() {
 // ---------- 渲染 ----------
 function addTurn(question) {
   $('log').insertAdjacentHTML('beforeend',
-    `<div class="turn"><div class="q"></div><div class="a"></div><div class="card" hidden></div><div class="meta"></div></div>`);
+    `<div class="turn"><div class="q"></div><div class="a"></div><div class="breaker" hidden></div><div class="card" hidden></div><div class="meta"></div></div>`);
   const turn = $('log').lastElementChild;
   turn.querySelector('.q').textContent = question;
   // 🔴 本回合当前展开的引用编号（`null` = 都收着）。放**元素上**，⛔ 不放全局 ——
@@ -250,6 +265,41 @@ function syncCard(turn) {
   }
 }
 
+// ---------- 熔断卡片（`R3.2` · `DEC-090`） ----------
+
+/** 读 429 的响应体；读不出就返回 `{}`，⛔ 别为了拿一个字段把整轮拖炸。 */
+async function readErrorBody(resp) {
+  try { return await resp.json(); }
+  catch (e) { console.warn('429 响应体不是 JSON ⇒ 退回通用文案', e); return {}; }
+}
+
+// 🔴 四件事的**文字**由 `RagSse.breakerCard` 给（有 `node --test` 钉着），
+//    本函数只管挂 DOM —— ⛔ 别在这里再拼一遍那份文案。
+// ⚠️ 全部用 `textContent`：`error` 是**后端的自由文本**，`innerHTML` 会把它当标签。
+function showBreaker(turn, scope, message) {
+  const box = turn.querySelector('.breaker');
+  const card = RagSse.breakerCard(scope, message);
+  box.innerHTML = '';
+  const h = document.createElement('div');
+  h.className = 'bk-title';
+  h.textContent = card.title;
+  box.appendChild(h);
+  for (const it of card.items) {
+    const row = document.createElement('div');
+    row.className = 'bk-row';
+    const k = document.createElement('span');
+    k.className = 'bk-k';
+    k.textContent = it.k;
+    const v = document.createElement('span');
+    v.className = 'bk-v';
+    v.textContent = it.v;
+    row.appendChild(k); row.appendChild(v);
+    box.appendChild(row);
+  }
+  box.hidden = false;
+  box.scrollIntoView({ block: 'nearest' });
+}
+
 // ---------- 发起一次提问 ----------
 async function ask() {
   if (state !== 'idle') return;
@@ -288,8 +338,16 @@ async function ask() {
     });
 
     if (!resp.ok) {
-      const { msg, relogin } = explainStatus(resp.status);
-      aEl.textContent = msg;
+      const { msg, relogin, breaker } = explainStatus(resp.status);
+      if (breaker) {
+        // 🔴 `R3.2`：429 画卡片，⛔ 不退化成一行字 / 白屏 / 通用错误页（`R3.3`）。
+        //    哪一种熔断由 body 里的 `scope` 说 —— 读不出就传 `undefined`，
+        //    卡片会把「何时恢复」画成 `—`，⛔ 不猜（猜错会把人引到做不到的处置上）。
+        const body = await readErrorBody(resp);
+        showBreaker(turn, body.scope, body.error);
+      } else {
+        aEl.textContent = msg;
+      }
       if (relogin) localStorage.removeItem(KEY_STORE);
       // 🔴 2026-10-06 施工实测·订正⑧：起草稿这里**只写了 `metaEl.textContent = '出错'`，
       //    没有置 `exit`** ⇒ `exit` 还是 'incomplete' ⇒ 下面 `finally` 会把这行**覆盖成

@@ -479,6 +479,10 @@ async def app_exception_handler(request: Request, exc: AppException):
 
     ⚠️ `retry_after`（B12）**只在挂了的异常上出现** —— 没挂时**整个字段不写**，
        因为 `retry_after: 0` 会被客户端读成「立刻可重试」，与「不知道多久」是两回事。
+
+    ⚠️ `scope`（`DEC-090` · `R3.2`）**同一个套路**：没给就**不写**。
+       ⛔ 别给它兜一个默认值（比如 `"global"`）—— 那会让一个**根本没有日级额度**的
+       场合（如中间件的限流 429）也长出「明日起恢复」来，**前端就再也分不出"不知道"**。
     """
     content = {
         "error": exc.message,
@@ -490,6 +494,9 @@ async def app_exception_handler(request: Request, exc: AppException):
     if retry_after is not None:
         content["retry_after"] = retry_after
         headers["Retry-After"] = str(retry_after)
+    scope = getattr(exc, "scope", None)
+    if scope is not None:
+        content["scope"] = scope
     return JSONResponse(status_code=exc.status_code, content=content, headers=headers)
 
 @app.exception_handler(Exception)
