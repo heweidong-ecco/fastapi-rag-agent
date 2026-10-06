@@ -50,6 +50,10 @@ from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, Too
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from langchain_core.runnables.base import RunnableBinding
 
+# 🔴 `DEC-085` 契约 C 起，历史键里多了 `thread_id`（端点收到的那个）。
+#    本文件**读写走同一个名字** —— 两处一旦不一致，`assert history(...) == []` 会读空桶而静默变绿。
+THREAD = "t-sse"
+
 from session_key import session_key          # `DEC-056` 丙段：进图的键要拼身份
 
 
@@ -356,7 +360,7 @@ def _call_stream_route(monkeypatch, fake_graph, redis=None, **kw):
     #    一个点盖住全部 6 条端点。
     monkeypatch.setattr(cache_mod, "redis_client", redis if redis is not None else FakeRedis())
     kw.setdefault("question", "你好")
-    kw.setdefault("thread_id", "t-sse")
+    kw.setdefault("thread_id", THREAD)
     kw.setdefault("user_name", "tester")
     return asyncio.run(m.langgraph_chat_stream(**kw))
 
@@ -545,7 +549,7 @@ def test_stream_route_persists_the_turn_on_completion(monkeypatch):
     fake = _FakeGraph(tokens=("你", "好"), final_messages=[AIMessage(content="最终答案")])
     _collect_frames(_call_stream_route(monkeypatch, fake, redis=store, question="问题一"))
 
-    entries = store.history("tester")
+    entries = store.history("tester", THREAD)
     assert [e["role"] for e in entries] == ["user", "assistant"], f"没成对写：{entries}"
     assert entries[0]["content"] == "问题一"
     assert entries[1]["content"] == "最终答案", (
@@ -569,6 +573,6 @@ def test_stream_route_writes_nothing_while_waiting_for_approval(monkeypatch):
     fake = _FakeGraph(tool_call=True)
     _collect_frames(_call_stream_route(monkeypatch, fake, redis=store))
 
-    assert store.history("tester") == [], (
-        f"停在审批点却写了历史 ⇒ 那半句会被读成'说完了'：{store.history('tester')}"
+    assert store.history("tester", THREAD) == [], (
+        f"停在审批点却写了历史 ⇒ 那半句会被读成'说完了'：{store.history('tester', THREAD)}"
     )

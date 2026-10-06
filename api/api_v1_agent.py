@@ -369,7 +369,7 @@ async def langgraph_chat_stream(
             yield sse_frame({"error": msg}, ensure_ascii=False)
             yield DONE_FRAME
             # ⚠️ 挪进了这一支（⛔ 别在末尾再写一处 `persist_turn`）—— 本轮**没答成**。
-            persist_turn(user_name, question, msg, status="error")
+            persist_turn(user_name, question, msg, thread_id=thread_id, status="error")
             return
 
         summary = summarize_agent_result(state.values or {})
@@ -392,7 +392,7 @@ async def langgraph_chat_stream(
         #    ⚠️ 位置：排在**帧之后** —— 与 `/rag/stream_search` 的 `_complete` 同款。
         #       redis 出问题时客户端**已经**拿到完整收尾，不会看到"答案被 error 帧顶掉"。
         if summary.get("status") == "answered":
-            persist_turn(user_name, question, summary.get("answer") or "", status="done")
+            persist_turn(user_name, question, summary.get("answer") or "", thread_id=thread_id, status="done")
 
     return sse_response(sse_stream(
         # ⚠️ 上游**必须返回一个可 `aclose()` 的句柄**（这里是个 lambda，返回 `astream` 对象）——
@@ -421,7 +421,7 @@ async def langgraph_chat_stream(
         #    ⚠️ 这里**只能用 `collected`**：取消/异常时图正跑到一半，**没有最终状态可查**
         #       （与 `_complete` 那条"答案取自 `aget_state`"不矛盾 —— 那条管 `done`）。
         on_incomplete=lambda collected, status: persist_turn(
-            user_name, question, "".join(collected), status=status,
+            user_name, question, "".join(collected), thread_id=thread_id, status=status,
         ),
     ))
 
@@ -789,7 +789,7 @@ async def advanced_agent_chat_stream(
             msg = agent_budget_intercept_message(why)
             yield sse_frame({"error": msg}, ensure_ascii=False)
             yield DONE_FRAME
-            persist_turn(user_name, question, msg, status="error")
+            persist_turn(user_name, question, msg, thread_id=thread_id, status="error")
             return
 
         yield sse_frame({
@@ -804,7 +804,7 @@ async def advanced_agent_chat_stream(
         #    与**上面那一帧**的占位串 `"处理完成"` **有意不同**：占位串是给前端看的兜底，
         #    而把一句假的"处理完成"存进历史，下一轮 prompt 会把它当成**真的回答内容**。
         #    ⚠️ 本链**没有** `status` 口径（不走 `summarize_agent_result`）⇒ 无审批点可停，不设 gate。
-        persist_turn(user_name, question, values.get("final_output") or "", status="done")
+        persist_turn(user_name, question, values.get("final_output") or "", thread_id=thread_id, status="done")
 
     return sse_response(sse_stream(
         lambda: advanced_agent.astream(
@@ -833,7 +833,7 @@ async def advanced_agent_chat_stream(
         on_complete=_complete,
         # 🔴 `DEC-055`：取消 / 异常两条出口的留痕（同步 · 排在 `await aclose()` 之前）。
         on_incomplete=lambda collected, status: persist_turn(
-            user_name, question, "".join(collected), status=status,
+            user_name, question, "".join(collected), thread_id=thread_id, status=status,
         ),
     ))
 
@@ -1057,7 +1057,7 @@ async def agent_plan_execute_stream(
         # 🔴 `DEC-055` · 留痕（`status="done"`）。答案取**执行结果**，⛔ 不是流出去的规划段 JSON 片段
         #    （那半截 `{"step"` 本就不是人读终稿，见本函数上方）。
         #    ⚠️ 与上面那一帧**同一个键**（`result_holder["execution_result"]`）⇒ 帧与历史不会对不上。
-        persist_turn(user_name, goal, result_holder.get("execution_result", ""), status="done")
+        persist_turn(user_name, goal, result_holder.get("execution_result", ""), thread_id=thread_id, status="done")
 
     return sse_response(sse_stream(
         _open_upstream,
@@ -1069,7 +1069,7 @@ async def agent_plan_execute_stream(
         #    ⚠️ **已知毛刺（登记，本轮不修）**：中途取消时存下去的是**半截 JSON**（`{"step"` 这种）
         #       —— 它的流本就不是人读终稿。**照实存**，⛔ 不许为了好看去 `json.loads` 那半截（可能非法）。
         on_incomplete=lambda collected, status: persist_turn(
-            user_name, goal, "".join(collected), status=status,
+            user_name, goal, "".join(collected), thread_id=thread_id, status=status,
         ),
     ))
 
@@ -1196,7 +1196,7 @@ async def memory_chat_stream(
             msg = agent_budget_intercept_message(why)
             yield sse_frame({"error": msg}, ensure_ascii=False)
             yield DONE_FRAME
-            persist_turn(user_name, question, msg, status="error")
+            persist_turn(user_name, question, msg, thread_id=thread_id, status="error")
             return
 
         summary = summarize_agent_result(state.values or {})
@@ -1214,7 +1214,7 @@ async def memory_chat_stream(
         #    模型输出，不 gate 会被写成 `done`（假信号）。停审批点**登记为边界、本轮不实现**。
         #    ⚠️ ⛔ **别动上面 `register`/`resolve` 的顺序**（B5 待接管队列）。
         if summary.get("status") == "answered":
-            persist_turn(user_name, question, summary.get("answer") or "", status="done")
+            persist_turn(user_name, question, summary.get("answer") or "", thread_id=thread_id, status="done")
 
     return sse_response(sse_stream(
         lambda: checkpointer_agent.astream(
@@ -1231,7 +1231,7 @@ async def memory_chat_stream(
         on_complete=_complete,
         # 🔴 `DEC-055`：取消 / 异常两条出口的留痕（同步 · 排在 `await aclose()` 之前）。
         on_incomplete=lambda collected, status: persist_turn(
-            user_name, question, "".join(collected), status=status,
+            user_name, question, "".join(collected), thread_id=thread_id, status=status,
         ),
     ))
 
@@ -1611,7 +1611,7 @@ async def mcp_agent_chat_stream(
             yield DONE_FRAME
             # 🔴 `DEC-055`：留痕排在任何 `yield` 之前的那条约束这里**不适用**（本支不会异常），
             #    但"三条出口都要留痕"照办 —— 这条算 `error`（本轮没答成）。
-            persist_turn(user_name, question, msg, status="error")
+            persist_turn(user_name, question, msg, thread_id=thread_id, status="error")
             return
 
         # 预算提醒
@@ -1627,7 +1627,7 @@ async def mcp_agent_chat_stream(
         #    （图的最终状态末条消息），⛔ 不是攒流过的块（`DEC-050`）。
         #    ⚠️ ⛔ **别动 `finish_trace` 的顺序**（记录工具要的是"追踪先结束"）——
         #       本句排在最后，不碰它。
-        persist_turn(user_name, question, answer, status="done")
+        persist_turn(user_name, question, answer, thread_id=thread_id, status="done")
 
     return sse_response(sse_stream(
         lambda: mcp_agent.astream(
@@ -1647,7 +1647,7 @@ async def mcp_agent_chat_stream(
         on_complete=_complete,
         # 🔴 `DEC-055`：取消 / 异常两条出口的留痕（同步 · 排在 `await aclose()` 之前）。
         on_incomplete=lambda collected, status: persist_turn(
-            user_name, question, "".join(collected), status=status,
+            user_name, question, "".join(collected), thread_id=thread_id, status=status,
         ),
     ))
 

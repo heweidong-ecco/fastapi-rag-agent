@@ -694,7 +694,7 @@ async def stream_search(
     """
     # 0. 若前端未主动传历史，则从 Redis 加载该用户最近5轮对话
     if not req.conversation_history:
-        req.conversation_history = get_chat_history(user_name)
+        req.conversation_history = get_chat_history(user_name, thread_id=thread_id)
 
     # B8 · 会话级 token 上限（`DEC-041`）—— 触顶直接拒绝。
     # ⚠️ 放在**取历史之后、检索之前**：这是本端点**第一处真花钱**的位置之前。
@@ -807,7 +807,7 @@ async def stream_search(
         #    ⇒ `status` 这个区分只有一份实现，⛔ 不是在这里手写一遍 `append_chat_history`。
         #    ⚠️ `done` 的字节与改前**逐字相同**（答案原样，⛔ 不 strip、⛔ 不带标记）。
         #    ⚠️ **唯一的行为变化**：空答案 ⇒ **连提问也不写**（旧代码会写下孤零零的提问）。
-        persist_turn(user_name, req.question, "".join(collected), status="done")
+        persist_turn(user_name, req.question, "".join(collected), thread_id=thread_id, status="done")
         # 如果有引用，在结束后发送来源列表
         if req.citations and sources_list:
             yield sse_frame({"sources": sources_list}, ensure_ascii=True)
@@ -845,7 +845,7 @@ async def stream_search(
         #       骨架会在 `await aclose()` **之前**调它，这正是"晚切也存得下"的原因（`DEC-054`）。
         #    ⚠️ 骨架的 `logger.info` 与 `_on_error` 里的 `print` 不冲突：前者进日志文件，后者仍在 stdout。
         on_incomplete=lambda collected, status: persist_turn(
-            user_name, req.question, "".join(collected), status=status,
+            user_name, req.question, "".join(collected), thread_id=thread_id, status=status,
         ),
         on_error=_on_error,
         # 🔴 **`ensure_ascii=True` 不是可有可无的**：本端点三帧一直用**默认的 `True`**

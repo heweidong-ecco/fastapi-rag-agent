@@ -493,7 +493,10 @@ def _stub_rag_externals(monkeypatch, rag_mod, llm):
         rag_mod, "get_embedding", lambda text, model=None: _probe_vector(0.11)
     )
     monkeypatch.setattr(rag_mod, "get_llm_stream", lambda: llm)
-    monkeypatch.setattr(rag_mod, "get_chat_history", lambda user: [])
+    # 🔴 `DEC-085` 契约 C：端点改成 `get_chat_history(user_name, thread_id=thread_id)` 调用
+    #    ⇒ 写死单参数的 `lambda user:` 会 `TypeError`。本文件带 `@pytest.mark.needs_db`
+    #    ⇒ **CI 那条命令筛不到它**，坏掉也不会有东西响（判据不能是「本机跑绿」）。
+    monkeypatch.setattr(rag_mod, "get_chat_history", lambda *a, **k: [])
     monkeypatch.setattr(rag_mod, "append_chat_history", lambda *a, **k: None)
     monkeypatch.setattr(rag_mod, "check_session_token_budget", lambda *a, **k: (True, ""))
     monkeypatch.setattr(rag_mod, "circuit", lambda *a, **k: (True, ""))

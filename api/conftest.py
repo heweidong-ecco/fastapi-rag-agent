@@ -50,9 +50,22 @@ class FakeRedis:
     def expire(self, key, seconds):
         self.expired.append((key, seconds))
 
-    def history(self, user_name):
+    def history(self, user_name, thread_id):
+        """按**契约 C 的键**取历史（`DEC-085`）—— 键里现在是 `(user, thread)` 的复合键。
+
+        🔴 `thread_id` **必填、无默认值**（同产品侧那三个函数）。
+           ⛔ **不许给它一个 `"t1"` 之类的默认值**：本仓各测试文件用的会话名并不相同
+           （`t-cancel` / `t-sse` / `t-chain` / `t1`），一个"顺手"的默认值会让**读错桶**，
+           而 `assert history(...) == []` 那类断言会**静默变绿**（读了个空桶，
+           看起来像"确实没写"）—— 那正是 `DEC-056` §六 ③ 裁定的 fail-open 形状。
+        """
         import json
-        return [json.loads(x) for x in self.lists.get(f"chat_history:{user_name}", [])]
+
+        from session_key import session_key
+        return [
+            json.loads(x)
+            for x in self.lists.get(f"chat_history:{session_key(user_name, thread_id)}", [])
+        ]
 
 
 @pytest.fixture

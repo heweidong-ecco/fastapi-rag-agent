@@ -509,7 +509,7 @@ def test_completed_turn_is_persisted_with_done_status(chain_key, monkeypatch):
                         final_values=_FINAL_BY_CHAIN[chain_key])
     _collect_frames(_call(chain_key, monkeypatch, graph, redis=store, question="问题一"))
 
-    entries = store.history("tester")
+    entries = store.history("tester", THREAD)
     assert [e["role"] for e in entries] == ["user", "assistant"], (
         f"{CHAINS[chain_key]['route']} 正常跑完却没成对留痕：{entries}"
     )
@@ -535,7 +535,7 @@ def test_cancelled_turn_is_persisted_with_cancelled_status(chain_key, monkeypatc
     resp = _call(chain_key, monkeypatch, graph, redis=store, question="问题一")
     _drive_asgi_until_disconnect(resp, after_chunks=DISCONNECT_AFTER)
 
-    entries = store.history("tester")
+    entries = store.history("tester", THREAD)
     assert [e["role"] for e in entries] == ["user", "assistant"], (
         f"{CHAINS[chain_key]['route']} 取消后没成对留痕：{entries}"
     )
@@ -560,7 +560,7 @@ def test_failed_turn_is_persisted_with_error_status(chain_key, monkeypatch):
     resp = _call(chain_key, monkeypatch, graph, redis=store, question="问题一")
     _drive_asgi_until_disconnect(resp, after_chunks=99)   # 跑到自然结束（错误帧收尾）
 
-    entries = store.history("tester")
+    entries = store.history("tester", THREAD)
     assert [e["role"] for e in entries] == ["user", "assistant"], (
         f"{CHAINS[chain_key]['route']} 异常后没成对留痕：{entries}"
     )
@@ -587,8 +587,8 @@ def test_pending_approval_turn_writes_nothing(monkeypatch):
     objs = _frames_to_objs(_collect_frames(resp))
 
     assert objs[-2]["status"] == "pending_approval", f"前提没成立：{objs[-2]}"
-    assert store.history("tester") == [], (
-        f"停在审批点却写了历史 ⇒ 那半步会被当成 `done` 的完整答案：{store.history('tester')}"
+    assert store.history("tester", THREAD) == [], (
+        f"停在审批点却写了历史 ⇒ 那半步会被当成 `done` 的完整答案：{store.history('tester', THREAD)}"
     )
 
 
@@ -906,7 +906,7 @@ def test_plan_execute_persists_the_turn_on_completion(monkeypatch):
                             execute_plan=lambda p, g, u: "结果是 42", redis=store)
     _collect_plan_frames(factory)
 
-    entries = store.history("tester")
+    entries = store.history("tester", THREAD)
     assert [e["role"] for e in entries] == ["user", "assistant"], (
         f"链 D 正常跑完却没成对留痕：{entries}"
     )
@@ -932,7 +932,7 @@ def test_plan_execute_persists_the_turn_on_budget_exceeded(monkeypatch):
                             execute_plan=lambda p, g, u: "不该跑到这里", redis=store)
     _collect_plan_frames(factory)
 
-    entries = store.history("tester")
+    entries = store.history("tester", THREAD)
     assert [e["role"] for e in entries] == ["user", "assistant"], (
         f"链 D 异常后没成对留痕：{entries}"
     )
@@ -964,7 +964,7 @@ def test_plan_execute_persists_the_turn_on_cancel(monkeypatch):
                             execute_plan=lambda p, g, u: "", redis=store)
     _drive_asgi_until_disconnect(_LazyResponse(factory), after_chunks=DISCONNECT_AFTER)
 
-    entries = store.history("tester")
+    entries = store.history("tester", THREAD)
     assert [e["role"] for e in entries] == ["user", "assistant"], (
         f"链 D 取消后没成对留痕：{entries}"
     )

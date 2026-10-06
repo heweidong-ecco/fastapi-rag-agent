@@ -52,6 +52,11 @@ from schemas import QuestionRequest
 RAG_ENDPOINT = "rag_stream_search"
 AGENT_ENDPOINT = "agent_langgraph_chat_stream"
 
+# 🔴 `DEC-085` 契约 C 起，历史键里多了 `thread_id`（端点收到的那个）。
+#    本文件**读写走同一个名字** —— ⛔ 别在 `kw.setdefault` 处写一个字面量、
+#    读取处另写一个：两处一旦不一致，`assert history(...) == []` 会**读空桶而静默变绿**。
+THREAD = "t-cancel"
+
 # 断开发生在**第几帧之后** —— 取 2 是为了留出一帧的余量，
 # 免得把"正在途中的那一块"误判成"断开后还在拉"。
 DISCONNECT_AFTER = 2
@@ -301,7 +306,7 @@ def _call_rag_stream(monkeypatch, llm, history=None, get_history=None, **kw):
     #       `POSTGRES_PORT=59999 venv/bin/python -m pytest api/ -q -m "not integration and not needs_db"`
     #    📄 复现与根因 ⇒ `docs/复盘/2026-10-03-CI同款命令不等于CI等价物.md`
     monkeypatch.setattr(db_mod, "get_db", lambda: _FakeConn())
-    kw.setdefault("thread_id", "t-cancel")
+    kw.setdefault("thread_id", THREAD)
     kw.setdefault("user_name", "tester")
     # ⚠️ `citations` 默认 `False` = **旧行为**（⛔ 不是本次新增的行为）。
     #    开这个口子只为下面那条「帧序」用例 —— 不开引用模式 ⇒ `sources` 帧**根本不发**
@@ -321,7 +326,7 @@ def _call_agent_stream(monkeypatch, graph, redis=None, **kw):
     monkeypatch.setattr(agent_mod, "resolve", lambda *a, **k: None)
     # 🔴 `DEC-055`：端点会往 `chat_history` 写留痕 ⇒ 短路存储（⛔ 否则打到真 redis）。
     monkeypatch.setattr(cache_mod, "redis_client", redis if redis is not None else FakeRedis())
-    kw.setdefault("thread_id", "t-cancel")
+    kw.setdefault("thread_id", THREAD)
     kw.setdefault("user_name", "tester")
     kw.setdefault("question", "你好")
     return asyncio.run(agent_mod.langgraph_chat_stream(**kw))
@@ -456,7 +461,7 @@ def test_rag_persists_partial_answer_when_cancelled(monkeypatch):
 
     seen = _seen_content(sent)
     assert seen, "根本没流出内容 ⇒ 本断言无意义"
-    entries = store.history("tester")
+    entries = store.history("tester", THREAD)
     assert [e["role"] for e in entries] == ["user", "assistant"], (
         f"中断后历史应**成对**写入 user+assistant，实际 {entries}"
     )
@@ -498,7 +503,7 @@ def test_rag_bookkeeping_survives_interrupted_aclose(monkeypatch):
     assert any("断开" in line for line in lines), f"日志里没有取消事件：{lines}"
     seen = _seen_content(sent)
     assert seen, "根本没流出内容 ⇒ 本断言无意义"
-    entries = store.history("tester")
+    entries = store.history("tester", THREAD)
     assert [e["role"] for e in entries] == ["user", "assistant"], f"半截没成对落盘：{entries}"
     assert entries[1]["content"] == seen + rag_mod.INTERRUPTED_SUFFIX, (
         f"落盘的不是客户端看到的那半截：{entries[1]['content']!r}"
@@ -535,7 +540,7 @@ def test_rag_bookkeeping_lands_even_when_aclose_itself_fails(monkeypatch):
     assert any("断开" in line for line in lines), f"日志里没有取消事件：{lines}"
     seen = _seen_content(sent)
     assert seen, "根本没流出内容 ⇒ 本断言无意义"
-    entries = store.history("tester")
+    entries = store.history("tester", THREAD)
     assert [e["role"] for e in entries] == ["user", "assistant"], (
         f"关流抛 ⇒ 半截没落盘（B3 承诺失效）：{entries}"
     )
@@ -556,8 +561,8 @@ def test_rag_next_turn_prompt_reads_the_interrupted_half_answer(monkeypatch):
     llm1 = _SpyRagLLM(cap=40)
     resp = _call_rag_stream(monkeypatch, llm1, history=store, question="第一问：紫色河马协议")
     _drive_asgi_until_disconnect(resp, after_chunks=DISCONNECT_AFTER)
-    assert [e["role"] for e in store.history("tester")] == ["user", "assistant"], (
-        f"前提没成立：第一轮被切断后历史没落账，后面对不上：{store.history('tester')}"
+    assert [e["role"] for e in store.history("tester", THREAD)] == ["user", "assistant"], (
+        f"前提没成立：第一轮被切断后历史没落账，后面对不上：{store.history('tester', THREAD)}"
     )
 
     # 第二轮：**不传 conversation_history** ⇒ 走 `:628` 从存储读回（`_call_rag_stream` 的默认读法）
@@ -585,7 +590,7 @@ def test_rag_full_answer_is_saved_without_interrupt_marker(monkeypatch):
     resp = _call_rag_stream(monkeypatch, llm, history=store, question="完整的一问")
     _drive_asgi_until_disconnect(resp, after_chunks=99)  # 永不触发断开
 
-    entries = store.history("tester")
+    entries = store.history("tester", THREAD)
     assert [e["role"] for e in entries] == ["user", "assistant"], f"正常收尾的历史不对：{entries}"
     assert entries[1]["content"] == "字" * 3, f"正常收尾存的不是完整答案：{entries[1]['content']!r}"
     assert rag_mod.INTERRUPTED_SUFFIX not in entries[1]["content"], "完整答案被误标成了中断"
@@ -605,7 +610,7 @@ def test_rag_cancel_before_any_chunk_saves_nothing(monkeypatch):
     resp = _call_rag_stream(monkeypatch, llm, history=store, question="还没开始就断了")
     _drive_asgi_until_disconnect(resp, after_chunks=0)
 
-    assert store.history("tester") == [], f"没生成任何内容却写了历史：{store.history('tester')}"
+    assert store.history("tester", THREAD) == [], f"没生成任何内容却写了历史：{store.history('tester', THREAD)}"
 
 
 def test_rag_persists_partial_answer_when_generation_raises(monkeypatch):
@@ -623,7 +628,7 @@ def test_rag_persists_partial_answer_when_generation_raises(monkeypatch):
 
     seen = _seen_content(sent)
     assert seen == "字" * 2, f"前提没成立：断前应已收到 2 块，实际 {seen!r}"
-    entries = store.history("tester")
+    entries = store.history("tester", THREAD)
     assert [e["role"] for e in entries] == ["user", "assistant"], f"异常后没成对落盘：{entries}"
     assert entries[0]["content"] == "生成到一半炸了"
     assert entries[1]["content"] == seen + rag_mod.INTERRUPTED_SUFFIX, (
@@ -750,7 +755,7 @@ def test_agent_persists_the_partial_answer_when_client_disconnects(monkeypatch):
     resp = _call_agent_stream(monkeypatch, graph, redis=store)
     _drive_asgi_until_disconnect(resp, after_chunks=DISCONNECT_AFTER)
 
-    entries = store.history("tester")
+    entries = store.history("tester", THREAD)
     assert [e["role"] for e in entries] == ["user", "assistant"], f"取消后没成对留痕：{entries}"
     assert entries[0]["content"] == "你好", f"提问没留下：{entries[0]}"
     body = entries[1]["content"]
@@ -767,7 +772,7 @@ def test_agent_persists_the_partial_answer_when_generation_raises(monkeypatch):
     resp = _call_agent_stream(monkeypatch, graph, redis=store)
     _drive_asgi_until_disconnect(resp, after_chunks=99)   # 跑到自然结束（错误帧收尾）
 
-    entries = store.history("tester")
+    entries = store.history("tester", THREAD)
     assert [e["role"] for e in entries] == ["user", "assistant"], f"异常后没成对留痕：{entries}"
     assert entries[0]["content"] == "你好", f"提问没留下：{entries[0]}"
     assert entries[1]["content"] == "字" * 2 + cache_mod.INTERRUPTED_SUFFIX, (
