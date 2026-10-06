@@ -472,7 +472,9 @@ async def rerank_search_api(
 @router.post("/rag/rewrite_search")
 async def rewrite_search_api(
     req: QuestionRequest,
-    thread_id: str = "default",       # 🔴 2026-10-05 加（B8 需要会话维度）—— 同 `/rag/stream_search`
+    # 🔴 `DEC-085` 裁定 #12：空串挡在**进端点之前**（422）—— ⛔ 否则它会一路走到
+    #    `session_key()` 的 `ValueError`，而那时**流已经开了一半**，只能变成 500。
+    thread_id: str = Query("default", min_length=1),   # 🔴 2026-10-05 加（B8 需要会话维度）
     user_name: str = Depends(get_current_user_hybrid),
 ):
     """带查询改写的混合检索（**只在该用户自己的文档内**）"""
@@ -516,7 +518,9 @@ PIPELINE_FACTORIES = {
 async def unified_search(
     req: QuestionRequest,
     mode: SearchMode = "accurate_norerank",
-    thread_id: str = "default",       # 🔴 2026-10-05 加（B8 需要会话维度）—— 同 `/rag/stream_search`
+    # 🔴 `DEC-085` 裁定 #12：空串挡在**进端点之前**（422）—— ⛔ 否则它会一路走到
+    #    `session_key()` 的 `ValueError`，而那时**流已经开了一半**，只能变成 500。
+    thread_id: str = Query("default", min_length=1),   # 🔴 2026-10-05 加（B8 需要会话维度）
     user_name: str = Depends(get_current_user_hybrid),
 ):
     """
@@ -683,7 +687,9 @@ class _StreamUsageTap:
 @router.post("/rag/stream_search")
 async def stream_search(
     req: QuestionRequest,
-    thread_id: str = "default",       # ⚠️ B8 补：本端点原先**没有** thread_id
+    # 🔴 `DEC-085` 裁定 #12：空串挡在**进端点之前**（422）—— ⛔ 否则它会一路走到
+    #    `session_key()` 的 `ValueError`，而那时**流已经开了一半**，只能变成 500。
+    thread_id: str = Query("default", min_length=1),   # ⚠️ B8 补：本端点原先**没有** thread_id
     user_name: str = Depends(get_current_user_hybrid),
 ):
     """流式RAG问答接口（融合优化版）（支持引用溯源和历史补偿）。

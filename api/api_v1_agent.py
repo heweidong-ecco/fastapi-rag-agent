@@ -208,7 +208,9 @@ def _tool_rulings(pending_calls: list, ruling_text: str) -> list:
 @router.post("/agent/langgraph_chat")
 async def langgraph_chat(
     question: str,                    # 这是一个查询参数
-    thread_id: str = "default",       # 这也是一个查询参数
+    # 🔴 `DEC-085` 裁定 #12：空串挡在**进端点之前**（422）—— ⛔ 否则它会一路走到
+    #    `session_key()` 的 `ValueError`，而那时**流已经开了一半**，只能变成 500。
+    thread_id: str = Query("default", min_length=1),   # 这也是一个查询参数
     user_name: str = Depends(get_current_user_hybrid), # 这是依赖注入
 ):
     """
@@ -276,7 +278,9 @@ async def langgraph_chat(
 @router.post("/agent/langgraph_chat/stream")
 async def langgraph_chat_stream(
     question: str,
-    thread_id: str = "default",
+    # 🔴 `DEC-085` 裁定 #12：空串挡在**进端点之前**（422）—— ⛔ 否则它会一路走到
+    #    `session_key()` 的 `ValueError`，而那时**流已经开了一半**，只能变成 500。
+    thread_id: str = Query("default", min_length=1),
     user_name: str = Depends(get_current_user_hybrid),
 ):
     """`/agent/langgraph_chat` 的**流式**版本（`B1`）。SSE 逐 token 返回。
@@ -680,7 +684,9 @@ advanced_agent = build_advanced_agent()
 # 新增Mem0 灵活 独立隔离的记忆空间，memory_space，默认：default
 async def advanced_agent_chat(
     question: str,
-    thread_id: str = "default",
+    # 🔴 `DEC-085` 裁定 #12：空串挡在**进端点之前**（422）—— ⛔ 否则它会一路走到
+    #    `session_key()` 的 `ValueError`，而那时**流已经开了一半**，只能变成 500。
+    thread_id: str = Query("default", min_length=1),
     memory_space: str = "default",
     user_name: str = Depends(get_current_user_hybrid),
 ):
@@ -731,7 +737,9 @@ async def advanced_agent_chat(
 @router.post("/agent/advanced_chat/stream")
 async def advanced_agent_chat_stream(
     question: str,
-    thread_id: str = "default",
+    # 🔴 `DEC-085` 裁定 #12：空串挡在**进端点之前**（422）—— ⛔ 否则它会一路走到
+    #    `session_key()` 的 `ValueError`，而那时**流已经开了一半**，只能变成 500。
+    thread_id: str = Query("default", min_length=1),
     memory_space: str = "default",
     user_name: str = Depends(get_current_user_hybrid),
 ):
@@ -914,7 +922,9 @@ class _ThreadTokenBridge:
 @router.post("/agent/plan_execute")
 async def agent_plan_execute(
     goal: str,
-    thread_id: str = "default",       # ⚠️ B8 补：本端点原先**没有** thread_id
+    # 🔴 `DEC-085` 裁定 #12：空串挡在**进端点之前**（422）—— ⛔ 否则它会一路走到
+    #    `session_key()` 的 `ValueError`，而那时**流已经开了一半**，只能变成 500。
+    thread_id: str = Query("default", min_length=1),   # ⚠️ B8 补：本端点原先**没有** thread_id
     user_name: str = Depends(get_current_user_hybrid),
 ):
     """完整的 Plan-and-Execute 流程"""
@@ -966,7 +976,9 @@ async def agent_plan_execute(
 @router.post("/agent/plan_execute/stream")
 async def agent_plan_execute_stream(
     goal: str,
-    thread_id: str = "default",
+    # 🔴 `DEC-085` 裁定 #12：空串挡在**进端点之前**（422）—— ⛔ 否则它会一路走到
+    #    `session_key()` 的 `ValueError`，而那时**流已经开了一半**，只能变成 500。
+    thread_id: str = Query("default", min_length=1),
     user_name: str = Depends(get_current_user_hybrid),
 ):
     """`/agent/plan_execute` 的**流式**版本（`B1`）。SSE 逐块返回。
@@ -1081,7 +1093,9 @@ async def agent_plan_execute_stream(
 @router.post("/agent/memory_chat")
 async def memory_chat(
     question: str,
-    thread_id: str = "default",
+    # 🔴 `DEC-085` 裁定 #12：空串挡在**进端点之前**（422）—— ⛔ 否则它会一路走到
+    #    `session_key()` 的 `ValueError`，而那时**流已经开了一半**，只能变成 500。
+    thread_id: str = Query("default", min_length=1),
     user_name: str = Depends(get_current_user_hybrid),
 ):
     """带持久化记忆的 Agent 对话接口。
@@ -1145,7 +1159,9 @@ async def memory_chat(
 @router.post("/agent/memory_chat/stream")
 async def memory_chat_stream(
     question: str,
-    thread_id: str = "default",
+    # 🔴 `DEC-085` 裁定 #12：空串挡在**进端点之前**（422）—— ⛔ 否则它会一路走到
+    #    `session_key()` 的 `ValueError`，而那时**流已经开了一半**，只能变成 500。
+    thread_id: str = Query("default", min_length=1),
     user_name: str = Depends(get_current_user_hybrid),
 ):
     """`/agent/memory_chat` 的**流式**版本（`B1`）。SSE 逐 token 返回。
@@ -1459,7 +1475,9 @@ async def agent_token_budget(
 @router.post("/agent/mcp_chat")
 async def mcp_agent_chat(
     question: str,
-    thread_id: str = "default",
+    # 🔴 `DEC-085` 裁定 #12：空串挡在**进端点之前**（422）—— ⛔ 否则它会一路走到
+    #    `session_key()` 的 `ValueError`，而那时**流已经开了一半**，只能变成 500。
+    thread_id: str = Query("default", min_length=1),
     memory_space: str = "default",
     # 在需要控制成本的接口中使用
     # 新增 Token预算检查依赖和查询
@@ -1541,7 +1559,9 @@ async def mcp_agent_chat(
 @router.post("/agent/mcp_chat/stream")
 async def mcp_agent_chat_stream(
     question: str,
-    thread_id: str = "default",
+    # 🔴 `DEC-085` 裁定 #12：空串挡在**进端点之前**（422）—— ⛔ 否则它会一路走到
+    #    `session_key()` 的 `ValueError`，而那时**流已经开了一半**，只能变成 500。
+    thread_id: str = Query("default", min_length=1),
     memory_space: str = "default",
     # ⚠️ 依赖**与 `/agent/mcp_chat` 一致**（`check_budget`，⛔ 不是 `get_current_user_hybrid`）——
     #    它判的是【用户**日**预算】，是本端点原有的一道门，与会话级 `B8` **并存**（两个东西）。
