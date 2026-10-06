@@ -671,8 +671,17 @@ async def list_pending_approvals(
       · `raw_thread_id` —— 调用方传的**原值**（`thread_id` 现在是**拼过身份**的键）
       · `graph` —— 这条会话停在**哪张图**上（`agent_graph` / `checkpointer_agent`）
         ⇒ **批量批的时候要看它**：`/agent/approve` 按它选图。
+
+    🔴 **2026-10-06（`DEC-088` §二·发现③）起：本人默认只看自己的；admin 看全量。**
+      ⚠️ 改动前是 `list_pending()` 原样返回 ⇒ **任何登录用户都能看到所有人的待批会话**
+         （含别人的 `tool_calls` 与 `raw_thread_id`）。同族的 `/agent/traces` 在 `N4` 修过，它没跟上。
+      🔴 **过滤放在这里，⛔ 不改 `pending_approvals.list_pending()`** ——
+         那个函数的职责就是"交出这个进程级队列"，往里加 `user_name=None` 只会造出
+         「忘了传 = 静默全量」的默认值（`DEC-055` 口径）。
     """
     rows = list_pending()
+    if get_user_role(user_name) != UserRole.ADMIN:      # ⚠️ admin 例外，显式一行（照 :1943）
+        rows = [r for r in rows if r["user_name"] == user_name]
     return {"count": len(rows), "items": rows, "requested_by": user_name}
 
 # ==================== 高级图LangGraph进阶 接口：包含---条件边、循环、子图  ====================
