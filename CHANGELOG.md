@@ -10,6 +10,37 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- ⭐ **接管页（段 1 第二刀 · `F1`）**（2026-10-06 · `DEC-088`）—— `api/approval_audit.py` + `api/static/web/approvals.html` + `api/static/js/approvals.js`（纯逻辑，`node --test`）+ 三条后端接口。
+
+  **目标**：**硬门 D（人工接管）的演示那一栏**。它的反例原文是「**界面上找不到**」——
+  ⇒ 这一块**只能靠界面**补，后端再全也补不出它（`DEC-088` §一）。
+
+  - **新**：`api/approval_audit.py` —— 审批留痕落 PG（表 `approval_events`，`owner` / `actor` 两个身份）
+  - **新**：`GET /agent/pending/context`（完整上下文）· `GET /agent/approvals/history`（裁决历史）
+  - **新**：`api/static/web/approvals.html` + `GET /approvals` → 302（硬门 D 演示那一栏）
+  - **改**：`/agent/pending` 收窄为**本人默认 · admin 全量**（此前跨用户可见，`DEC-088` 缺口③）
+  - **改**：`/agent/approve` 加可选 `owner`（收窄撞车的 `thread_id`）+ 每次真裁决写留痕
+  - ⚠️ **后两条不属于 `F1` 本身**，是同 PR 里顺手修的**既有端点**（`DEC-051` 先例）
+
+  🔴 **`GET /approvals` 也是一条新的【公开路由】** ⇒ 已**显式**写进 `scripts/route-auth-baseline.txt`
+  （同上一刀：模板注释与结果文件**两处一起改**）。
+  ⚠️ **但它查不出"路径被删"** —— 少一条它报「少了 N 条（修好了）」并 `exit 0`
+  ⇒ 真正的守卫是 `api/test_approvals_page.py` 那三条。
+  ⚠️ **页面级的过滤才是那道边界**：接口的四类拒绝**全是 HTTP 200 + `{"status":"error"}`**
+  ⇒ 只看 `r.ok` 的写法会把"无权查看"当成成功。
+
+  ⚠️ **本批做完 ⛔ 不等于硬门 D 翻 ✅**（`DEC-088` §六·6）—— 判定原文还有"重启后仍能接管"之类的前提。
+
+  **判据（可打印）**：
+  ```bash
+  node --test api/static/js/approvals.test.js   # ⇒ ℹ tests 14 / pass 14 / fail 0
+  venv/bin/python -m pytest api/test_approvals_page.py -q   # ⇒ 3 passed
+  venv/bin/python -m pytest api/test_pending_context.py api/test_approval_events.py \
+      api/test_approvals_page.py api/test_pending_visibility.py api/test_approve_audit_wiring.py \
+      api/test_pending_approvals.py api/test_approve_ownership.py -q   # ⇒ 54 passed
+  venv/bin/python scripts/check_route_auth.py --baseline; echo "exit=$?"   # ⇒ exit=0
+  ```
+
 - ⭐ **对话页一条线（段 1 第一刀）**（2026-10-06 · `DEC-085` 十二条裁定）—— `GET /chat` + `api/static/web/chat.html` + `api/static/js/sse.js`（纯逻辑，`node --test`）+ `scripts/issue_api_key.py`。
 
   业务方的顺序裁定（`DEC-033` 🅱️「**先把后端做完，再进前端**」）在 2026-10-06 满足 ⇒ 进入**段 1**。

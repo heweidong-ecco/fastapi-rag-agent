@@ -167,3 +167,20 @@ def test_unknown_thread_reports_no_pending_task(graph):
     assert out["status"] == "error"
     assert "审批" in out["message"]
     assert graph.trace == [], "队列里没有 ⇒ ⛔ 不许去碰图"
+
+
+# ==================== ⑤ 裁定 6（DEC-088）：可选 `owner` 收窄 ====================
+
+def test_owner_param_narrows_candidates(graph):
+    """两个人都用 `thread_id="default"` ⇒ 歧义；给了 `owner` ⇒ 批的是**他指的那本**。"""
+    pa.clear()
+    pa.register(session_key("alice", THREAD), "alice", [{"name": "x", "args": {}}],
+                raw_thread_id=THREAD)
+    pa.register(session_key("bob", THREAD), "bob", [{"name": "x", "args": {}}],
+                raw_thread_id=THREAD)
+
+    out = _approve(user_name="admin", owner="bob")
+
+    assert out["status"] == "approved"
+    assert all(c["configurable"]["thread_id"] == session_key("bob", THREAD)
+               for c in graph.configs()), f"批错了会话：{graph.configs()}"

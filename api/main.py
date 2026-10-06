@@ -533,6 +533,15 @@ async def chat_page():
     """把人送到对话页。⚠️ `include_in_schema=False`：它不是 API，⛔ 别混进 openapi。"""
     return RedirectResponse(url="/static/web/chat.html", status_code=302)
 
+# 🔴 `DEC-088` §3.3：接管页的**入口 URL**。形状与上面那条 `/chat` **逐字同款** ——
+#    ⚠️ 302 而不是直接返回文件（页面本体由已挂的 `/static` 托管）。
+#    🔴 代价已认：这是**新公开路由** ⇒ `check_route_auth.py --baseline` 会 exit 1
+#       ⇒ **已显式写进 `scripts/route-auth-baseline.txt`**（一次有意识的操作）。
+@app.get("/approvals", include_in_schema=False)
+async def approvals_page():
+    """把人送到接管页。⚠️ `include_in_schema=False`：它不是 API，⛔ 别混进 openapi。"""
+    return RedirectResponse(url="/static/web/approvals.html", status_code=302)
+
 # 新增  嵌入了 Prometheus 指标采集
 # 指标暴露接口
 @app.get("/metrics")

@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>人工接管</title>
+<style>
+  :root { --fg:#1a1a1a; --muted:#6b7280; --line:#e5e7eb; --bg:#fafafa;
+          --human:#1d4ed8; --ai:#047857; --tool:#b45309; --bad:#b91c1c; }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }        /* ⚠️ 全局兜底：别让 hidden 被 display 覆盖 */
+  body { font: 14px/1.6 system-ui, sans-serif; color: var(--fg); background: var(--bg);
+         margin: 0; padding: 16px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 20px 0 8px; }
+  .sub { color: var(--muted); margin: 0 0 12px; }
+  input, button, textarea { font: inherit; }
+  input[type=password] { width: 320px; }
+  button { cursor: pointer; padding: 4px 12px; border: 1px solid var(--line);
+           background: #fff; border-radius: 6px; }
+  button.primary { border-color: #1d4ed8; color: #1d4ed8; }
+  button.danger  { border-color: var(--bad); color: var(--bad); }
+  #notice { margin: 8px 0; min-height: 1.4em; color: var(--muted); }
+  #notice.bad { color: var(--bad); }
+  table { border-collapse: collapse; width: 100%; background: #fff; }
+  th, td { border: 1px solid var(--line); padding: 6px 8px; text-align: left;
+           vertical-align: top; }
+  th { background: #f3f4f6; font-weight: 600; }
+  tr.pick > td { background: #eff6ff; }
+  .msg { border-left: 3px solid var(--line); padding: 2px 8px; margin: 4px 0; }
+  .msg.human { border-color: var(--human); } .msg.ai { border-color: var(--ai); }
+  .msg.tool  { border-color: var(--tool); }
+  .msg .role { font-weight: 600; font-size: 12px; color: var(--muted); }
+  .msg pre { margin: 2px 0 0; white-space: pre-wrap; word-break: break-word; }
+  details > summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+  #opbox { background: #fff; border: 1px solid var(--line); border-radius: 8px;
+           padding: 12px; margin: 8px 0; }
+  #edited { width: 100%; min-height: 64px; }
+</style>
+</head>
+<body>
+<h1>人工接管</h1>
+<p class="sub">待接管会话 · 点一行看**完整上下文** · 批准 / 拒绝 / 代替模型给出这次工具调用的结果</p>
+
+<p>
+  <label>API Key：<input id="apikey" type="password" placeholder="X-API-Key"></label>
+  <button id="save">保存</button>
+  <button id="refresh">刷新</button>
+</p>
+<div id="notice"></div>
+
+<h2>待接管</h2>
+<table id="pending">
+  <thead><tr><th>属主</th><th>图</th><th>轮次</th><th>卡了多久</th><th>待批的工具</th></tr></thead>
+  <tbody></tbody>
+</table>
+
+<div id="opbox" hidden>
+  <h2>上下文 <span class="sub" id="ctxwho"></span></h2>
+  <div id="ctx"></div>
+  <h2>代替模型执行这次工具调用</h2>
+  <p class="sub">它拿着你给的结论继续往下答。<b>不填也能批 / 拒</b> —— 不填就是「原样放行」。</p>
+  <textarea id="edited" placeholder="（可留空）"></textarea>
+  <p>
+    <button id="approve" class="primary">批准</button>
+    <button id="reject" class="danger">拒绝</button>
+  </p>
+</div>
+
+<h2>裁决历史</h2>
+<table id="history">
+  <thead><tr><th>属主</th><th>谁批的</th><th>裁决</th><th>改写</th><th>轮次</th><th>为什么</th></tr></thead>
+  <tbody></tbody>
+</table>
+
+<script src="/static/js/approvals.js"></script>
+<script>
+'use strict';
+const KEY_STORE = 'rag_api_key';       // ⚠️ 与 chat.html 同一个 localStorage 键
+const $ = (id) => document.getElementById(id);
+let picked = null;                     // 当前选中的那一行
+let timer = null;
+
+function key() { return localStorage.getItem(KEY_STORE) || ''; }
+
+function notice(msg, bad) {
+  const el = $('notice');
+  el.textContent = msg || '';
+  el.classList.toggle('bad', !!bad);
+}
+
+/* 🔴 401/403 与 503/429 要分开说 —— 与 chat.html 的 explainStatus 同款口径（DEC-082/N9）。 */
+function explainStatus(status) {
+  if (status === 401 || status === 403) return 'Key 不对或没权限（401/403）';
+  if (status === 429) return '被限额拦下了（429）—— 稍后再试';
+  if (status >= 500) return '服务端出问题了（' + status + '）';
+  return '请求失败（' + status + '）';
+}
+
+async function getJSON(url) {
+  const r = await fetch(url, { headers: { 'X-API-Key': key() } });
+  if (!r.ok) throw new Error(explainStatus(r.status));
+  return r.json();
+}
+
+/* ==================== 上 · 待接管列表 ==================== */
+
+async function loadPending() {
+  const data = await getJSON('/agent/pending');
+  const body = $('pending').querySelector('tbody');
+  body.innerHTML = '';
+  const now = Date.now() / 1000;
+  for (const row of data.items) {
+    const tr = document.createElement('tr');
+    if (picked && picked.thread_id === row.thread_id && picked.owner === row.user_name) {
+      tr.className = 'pick';
+    }
+    const cells = [
+      row.user_name,
+      row.graph || 'agent_graph',
+      String(row.rounds || 1),
+      RagApprovals.formatElapsed(now - row.since),
+      RagApprovals.summarizeToolCalls(row.tool_calls),
+    ];
+    for (const text of cells) {
+      const td = document.createElement('td');
+      td.textContent = text;
+      tr.appendChild(td);
+    }
+    tr.onclick = () => openContext(row);
+    body.appendChild(tr);
+  }
+  if (data.items.length === 0) {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 5; td.textContent = '（当前没有等待接管的会话）';
+    tr.appendChild(td); body.appendChild(tr);
+  }
+}
+
+/* ==================== 点开 · 完整上下文 ==================== */
+
+async function openContext(row) {
+  const q = RagApprovals.buildContextQuery(row.raw_thread_id, row.user_name);
+  const data = await getJSON('/agent/pending/context?' + q);
+  if (data.status !== 'ok') { notice(data.message, true); return; }
+  picked = { thread_id: row.raw_thread_id, owner: row.user_name };
+  $('opbox').hidden = false;
+  $('ctxwho').textContent = '属主 ' + data.owner + ' · ' + data.graph +
+                            ' · 第 ' + data.rounds + ' 轮 · 停于 ' + data.next.join(',');
+  const box = $('ctx');
+  box.innerHTML = '';
+  data.messages.forEach((msg) => {
+    const div = document.createElement('div');
+    div.className = 'msg ' + (msg.type || '');
+    const role = document.createElement('div');
+    role.className = 'role';
+    role.textContent = msg.type + (msg.name ? ' · ' + msg.name : '');
+    div.appendChild(role);
+    const pre = document.createElement('pre');
+    pre.textContent = RagApprovals.messageText(msg) || '（无文本）';
+    div.appendChild(pre);
+    if (msg.tool_calls && msg.tool_calls.length) {
+      const d = document.createElement('details');
+      d.innerHTML = '<summary>待批的工具调用</summary>';
+      const p = document.createElement('pre');
+      p.textContent = JSON.stringify(msg.tool_calls, null, 2);
+      d.appendChild(p); div.appendChild(d);
+    }
+    box.appendChild(div);
+  });
+  notice('');
+}
+
+/* ==================== 操作区 ==================== */
+
+async function decide(decision) {
+  if (!picked) { notice('先点一行选一个会话', true); return; }
+  const q = RagApprovals.buildApprovePayload(
+    picked.thread_id, picked.owner, decision, $('edited').value);
+  const r = await fetch('/agent/approve?' + q, {
+    method: 'POST',
+    headers: { 'X-API-Key': key() },
+  });
+  if (!r.ok) { notice(explainStatus(r.status), true); return; }
+  const data = await r.json();
+  if (data.status === 'error') { notice(data.message, true); return; }
+  notice('已' + (data.status === 'pending_approval' ? '放行（模型又停在审批点了 —— 见下一条）'
+                                                    : decision === 'approve' ? '批准' : '拒绝'));
+  $('edited').value = '';
+  picked = null;
+  $('opbox').hidden = true;
+  await refreshAll();
+}
+
+/* ==================== 下 · 裁决历史 ==================== */
+
+async function loadHistory() {
+  const data = await getJSON('/agent/approvals/history?limit=50');
+  const body = $('history').querySelector('tbody');
+  body.innerHTML = '';
+  for (const ev of data.events) {
+    const tr = document.createElement('tr');
+    for (const text of [ev.owner, ev.actor, ev.decision, ev.edited ? '有' : '—',
+                        String(ev.rounds ?? '—'), ev.reason || '—']) {
+      const td = document.createElement('td');
+      td.textContent = text;
+      tr.appendChild(td);
+    }
+    body.appendChild(tr);
+  }
+}
+
+/* ==================== 刷新：轮询 5s，仅页面可见（裁定 5） ==================== */
+
+async function refreshAll() {
+  try {
+    await loadPending();
+    await loadHistory();
+  } catch (e) { notice(e.message, true); }
+}
+
+function schedule() {
+  if (timer) { clearTimeout(timer); timer = null; }
+  const delay = RagApprovals.nextPollDelay(document.visibilityState);
+  if (delay === null) return;                       // 不可见 ⇒ 不排下一次
+  timer = setTimeout(async () => { await refreshAll(); schedule(); }, delay);
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') refreshAll();   // 回到前台立刻刷一次
+  schedule();
+});
+
+$('apikey').value = key();
+$('save').onclick = () => {
+  localStorage.setItem(KEY_STORE, $('apikey').value.trim());
+  notice('已保存'); refreshAll(); schedule();
+};
+$('refresh').onclick = () => { refreshAll(); schedule(); };
+$('approve').onclick = () => decide('approve');
+$('reject').onclick  = () => decide('reject');
+
+if (key()) { refreshAll(); schedule(); } else { notice('先填 API Key', true); }
+</script>
+</body>
+</html>
