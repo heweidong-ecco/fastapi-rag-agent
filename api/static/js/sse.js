@@ -39,6 +39,9 @@ function payloadKind(payload) {
     if ('error' in payload) return 'error';
     if ('usage' in payload) return 'usage';
     if ('sources' in payload) return 'sources';
+    // 🔴 `F4` ①（`DEC-091`）：无据拒答的信号帧。⚠️ 认不出的帧落到 `'unknown'`，
+    //    而 `chat.html` 对 `'unknown'` **什么都不做** ⇒ 老前端遇到这一帧天然兼容（不炸、不误画）。
+    if ('no_answer' in payload) return 'no_answer';
     if ('content' in payload) return 'content';
   }
   return 'unknown';
@@ -211,6 +214,32 @@ function breakerCard(scope, message) {
   };
 }
 
+/**
+ * 无据拒答时的那条提示（`F4` ① · 硬门 B 的**第二半** · `DEC-091`）。
+ *
+ * 🔴 后端**只给信号**（一帧 `{"no_answer": true}`），**文案在这里** —— 理由与 `breakerCard` 同源：
+ *    文案属于**呈现层**；塞进帧就变成又一份要两边同步的契约。
+ *    ⇒ 判据（「这轮算不算拒答」）**只有后端那一份**，前端只认帧（`sse.test.js` 有一条结构型守卫）。
+ *
+ * ⚠️ 措辞的两条硬约束（都有用例钉着）：
+ *    ① **必须指向"资料/文档"** —— 用户能做的只有「换问法」或「先上传相关文档」；
+ *       说成"出错/检索失败"会让人去重启、重试、找人修，全是无用功。
+ *    ② ⛔ **不许暗示"稍后再试"** —— 无据拒答是**检索＋上下文**的结论，重问同一句不会变；
+ *       「稍后再试」是**限流**那种状态的出路（那是 `breakerCard` 管的另一件事）。
+ *
+ * ⚠️ ⛔ 别说「检索不到片段」 —— 那是**假话**：实测（2026-10-06 spike）拒答那一轮的
+ *    `sources` 帧里**照样有 3 条**片段（相似度 0.07–0.77）。真实情况是
+ *    **检索到的片段里没有能回答这个问题的内容**，⛔ 不是"检索不到东西"。
+ *
+ * @returns {{title: string, body: string}}
+ */
+function refusalNotice() {
+  return {
+    title: '知识库中没有相关资料',
+    body: '回答这个问题需要的信息不在已上传的文档里。换个问法，或先上传相关文档再试。',
+  };
+}
+
 // 🔴 2026-10-06 施工实测·订正⑨ —— **本文件此前【没有】`RagSse` 这个对象。**
 //    起草时 Task 6 的 Interfaces 写着「Produces（全局对象 `RagSse`，浏览器）」，而实现只有
 //    末尾那段 `module.exports` ⇒ 顶层函数确实成了全局，但**没有一个叫 `RagSse` 的东西**。
@@ -221,6 +250,7 @@ function breakerCard(scope, message) {
 const RagSse = {
   DONE_SENTINEL, parseSseChunk, payloadKind, citationIndexes, splitCitations,
   resolveCitations, classifyExit, formatCost, formatSource, toggleOpen, breakerCard,
+  refusalNotice,
 };
 
 if (typeof module !== 'undefined' && module.exports) {

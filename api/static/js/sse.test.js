@@ -6,7 +6,7 @@ const assert = require('node:assert');
 
 const {
   parseSseChunk, payloadKind, citationIndexes, splitCitations, resolveCitations,
-  classifyExit, formatCost, formatSource, toggleOpen, breakerCard,
+  classifyExit, formatCost, formatSource, toggleOpen, breakerCard, refusalNotice,
 } = require('./sse.js');
 
 test('parseSseChunk 只吐【完整】的帧，半截留在 rest 里', () => {
@@ -31,12 +31,15 @@ test('parseSseChunk 把多帧按 \\n\\n 切开', () => {
   assert.deepStrictEqual(parseSseChunk(buf).payloads, [{ content: 'a' }, { content: 'b' }]);
 });
 
-test('payloadKind 认得五种帧', () => {
+test('payloadKind 认得六种帧', () => {
   assert.strictEqual(payloadKind('[DONE]'), 'done');
   assert.strictEqual(payloadKind({ content: 'x' }), 'content');
   assert.strictEqual(payloadKind({ sources: [] }), 'sources');
   assert.strictEqual(payloadKind({ usage: {} }), 'usage');
   assert.strictEqual(payloadKind({ error: 'boom' }), 'error');
+  assert.strictEqual(payloadKind({ no_answer: true }), 'no_answer');
+  // ⚠️ 认不出的帧仍然落到 'unknown' —— 老前端遇到新帧就是这条路
+  //    （`chat.html` 对 'unknown' **什么都不做**）⇒ 后端加帧天然向后兼容。
   assert.strictEqual(payloadKind({ something: 1 }), 'unknown');
 });
 
@@ -139,7 +142,7 @@ test('把 sse.js 当【经典脚本】跑一遍 ⇒ window.RagSse 存在且接�
   assert.strictEqual(typeof w.RagSse, 'object', 'sse.js 没有挂 window.RagSse ⇒ 页面里 RagSse.xxx 全报 ReferenceError');
   for (const k of ['parseSseChunk', 'payloadKind', 'citationIndexes', 'splitCitations',
                    'resolveCitations', 'classifyExit', 'formatCost',
-                   'formatSource', 'toggleOpen', 'breakerCard']) {
+                   'formatSource', 'toggleOpen', 'breakerCard', 'refusalNotice']) {
     assert.strictEqual(typeof w.RagSse[k], 'function', `window.RagSse.${k} 不是函数`);
   }
 });
@@ -322,4 +325,48 @@ test('改前那句「混两种」的话已从 chat.html 删掉（结构型：数
     .filter((f) => fs.readFileSync(f, 'utf8').includes(MERGED))
     .map((f) => path.relative(path.join(JS_DIR, '..', '..'), f).replace(/\\/g, '/'));
   assert.deepStrictEqual(hit, [], `那句把两种熔断混起来的话还在：${hit.join(', ')}`);
+});
+
+// ---------- 无据拒答的提示条：`F4` ① · 硬门 B 的**第二半** ----------
+//
+// 🔴 为什么抽进本文件：与 `breakerCard` 同一条理由 —— 这是**能写成命令**的那部分
+//    （"这句话说的是不是实话"）。DOM 怎么挂留在 `chat.html`。
+//
+// 🔴 后端**只给信号**（一帧 `{"no_answer": true}`），⛔ **不把这句文案塞进帧里**：
+//    文案属于**呈现层**；塞进帧就变成又一份要两边同步的契约（本仓已栽过同型事故）。
+//    ⚠️ 于是判据（"这轮算不算拒答"）**只有后端那一份** —— 见下面那条结构型守卫。
+
+test('refusalNotice：说的是「资料里没有」，⛔ 不许说成"检索失败 / 出错了"', () => {
+  const n = refusalNotice();
+  const text = n.title + n.body;
+  // 这句必须指向**知识库**：用户能做的是换问法 / 补文档。
+  assert.ok(/资料|文档/.test(text), `没提到"资料/文档" ⇒ 读的人会以为是系统坏了：${text}`);
+  // ⛔ 说成故障 = 让用户去重启、重试、找人修 —— 全是无用功。
+  assert.ok(!/出错|故障|失败|异常|坏了/.test(text), `把无据拒答说成了故障：${text}`);
+});
+
+test('refusalNotice：⛔ 不许暗示"等一会儿/重试就好"（那是做不到的承诺）', () => {
+  // 🔴 拒答是**检索＋上下文**的结论，原样重问不会变。⛔ 别把它写成限流那种「稍后再试」——
+  //    那是另一种状态（`breakerCard` 管）的出路，两者混起来会把人引到错误的处置上。
+  //
+  // ⚠️ 2026-10-06 施工实测：本条第一版写的是 `/稍后|再试|重试|刷新/`，**它误伤了真话** ——
+  //    提示语里的「先上传相关文档**再试**」是**做得到的**出路（先有动作，才有"再试"）。
+  //    ⇒ 那是**尺子歪了**，不是文案错：本条的靶子是「等一会儿它自己就好了」那个**假承诺**，
+  //      ⛔ 不是"再试"这两个字。收窄成下面这组（都指向"时间会解决"，而时间不会）。
+  const text = refusalNotice().title + refusalNotice().body;
+  assert.ok(!/稍后|重试|刷新|多试|过一会儿|等一会/.test(text),
+    `把无据拒答当成了限流类问题（暗示"等/重试就好"）：${text}`);
+});
+
+test('前端 ⛔ 不许自己认拒答 —— 判据只有后端一份（结构型：数的是【文件】）', () => {
+  // 🔴 与「引用正则只许有一份」同型。拒答那句在 `api_v1_rag.py` 的 prompt 里。
+  //    前端若也写一份去认，两处一旦漂移：**后端发了帧、前端却按另一套判**，
+  //    或者反过来 —— 而**页面上不报任何错**。
+  // 针脚分两段拼，让本文件自身不含那个连续子串（否则这条守卫会被**自己**绊倒）。
+  const REFUSE = '无法' + '回答';
+  const hit = frontendSources()
+    .filter((f) => fs.readFileSync(f, 'utf8').includes(REFUSE))
+    .map((f) => path.relative(path.join(JS_DIR, '..', '..'), f).replace(/\\/g, '/'));
+  assert.deepStrictEqual(hit, [],
+    `前端自己认起拒答来了：${hit.join(', ')} —— 判据只该在后端一处，前端只认帧`);
 });
