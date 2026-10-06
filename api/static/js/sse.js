@@ -44,16 +44,38 @@ function payloadKind(payload) {
   return 'unknown';
 }
 
+/**
+ * 把正文切成**有序**片段：`{text}` 是普通文本，`{index}` 是一个引用编号。
+ * 渲染层（`chat.html`）用它把 `[来源:2]` 换成可点开的 `<span>`。
+ *
+ * 🔴 **本函数是引用正则的【唯一一份】** —— `citationIndexes` 由它推导，
+ *    页面渲染也走它。⛔ 别在 `chat.html` 里再写一份同款正则：
+ *    两处一旦漂移，**画出来的编号与点开的编号不是同一批**，而页面上**不报任何错**
+ *    （表现就是"点了没反应"）。本仓已记过同型事故（两处各写一遍 ⇒ 静默错位）。
+ * ⚠️ 不吐空片段：没有引用时返回 `[{text: 全文}]`，空串返回 `[]`。
+ */
+function splitCitations(text) {
+  const s = text || '';
+  const out = [];
+  const re = /\[来源\s*:\s*([0-9]+(?:\s*,\s*[0-9]+)*)\]/g;
+  let last = 0, m;
+  while ((m = re.exec(s)) !== null) {
+    if (m.index > last) out.push({ text: s.slice(last, m.index) });
+    for (const piece of m[1].split(',')) {
+      const n = parseInt(piece.trim(), 10);
+      if (!Number.isNaN(n)) out.push({ index: n });
+    }
+    last = m.index + m[0].length;
+  }
+  if (last < s.length) out.push({ text: s.slice(last) });
+  return out;
+}
+
 /** 从答案正文里取出引用编号：`[来源:2]` / `[来源:1, 3]` ⇒ [2] / [1, 3]（去重、保序）。 */
 function citationIndexes(text) {
   const out = [];
-  const re = /\[来源\s*:\s*([0-9]+(?:\s*,\s*[0-9]+)*)\]/g;
-  let m;
-  while ((m = re.exec(text || '')) !== null) {
-    for (const piece of m[1].split(',')) {
-      const n = parseInt(piece.trim(), 10);
-      if (!Number.isNaN(n) && !out.includes(n)) out.push(n);
-    }
+  for (const seg of splitCitations(text)) {
+    if (seg.index !== undefined && !out.includes(seg.index)) out.push(seg.index);
   }
   return out;
 }
@@ -94,9 +116,21 @@ function formatCost(costUsd) {
   return '$' + Number(costUsd).toFixed(6);
 }
 
+// 🔴 2026-10-06 施工实测·订正⑨ —— **本文件此前【没有】`RagSse` 这个对象。**
+//    起草时 Task 6 的 Interfaces 写着「Produces（全局对象 `RagSse`，浏览器）」，而实现只有
+//    末尾那段 `module.exports` ⇒ 顶层函数确实成了全局，但**没有一个叫 `RagSse` 的东西**。
+//    ⇒ `chat.html` 里每一处 `RagSse.xxx` 都会 `ReferenceError: RagSse is not defined`。
+//    ⚠️ **`node --test` 抓不到它**（用例只走 `module.exports`），页面加载时也**不报**
+//       （`RagSse` 第一次被用到是在**答案真的开始流**之后）—— 实测见施工单 Task 8。
+//    ⇒ 现在两侧都挂，且下面有两条用例钉住（浏览器那侧用 `node:vm` 造一个假 window 来测）。
+const RagSse = {
+  DONE_SENTINEL, parseSseChunk, payloadKind, citationIndexes, splitCitations,
+  resolveCitations, classifyExit, formatCost,
+};
+
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = {
-    DONE_SENTINEL, parseSseChunk, payloadKind, citationIndexes, resolveCitations,
-    classifyExit, formatCost,
-  };
+  module.exports = RagSse;                       // Node（`node --test` / `require`）
+}
+if (typeof window !== 'undefined') {
+  window.RagSse = RagSse;                        // 浏览器（`<script src>` 之后就是全局）
 }
