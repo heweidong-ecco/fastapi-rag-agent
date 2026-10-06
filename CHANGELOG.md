@@ -506,8 +506,12 @@ All notable changes to this project will be documented in this file.
     · `/rag/jwt_ask` · `/ws/agent`），**成功路径也不记**。真库佐证：`token_usage_logs` 里
     **非 embedding 行全库只有 6 行**，全是 2026-09-20 的 agent graph 运行。
     ⚠️ **还有一条技术上绕不过去的**：取消瞬间的 token 数**协议上拿不到** ——
-    `llm_factory` 没开 `stream_usage`，usage 只在**最后一帧**回来，而我们提前 `aclose()` ⇒
+    ~~`llm_factory` 没开 `stream_usage`，~~ usage 只在**最后一帧**回来，而我们提前 `aclose()` ⇒
     那一帧**永远不会到** ⇒ 硬补只能估算 = **往账本写假数**，比空着更坏。
+    🔴 **2026-10-06 更正（`DEC-084`）**：划掉的那半句**是错的** —— 实测本仓 provider
+    **默认 `stream_usage=False` 也**拿得到 `usage_metadata`（挂在最后一帧、`content=''` 上）
+    ⇒ **结论不变**（取消仍补不了），但**理由是"那帧到不了"，⛔ 不是"没开某个开关"**；
+    而"成功路径也不记"那条**已于当天补上**（`DEC-084`）。📄 `docs/复盘/2026-10-06-未核的推断被当成前提写进文档.md`
   - **判据②「半截答案处理方式明确」—— 现状是"丢"，但那是碰巧、不是决定**：
     `append_chat_history` 写在循环之后，取消在它之前 `raise` ⇒ 一行都不跑；
     ⚠️ **用户那句提问跟着一起丢**（它和答案写在同一个收尾段里）。
@@ -530,7 +534,8 @@ All notable changes to this project will be documented in this file.
   （与 `B2` 同一段取消代码）；`B2` 那轮必须真服务是要证"计数在真 uvicorn 下也涨"，这一轮没有同类观测对象。
   ⚠️ **仍未端到端验**：「**下一轮 prompt 真的读到了那半截**」。
   📄 全文 ⇒ `docs/decisions/DEC-053-中断后的半截答案存进历史并打标记.md`（含 §遗留：
-  `except Exception` 那条路仍丢提问 · **RAG 侧零 LLM 记账**是独立缺陷、已立进 `docs/待办总表.md`）
+  `except Exception` 那条路仍丢提问 · **RAG 侧零 LLM 记账**是独立缺陷、已立进 `docs/待办总表.md`
+  —— ✅ **2026-10-06 该独立缺陷【全部关闭】**：非流式 `DEC-073` · 流式 `DEC-084` · `/ws/agent` `DEC-075`）
 
 - ✅ **服务端 cancel 传播到上游 —— 两条流式端点**（2026-10-03 · `③` Task 5 · `B2` · `DEC-052`）——
   客户端断开后**真的停掉并关掉上游**，⛔ 不是"前端不显示了"（后者后端仍在烧钱）。
@@ -1790,6 +1795,40 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- 🔴 **`/rag/stream_search` 的流式答案【从建立起一笔账都没记过】**（2026-10-06 · `DEC-084`）
+
+  > **门在，锁坏了** —— 与 `DEC-072` / `DEC-073` 同族，这是这一族在这一侧的**最后一笔**。
+
+  端点上的两道闸（`check_session_token_budget` B8 会话上限 · `circuit(global_key())` B11 全站熔断）
+  一直在，而 `api/api_v1_rag.py` **全文 `record_usage` / `record_from_response` = 0**
+  ⇒ **闸读的计数器它从不写** ⇒ 两道闸对这条链**等于不存在**。
+
+  **🔴 真根因与文档里写的【不一样】**：本仓三处文档（上一份施工单 §范围外·1 · `待办总表` §一
+  `DEC-073` 子表 · 本篇下一条）写着「流式拿不到 `usage_metadata`，要先开 `stream_usage`」——
+  **实测推翻**：本仓 provider 把 usage 挂在**最后一帧（`content=''`）**上，
+  **默认 `stream_usage=False` 也拿得到**；且按 `llm_chunk_text` 口径过滤后，
+  开与不开**帧序列逐帧相同**。⇒ 真根因只有一个：**没有人读那一帧**
+  （`llm_chunk_text` 返回 `chunk.content or None`，`''` 被判空丢掉）。
+
+  **改了什么**：`api/api_v1_rag.py` **一个文件** —— 新增 `_StreamUsageTap`，
+  用骨架（`sse.sse_stream`）本来就逐块调用的 `extract` 钩子累积所有块
+  （`AIMessageChunk.__add__`），在**正常收尾**出口把聚合块交给
+  `record_from_response(…, "answer_generation", user_name=…, thread_id=…)`。
+  ⛔ **没碰 `api/sse.py`**（6 条流式端点共用），⛔ **帧序 / 取消 / 关流语义零改动**
+  （判据：`git diff --stat api/test_cancel_propagation.py api/sse.py` ⇒ **空**）。
+
+  **⚠️ 一处【行为变更】**：这条链的消耗**第一次进 B8 / B11 的计数器**
+  ⇒ 此前"流式问到底也不触顶"的用户**会开始被拦**（触顶回 `QUOTA_EXCEEDED`）。
+  这是**修复**，⛔ 不是回归。上线后若有人报"流式突然被限"，先查 `token_usage_logs`
+  里该用户有没有**新出现**的行。
+
+  **⛔ 范围要说准**：**只有成功出口**记账 —— **取消 / 异常不记**
+  （usage 只在最后一帧回来，提前 `aclose()` ⇒ 那帧根本不到；硬补 = 往账本写假数 ·
+  `DEC-053` §遗留·2）。这条**写成了守卫**（不是"记得别做"）。
+
+  📄 `docs/decisions/DEC-084-流式答案的记账落点.md` ·
+  复盘 `docs/复盘/2026-10-06-未核的推断被当成前提写进文档.md`
+
 - 🔴 **图内「预算已用完」的【软返回】⇒ 429 / error 帧**（2026-10-05 · **批 7** · `N11` · `DEC-083`）
 
   > **图里"预算不够"不再是一句【答案】，而是一个【信号】。**
@@ -2525,9 +2564,15 @@ All notable changes to this project will be documented in this file.
   ⚠️ **一处【行为变更】**：这两条端点**从无闸变成有闸** —— 超预算的请求现在会**被拒**（`QUOTA_EXCEEDED`；
   与本仓 fail-open 取向一致：**DB 挂了仍放行**）。⚠️ **签名是必填** ⇒ 漏传的调用方**当场 `TypeError`**。
 
-  ⚠️ **范围要说准（⛔ 别读成"RAG 侧全记上了"）**：`/rag/stream_search` **仍然不记账** ——
-  `llm_factory` 没开 `stream_usage` ⇒ `astream` **不挂 `usage_metadata`**；要记得**顺带开 `stream_usage`**
-  = **改流式帧形态**，与"补记账"是两件事，**单独一轮**。`/rag/hybrid_search` · `/rag/rerank_search`
+  ⚠️ **范围要说准（⛔ 别读成"RAG 侧全记上了"）**：`/rag/stream_search` **本轮仍然不记账** ——
+  ~~`llm_factory` 没开 `stream_usage` ⇒ `astream` **不挂 `usage_metadata`**；要记得**顺带开 `stream_usage`**
+  = **改流式帧形态**，与"补记账"是两件事，**单独一轮**。~~
+  🔴 **2026-10-06 更正（`DEC-084`）：上面这句理由【是错的】** —— 实测本仓 provider
+  把 `usage_metadata` 挂在**最后一帧（`content=''`）**上，**默认 `stream_usage=False` 也拿得到**，
+  且开与不开**帧序列逐帧相同**（判据：`fastapi-rag-agent-TODO待办/探针-流式与记账.py`，
+  ⚠️ 它 **2026-10-04** 就写了"不需要 `stream_usage`"，而这条**当天写的**理由没去核）。
+  ⇒ 真根因是**没人读那一帧**；记账**已于当天补上**（`DEC-084`），⛔ **没有**改帧形态。
+  `/rag/hybrid_search` · `/rag/rerank_search`
   **只跑本地 embedding / Cross-Encoder**，不花 LLM 钱，⛔ **没给它们加闸**。
 
   ⭐ **自证救回一条【假守卫】**：`test_no_llm_usage_is_swallowed_by_string_output_parser` 第一版挂在
