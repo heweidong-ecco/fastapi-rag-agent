@@ -35,7 +35,7 @@ import pathlib
 from types import SimpleNamespace
 
 import pytest
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, AIMessageChunk
 
 import answer_with_citations as awc
 import query_rewriter as qr
@@ -427,4 +427,216 @@ def test_query_rewriter_uses_record_usage_not_record_from_response():
         "query_rewriter 用的是裸 OpenAI（响应只有 .usage）"
         "—— `record_from_response` 对它**恒 False 静默不记**，⛔ 用错了比不记还坏"
     )
+
+
+# ══════════════════════════════════════════════════════════════════
+# Task 5 · 行为判据：`/rag/stream_search` 的【流式答案】也要记真账
+# ══════════════════════════════════════════════════════════════════
+#
+# 🔴 为什么这条端点此前一直"在闸后面免费跑"
+#   `api_v1_rag.py` 里 `check_session_token_budget` / `circuit` 两道闸都在，而**全文
+#   `record_from_response` = 0** ⇒ 闸读的计数器它从不写 ⇒ 对这条链等于不存在。
+#
+# 🔴 为什么不能靠骨架（`sse.sse_stream`）攒 usage
+#   骨架只把**通过 `llm_chunk_text` 过滤的块**攒进 `collected`；而本仓 provider 把
+#   `usage_metadata` 挂在**最后一帧、且那帧 `content=''`** 上 ⇒ `llm_chunk_text` 返回
+#   `chunk.content or None` = `None` ⇒ **恰好被丢掉**。
+#   📄 判据（可打印）⇒ `fastapi-rag-agent-TODO待办/探针-流式与记账.py` §结论 1/2
+#
+# ⚠️ 本节的用例**驱动真实端点函数**（含真实 `sse.sse_stream` 骨架）—— ⛔ 不是只测 tap 类。
+#    理由：tap 挂在骨架**逐块调用 `extract`** 这个性质上；只测 tap 会漏掉
+#    "某天骨架不再对空 content 调 extract" 这一类回归（那时 tap 测试照样全绿）。
+#
+# ⚠️ ⛔ **别把 `api_v1_rag.py` 加进本文件的 `_RAG_LLM_FILES`**：那条 AST 守卫的
+#    `_called_names(fn)` **刻意不下钻嵌套函数**，而本端点的记账必然发生在 `_complete`
+#    （嵌套 async gen）里 ⇒ 加进去**恒红**。本节的行为判据对这条链**严格更强**。
+
+
+class _FakeStreamLLM:
+    """最小流式 LLM：吐若干正文块，**最后一帧带 `usage_metadata` 且 `content=''`**。
+
+    🔴 这个形状是**照真服务刻的**，不是编的（`探针-流式与记账.py`）：
+       usage 挂在最后一帧上，而那一帧 `content=''` —— 只看正文的代码**必然把它丢掉**。
+       `test_stream_search_bills_the_usage_frame_that_has_no_text` 钉的就是这一点。
+    """
+
+    model_name = "fake-stream-answer-model"     # `record_from_response` 从这里取 model
+
+    def __init__(self, texts=("你", "好"), usage=None, explode_after=None):
+        self._texts = texts
+        self._usage = usage or {"input_tokens": 21, "output_tokens": 5, "total_tokens": 26}
+        self._explode_after = explode_after      # ⇒ 吐够 N 个正文块之后抛
+
+    async def astream(self, messages):
+        for i, t in enumerate(self._texts):
+            if self._explode_after is not None and i >= self._explode_after:
+                raise RuntimeError("流到一半炸了")
+            yield AIMessageChunk(content=t)
+        # ⚠️ 末帧：`content=''` 但**带 usage** —— 这就是被丢掉的那一帧
+        yield AIMessageChunk(content="", usage_metadata=self._usage)
+
+
+@pytest.fixture
+def rag_stream_env(monkeypatch):
+    """把 `stream_search` 的外部依赖短路，**只留真实骨架 + 真实记账接线**在被测路径上。"""
+    import cache as cache_mod
+    import db as db_mod
+    import api_v1_rag as rag_mod
+    from conftest import FakeRedis
+
+    monkeypatch.setattr(cache_mod, "redis_client", FakeRedis())
+    monkeypatch.setattr(rag_mod, "get_chat_history", lambda *a, **k: [])
+    monkeypatch.setattr(rag_mod, "check_session_token_budget", lambda *a, **k: (True, ""))
+    monkeypatch.setattr(rag_mod, "circuit", lambda *a, **k: (True, ""))
+    monkeypatch.setattr(rag_mod, "get_embedding", lambda text: [0.0] * 8)
+    monkeypatch.setattr(rag_mod, "search_similar", lambda *a, **k: [])   # 检索结果不参与本判据
+    monkeypatch.setattr(db_mod, "get_db", lambda: None)                  # 落库失败要能 fail-open
+    return SimpleNamespace(rag=rag_mod)
+
+
+def _content_frames(frames):
+    """把 SSE 帧解出 `content` 列表（`[DONE]` 与非 content 帧跳过）。
+
+    ⚠️ **必须 JSON 解码**：本端点 `ensure_ascii=True` ⇒ 帧里中文是 `\\uXXXX` 转义，
+       ⛔ 直接 `"你" in frame` 恒为假（本用例第一版就栽在这 —— 假红）。
+    """
+    import json as _json
+
+    out = []
+    for f in frames:
+        if not f.startswith("data: ") or f.strip() == "data: [DONE]":
+            continue
+        payload = _json.loads(f[len("data: "):].strip())
+        if "content" in payload:
+            out.append(payload["content"])
+    return out
+
+
+def _drive_stream(rag_mod, monkeypatch, llm, **kw):
+    """直接调端点函数，把帧**全部拉完**，返回 `(frames, recorded)`。"""
+    recorded = []
+
+    def _fake_record_from_response(llm_obj, resp, purpose, **k):
+        # 🔴 **必须复刻真函数的判据**（`api/token_tracker.py:159` · `DEC-072`）：
+        #    没有 `usage_metadata` ⇒ **恒返回 False · 一笔不记**。
+        #    ⚠️ 桩若比真的宽松（无脑 append），"跳过空 content 那一帧"这类回归会**漏网** ——
+        #       本节第一版就是这样：改坏了实现，只有 1 条用例红、而它本该红的那条**照样绿**。
+        if not getattr(resp, "usage_metadata", None):
+            return False
+        recorded.append((llm_obj, resp, purpose, k))
+        return True
+
+    monkeypatch.setattr(rag_mod, "record_from_response", _fake_record_from_response)
+    monkeypatch.setattr(rag_mod, "get_llm_stream", lambda: llm)
+
+    from schemas import QuestionRequest
+
+    async def go():
+        resp = await rag_mod.stream_search(
+            QuestionRequest(question="你好"),
+            thread_id=kw.pop("thread_id", "t-bill"),
+            user_name=kw.pop("user_name", "alice"),
+        )
+        out = []
+        async for frame in resp.body_iterator:
+            out.append(frame)
+        return out
+
+    return asyncio.run(go()), recorded
+
+
+def test_stream_search_records_answer_generation_with_identity(monkeypatch, rag_stream_env):
+    """调了一次流式 LLM ⇒ 必须记**恰好一笔**，身份是**真值**，purpose 与其它答案链同口径。"""
+    frames, recorded = _drive_stream(
+        rag_stream_env.rag, monkeypatch, _FakeStreamLLM(),
+        user_name="alice", thread_id="t-bill",
+    )
+
+    # ⚠️ 本端点 `ensure_ascii=True` ⇒ 帧里的中文是 `\uXXXX` 转义 ⇒ 要 JSON 解码后再比
+    assert _content_frames(frames) == ["你", "好"], "正文帧没变（本用例不为改帧序）"
+    assert len(recorded) == 1, "调了一次 LLM 就该记且只记一笔"
+    _llm_obj, resp, purpose, kw = recorded[0]
+    assert purpose == "answer_generation"
+    assert kw["user_name"] == "alice", "🔴 ⛔ 不许是 'unknown'（那是假记账）"
+    assert kw["thread_id"] == "t-bill"
+    assert getattr(resp, "usage_metadata", None), "🔴 传去记账的必须是【带 usage_metadata 的聚合块】"
+
+
+def test_stream_search_bills_the_usage_frame_that_has_no_text(monkeypatch, rag_stream_env):
+    """🔴 **反证检验的核心用例**：带 usage 的那一帧 `content=''`。
+
+    * 它 ⛔ **不该**变成一帧 SSE（前端不能收到空帧）；
+    * 但它 ⛔ **必须**进账 —— 只看 `content` 的实现会**恰好**在这里把账丢了。
+
+    ⚠️ 把实现改成「跳过空 content 的块」⇒ **本用例变红，而其它用例全绿**（这就是它的价值）。
+    """
+    frames, recorded = _drive_stream(
+        rag_stream_env.rag, monkeypatch, _FakeStreamLLM(texts=("你", "好")),
+    )
+    assert not any(f == 'data: {"content": ""}\n\n' for f in frames), "空 content 不许发帧"
+    assert len(recorded) == 1, "🔴 那一帧没有正文，但**有 usage** ⇒ 账必须记上"
+
+
+def test_stream_search_records_the_llm_model_name(monkeypatch, rag_stream_env):
+    """`model` 必须是**那个 LLM 对象**的名字（⛔ 不写死）—— 与 `query_rewriter` 那条同款要求。"""
+    _llm_obj, _resp, _purpose, _kw = _drive_stream(
+        rag_stream_env.rag, monkeypatch, _FakeStreamLLM(),
+    )[1][0]
+    assert getattr(_llm_obj, "model_name", None) == "fake-stream-answer-model"
+
+
+def test_stream_search_does_not_record_when_client_disconnects(monkeypatch, rag_stream_env):
+    """🔴 取消 ⇒ **不记账**。usage 只在**最后一帧**回来，提前关流 ⇒ 那帧永远不到
+    ⇒ **补不了**（`DEC-053` §遗留·2）。⛔ 硬补 = 往账本写假数，比不记更坏。
+
+    ⚠️ 这条是**反向守卫**：⛔ 别"顺手"让它在取消时也记一笔。
+       📌 **反证检验**：把实现改成"取消也调 `tap.record`" ⇒ 本用例必须变红。
+    """
+    recorded = []
+    monkeypatch.setattr(rag_stream_env.rag, "record_from_response",
+                        lambda *a, **k: recorded.append(a) or True)
+
+    class _Hangs(_FakeStreamLLM):
+        async def astream(self, messages):
+            yield AIMessageChunk(content="你")
+            yield AIMessageChunk(content="好")
+            await asyncio.sleep(3600)          # 客户端在这里断开 —— usage 那一帧永不到
+
+    monkeypatch.setattr(rag_stream_env.rag, "get_llm_stream", lambda: _Hangs())
+
+    from schemas import QuestionRequest
+
+    async def go():
+        resp = await rag_stream_env.rag.stream_search(
+            QuestionRequest(question="你好"), thread_id="t-cancel", user_name="alice",
+        )
+        it = resp.body_iterator
+        await it.__anext__()
+        await it.__anext__()                   # 看到字了才断（"晚切"才是主场景）
+        await it.aclose()
+
+    asyncio.run(go())
+    assert recorded == [], "取消路径 ⛔ 不许记账（那一帧没到 ⇒ 记了就是假数）"
+
+
+def test_stream_search_does_not_record_when_generation_raises(monkeypatch, rag_stream_env):
+    """🔴 异常 ⇒ **不记账** —— 与取消同源：带 usage 的那一帧没到。"""
+    recorded = []
+    monkeypatch.setattr(rag_stream_env.rag, "record_from_response",
+                        lambda *a, **k: recorded.append(a) or True)
+    monkeypatch.setattr(rag_stream_env.rag, "get_llm_stream",
+                        lambda: _FakeStreamLLM(texts=("你", "好"), explode_after=1))
+
+    from schemas import QuestionRequest
+
+    async def go():
+        resp = await rag_stream_env.rag.stream_search(
+            QuestionRequest(question="你好"), thread_id="t-err", user_name="alice",
+        )
+        return [f async for f in resp.body_iterator]
+
+    frames = asyncio.run(go())
+    assert recorded == []
+    # ⚠️ 顺带钉住"错误路径仍然没有 [DONE]"（本仓线上契约，⛔ 不是本轮改的）
+    assert not any(f == "data: [DONE]\n\n" for f in frames)
 
