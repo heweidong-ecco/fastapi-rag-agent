@@ -20,7 +20,7 @@ from exceptions import ErrorCode, AppException
 # ⚠️ `token_tracker` 模块级只 import `os/json/threading` 等标准库 + `token_config`
 #    （`db` / `langchain` 都是**函数内**惰性导入）⇒ 放文件头**不破坏**本文件
 #    「导入期不拉 langchain」的既有做法（与上面 `MAX_TOKENS_ANSWER` 同一条理由）。
-from token_tracker import check_session_token_budget
+from token_tracker import check_session_token_budget, record_from_response
 # B11（①b Task 4）：全站日级熔断。与 B8 并列，⛔ 别合并（B8 按会话 / B11 按全站）。
 # ⚠️ breaker 只在**函数内**惰性导入 token_tracker ⇒ 放文件头不破坏本文件
 #    「导入期不拉重依赖」的既有做法（同上面 `token_tracker` 那条注释的道理）。
@@ -621,6 +621,51 @@ def get_llm_stream():
     return _llm_stream
 
 
+class _StreamUsageTap:
+    """把「发帧」与「记账」分开：`extract` 逐块累积，`record` 在收尾时落一笔账。
+
+    ## 🔴 为什么必须是它，⛔ 不能靠骨架
+
+    `sse.sse_stream` 只把**通过 `text` 过滤的块**攒进 `collected` ——
+    而本仓 provider 把 `usage_metadata` 挂在**最后一帧、且那帧 `content=''`** 上
+    （实测 ⇒ `fastapi-rag-agent-TODO待办/探针-流式与记账.py` §结论 1/2）
+    ⇒ 它**必然**被 `llm_chunk_text`（`return chunk.content or None`）滤掉。
+    ⇒ 累积必须发生在**过滤之前**。骨架里唯一看到**每一块**的钩子就是 `extract`
+      （`sse.py`：`text = extract(item) if extract is not None else item` 排在
+      `if not text: continue` **之前**）。
+
+    ⚠️ **所以这里的 `extract` 有副作用**（既发帧、又攒账）。这是**有意的**：
+       两个动作的输入是**同一串块**；分两处遍历 = 要么重复读流，要么漏掉空 content 那帧。
+
+    ⚠️ ⛔ **别把 `content` 过滤搬进来** —— 那一帧正是 usage 的载体。
+       守卫 ⇒ `api/test_rag_billing_wiring.py::test_stream_search_bills_the_usage_frame_that_has_no_text`
+    """
+
+    __slots__ = ("_agg",)
+
+    def __init__(self):
+        self._agg = None          # 聚合块（`AIMessageChunk.__add__`）
+
+    def extract(self, chunk):
+        """喂给 `sse_stream` 的 `extract`：**累积所有块**，返回该发的文本（沿用旧口径）。"""
+        # ⚠️ 对【所有】块做 `+`，⛔ 不跳空 content（`plan_execute.py:202-205` 同款写法）
+        self._agg = chunk if self._agg is None else self._agg + chunk
+        return llm_chunk_text(chunk)
+
+    def record(self, llm, *, user_name, thread_id):
+        """收尾（**只在这条出口**）时调用：聚合块交给 `record_from_response`。
+
+        ⚠️ 它**只在正常跑完**那条路被调 —— 取消 / 异常时带 usage 的那一帧根本没到
+           ⇒ 如实不记，⛔ **不编一个数进账本**（`DEC-053` §遗留·2）。
+        """
+        if self._agg is None:
+            return False
+        return record_from_response(
+            llm, self._agg, "answer_generation",
+            user_name=user_name, thread_id=thread_id,
+        )
+
+
 # 🔴 2026-10-04（`DEC-055`）：`INTERRUPTED_SUFFIX` 与 `_persist_interrupted_turn` **搬去
 #    `api/cache.py`** —— 6 条流式端点现在共用同一段留痕（`persist_turn`），
 #    本文件只**再导出**这个名字（`api/test_cancel_propagation.py` 按 `rag_mod.INTERRUPTED_SUFFIX` 取它）。
@@ -718,6 +763,7 @@ async def stream_search(
     
     # 4. 流式生成器
     ENDPOINT = "rag_stream_search"    # Prometheus 的 label（`③` Task 5），⛔ 别与函数名混用
+    tap = _StreamUsageTap()           # 🔴 `DEC-084`：流式答案的记账（见类 docstring）
 
     # 🔴 2026-10-04（`B1` 剩余 4 条链 · 批 3）：**内联生成器整个换成 `sse.sse_stream` 骨架**。
     #    这段原来有 ~80 行 `try / except / except / finally`，与 `/agent/langgraph_chat/stream`
@@ -734,6 +780,10 @@ async def stream_search(
            抽公共层**不是**顺手改行为的理由 —— 所以骨架**不替我们补 `[DONE]`**，
            整条尾巴交给本函数自己产（见 `api/sse.py` 的「②」）。
         """
+        # 🔴 2026-10-06（`DEC-084`）：记账排在【任何 `yield` 之前】（`sse.py` 约束① 同源）——
+        #    `yield` 是 await 点，被"二次投递的取消"打断 ⇒ 排在它后面的收尾**一件都不跑**，
+        #    可钱**已经花了**。⚠️ `persist_turn` 仍留在原位（那是 `DEC-055` 定的，⛔ 本轮不动它）。
+        tap.record(get_llm_stream(), user_name=user_name, thread_id=thread_id)
         # 发送结束信号
         yield DONE_FRAME
         # ---- 在这里记录对话历史 ----
@@ -764,9 +814,11 @@ async def stream_search(
         #    ⇒ 上游卡住时，最坏要等一整个 chunk 的时间才停得下来。
         lambda: get_llm_stream().astream(messages),
         endpoint=ENDPOINT,
-        # ⚠️ 这是**裸 LLM**（不是图）⇒ 用 `llm_chunk_text`。空 `content` 由它一并挡掉
+        # ⚠️ 这是**裸 LLM**（不是图）⇒ 旧口径用 `llm_chunk_text`。空 `content` 由它一并挡掉
         #    （不过滤 ⇒ 前端收到一串空白帧）。
-        extract=llm_chunk_text,
+        # 🔴 `DEC-084`：现在传 `tap.extract` —— 它**返回的仍是 `llm_chunk_text(chunk)`**（发帧口径不变），
+        #    只是**顺手把每一块 `+` 进聚合**（usage 挂在最后一帧、而那帧 `content=''` ⇒ 见类的 docstring）。
+        extract=tap.extract,
         on_complete=_complete,
         # 🔴 `DEC-055`：**取消与异常两条出口**都把**已经生成的那半截**补存进历史（⛔ 不是直接丢）。
         #    ⚠️ 它**必须是同步的**（`persist_turn` 走同步的 `append_chat_history`）——
