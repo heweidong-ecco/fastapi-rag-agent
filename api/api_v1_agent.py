@@ -30,7 +30,7 @@ from pending_approvals import (
 # 🔴 2026-10-06（`DEC-088` §3.2）：审批留痕。⚠️ 必须是**模块级名字绑定** ——
 #    测试靠 `monkeypatch.setattr(api_v1_agent, "record_decision", …)` 换掉它。
 #    ⛔ 别改成函数体里 `from approval_audit import …`：那样 patch 会失效、用例变**假绿**。
-from approval_audit import record_decision, summarize_tool_calls
+from approval_audit import record_decision, summarize_tool_calls, list_decisions
 # 角色（`DEC-046`）—— `/agent/approve` 的「本人或 admin」判据走这里，
 # ⛔ 别在本文件另写 `user_name == "admin"`（那就又多一处口径）。
 from permission import UserRole, get_user_role
@@ -2016,6 +2016,27 @@ async def agent_budget_intercepts(
         **get_intercept_count(user_name),
         "requested_by": user_name,
     }
+
+
+@router.get("/agent/approvals/history")
+async def agent_approval_history(
+    limit: int = 50,
+    user_name: str = Depends(get_current_user_hybrid),
+):
+    """裁决历史 —— **接管页下半栏就读它**，也就是硬门 D「证真」那栏的可视证据（`DEC-088` §3.2）。
+
+    🔴 **可见性镜像 `/agent/traces`（`:1943`）**：本人默认只看自己的，**admin 看全量**。
+
+    ⚠️ 与 `/agent/pending` 不同：那条队列是**进程内存**、重启即空；本表在 **PG** 里，
+       **重启后照样查得到**。⇒ 重启之后「历史查得到、会话找不到」是**预期行为，⛔ 不是 bug**。
+
+    ⚠️ `owner` 那个 `None` 是**显式传**的（admin 那条路）—— `list_decisions` 的 `owner`
+       **故意不给默认值**，就是为了让"我忘了传"**当场 `TypeError`**，⛔ 而不是静默变成
+       "查所有人"（`DEC-055` 口径）。
+    """
+    owner_filter = None if get_user_role(user_name) == UserRole.ADMIN else user_name
+    events = list_decisions(owner=owner_filter, limit=limit)
+    return {"events": events, "count": len(events), "requested_by": user_name}
 
 # ====  Token统计 花费明细查询 接口 ====================
 

@@ -183,3 +183,41 @@ def test_summarize_tool_calls():
     ) == "web_search×2、python_repl"
     assert aa.summarize_tool_calls([]) == "(无工具调用)"
     assert aa.summarize_tool_calls(None) == "(无工具调用)"
+
+
+# ==================== ⑤ 端点层：本人默认 · admin 全量 ====================
+
+import asyncio
+import api_v1_agent as m
+
+
+def _history(monkeypatch, user_name, limit=50):
+    """直接调端点函数（⛔ 不经过 TestClient ⇒ 不触发 lifespan ⇒ 不需要库）。"""
+    seen = {}
+
+    def _fake_list(*, owner, limit):
+        seen["owner"] = owner
+        seen["limit"] = limit          # ⚠️ 施工单这份假货漏了它，而它自己的用例要断言它
+        return []
+
+    monkeypatch.setattr(m, "list_decisions", _fake_list)
+    out = asyncio.run(m.agent_approval_history(limit=limit, user_name=user_name))
+    return out, seen
+
+
+def test_history_narrows_to_self(monkeypatch):
+    out, seen = _history(monkeypatch, "alice")
+    assert seen["owner"] == "alice", f"普通用户必须只看自己的，实际查了 {seen['owner']!r}"
+    assert out == {"events": [], "count": 0, "requested_by": "alice"}
+
+
+def test_history_admin_gets_all(monkeypatch):
+    """admin ⇒ `owner=None`（全量）。⚠️ 这个 `None` 必须**显式传**，见模块签名。"""
+    _, seen = _history(monkeypatch, "admin")
+    assert seen["owner"] is None, "admin 应当查全量"
+
+
+def test_history_passes_limit_through(monkeypatch):
+    """`limit` ⛔ 别收下不用（签名看着对、行为是死的 —— 本仓栽过）。"""
+    _, seen = _history(monkeypatch, "alice", limit=7)
+    assert seen["limit"] == 7
