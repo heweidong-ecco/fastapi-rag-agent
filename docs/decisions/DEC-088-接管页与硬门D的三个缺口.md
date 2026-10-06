@@ -2,12 +2,13 @@
 
 | 项 | 内容 |
 |---|---|
-| **状态** | 🔵 **设计中**（2026-10-06）—— 设计已与业务方过完 **六条裁定**（§一），**⛔ 实现一行未写**<br>施工单由 `writing-plans` **在本份之后**另出 |
+| **状态** | 🟢 **已实现**（2026-10-06）—— 设计已与业务方过完 **六条裁定**（§一），落地见下方「落地单」<br>⚠️ **本份写的是【设计时的形状】**；实现时的三处偏离**逐条记在 §三·具体化 A/B/C**（⛔ 不是把本文改写成实现日记）<br>🔴 **⛔ 本单跑完 ≠ 硬门 D 翻 ✅** —— 见 §六·6 |
+| **落地单** | `fastapi-rag-agent-TODO待办/施工单-20261006-接管页.md`（8 个 Task · 命令级）· 分支 `feat/approvals-page` · 7 条 commit（`deeaade` → `a301c3c`） |
 | **触发** | `ROADMAP` 的 `⬜ 接管页`（`docs/待办总表.md` §三·附2 的 **`F1`**）—— 它是**唯一一条做完就能把一个 🟡 硬门变 ✅ 的**（业务方 2026-10-06 已按此顺序批准执行）<br>硬门 D 至今 🟡 的理由就是**它的演示/反例里明写含界面** |
 | **业务方裁定** | **六条**（§一）。⚠️ 其中 **③④⑤⑥ 四条**是**本份核出缺口之后才出现的新选择**，⛔ 不是开工前就问好的 |
 | **类型** | 🆕 第 2 个面向人的页面 · 🆕 一张表 + 一个新端点 · 🔧 **两处既有端点改动**（可见性 · 歧义定位） |
-| **落点** | `api/api_v1_agent.py` · `api/pending_approvals.py` · `api/approval_audit.py`（新）· `api/static/web/approvals.html`（新）· `api/static/js/approvals.js`（新）· `api/main.py` · `api/schema.sql` · `scripts/route-auth-baseline.txt` · `docs/specs/` 三份 |
-| **判据** | §五 —— 全部**可打印** |
+| **落点** | `api/api_v1_agent.py` · `api/approval_audit.py`（新）· `api/static/web/approvals.html`（新）· `api/static/js/approvals.js`（新）· `api/main.py` · `scripts/route-auth-baseline.txt` · `docs/specs/` 四份<br>⚠️ **`api/pending_approvals.py` 一行没改**（原计划要动它 ⇒ 见 §三·具体化 A）· **`api/schema.sql` 未重新生成**（要活库 ⇒ 未做，见 §三·具体化 D） |
+| **判据** | §五 —— 全部**可打印**（**已填实测数**） |
 
 > 📌 **行号基准 = `ffb2c54`**（`#104` 合并后的主干）。
 > **定位一律用命令，⛔ 别抄行号** —— 本仓栽过「行号写死 → 一改就变成新的假话」：
@@ -140,6 +141,7 @@ CREATE TABLE IF NOT EXISTS approval_events (
   往里加 PG 写会把它变成"两种存储各说一半"的模块。
 - **记哪些出口**：**只记"真的做出了一次裁决"**（`approved` / `rejected`，含 `forced_finish=True` 那次）。
   ⛔ **不记"根本没批成"的三条**（没有可待批任务 / 歧义 / 无权限）—— 那不是裁决事件，见 §六。
+  🔴 **落地时补上了第四条**（「**登记陈了**」）⇒ 见 §三·**具体化 C**（设计时没看见它 —— 它排在归属校验**之后**）。
 - 读端点：`GET /agent/approvals/history` —— **页面下半栏就读它**，它就是硬门 D 证真那栏的可视证据。
 
 ### 3.3 页面（新）· `api/static/web/approvals.html` + `GET /approvals` → 302
@@ -157,12 +159,27 @@ CREATE TABLE IF NOT EXISTS approval_events (
 
 ### 3.4 顺手修的两处既有端点（⛔ 不属于 `F1` 本身）
 
-| | 改动 | 落点 |
-|---|---|---|
-| **③** | `/agent/pending` 加 `include_all`，照 `:1943` 那一行 | `api_v1_agent.py:658` |
-| **④** | `/agent/pending/context` 与 `/agent/approve` 各加**可选** `owner`（默认 `None` ⇒ 退回现有行为） | `:436` 与 3.1 |
+| | 改动（**设计时的形状**） | 落点 | **实际落地** |
+|---|---|---|---|
+| **③** | `/agent/pending` 加 `include_all`，照 `:1943` 那一行 | `api_v1_agent.py:658` | 🔴 **没加那个参数** ⇒ 见下方**具体化 A** |
+| **④** | `/agent/pending/context` 与 `/agent/approve` 各加**可选** `owner`（默认 `None` ⇒ 退回现有行为） | `:436` 与 3.1 | ✅ **照原样落地**（两个端点各一个 `Query(None)` / 形参 `None`） |
 
 ⚠️ **两条都是"改既有端点"** ⇒ 按 `DEC-051` 夹在 PR `#73` 里的先例：**同 PR、正文里单独标明它们不属于 `F1`**。
+
+### 3.5 落地时的四处具体化（设计 → 实现，⛔ 不是设计错了）
+
+> 📌 **写法说明**：本份**不改写 §3.1–3.4 的原文**（那是设计当时的账）。
+> 实现时偏离的地方**另列在这里**，逐条给**为什么**与**判据**。
+
+| # | 设计写的是 | 实际做的是 | 为什么 |
+|---|---|---|---|
+| **A** | §3.4 ③：给 `/agent/pending` **加 `include_all` 参数** | 🔴 **没加参数** —— 端点里**两行过滤**（`rows = list_pending()` 之后按 `get_user_role(...) == ADMIN` 决定要不要筛 `r["user_name"] == user_name`），**`pending_approvals.py` 一行没动** | ① **加参数 = 把授权交给调用方**：`?include_all=true` 谁都能传 ⇒ 还得再判一次角色，等于同一个判断写两遍（`DEC-051` 那一族）；② 语义对齐的对象其实**不是** `/agent/traces` 那个参数形式，而是它**那一行**（`get_user_role(...) == UserRole.ADMIN`）；③ 少一个**对外承诺的参数**（加了的参数就进了契约，删不掉）。⛔ **代价认了**："admin 想看全量" 这件事**只能靠身份**，⛔ 不能用一个开关模拟 |
+| **B** | §五 判据⑤ 的文件名 `api/test_pending_approvals.py` | **`api/test_pending_visibility.py`**（4 条） | `test_pending_approvals.py` 是**队列模块自己的**用例（7 条），**改模块名下的用例去测端点**会让"改坏了哪一层"分不出来。⇒ 可见性收窄的守卫**另起一个文件**，名字里带 `visibility`。**顺带**：`§3.2` 那批还多出一条 `api/test_approve_audit_wiring.py`（12 条 —— 留痕**接线**的守卫，与"留痕函数本身"的 12 条 `test_approval_events.py` 分开） |
+| **C** | §3.2「⛔ 不记的三条」 | 🔴 **实际是四条** —— 补上「**登记陈了**」：`thread_id` 反查得到、**归属校验也过了**，但 `get_state().next != ("approval",)` ⇒ 顺手 `resolve()` 并答"没有等待审批的任务" | 这一条**发生在归属校验之后**，最容易被当成"一次真裁决"记下来 —— 而它**现场什么都没发生** ⇒ 记了就是**假留痕**。⛔ 原文那三条（没有可批任务 / 歧义 / 无权限）**都排在归属校验前后**，所以设计时没看见它。⇒ **判据是位置**：`record_decision(...)` 必须排在那道 `return` **之后**（`api_v1_agent.py:578` vs `:558`） |
+| **D** | 落点表里有 `api/schema.sql` | 🔴 **没重新生成** —— 它**头部明写「本文件是【生成的】，不要手改」**，而**重新生成要一个活着的 PG**（`docker compose exec -T postgres pg_dump …`），本批没起 Docker | 手改生成文件 = 下次谁一跑生成命令就**静默抹掉**。⇒ **未做，并显式登记**：在那之前 `approval_audit.py` 的 `_DDL` 是 `approval_events` 的**唯一权威**。⏭️ **待办**：起库后跑一次 `--schema-only` 的 `pg_dump` 覆盖它 |
+
+> 🔴 **D 是本批唯一一件"该做而没做"的事** —— 它**不是**"忘了"，是**判据不满足**（没有活库），
+> 且**做了会更糟**（手改生成物）。⛔ 别把它读成"已经收口了"。
 
 ---
 
@@ -178,32 +195,47 @@ CREATE TABLE IF NOT EXISTS approval_events (
 
 ## 五 · 判据（可打印）
 
-> ⚠️ **全部要在实现完成、且跑过之后才填数** —— 本份是设计，下面留的是**命令形状**。
+> ✅ **2026-10-06 已逐条跑过并填数**（`feat/approvals-page`，跑法 = 施工单 Task 8 Step 6 + 收尾）。
+> ⚠️ **别抄下面的数** —— 用例条数会随批次往上走；**跑一遍比读一遍便宜**。
 
 ```bash
-# ① 上下文端点（离线 · 假图）
+# ① 上下文端点（离线 · 假图）—— 10 passed
 venv/bin/python -m pytest api/test_pending_context.py -q
 #   · 找不到 ⇒ 拒绝（⛔ 不是 404）
 #   · 歧义 ⇒ 拒绝            · 给了 owner ⇒ 不再歧义（裁定 6 的正面）
 #   · 非属主且非 admin ⇒ 拒绝（反面：属主本人 / admin 各一条正面控制）
 #   · content 是 list 的多模态消息 ⇒ 序列化不炸（防御，不是 happy path）
 
-# ② 留痕
-venv/bin/python -m pytest api/test_approval_events.py -q          # 假 pg · 出口覆盖
-POSTGRES_DB=rag_test venv/bin/python -m pytest api/test_approval_events_db.py -q   # 真写入
+# ② 留痕 —— 12 passed（含 3 条读端点）
+venv/bin/python -m pytest api/test_approval_events.py -q          # 假 pg · 出口覆盖 + GET /agent/approvals/history
+# ⛔ POSTGRES_DB=rag_test venv/bin/python -m pytest api/test_approval_events_db.py -q   # 真写入
+#   ⛔ **那份文件不存在、本批也没写** —— 它要一个活着的 PG，而本批的用例全是"不连库"的。
+#      **留成注释是刻意的**：把没做的事写成一条能跑的命令，等于给它一个假的"跑过、绿了"的外观。
+#      见 §三·具体化 D（同一笔账）。⏭️ **待办**：起库后补这份 + 重生成 `api/schema.sql`。
 
-# ③ 页面契约（照 api/test_chat_page.py 的 3 条：重定向 / 目标文件在盘上 / 不进 OpenAPI）
+# ③ 页面契约（照 api/test_chat_page.py 的 3 条：重定向 / 目标文件在盘上 / 不进 OpenAPI）—— 3 passed
 venv/bin/python -m pytest api/test_approvals_page.py -q
 
-# ④ 前端纯逻辑
+# ④ 前端纯逻辑 —— ℹ tests 14 / pass 14（⚠️ 计划里写的 17 是错的：文件里就 14 条）
 node --test api/static/js/approvals.test.js
 
-# ⑤ 顺手修的两处（③ 的可见性**此前一条用例都没有**）
-venv/bin/python -m pytest api/test_pending_approvals.py api/test_approve_ownership.py -q
+# ⑤ 顺手修的两处 —— 可见性 4 · 归属 6 · 留痕接线 12
+venv/bin/python -m pytest api/test_pending_visibility.py -q        # ← 具体化 B：⛔ 不是 test_pending_approvals.py
+venv/bin/python -m pytest api/test_approve_ownership.py -q
+venv/bin/python -m pytest api/test_approve_audit_wiring.py -q      # ← 具体化 B 补的那份
 
 # ⑥ 全量（⭐ CI 等价物，⛔ 别拿裸 pytest 顶替）
 bash scripts/ci-local.sh
-venv/bin/python scripts/check_route_auth.py --baseline      # 新公开路由 ⇒ 必须显式改基线
+venv/bin/python scripts/check_route_auth.py --baseline; echo "exit=$?"   # 新公开路由 ⇒ 必须显式改基线（exit=0）
+```
+
+**⑥ 那 7 份一起跑**（施工单「收尾」的判据 ⑥）⇒ **54 passed**：
+
+```bash
+venv/bin/python -m pytest api/test_pending_context.py api/test_approval_events.py \
+    api/test_approvals_page.py api/test_pending_visibility.py api/test_approve_audit_wiring.py \
+    api/test_pending_approvals.py api/test_approve_ownership.py -q
+# ⇒ 54 passed in ~36s（10 + 12 + 3 + 4 + 12 + 7 + 6 —— 2026-10-06 实测）
 ```
 
 ---
