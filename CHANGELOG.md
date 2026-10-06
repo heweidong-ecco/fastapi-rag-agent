@@ -10,6 +10,38 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- ⭐ **引用卡片：就地展开/收起 + 卡片头带 chunk id / 相似度（段 1 第三刀 · `F8`）**（2026-10-06 · `DEC-089`）——
+  `api/static/js/sse.js`（纯逻辑 +2 个函数）· `api/static/web/chat.html` · **后端只动两行**。
+
+  **目标**：**硬门 B 判定三句里剩下的两句**（第一句由 `DEC-085` 做掉）。
+  ② 「**再点能跳到原文位置**」· ③ 证真「点开能看到 **chunk id + 相似度分**」。
+
+  - **改**：引用卡片从「固定挂在 `#log` 末尾」改为「**挂在该条回答下面**」；**再点同一条 ⇒ 收起**
+    （业务方 2026-10-06 裁「**甲 · 就地展开/收起**」）。
+    ⚠️ **不做"真的跳原文"**：`documents` 表**没有任何位置字段**
+    （`api/db.py:65-71` 只有 `id/content/source/embedding/requested_by`）⇒ **没有位置可跳**。
+  - **改**：卡片头现在画 `[i] 来源` + `id=<chunk id> · 相似度 <分>`（缺值画 `—`）。
+  - **改**：`sources` 帧补 `similarity` —— ⚠️ **两个出口都加**
+    （`api/api_v1_rag.py` 流式 + `api/answer_with_citations.py` 非流式）。
+    🔴 那个数**本来就在手上**（`contexts` 里的 `r[3]`），只是没人往帧里放。
+  - **新**：`RagSse.formatSource` / `RagSse.toggleOpen`（纯逻辑，`node --test` 钉着）。
+    ⚠️ **卡片头的格式只许有一份实现**，有**结构型用例**挡着（「相似度」这个字面量在
+    `static/js` + `static/web` 里只能出现在 `sse.js`）。
+
+  ⚠️ **本条做完 ⛔ 不等于硬门 B 翻 ✅** —— 判定之外还有前提：**非流式链仍无界面** · 「无据拒答」未做。
+
+  🔴 **同批补上一条尺子**：`test_both_sources_exits_have_the_same_key_set`。
+  `answer_with_citations.py` 那句注释（「改一边忘另一边 ⇒ 两边各自的用例都是绿的」）
+  **在 2026-10-06 之前是真的**：实测**只改流式那侧**，连同其余 9 条用例 **一条都不红**（`DEC-089` §五）。
+
+  **判据（可打印）**：
+  ```bash
+  node --test api/static/js/sse.test.js          # ⇒ ℹ tests 23 / pass 23 / fail 0（改前 18）
+  venv/bin/python -m pytest api/test_frontend_contract.py -q   # ⇒ 10 passed（改前 7）
+  grep -c '<div class="card" hidden>' api/static/web/chat.html # ⇒ 1（改前 0）
+  grep -c 'DEMO 版' api/static/web/chat.html                   # ⇒ 0（改前 1）
+  ```
+
 - 🟢 **一条新规矩：`docs/规范/开发规范.md` §2.6·5「开新分支后，先核它从哪儿分出来的」**（2026-10-06）——
   起因是**同一天真栽了**：`git checkout -b <名>` 的 base 是 **`HEAD`**（⛔ 不是 `main`），
   而 HEAD 还停在刚合并的 `feat/approvals-page` 上 ⇒ 新分支从**上一件事**分出去。
@@ -983,6 +1015,11 @@ All notable changes to this project will be documented in this file.
   📄 该节现含三条轴对照表 + `ci-local.sh` 用法与判据。
 
 ### Changed
+
+- ⚠️ **`docs/specs/README.md` 的模块表重生成**（2026-10-06）—— `bash scripts/spec_status.sh --write`。
+  本次是**生成物的例行同步**：除本刀（`DEC-089`）的 `answer_with_citations.py` 78→84 ·
+  `api_v1_rag.py` 1106→1111 外，还带出**一处此前就漂了的** —— `main.py` 743→752
+  （`F1` 那刀加了两条页面路由，但**当时没重生成**）。
 
 - 🔴 **四处后端契约改动（为对话页）**（2026-10-06 · `DEC-085` 契约 A–D + 裁定 #12）—— ⚠️ **帧序、历史键、`is_active` 都动了**，逐条如下。
 

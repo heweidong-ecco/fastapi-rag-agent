@@ -116,6 +116,51 @@ function formatCost(costUsd) {
   return '$' + Number(costUsd).toFixed(6);
 }
 
+/** 缺值统一画成 `—`。⚠️ `0` **不是**缺值（见 `formatSource`）—— 所以判的是 `== null`。 */
+function dashIfMissing(v) {
+  return (v === null || v === undefined) ? '—' : String(v);
+}
+
+/**
+ * 引用卡片的**卡片头**（`DEC-089` · 硬门 B 的证真那句）。
+ *
+ * 🔴 为什么抽到本文件：判定要求「点开能看到 **chunk id + 相似度分**」——
+ *    那是**能写成命令**的一句（本仓立场：写不出命令的，就是还没核过）。
+ *    ⛔ DOM 不进本文件；这里只把 `sources` 帧里的一条拼成两行文字。
+ *
+ * ⚠️ 缺字段画 `—`，⛔ 不许把 `undefined` / `NaN` 漏到页面上 ——
+ *    非流式那条链（`answer_with_citations.py`）的上下文里**没有** `similarity`，
+ *    它会**诚实地**传 `None` 过来。页面上一个 `undefined` 会被读成"这功能坏了"。
+ * ⚠️ 但 `similarity: 0` 与"没有相似度"是**两件事**（同 `formatCost` 的立场）：
+ *    前者是**真值**，画 `0.000`；后者才是 `—`。
+ *
+ * @returns {{title: string, meta: string}}
+ */
+function formatSource(src) {
+  const s = src || {};
+  const sim = s.similarity;
+  const simText = (sim === null || sim === undefined) ? '—' : Number(sim).toFixed(3);
+  return {
+    title: '[' + dashIfMissing(s.index) + '] ' + dashIfMissing(s.source),
+    meta: 'id=' + dashIfMissing(s.id) + ' · 相似度 ' + simText,
+  };
+}
+
+/**
+ * 「再点」的语义（`DEC-089` · 硬门 B 的另一句「再点能跳到原文位置」）。
+ *
+ * 本仓 2026-10-06 裁定走「**甲 · 就地展开/收起**」：卡片挂在该条回答**下面**，
+ * 点引用展开、**再点同一条收起**、点另一条则换内容（⛔ 不是同时开着两张）。
+ * ⇒ 页面上只需要记「当前开着哪一条」这一个数，本函数给出它的**下一个值**。
+ *
+ * @param {number|null} current 当前展开的引用编号（`null` = 都收着）
+ * @param {number} clicked 刚点的那一条
+ * @returns {number|null}
+ */
+function toggleOpen(current, clicked) {
+  return current === clicked ? null : clicked;
+}
+
 // 🔴 2026-10-06 施工实测·订正⑨ —— **本文件此前【没有】`RagSse` 这个对象。**
 //    起草时 Task 6 的 Interfaces 写着「Produces（全局对象 `RagSse`，浏览器）」，而实现只有
 //    末尾那段 `module.exports` ⇒ 顶层函数确实成了全局，但**没有一个叫 `RagSse` 的东西**。
@@ -125,7 +170,7 @@ function formatCost(costUsd) {
 //    ⇒ 现在两侧都挂，且下面有两条用例钉住（浏览器那侧用 `node:vm` 造一个假 window 来测）。
 const RagSse = {
   DONE_SENTINEL, parseSseChunk, payloadKind, citationIndexes, splitCitations,
-  resolveCitations, classifyExit, formatCost,
+  resolveCitations, classifyExit, formatCost, formatSource, toggleOpen,
 };
 
 if (typeof module !== 'undefined' && module.exports) {

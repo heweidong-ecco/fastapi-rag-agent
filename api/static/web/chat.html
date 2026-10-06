@@ -31,9 +31,14 @@
   .badge { display:inline-block; padding:1px 6px; border-radius:3px; font-size:11px;
            background:#fde8e8; color:#a33; margin-left:6px; }
   .cite { color:#1a73e8; cursor:pointer; text-decoration:underline; }
-  #card { border:1px solid var(--line); border-radius:6px; padding:10px; margin-top:8px;
+  .cite.open { font-weight:600; }
+  /* 🔴 `DEC-089`：「甲 · 就地展开/收起」⇒ 卡片挂在该条回答【下面】，⛔ 不再是全局一个 #card。
+     每条回答自带一个（`addTurn` 里建，默认 `hidden`）。 */
+  .card { border:1px solid var(--line); border-radius:6px; padding:10px; margin-top:8px;
           background:#fffbe6; font-size:13px; }
-  #card .src { font-weight:600; margin-bottom:4px; }
+  .card[hidden] { display:none; }
+  .card .src { font-weight:600; }
+  .card .src-meta { color:var(--muted); font-size:12px; margin:2px 0 6px; }
   #composer { border-top:1px solid var(--line); padding:12px; display:flex; gap:8px; }
   #q { flex:1; padding:10px; font-size:15px; border:1px solid var(--line); border-radius:6px; }
   button { padding:10px 18px; font-size:15px; cursor:pointer; border-radius:6px;
@@ -168,16 +173,22 @@ function showEmptyLog() {
 // ---------- 渲染 ----------
 function addTurn(question) {
   $('log').insertAdjacentHTML('beforeend',
-    `<div class="turn"><div class="q"></div><div class="a"></div><div class="meta"></div></div>`);
+    `<div class="turn"><div class="q"></div><div class="a"></div><div class="card" hidden></div><div class="meta"></div></div>`);
   const turn = $('log').lastElementChild;
   turn.querySelector('.q').textContent = question;
+  // 🔴 本回合当前展开的引用编号（`null` = 都收着）。放**元素上**，⛔ 不放全局 ——
+  //    否则两条回答的卡片会互相抢那一个状态（本页可以连问多轮）。
+  turn._openIndex = null;
+  turn._byIndex = new Map();
   return turn;
 }
 
 // 把正文里的 [来源:X] 换成可点开的 span。
 // 🔴 切分走 `RagSse.splitCitations` —— **正则只有那一份**（⛔ 本文件里不许再有第二份）。
 function renderAnswer(el, text, sources) {
+  const turn = el.closest('.turn');
   const byIndex = new Map(RagSse.resolveCitations(text, sources).map((r) => [r.index, r]));
+  turn._byIndex = byIndex;
   el.innerHTML = '';
   for (const seg of RagSse.splitCitations(text)) {
     if (seg.index === undefined) {
@@ -186,32 +197,57 @@ function renderAnswer(el, text, sources) {
     }
     const span = document.createElement('span');
     span.className = 'cite';
+    span.dataset.index = String(seg.index);
     span.textContent = '[' + seg.index + ']';
     // ⚠️ 找不到的编号**照样画出来、只是点不动** —— 让"模型吐了个不存在的号"看得见，
     //    ⛔ 别悄悄吞掉（吞掉会让人以为模型没引用）。
-    if (byIndex.has(seg.index)) span.onclick = () => showCard(byIndex.get(seg.index));
+    if (byIndex.has(seg.index)) span.onclick = () => toggleCard(turn, seg.index, byIndex.get(seg.index));
     el.appendChild(span);
   }
+  syncCard(turn);   // 重画后把"当前开着哪一条"补回去（流式期间本函数会被调很多次）
 }
 
-// ⚠️ DEMO 版：卡片固定放在 `#log` 末尾（⛔ 不是插在该条回答下面），再点一次就换内容。
-function showCard(src) {
-  let card = $('card');
-  if (!card) {
-    card = document.createElement('div');
-    card.id = 'card';
-    $('log').appendChild(card);
-  }
+// 🔴 `DEC-089` · 硬门 B 的「再点能跳到原文位置」= 就地展开/收起（本仓 2026-10-06 裁的「甲」）：
+//    卡片挂在该条回答**下面**，点引用展开、再点同一条收起、点另一条换内容。
+//    ⛔ 改前那个是「固定挂在 #log 末尾、再点只换内容」的旧版。
+//    ⚠️ 旧注释里那个词（`DEC-089` 的 `F8` 判据拿它当"还没修"的标记）**已随本行删掉** ——
+//       ⛔ 别再把那个词写回来，否则 `grep` 那条判据会指着一个已经修好的地方说"还没修"。
+// ⚠️ 「下一个状态是什么」由 `RagSse.toggleOpen` 说了算（有 `node --test` 钉着）；
+//    本函数只管 DOM —— ⛔ 别在这里再写一遍那个三态判断。
+function toggleCard(turn, index, src) {
+  if (src) turn._byIndex.set(index, src);
+  turn._openIndex = RagSse.toggleOpen(turn._openIndex, index);
+  syncCard(turn);
+  const card = turn.querySelector('.card');
+  if (!card.hidden) card.scrollIntoView({ block: 'nearest' });   // 卡片在回答下面 ⇒ 滚进视野
+}
+
+// 按 `turn._openIndex` 把卡片画成该有的样子（收起 = `hidden`）。
+// 🔴 卡片头走 `RagSse.formatSource` —— ⛔ 本文件里不许再拼一遍那份格式
+//    （`sse.test.js` 有结构型用例钉着：那两行只能有一份实现）。
+function syncCard(turn) {
+  const card = turn.querySelector('.card');
+  const idx = turn._openIndex;
+  const src = idx === null ? undefined : turn._byIndex.get(idx);
+
   card.innerHTML = '';
-  const h = document.createElement('div');
-  h.className = 'src';
-  h.textContent = `[${src.index}] ${src.source}`;
-  const p = document.createElement('div');
-  // 🔴 用 textContent：文档正文里可能有尖括号 ⇒ innerHTML 会把它变成标签
-  p.textContent = src.content;
-  card.appendChild(h);
-  card.appendChild(p);
-  card.scrollIntoView({ block: 'nearest' });   // 卡片在 log 末尾 ⇒ 把它滚进视野
+  if (src) {
+    const head = RagSse.formatSource(src);
+    const h = document.createElement('div');
+    h.className = 'src';
+    h.textContent = head.title;
+    const m = document.createElement('div');
+    m.className = 'src-meta';
+    m.textContent = head.meta;
+    const p = document.createElement('div');
+    // 🔴 用 textContent：文档正文里可能有尖括号 ⇒ innerHTML 会把它变成标签
+    p.textContent = src.content;
+    card.appendChild(h); card.appendChild(m); card.appendChild(p);
+  }
+  card.hidden = !src;
+  for (const s of turn.querySelectorAll('.cite')) {
+    s.classList.toggle('open', Number(s.dataset.index) === idx);
+  }
 }
 
 // ---------- 发起一次提问 ----------

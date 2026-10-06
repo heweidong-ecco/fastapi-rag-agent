@@ -751,6 +751,11 @@ async def stream_search(
                 #    `content_preview` 仍在（老前端用它）—— ⛔ 不是替换，是追加。
                 "content": doc["content"],
                 "content_preview": doc["content"][:100],
+                # 🔴 `DEC-089`：硬门 B 的证真那句要求「点开能看到 **chunk id + 相似度分**」。
+                #    这个数**本来就在手上**（上面 `contexts` 里的 `r[3]`）—— 只是没人往帧里放。
+                # ⚠️ **两个出口**（本处 + `answer_with_citations.py`）必须保持同形，
+                #    有 `test_both_sources_exits_have_the_same_key_set` 钉着。
+                "similarity": doc.get("similarity"),
             })
         context_text = "\n\n".join(context_parts)
 

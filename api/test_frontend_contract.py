@@ -186,6 +186,89 @@ def test_answer_with_citations_sources_carry_the_same_shape(monkeypatch):
     assert sources[1]["id"] == 2
 
 
+# ============ 契约 A·追加：`sources` 帧补 `similarity`（`DEC-089`） ============
+#
+# 🔴 起因：硬门 B 的证真那句要求「点开能看到 **chunk id + 相似度分**」。
+#    `id` 早在帧里（契约 A），`similarity` 这一条**数据本来就在手上**
+#    （`api_v1_rag.py` 里 `contexts` 的 `r[3]`）—— 只是没人往帧里放。
+
+
+def test_sources_carry_similarity_for_the_citation_card(monkeypatch, rag_env):
+    """🔴 帧里必须带 `similarity`，且**是检索出来的那个值**。
+
+    ⚠️ **推导型**：期望值取自本文件顶上那份 `DOCS`（= 检索桩的出处），
+       ⛔ 不是写死 `0.9` —— 写死的话，值被换掉时两处会一起错、用例照样绿。
+    """
+    llm = _PromptCapturingLLM()
+    monkeypatch.setattr(rag_env.rag, "get_llm_stream", lambda: llm)
+
+    payloads = payloads_of(drive(rag_env, llm, citations=True)[0])
+    sources = next(p["sources"] for p in payloads if isinstance(p, dict) and "sources" in p)
+
+    assert [s["similarity"] for s in sources] == [doc[3] for doc in DOCS], \
+        "sources 帧里的 similarity 与检索结果对不上（卡片会显示一个编出来的分）"
+
+
+def test_sources_similarity_is_a_number_not_a_string(monkeypatch, rag_env):
+    """反面守卫：`similarity` 是**数字**，⛔ 不是字符串/None。
+
+    ⚠️ 前端 `formatSource` 会对它做 `toFixed` —— 传字符串过去会得到 `NaN`，
+       而页面上**不报错**（只会显示一个看不懂的东西）。
+       🔴 本仓栽过同款：`json.dumps` 出来的 `"0.9"` 与 `0.9` 在肉眼上几乎一样。
+    """
+    llm = _PromptCapturingLLM()
+    monkeypatch.setattr(rag_env.rag, "get_llm_stream", lambda: llm)
+
+    payloads = payloads_of(drive(rag_env, llm, citations=True)[0])
+    sources = next(p["sources"] for p in payloads if isinstance(p, dict) and "sources" in p)
+
+    for s in sources:
+        assert isinstance(s["similarity"], (int, float)) and not isinstance(s["similarity"], bool), \
+            f"similarity 不是数字：{s['similarity']!r}"
+
+
+def test_both_sources_exits_have_the_same_key_set(monkeypatch, rag_env):
+    """🔴 把「两个出口形状必须一样」从**注释**变成**用例**（`DEC-089`）。
+
+    ⚠️ 原状：`answer_with_citations.py` 的注释写着「⛔ 改一边忘另一边 ⇒ 两个出口的形状
+       悄悄分叉，而两边各自的用例都是绿的」—— 而那件事**当时没有任何尺子**。
+
+    🔴 2026-10-06 施工时**实测**（判据是命令，⛔ 不是"我觉得应该抓得住"）：
+       - 改动前全文：`7 passed`（基线）
+       - **只给流式那侧加上 `similarity`**、再把本条摘掉：
+         `-k 'not both_sources_exits'` ⇒ **9 passed, 1 deselected**
+         ⇒ 连同上面新写的两条 `similarity` 用例一起，**一条红都没有** ——
+         这句「分叉了」在**当时是被静默放行的**。
+       - 加上本条 ⇒ **1 failed, 9 passed**，且报的正是 `Extra items in the left set: 'similarity'`。
+       ⇒ 结论：这条尺子**在今天之前不存在**，而缺它的代价就是"改一边忘另一边"零成本。
+    """
+    import answer_with_citations as awc
+
+    # 出口①：流式帧
+    llm = _PromptCapturingLLM()
+    monkeypatch.setattr(rag_env.rag, "get_llm_stream", lambda: llm)
+    payloads = payloads_of(drive(rag_env, llm, citations=True)[0])
+    stream_src = next(p["sources"] for p in payloads if isinstance(p, dict) and "sources" in p)[0]
+
+    # 出口②：非流式（`/rag/search?generate_answer=true&citations=true` 走的就是它）
+    monkeypatch.setattr(awc, "record_from_response", lambda *a, **k: True)
+
+    class _LLM:
+        model_name = "fake-answer-model"
+
+        def invoke(self, messages):
+            return AIMessage(content="答案 [来源:1]", usage_metadata={
+                "input_tokens": 1, "output_tokens": 1, "total_tokens": 2})
+
+    _answer, sources = awc.generate_answer_with_citations(
+        [{"id": 11, "content": "甲", "source": "a.md"}], "问句", _LLM(),
+        user_name="alice", thread_id="t-front",
+    )
+
+    assert set(stream_src.keys()) == set(sources[0].keys()), \
+        f"两个出口的 sources 形状分叉了：流式 {sorted(stream_src)} vs 非流式 {sorted(sources[0])}"
+
+
 # ==================== 契约 B：末尾的 `usage` 汇总帧 ====================
 #
 # 🔴 一条贯穿三节的判据：**记账了才出帧**。

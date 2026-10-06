@@ -6,7 +6,7 @@ const assert = require('node:assert');
 
 const {
   parseSseChunk, payloadKind, citationIndexes, splitCitations, resolveCitations,
-  classifyExit, formatCost,
+  classifyExit, formatCost, formatSource, toggleOpen,
 } = require('./sse.js');
 
 test('parseSseChunk 只吐【完整】的帧，半截留在 rest 里', () => {
@@ -138,7 +138,8 @@ test('把 sse.js 当【经典脚本】跑一遍 ⇒ window.RagSse 存在且接�
   const w = loadInBrowserLikeSandbox();
   assert.strictEqual(typeof w.RagSse, 'object', 'sse.js 没有挂 window.RagSse ⇒ 页面里 RagSse.xxx 全报 ReferenceError');
   for (const k of ['parseSseChunk', 'payloadKind', 'citationIndexes', 'splitCitations',
-                   'resolveCitations', 'classifyExit', 'formatCost']) {
+                   'resolveCitations', 'classifyExit', 'formatCost',
+                   'formatSource', 'toggleOpen']) {
     assert.strictEqual(typeof w.RagSse[k], 'function', `window.RagSse.${k} 不是函数`);
   }
 });
@@ -204,4 +205,50 @@ test('formatCost 是 6 位小数且带 $', () => {
   assert.strictEqual(formatCost(0.0123456), '$0.012346');
   assert.strictEqual(formatCost(0), '$0.000000');
   assert.strictEqual(formatCost(null), '—');
+});
+
+// ---------- 引用卡片：卡片头 / 就地展开（`DEC-089` · 硬门 B 的另外两句） ----------
+//
+// 🔴 为什么这两件抽进本文件：硬门 B 的判定有三句，其中两句是
+//    「再点能跳到原文位置」与「点开能看到 chunk id + 相似度分」—— 它们**能写成命令**
+//    （本仓立场：写不出命令的，就是还没核过）。DOM 怎么挂仍留在 `chat.html`（手工验）。
+
+test('formatSource 拼出卡片头：[编号] 来源 · chunk id · 相似度', () => {
+  const out = formatSource({ index: 1, source: 'handbook.md', id: 812, similarity: 0.8312 });
+  assert.strictEqual(out.title, '[1] handbook.md');
+  assert.strictEqual(out.meta, 'id=812 · 相似度 0.831');
+});
+
+test('formatSource 缺字段画 —，⛔ 不许把 undefined / NaN 画到页面上', () => {
+  // ⚠️ 这不是假想：非流式那条链（`answer_with_citations.py`）的上下文里**没有** similarity
+  //    ⇒ 它会诚实地传 `None` 过来。页面显示 `undefined` 会被读成"这个功能坏了"。
+  const out = formatSource({ index: 2, source: 'b.md' });
+  assert.strictEqual(out.meta, 'id=— · 相似度 —');
+  for (const v of Object.values(out)) {
+    assert.ok(!/undefined|NaN|null/.test(v), `卡片头里出现了 ${v}`);
+  }
+});
+
+test('formatSource：相似度 0 与「没有相似度」是两件事（⛔ 别都画成 —）', () => {
+  // 同 `formatCost` 的立场：`null` ⇒ `—`（"不知道"），`0` ⇒ 真值。
+  assert.strictEqual(
+    formatSource({ index: 3, source: 'c.md', similarity: 0 }).meta, 'id=— · 相似度 0.000');
+  assert.strictEqual(
+    formatSource({ index: 3, source: 'c.md', similarity: null }).meta, 'id=— · 相似度 —');
+});
+
+test('toggleOpen：没展开就展开、点同一条收起、点另一条换内容（= 判定里的「再点」）', () => {
+  assert.strictEqual(toggleOpen(null, 1), 1, '第一次点 ⇒ 展开');
+  assert.strictEqual(toggleOpen(1, 1), null, '🔴 再点同一条 ⇒ 收起（本仓 2026-10-06 裁的「甲」）');
+  assert.strictEqual(toggleOpen(1, 2), 2, '点另一条 ⇒ 换内容，⛔ 不是同时开着两张卡片');
+});
+
+test('卡片头只许有一份实现（结构型：数的是【文件】，⛔ 不是"我记得没写第二份"）', () => {
+  // 🔴 与上面那条「引用正则只许有一份」同型：两处一旦漂移，页面上的编号与卡片里的数
+  //    不是同一批，而**页面上不报任何错**（本仓原话：「有结构才执行，只有文字就漏」）。
+  const hit = frontendSources()
+    .filter((f) => fs.readFileSync(f, 'utf8').includes('相似度'))
+    .map((f) => path.relative(path.join(JS_DIR, '..', '..'), f).replace(/\\/g, '/'));
+  assert.deepStrictEqual(hit, ['static/js/sse.js'],
+    '「相似度」在别处又出现了一份 ⇒ 卡片头有两套格式，会漂移');
 });
