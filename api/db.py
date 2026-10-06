@@ -77,7 +77,19 @@ def create_table():
                         user_name TEXT NOT NULL,
                         key_hash TEXT NOT NULL UNIQUE,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        expires_at TIMESTAMP NOT NULL
+                        expires_at TIMESTAMP NOT NULL,
+                        -- 🔴 `DEC-085` 契约 D / `DEC-086`：`api/auth.py` 的查询按
+                        --    `COALESCE(is_active, 1) = 1` 过滤 ⇒ **这一列必须真实存在**。
+                        --    ⚠️ 故意**可空**（⛔ 别加 NOT NULL）：`COALESCE` 就是为了让
+                        --    那批"加列之前写进去的老行（NULL）"照样能通过认证。
+                        -- 🔴 **类型必须是 INTEGER（0/1），⛔ 别改成 BOOLEAN** ——
+                        --    写入侧写的是整数：`scripts/issue_api_key.py:55` 的
+                        --    `UPDATE api_keys SET is_active = 0` ⇒ 建成 boolean 那句直接报
+                        --    "column is of type boolean but expression is of type integer"。
+                        --    ⚠️ 全仓另外两处也是**整数**口径，别只改这里：
+                        --    `api/db_metadata.py:41`（`Integer, server_default="1"`）·
+                        --    `api/test_auth_api_key_active.py:78`（sqlite `INTEGER`）。
+                        is_active INTEGER DEFAULT 1
                     );
                 """)
                 conn.commit()
@@ -90,6 +102,24 @@ def create_table():
                             WHERE table_name='documents' AND column_name='requested_by'
                         ) THEN
                             ALTER TABLE documents ADD COLUMN requested_by TEXT NOT NULL DEFAULT 'anonymous';
+                        END IF;
+                    END $$;
+                """)
+                # 🔴 同一款：`api_keys.is_active`（`DEC-086`）
+                #    病因：这个库是**先建的**（`CREATE TABLE IF NOT EXISTS` 那句对已存在的表
+                #    **什么都不做**）⇒ 光把列写进上面的建表语句，**老库永远补不上**。
+                #    实测（2026-10-06）：本机真库 `api_keys` 只有 5 列，没有 `is_active`，
+                #    而 `api/auth.py:105` 按它过滤 ⇒ **每次 key 认证 503
+                #    （`UndefinedColumn`）**，且限流/额度两道闸**同时 fail-open**。
+                #    ⇒ 加列这一步**必须**在这里做，⛔ 不能只写在建表语句里。
+                cur.execute("""
+                    DO $$
+                    BEGIN
+                        IF NOT EXISTS (
+                            SELECT 1 FROM information_schema.columns
+                            WHERE table_name='api_keys' AND column_name='is_active'
+                        ) THEN
+                            ALTER TABLE api_keys ADD COLUMN is_active INTEGER DEFAULT 1;
                         END IF;
                     END $$;
                 """)
