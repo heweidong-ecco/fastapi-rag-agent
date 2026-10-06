@@ -704,14 +704,18 @@ async def stream_search(
 
     # B8 · 会话级 token 上限（`DEC-041`）—— 触顶直接拒绝。
     # ⚠️ 放在**取历史之后、检索之前**：这是本端点**第一处真花钱**的位置之前。
+    # 🔴 `scope="session"`（`DEC-090` · `R3.2`）：两种熔断 `code` 相同 ⇒ 必须显式标出
+    #    是哪种，否则前端写不出「何时恢复」（会话级**开个新会话立刻能继续**）。
     ok, why = check_session_token_budget(user_name, thread_id)
     if not ok:
-        raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
+        raise AppException(ErrorCode.QUOTA_EXCEEDED, why, scope="session")
 
     # B11 · 全站日级熔断（`①b` Task 4）—— 与上一段并列、都要过。
+    # 🔴 `scope="global"`：全站共享 ⇒ 用户**做什么都救不回来**，只能等跨天。
+    #    ⛔ 与上面那句**不是一回事**，别合并。
     ok, why = circuit(global_key())
     if not ok:
-        raise AppException(ErrorCode.QUOTA_EXCEEDED, why)
+        raise AppException(ErrorCode.QUOTA_EXCEEDED, why, scope="global")
     # 1. 检索（与普通接口相同）
     # 1. 向量检索（这部分不是流式的，一次性查完）
     # 构建当前输入的这条的历史对话，真停止按钮的调用（使它支持历史补偿）
@@ -751,6 +755,11 @@ async def stream_search(
                 #    `content_preview` 仍在（老前端用它）—— ⛔ 不是替换，是追加。
                 "content": doc["content"],
                 "content_preview": doc["content"][:100],
+                # 🔴 `DEC-089`：硬门 B 的证真那句要求「点开能看到 **chunk id + 相似度分**」。
+                #    这个数**本来就在手上**（上面 `contexts` 里的 `r[3]`）—— 只是没人往帧里放。
+                # ⚠️ **两个出口**（本处 + `answer_with_citations.py`）必须保持同形，
+                #    有 `test_both_sources_exits_have_the_same_key_set` 钉着。
+                "similarity": doc.get("similarity"),
             })
         context_text = "\n\n".join(context_parts)
 

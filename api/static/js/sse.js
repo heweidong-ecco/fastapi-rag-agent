@@ -116,6 +116,101 @@ function formatCost(costUsd) {
   return '$' + Number(costUsd).toFixed(6);
 }
 
+/** 缺值统一画成 `—`。⚠️ `0` **不是**缺值（见 `formatSource`）—— 所以判的是 `== null`。 */
+function dashIfMissing(v) {
+  return (v === null || v === undefined) ? '—' : String(v);
+}
+
+/**
+ * 引用卡片的**卡片头**（`DEC-089` · 硬门 B 的证真那句）。
+ *
+ * 🔴 为什么抽到本文件：判定要求「点开能看到 **chunk id + 相似度分**」——
+ *    那是**能写成命令**的一句（本仓立场：写不出命令的，就是还没核过）。
+ *    ⛔ DOM 不进本文件；这里只把 `sources` 帧里的一条拼成两行文字。
+ *
+ * ⚠️ 缺字段画 `—`，⛔ 不许把 `undefined` / `NaN` 漏到页面上 ——
+ *    非流式那条链（`answer_with_citations.py`）的上下文里**没有** `similarity`，
+ *    它会**诚实地**传 `None` 过来。页面上一个 `undefined` 会被读成"这功能坏了"。
+ * ⚠️ 但 `similarity: 0` 与"没有相似度"是**两件事**（同 `formatCost` 的立场）：
+ *    前者是**真值**，画 `0.000`；后者才是 `—`。
+ *
+ * @returns {{title: string, meta: string}}
+ */
+function formatSource(src) {
+  const s = src || {};
+  const sim = s.similarity;
+  const simText = (sim === null || sim === undefined) ? '—' : Number(sim).toFixed(3);
+  return {
+    title: '[' + dashIfMissing(s.index) + '] ' + dashIfMissing(s.source),
+    meta: 'id=' + dashIfMissing(s.id) + ' · 相似度 ' + simText,
+  };
+}
+
+/**
+ * 「再点」的语义（`DEC-089` · 硬门 B 的另一句「再点能跳到原文位置」）。
+ *
+ * 本仓 2026-10-06 裁定走「**甲 · 就地展开/收起**」：卡片挂在该条回答**下面**，
+ * 点引用展开、**再点同一条收起**、点另一条则换内容（⛔ 不是同时开着两张）。
+ * ⇒ 页面上只需要记「当前开着哪一条」这一个数，本函数给出它的**下一个值**。
+ *
+ * @param {number|null} current 当前展开的引用编号（`null` = 都收着）
+ * @param {number} clicked 刚点的那一条
+ * @returns {number|null}
+ */
+function toggleOpen(current, clicked) {
+  return current === clicked ? null : clicked;
+}
+
+/**
+ * 🔴 **占位符** —— 上公网前**必须**换成真地址。
+ *
+ * ⛔ 别把它写成 `admin@example.com` 那种**看着像真的**假邮箱：那会变成**假话**
+ *    （本仓立场：宁可空着，不编数）。现在这串一眼认得出是没填。
+ * 📌 已登记进 `docs/待办总表.md`，免得它**静默上线**。
+ */
+const BREAKER_CONTACT = '（待设置 —— 联系入口尚未确定）';
+
+/**
+ * 熔断提示卡片的**四件事**（`R3.2` · `DEC-090`）。
+ *
+ * 🔴 `R3.2` 的验收原文：「卡片上写清四件事 —— **现状 / 这不是故障 / 何时恢复 / 怎么联系**」
+ *    （`施工单-本项目.md` §要求 R3）。四件里三件是常量，**只有「何时恢复」随 `scope` 变**。
+ *
+ * 🔴 为什么 `scope` 非得由后端给：两种熔断的 `ErrorCode` **都是 `QUOTA_EXCEEDED`**
+ *    ⇒ 前端不看文案**分不出**是哪种，而两者恢复条件**完全不同**：
+ *      · `global`（全站日级 · `B11`）⇒ 全站共享，**做什么都救不回来**，只能等跨天；
+ *      · `session`（会话级 · `B8`）  ⇒ 是**你自己这个 thread** 的今日用量
+ *        ⇒ **开个新会话立刻能继续**（`chat.html` 有「＋ 新会话」按钮，这句是真做得到的）。
+ *
+ * ⚠️ 认不出的 `scope`（含缺字段）⇒「何时恢复」画 `—`，⛔ **不猜一个口径** ——
+ *    中间件的限流 429 也走同一条 `error` 分支，它**没有** scope；猜成 `global`
+ *    会让「明日起恢复」出现在一个**根本没有日级额度**的场合。
+ *
+ * ⚠️ 「现状」用**后端原话**（里面有「已使用 X / 上限 Y tokens」）⇒ ⛔ 不在这里重编一句
+ *    （重编 = 数字口径有两份，会漂移，且**页面上不报错**）。
+ *
+ * ⛔ DOM 不进本文件 —— 这里只给文字，怎么挂留在 `chat.html`。
+ *
+ * @param {string} scope `"global"` / `"session"` / 认不出的值
+ * @param {string} message 后端 429 响应体里的 `error`
+ * @returns {{title: string, items: Array<{k: string, v: string}>}}
+ */
+function breakerCard(scope, message) {
+  const recovery = {
+    global: '明日起自动恢复（额度按自然日重置 · 全站共享 · ⛔ 无法提前）',
+    session: '开一个新会话立刻可继续（额度按会话计 · 跨天也会重置）',
+  }[scope] || '—';
+  return {
+    title: '额度已用完',
+    items: [
+      { k: '现状', v: (message === null || message === undefined) ? '—' : String(message) },
+      { k: '这不是故障', v: '额度上限是成本控制，不是服务坏了；超出后一律拒绝，⛔ 不是变慢。' },
+      { k: '何时恢复', v: recovery },
+      { k: '怎么联系', v: BREAKER_CONTACT },
+    ],
+  };
+}
+
 // 🔴 2026-10-06 施工实测·订正⑨ —— **本文件此前【没有】`RagSse` 这个对象。**
 //    起草时 Task 6 的 Interfaces 写着「Produces（全局对象 `RagSse`，浏览器）」，而实现只有
 //    末尾那段 `module.exports` ⇒ 顶层函数确实成了全局，但**没有一个叫 `RagSse` 的东西**。
@@ -125,7 +220,7 @@ function formatCost(costUsd) {
 //    ⇒ 现在两侧都挂，且下面有两条用例钉住（浏览器那侧用 `node:vm` 造一个假 window 来测）。
 const RagSse = {
   DONE_SENTINEL, parseSseChunk, payloadKind, citationIndexes, splitCitations,
-  resolveCitations, classifyExit, formatCost,
+  resolveCitations, classifyExit, formatCost, formatSource, toggleOpen, breakerCard,
 };
 
 if (typeof module !== 'undefined' && module.exports) {

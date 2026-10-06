@@ -186,6 +186,89 @@ def test_answer_with_citations_sources_carry_the_same_shape(monkeypatch):
     assert sources[1]["id"] == 2
 
 
+# ============ 契约 A·追加：`sources` 帧补 `similarity`（`DEC-089`） ============
+#
+# 🔴 起因：硬门 B 的证真那句要求「点开能看到 **chunk id + 相似度分**」。
+#    `id` 早在帧里（契约 A），`similarity` 这一条**数据本来就在手上**
+#    （`api_v1_rag.py` 里 `contexts` 的 `r[3]`）—— 只是没人往帧里放。
+
+
+def test_sources_carry_similarity_for_the_citation_card(monkeypatch, rag_env):
+    """🔴 帧里必须带 `similarity`，且**是检索出来的那个值**。
+
+    ⚠️ **推导型**：期望值取自本文件顶上那份 `DOCS`（= 检索桩的出处），
+       ⛔ 不是写死 `0.9` —— 写死的话，值被换掉时两处会一起错、用例照样绿。
+    """
+    llm = _PromptCapturingLLM()
+    monkeypatch.setattr(rag_env.rag, "get_llm_stream", lambda: llm)
+
+    payloads = payloads_of(drive(rag_env, llm, citations=True)[0])
+    sources = next(p["sources"] for p in payloads if isinstance(p, dict) and "sources" in p)
+
+    assert [s["similarity"] for s in sources] == [doc[3] for doc in DOCS], \
+        "sources 帧里的 similarity 与检索结果对不上（卡片会显示一个编出来的分）"
+
+
+def test_sources_similarity_is_a_number_not_a_string(monkeypatch, rag_env):
+    """反面守卫：`similarity` 是**数字**，⛔ 不是字符串/None。
+
+    ⚠️ 前端 `formatSource` 会对它做 `toFixed` —— 传字符串过去会得到 `NaN`，
+       而页面上**不报错**（只会显示一个看不懂的东西）。
+       🔴 本仓栽过同款：`json.dumps` 出来的 `"0.9"` 与 `0.9` 在肉眼上几乎一样。
+    """
+    llm = _PromptCapturingLLM()
+    monkeypatch.setattr(rag_env.rag, "get_llm_stream", lambda: llm)
+
+    payloads = payloads_of(drive(rag_env, llm, citations=True)[0])
+    sources = next(p["sources"] for p in payloads if isinstance(p, dict) and "sources" in p)
+
+    for s in sources:
+        assert isinstance(s["similarity"], (int, float)) and not isinstance(s["similarity"], bool), \
+            f"similarity 不是数字：{s['similarity']!r}"
+
+
+def test_both_sources_exits_have_the_same_key_set(monkeypatch, rag_env):
+    """🔴 把「两个出口形状必须一样」从**注释**变成**用例**（`DEC-089`）。
+
+    ⚠️ 原状：`answer_with_citations.py` 的注释写着「⛔ 改一边忘另一边 ⇒ 两个出口的形状
+       悄悄分叉，而两边各自的用例都是绿的」—— 而那件事**当时没有任何尺子**。
+
+    🔴 2026-10-06 施工时**实测**（判据是命令，⛔ 不是"我觉得应该抓得住"）：
+       - 改动前全文：`7 passed`（基线）
+       - **只给流式那侧加上 `similarity`**、再把本条摘掉：
+         `-k 'not both_sources_exits'` ⇒ **9 passed, 1 deselected**
+         ⇒ 连同上面新写的两条 `similarity` 用例一起，**一条红都没有** ——
+         这句「分叉了」在**当时是被静默放行的**。
+       - 加上本条 ⇒ **1 failed, 9 passed**，且报的正是 `Extra items in the left set: 'similarity'`。
+       ⇒ 结论：这条尺子**在今天之前不存在**，而缺它的代价就是"改一边忘另一边"零成本。
+    """
+    import answer_with_citations as awc
+
+    # 出口①：流式帧
+    llm = _PromptCapturingLLM()
+    monkeypatch.setattr(rag_env.rag, "get_llm_stream", lambda: llm)
+    payloads = payloads_of(drive(rag_env, llm, citations=True)[0])
+    stream_src = next(p["sources"] for p in payloads if isinstance(p, dict) and "sources" in p)[0]
+
+    # 出口②：非流式（`/rag/search?generate_answer=true&citations=true` 走的就是它）
+    monkeypatch.setattr(awc, "record_from_response", lambda *a, **k: True)
+
+    class _LLM:
+        model_name = "fake-answer-model"
+
+        def invoke(self, messages):
+            return AIMessage(content="答案 [来源:1]", usage_metadata={
+                "input_tokens": 1, "output_tokens": 1, "total_tokens": 2})
+
+    _answer, sources = awc.generate_answer_with_citations(
+        [{"id": 11, "content": "甲", "source": "a.md"}], "问句", _LLM(),
+        user_name="alice", thread_id="t-front",
+    )
+
+    assert set(stream_src.keys()) == set(sources[0].keys()), \
+        f"两个出口的 sources 形状分叉了：流式 {sorted(stream_src)} vs 非流式 {sorted(sources[0])}"
+
+
 # ==================== 契约 B：末尾的 `usage` 汇总帧 ====================
 #
 # 🔴 一条贯穿三节的判据：**记账了才出帧**。
@@ -265,3 +348,82 @@ def test_no_usage_frame_when_nothing_was_billed(monkeypatch, rag_env):
     assert not any(isinstance(p, dict) and "usage" in p for p in payloads), \
         "一笔账都没记，就不该有 usage 帧 —— 出了帧等于在报一个编出来的数"
     assert payloads[-1] == "[DONE]"
+
+
+# ==================== 契约 E：熔断 429 得说得出是【哪一种】熔断（`R3.2` · `DEC-090`）====================
+#
+# 🔴 为什么这条契约必须存在：`chat.html` 原先 429 只写一句
+#    「今日额度已用完 / 会话额度已用完」—— **把恢复条件完全不同的两种熔断混成了一句**：
+#      · 全站日级（`B11`）⇒ 全站共享，**做什么都救不回来**，只能等跨天
+#      · 会话级（`B8`）  ⇒ 是**你自己这个 thread** 的今日用量 ⇒ **开个新会话立刻能继续**
+#    两者 `code` **都是 `QUOTA_EXCEEDED`**（`api/exceptions.py` 就一个枚举）⇒
+#    **前端从 `code` 分不出是哪种** ⇒ `R3.2` 要的第三件事（「何时恢复」）**写不清**。
+#    ⇒ 后端在**对话页这条链**上补 `scope`（⛔ 有意只接这一个端点，见 `DEC-090`）。
+
+_QUOTA_WHY = {
+    "session": "本会话预算已用完（已使用 50000 tokens，会话上限 50000 tokens）",
+    "global": "今日全站额度已用完（已使用 1000000 / 上限 1000000 tokens），请明日再试",
+}
+
+
+def _quota_429_body(rag_env, monkeypatch, which):
+    """把对话页逼到 `which` 那种熔断，返回**处理器真会写出去的那份 JSON**。
+
+    ⚠️ **调的是真处理器**（`main.app_exception_handler`），⛔ 不是自己拼一份 body ——
+       自己拼就成了"我以为处理器会写什么"（本仓：桩打歪了 = 同义反复）。
+    """
+    import api_v1_rag as rag_mod
+    from exceptions import AppException
+    from main import app_exception_handler
+    from schemas import QuestionRequest
+
+    # 🔴 **两侧都显式置**，⛔ 不是"只打要失败的那侧" ——
+    #    端点的顺序是**先会话后全站**（`api_v1_rag.py` 的 `:709` / `:714`），
+    #    而 `monkeypatch` 要到用例**收尾**才还原 ⇒ 同一个用例里连调两次时，
+    #    第一次打的桩**还挂着**（实测：两条都返回 `session`，那条"可区分"的用例因此变红）。
+    #    ⇒ 写成「按 `which` 判」的纯函数，结果与调用顺序无关。
+    monkeypatch.setattr(
+        rag_mod, "check_session_token_budget",
+        lambda *a, **k: (False, _QUOTA_WHY["session"]) if which == "session" else (True, ""))
+    monkeypatch.setattr(
+        rag_mod, "circuit",
+        lambda *a, **k: (False, _QUOTA_WHY["global"]) if which == "global" else (True, ""))
+
+    async def go():
+        with pytest.raises(AppException) as ei:
+            await rag_mod.stream_search(QuestionRequest(question="你好"),
+                                        thread_id="t-quota", user_name="alice")
+        resp = await app_exception_handler(None, ei.value)   # 处理器不用 request（只读 exc）
+        return json.loads(resp.body)
+
+    return asyncio.run(go())
+
+
+def test_session_quota_429_is_marked_scope_session(rag_env, monkeypatch):
+    body = _quota_429_body(rag_env, monkeypatch, "session")
+    assert body["code"] == "QUOTA_EXCEEDED", "前提变了：这条链的 429 不再是配额错"
+    assert body.get("scope") == "session", (
+        f"会话级熔断的 429 没标出 scope（拿到 {body.get('scope')!r}）⇒ "
+        "前端只能退回那句把两种混起来的话")
+    assert _QUOTA_WHY["session"] in body["error"], "后端原话被换掉了 —— 那是 R3.1 要的「可识别」那半"
+
+
+def test_global_breaker_429_is_marked_scope_global(rag_env, monkeypatch):
+    body = _quota_429_body(rag_env, monkeypatch, "global")
+    assert body["code"] == "QUOTA_EXCEEDED"
+    assert body.get("scope") == "global", (
+        f"全站级熔断的 429 没标出 scope（拿到 {body.get('scope')!r}）")
+    assert _QUOTA_WHY["global"] in body["error"]
+
+
+def test_the_two_quota_scopes_are_distinguishable_without_reading_the_text(rag_env, monkeypatch):
+    """🔴 反面守卫：两种熔断**必须能不看文案就分开** —— 这正是 `scope` 存在的全部理由。
+
+    ⚠️ 头一行断言是**前提**，⛔ 不是凑数：若哪天有人把两者拆成两个 `ErrorCode`，
+       这条会先红在前提上，提醒重审整件事（而不是悄悄退化成一条恒真用例）。
+    """
+    s = _quota_429_body(rag_env, monkeypatch, "session")
+    g = _quota_429_body(rag_env, monkeypatch, "global")
+    assert s["code"] == g["code"], "前提变了：`code` 现在能把两种分开 ⇒ 该重审 `scope` 还要不要"
+    assert s["scope"] != g["scope"], (
+        "两种熔断的 scope 是同一个值 ⇒ 前端又只能写一句混话，`R3.2` 白做")

@@ -2,17 +2,17 @@
 
 | 项 | 内容 |
 |---|---|
-| **状态** | 🟡 **部分可用**（2026-10-06 建 · `DEC-085` 段 1 第一刀）—— **两个页面通了**：对话页（`DEC-085`）+ **接管页**（`DEC-088` · `F1`）；**Trace 页改造 / Eval 页仍没做** |
-| **对外提供** | `GET /chat` → **302** `/static/web/chat.html`（`api/main.py:531`，**`include_in_schema=False`**）<br>`GET /approvals` → **302** `/static/web/approvals.html`（`api/main.py:540`，**同上**）<br>· 页面本体由已挂的 `/static` 托管（零构建、零新服务、零 CORS）<br>⚠️ **两条 302 都在无鉴权基线里**（`scripts/route-auth-baseline.txt`）—— **故意公开**：它们是"给人打开 HTML"的跳转，**本身不含数据**；真正的边界在页面调的后端接口上 |
+| **状态** | 🟡 **部分可用**（2026-10-06 建 · `DEC-085` 段 1 第一刀 · 同日补 `DEC-089` 的 `F8` · `DEC-090` 的熔断卡片）—— **两个页面通了**：对话页（`DEC-085` · 引用卡片 `DEC-089` · **熔断卡片 `DEC-090`**）+ **接管页**（`DEC-088` · `F1`）；**Trace 页改造 / Eval 页仍没做** |
+| **对外提供** | `GET /chat` → **302** `/static/web/chat.html`（`api/main.py:538`，**`include_in_schema=False`**）<br>`GET /approvals` → **302** `/static/web/approvals.html`（`api/main.py:547`，**同上**）<br>· 页面本体由已挂的 `/static` 托管（零构建、零新服务、零 CORS）<br>⚠️ **两条 302 都在无鉴权基线里**（`scripts/route-auth-baseline.txt`）—— **故意公开**：它们是"给人打开 HTML"的跳转，**本身不含数据**；真正的边界在页面调的后端接口上 |
 | **谁在用** | 人（浏览器）。⚠️ **后端不 import 它、没有任何 `.py` 依赖它** —— 这就是本目录此前一直是"没人管"的原因 |
 
 **两个页面、各 3 个文件**（其余 3 个老页面见 §🟡）：
 
 | 文件 | 行数 | 是什么 |
 |---|---:|---|
-| `api/static/web/chat.html` | 358 | 对话页：装配层（DOM / fetch / 状态机 / 渲染） |
-| `api/static/js/sse.js` | 136 | **纯逻辑**：帧解析 / 引用映射 / 出口判定 / 费用格式 —— ⛔ 不碰 DOM、不发请求 |
-| `api/static/js/sse.test.js` | 207 | `node --test` 用例（**18 条**）—— 钉住 `sse.js`<br>⚠️ **数量别抄文档** —— 跑 `node --test api/static/js/sse.test.js`（Task 1–8 期间从 11 涨到 18） |
+| `api/static/web/chat.html` | 452 | 对话页：装配层（DOM / fetch / 状态机 / 渲染 / **引用卡片** / **熔断卡片**） |
+| `api/static/js/sse.js` | 231 | **纯逻辑**：帧解析 / 引用映射 / 出口判定 / 费用格式 / **卡片头与「再点」** / **熔断卡片四件事** —— ⛔ 不碰 DOM、不发请求 |
+| `api/static/js/sse.test.js` | 325 | `node --test` 用例（**29 条**）—— 钉住 `sse.js`<br>⚠️ **数量别抄文档** —— 跑 `node --test api/static/js/sse.test.js`（Task 1–8 从 11 到 18；`DEC-089` 的 `F8` 到 **23**；`DEC-090` 的熔断卡片到 **29**） |
 | `api/static/web/approvals.html` | 247 | **接管页**：待接管表 / 点开看完整上下文 / 批准·拒绝·代填工具结果 / 裁决历史 |
 | `api/static/js/approvals.js` | 86 | **纯逻辑**：消息归一 / 工具摘要 / 计时文案 / 轮询节拍 / 两个载荷构造 |
 | `api/static/js/approvals.test.js` | 120 | `node --test` 用例（**14 条**）—— 钉住 `approvals.js`（同上：⛔ 数量别抄） |
@@ -27,9 +27,29 @@
 - **出口状态机**：`idle → 请求中 → 流式中 → 完成 / 已中断 / 出错 / 未收到结束标志`。
   四种出口**分开显示**，⛔ 不合并（`DEC-082` / `N9` 的口径）。
 - **三种失败说三句话**（`explainStatus`）：`401` 让重新贴 key · **`503` 明说"不是你的 key 的问题"** ·
-  `429` 说额度。⚠️ 合并它们会让人**换 key 换到怀疑人生**（而根因在服务端）。
+  `429` **走熔断卡片**（`DEC-090`）。⚠️ 合并它们会让人**换 key 换到怀疑人生**（而根因在服务端）。
+- 🔵 **熔断提示卡片（`DEC-090` · `F4` 第三条 · 2026-10-06）** —— `R3.2` 要求卡片写清四件事
+  （**现状 / 这不是故障 / 何时恢复 / 怎么联系**）：
+  · 四件事的**文字**由纯函数 `RagSse.breakerCard(scope, message)` 给（`node --test` 钉住），
+    挂 DOM 的 `showBreaker` 留在 `chat.html`。卡片是**另起一个 `.breaker` 元素** ——
+    ⛔ 不与引用卡片的 `.card` 共用（后者由 `_openIndex` 驱动、每次重画都被清空，会互相抹掉）。
+  · 🔴 **「何时恢复」必须分两种**：全站级（`B11`）只能等跨天；会话级（`B8`）
+    **开个新会话立刻能继续**。而两者 `code` **都是 `QUOTA_EXCEEDED`** ⇒ 前端分不出来
+    ⇒ 后端给对话页那条链的两处 429 补了 `scope`（`"global"` / `"session"`）。
+    ⚠️ **只接了这一个端点**（全仓 35 处 `raise`，其余 33 处**有意不动**）⇒
+    没有 `scope` 的 429，卡片把「何时恢复」画 `—`，⛔ **不猜一个口径**。
 - **硬门 B / C 的界面那条线**（手工验过，见 §判据）：引用可点开**全文** · 停止 ⇒
   网络层真取消 + 「已中断」徽标 + 「中断未计费」。
+- 🔵 **引用卡片整条做完了（`DEC-089` · `F8` · 2026-10-06）** —— 硬门 B 判定是**三句**，
+  本刀之前只做掉第一句，这一刀把后两句一起关掉：
+  · **②「再点能跳到原文位置」** ⇒ 裁定走「**甲 · 就地展开/收起**」：
+    卡片挂在该条回答**下面**（`addTurn` 里每条自带一个 `<div class="card" hidden>`），
+    点引用展开、**再点同一条收起**、点另一条换内容。
+    ⚠️ **为什么不做"真的跳原文"**：`documents` 表**只有** `id/content/source/embedding/requested_by`
+    （`api/db.py:65-71`）—— **没有任何位置字段**，也没有"按 id 取全文"的端点 ⇒ **没有位置可跳**。
+  · **③证真「chunk id + 相似度分」** ⇒ 卡片头由 `RagSse.formatSource` 拼出 `id=… · 相似度 …`。
+    后端只动**两行**：`sources` 帧加 `"similarity"`（`api/api_v1_rag.py` + `api/answer_with_citations.py`，
+    **两个出口都要加**）。🔴 那个数**本来就在手上**（`contexts` 里的 `r[3]`），只是没人往帧里放。
 - 🔵 **接管页（`DEC-088` · `F1` · 2026-10-06）** —— **硬门 D 演示那一栏**（它的反例原文是
   「**界面上找不到**」，所以这一块**只能靠界面**，后端补不出它）：
   · **待接管表**（属主 / 图 / 轮次 / 卡了多久 / 待批的工具）→ **点一行**拉完整上下文 → **批准 / 拒绝**，
@@ -47,12 +67,12 @@
 | # | 没做 | 说明 |
 |---|---|---|
 | 1 | **不显示历史消息** | 后端**没有**"取历史"的公开接口（`DEC-085` 契约 C 只把历史喂给**模型**）。⇒ 切回旧会话时页面给一句实话（`showEmptyLog`），⛔ **不留一块看不出所以然的空白** |
-| 2 | **引用卡片固定放在 `#log` 末尾** | ⛔ 不是插在该条回答下面；再点一次就换内容。DEMO 版取舍，不是 bug —— 但**会被读成 bug** |
+| 2 | ~~**引用卡片固定放在 `#log` 末尾**~~ ✅ **2026-10-06 修**（`DEC-089` · `F8`） | 卡片现在**挂在该条回答下面**（每条自带 `.card`），再点收起。⚠️ 旧注释里那个被 `F8` 判据当"还没修"标记的词**已删** —— ⛔ 别写回来（`grep -c 'DEMO 版' api/static/web/chat.html` ⇒ 0） |
 | 3 | ~~**接管页**~~ ✅ **2026-10-06 做了**（`DEC-088` · `F1`）· **Trace 页改造 / Eval 页** | **后两个没做**。Trace 页改造的对象是 `api/static/trace_viewer.html`（⚰️ 见下） |
-| 4 | **硬门 A / C 的其余前端项** | 本刀只做了"能流、能停" |
-| 5 | **R3.2 熔断提示卡片** | 没做 |
+| 4 | **硬门 A / C 的其余前端项** | 本刀只做了"能流、能停" —— ⬜ 剩「**无据拒答**」那半 · C 的其余出口 |
+| 5 | ~~**R3.2 熔断提示卡片**~~ ✅ **2026-10-06 做了**（`DEC-090`） | ⚠️ 但「**怎么联系**」是**占位符**（业务方裁「后面我再设置」）⇒ 已登记 `N13`，⛔ 别当它做完了 |
 | 6 | **DOM 那层没有自动判据** | 滚动 / 按钮态 / 渲染仍靠 DevTools 手工。`sse.js` 覆盖的是**决策**，⛔ 不是**像素** |
-| 7 | 🔴 **硬门 B 判定里的另外两句** | 判定是**三句**（**⛔ 权威原文** ⇒ `fastapi-rag-agent-TODO待办/通用/四硬门-定义与验收标准.md` 硬门 B），本刀**只做掉第一句**「点开能展开原文片段」。⬜ 「**再点能跳到原文位置**」· ⬜ 证真那句「能看到 **chunk id + 相似度分**」—— 卡片只渲染 `[index] source` + `content`，**两个都没有**。⚠️ **与第 2 行是两个不同的缺**：第 2 行说卡片的**位置**不对，本行说**信息与跳转**没有 ⇒ `docs/待办总表.md` §三·附2 的 `F8` |
+| 7 | ~~🔴 **硬门 B 判定里的另外两句**~~ ✅ **2026-10-06 做**（`DEC-089` · `F8`） | 判定是**三句**（**⛔ 权威原文** ⇒ `fastapi-rag-agent-TODO待办/通用/四硬门-定义与验收标准.md` 硬门 B）。①「点开能展开原文片段」`DEC-085` 做的；②「**再点能跳到原文位置**」+③「**chunk id + 相似度分**」本刀做掉 ⇒ **三句齐了**。⚠️ 但**硬门 B 整体⛔ 不等于翻 ✅** —— 判定里还有「非流式链」那类前提，见 `ROADMAP` |
 
 ### ⚰️ 同目录下三个【存量坏页】—— 本刀**没碰**（本仓：⛔ 不顺手清理）
 
@@ -82,18 +102,43 @@
 | ⚠️ **「切回旧会话会看到旧消息」** | ⛔ **看不到** —— 本页不渲染历史（见 §🟡 1）。模型**记得**上下文，但界面上是空的 |
 | 🔴 **「接管页的 `data.status === 'error'` 是"服务端 500 了"」** | ⛔ **不是** —— 那四类拒绝（0 条 / 多条候选 / 越权 / 图名不认识）**全是 HTTP 200**，是**正常的业务回答**。<br>⚠️ **代价**：`fetch` 的 `r.ok`**为真** ⇒ 只看 `r.ok` 的写法会**静默把拒绝当成成功**。⇒ `approvals.html` 每条成功路径都要再判一遍 `data.status`。 |
 | ⚠️ **「`window.RagApprovals` 和 `module.exports` 是重复的」** | ⛔ **两条是给两侧的，缺一不可** —— `node --test` 只走 `module.exports`；浏览器 `<script src>` 只认 `window.*`（本仓**没有打包器**）。<br>⚠️ **删了 `window.RagApprovals`（`approvals.js:85`）** ⇒ 页面里 6 处 `RagApprovals.xxx` 全 `ReferenceError`，而 `node --test` **照样 14 条全绿**（同 `window.RagSse` 那条）。📌 反证 ⇒ 注释掉那两行后页面立刻报错，而用例**一条都不红**。 |
+| 🔴 **「卡片头那两行在 `chat.html` 里拼一下就行」** | ⛔ **只能有一份实现**（`RagSse.formatSource`）。<br>🔴 **这条有结构型用例钉着**（`sse.test.js`：「相似度」这个字面量在 `static/js` + `static/web` 里**只许出现在 `sse.js`**）⇒ 在 `chat.html` 里写那个词，**用例当场红**。<br>⚠️ **为什么必须这么钉**：本仓原话「**有结构才执行，只有文字就漏**」，而 `DEC-089` 施工时**当场验证了一次** —— 页面注释里留了句「⛔ 不再是…的 DEMO 版」，而 `F8` 的旧判据正好拿 `grep -n 'DEMO 版'` 当"还没修"的标记 ⇒ **修好了反而被那条 grep 指成"还没修"**。 |
+| 🔴 **「卡片状态放个全局变量就行」** | ⛔ **不行** —— 状态在**元素上**（`turn._openIndex` / `turn._byIndex`）。本页可以**连着问多轮** ⇒ 全局一个变量会让**两张卡片抢同一个状态**（点第二题的引用，第一题的卡片跟着变）。 |
+| 🔴 **「`sources` 帧只在流式那边发，非流式那条链不用管」** | ⛔ **两个出口**（`api/api_v1_rag.py` + `api/answer_with_citations.py`），形状必须**逐字同构**。⚠️ **2026-10-06 之前这句只是注释、没有尺子** —— 实测：只给流式那侧加一个键，**其余 9 条用例全绿**（`DEC-089` §五）。现在有 `test_both_sources_exits_have_the_same_key_set` 钉着。 |
+| 🔴 **「非流式那条链的 `similarity` 也该有值」** | ⛔ **它是 `None`，而且【不许】给它编一个**。非流式链的 `contexts` 来自 `rag_pipeline` 的 RRF 融合（候选字典只有 `id/content/source/from/rrf_score`，**没有 `similarity`**）⇒ 前端画 `—`。⚠️ 同 `DEC-084`：**宁可空着不编数**。 |
+| 🔴 **「两种熔断靠 `code` 就能分开」** | ⛔ **分不开** —— 全站级（`B11`）与会话级（`B8`）的 `ErrorCode` **都是 `QUOTA_EXCEEDED`**（`api/exceptions.py` 就一个枚举）。而两者**恢复条件完全不同**（前者只能等跨天，后者**开新会话立刻能继续**）⇒ 必须靠后端补的 `scope` 字段。<br>⚠️ **改前的真缺陷**：429 只写一行「额度已用完 / 会话额度已用完」把两种混成一句 ⇒ 被会话级挡住的人**会白等一天**。 |
+| 🔴 **「429 上没有 `scope` ⇒ 后端坏了」** | ⛔ **有意为之** —— **只有对话页那条链**（`stream_search`）的两处 429 带了 `scope`；全仓另 **33 处** `raise` **没接**（bounded · ⛔ 不顺手清理）。<br>⇒ 没有 `scope` 时卡片把「何时恢复」画 `—`，**这是对的**。⚠️ ⛔ 别为了"消灭 `—`"给 `scope` 兜一个默认值（比如 `"global"`）—— 那会让**中间件的限流 429**（它根本没有日级额度）也长出「明日起恢复」，前端**再也分不出"不知道"**。 |
+| 🔴 **「`breakerCard` 那四句话在 `chat.html` 里拼一下就行」** | ⛔ **文字只能有一份实现**（`RagSse.breakerCard`），`chat.html` 的 `showBreaker` **只管挂 DOM**。与 `formatSource` 同一条理由：两处会漂移，而**页面上不报错**。 |
+| 🔴 **「删掉某串的守卫，注释里引用那串没关系」** | ⛔ **有关系，而且实测栽过两次**。`sse.test.js` 的结构型守卫是**按子串扫整个前端**的 ⇒ 你在 `chat.html` 注释里写下**被禁的那串**（哪怕是为了说明"已经删掉了"），**守卫当场红**。<br>⚠️ 前科：`DEC-089` 的「…的 DEMO 版」（绊的是 `F8` 的 grep 判据）；`DEC-090` 的「额度已用完 / 会话额度已用完」（绊的是本条守卫，施工时**当场红**）。<br>⇒ **判据**：要提那串，**拆开写**或换句话描述。 |
 
 ## 判据（可打印）
 
 ```bash
 # ① 纯逻辑（自动的，CI 里也有）
-node --test api/static/js/sse.test.js        # ⇒ ℹ tests 18 / pass 18 / fail 0（2026-10-06 实测）
+node --test api/static/js/sse.test.js        # ⇒ ℹ tests 29 / pass 29 / fail 0（2026-10-06 实测；DEC-089 前是 23，DEC-090 前是 23）
 node --test api/static/js/approvals.test.js  # ⇒ ℹ tests 14 / pass 14 / fail 0（同批实测）
 venv/bin/python -m pytest api/test_chat_page.py -q        # ⇒ 3 passed（GET /chat 的三条守卫）
 venv/bin/python -m pytest api/test_approvals_page.py -q   # ⇒ 3 passed（GET /approvals 的三条守卫）
 #   对端（后端那半，本页消费的契约）——
-venv/bin/python -m pytest api/test_frontend_contract.py -q   # ⇒ 7 passed（DEC-085 契约 A/B）
+venv/bin/python -m pytest api/test_frontend_contract.py -q   # ⇒ 13 passed（契约 A/B + DEC-089 的 similarity + DEC-090 契约 E 的 scope 三条）
 venv/bin/python -m pytest api/test_token_tracker_cost_helpers.py -q   # ⇒ 5 passed（费用行那三个纯函数）
+
+# ①' 🔴 引用卡片那两句（DEC-089 · F8）—— 会动的判据（⛔ 别用旧那条，它测不出来）
+grep -n 'RagSse.formatSource\|RagSse.toggleOpen' api/static/web/chat.html  # ⇒ 非空
+grep -c '<div class="card" hidden>' api/static/web/chat.html              # ⇒ 1
+grep -c "id='card'\|getElementById('card')" api/static/web/chat.html      # ⇒ 0（旧的全局卡片没了）
+grep -c 'DEMO 版' api/static/web/chat.html                                # ⇒ 0（改前 1）
+# ⚠️ F8 旧判据的后半条 `grep -c 'chunk\|score\|相似度' api/static/web/chat.html` **改前改后都是 0** ——
+#    反证检验：取反（"卡片画了 id/相似度"）它照样打 0 ⇒ **它从来不是③的尺子**，已弃用（见 DEC-089 §五）。
+
+# ①'' 🔴 熔断卡片（DEC-090 · R3.2）—— 同样要"会动"的判据
+grep -n 'RagSse.breakerCard' api/static/web/chat.html      # ⇒ 非空（页面真的在用它）
+grep -c '<div class="breaker" hidden>' api/static/web/chat.html   # ⇒ 1（每条回答自带一个）
+grep -c '今日额度已用完 / 会话额度已用完' api/static/web/chat.html  # ⇒ 0（那句混话没了；改前 1）
+#    后端的对端：两种熔断的 429 必须带 **不同** 的 scope ——
+venv/bin/python -m pytest api/test_frontend_contract.py -q -k quota   # ⇒ 3 passed
+# ⚠️ **反证检验**（DEC-090 §五 实测）：把 breakerCard 里 global/session 两句**对调** ⇒ pass 27 / fail 2 ·
+#    拿掉 `scope="session"` ⇒ pass 11 / fail 2。⛔ 别只看"它绿"。
 
 # ② 那两条路由
 curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' http://127.0.0.1:8000/chat
@@ -105,7 +150,8 @@ curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' http://127.0.0.1:8000/a
 
 # ③ ⛔ 写不成命令的（手工，2026-10-06 实测过一次）
 #   · 硬门 A：Network 里 type = text/event-stream，正文增长时连接未关
-#   · 硬门 B：点 [来源:X] ⇒ 卡片里是【全文】（⛔ 不是摘要）
+#   · 硬门 B：点 [来源:X] ⇒ 卡片里是【全文】（⛔ 不是摘要）+ 卡片头有 id/相似度 +
+#     **再点同一条 ⇒ 收起** + 卡片在**该条回答下面**（⛔ 不是 log 末尾）
 #   · 硬门 C：点「停止」⇒ 请求变 (canceled) + 徽标「已中断」+ 费用行「中断未计费」
 #   · 硬门 D：接管页点开一行 ⇒ 看得见【完整上下文】（messages 序列）⇒ 批准 / 拒绝
 ```
@@ -113,6 +159,11 @@ curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' http://127.0.0.1:8000/a
 ## 关联
 
 - `docs/decisions/DEC-085-对话页一条线的四个契约.md`（A/B/C/D 四个契约 + 9 条裁定）
+- 🔴 `docs/decisions/DEC-089-引用卡片就地展开与sources帧补相似度.md`（**`F8`**：② 就地展开/收起 ·
+  ③ 卡片头 `id + 相似度` · `sources` 帧补 `similarity` · **两个出口同形的守卫**）
+- 🔴 `docs/decisions/DEC-090-熔断卡片与429补scope.md`（**`F4` 第三条 · `R3.2`**：四件事 ·
+    429 补 `scope` · **只接对话页这一条链**）· 对端 `docs/specs/breaker.md`（熔断器本身）·
+    `docs/specs/token_tracker.md`（两种额度的口径）
 - `docs/specs/api_v1_rag.md`（对端：`sources` 的 `index` / 末尾 `usage` 帧）· `docs/specs/sse.md`（共享 SSE 层）
 - `docs/decisions/DEC-033-上公网路线的两条前置约束.md` 🅱️（**后端先行** —— 前端是本刀才开始的）
 - 施工单 ⇒ `fastapi-rag-agent-TODO待办/施工单-20261006-对话页.md`

@@ -10,6 +10,73 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- ⭐ **熔断提示卡片：429 补 `scope`，卡片写清四件事（段 1 第四刀 · `F4` 第三条 · `R3.2`）**（2026-10-06 · `DEC-090`）——
+  **后端 3 处 / 约 8 行**（`api/exceptions.py` + `api/main.py` + `api/api_v1_rag.py`）· `api/static/js/sse.js` · `api/static/web/chat.html`。
+
+  **目标**：`施工单-本项目.md` 的 `R3.2` —— 熔断时前端必须画一张**明确的卡片**，写清**四件事**：
+  **现状 / 这不是故障 / 何时恢复 / 怎么联系**（`R3.3`：⛔ 不许退化成 500 / 白屏 / 通用错误页）。
+
+  - **改**：`chat.html` 的 429 分支从**一行字**改成**卡片**。`.breaker` **另起一个元素**，
+    ⛔ 不与引用卡片 `.card` 共用容器 —— 后者由 `_openIndex` 驱动、每次重画都被清空，共用一个会**互相抹掉**。
+  - **改（后端）**：`AppException` 加**可选 `scope`**；`stream_search` 那**两处**熔断各自标
+    `scope="session"` / `scope="global"`。
+    🔴 **为什么非标不可**：两种熔断 `ErrorCode` **都是 `QUOTA_EXCEEDED`**，光看 `code` **分不开**；
+    而它们的**出路不同** —— 会话级（`B8`）**开个新会话立刻能继续**，全站日级（`B11`）**只能等跨天**。
+    分不开 ⇒ 「何时恢复」**写不出来**，被会话级熔断的人会被那句「请明日再试」**白等一天**。
+  - **新**：`RagSse.breakerCard(scope, message)`（纯逻辑，`node --test` 钉着）。
+    ⚠️ 认不出的 `scope`（含字段缺失）⇒ 「何时恢复」画 `—`，**⛔ 不猜一个口径**。
+    ⚠️ 「现状」用**后端原话**，⛔ 前端不重编（重编 = 数字口径两份，会漂移且**页面上不报错**）。
+  - 🔴 **有意只接这一条链**：全仓 **35 处** `raise AppException(ErrorCode.QUOTA_EXCEEDED, …)`，
+    本刀只动 `stream_search` 那 **2 处**（其余不带 `scope` ⇒ 前端画 `—`，⚠️ **这是已知且有意的**）。改动面 = **bounded**。
+
+  ⚠️ **「怎么联系」现在是占位符**（业务方 2026-10-06 裁「先用占位符，后面我再设置」）——
+  ⛔ 写成 `admin@example.com` 那种**看着像真的**假邮箱 = 说假话（本仓：**宁可空着，不编数**）。
+  ⇒ 已登记 **`N13`**（`docs/待办总表.md`）。**它挡不住自己的上线；唯一拦法是本条被人读到。**
+
+  **判据（可打印）**：
+  ```bash
+  node --test api/static/js/sse.test.js                        # ⇒ ℹ tests 29 / pass 29 / fail 0（改前 23）
+  venv/bin/python -m pytest api/test_frontend_contract.py -q   # ⇒ 13 passed（改前 10）
+  grep -c '今日额度已用完 / 会话额度已用完' api/static/web/chat.html   # ⇒ 0（改前 1）
+  grep -c 'raise AppException(.*scope=' api/api_v1_rag.py      # ⇒ 2（改前 0）
+  ```
+  ⚠️ **⛔ 别把最后一条写成 `grep -c 'scope='`** —— 那样打出来是 **4**（**注释也算**），
+  正是本仓"拿一个混过的集合当计数"那一族（本刀写 `DEC` 时**自己已栽过一次**：35 写成了 39）。
+  🔴 **反证检验**：把 `global`/`session` 两句**对调** ⇒ **2 条红**；拿掉 `scope="session"` ⇒ **2 条红**。
+  两处都实测过并还原 ⇒ 这些断言**真在测那件事**（⛔ 不是"它绿"就算数）。
+
+- ⭐ **引用卡片：就地展开/收起 + 卡片头带 chunk id / 相似度（段 1 第三刀 · `F8`）**（2026-10-06 · `DEC-089`）——
+  `api/static/js/sse.js`（纯逻辑 +2 个函数）· `api/static/web/chat.html` · **后端只动两行**。
+
+  **目标**：**硬门 B 判定三句里剩下的两句**（第一句由 `DEC-085` 做掉）。
+  ② 「**再点能跳到原文位置**」· ③ 证真「点开能看到 **chunk id + 相似度分**」。
+
+  - **改**：引用卡片从「固定挂在 `#log` 末尾」改为「**挂在该条回答下面**」；**再点同一条 ⇒ 收起**
+    （业务方 2026-10-06 裁「**甲 · 就地展开/收起**」）。
+    ⚠️ **不做"真的跳原文"**：`documents` 表**没有任何位置字段**
+    （`api/db.py:65-71` 只有 `id/content/source/embedding/requested_by`）⇒ **没有位置可跳**。
+  - **改**：卡片头现在画 `[i] 来源` + `id=<chunk id> · 相似度 <分>`（缺值画 `—`）。
+  - **改**：`sources` 帧补 `similarity` —— ⚠️ **两个出口都加**
+    （`api/api_v1_rag.py` 流式 + `api/answer_with_citations.py` 非流式）。
+    🔴 那个数**本来就在手上**（`contexts` 里的 `r[3]`），只是没人往帧里放。
+  - **新**：`RagSse.formatSource` / `RagSse.toggleOpen`（纯逻辑，`node --test` 钉着）。
+    ⚠️ **卡片头的格式只许有一份实现**，有**结构型用例**挡着（「相似度」这个字面量在
+    `static/js` + `static/web` 里只能出现在 `sse.js`）。
+
+  ⚠️ **本条做完 ⛔ 不等于硬门 B 翻 ✅** —— 判定之外还有前提：**非流式链仍无界面** · 「无据拒答」未做。
+
+  🔴 **同批补上一条尺子**：`test_both_sources_exits_have_the_same_key_set`。
+  `answer_with_citations.py` 那句注释（「改一边忘另一边 ⇒ 两边各自的用例都是绿的」）
+  **在 2026-10-06 之前是真的**：实测**只改流式那侧**，连同其余 9 条用例 **一条都不红**（`DEC-089` §五）。
+
+  **判据（可打印）**：
+  ```bash
+  node --test api/static/js/sse.test.js          # ⇒ ℹ tests 23 / pass 23 / fail 0（改前 18）
+  venv/bin/python -m pytest api/test_frontend_contract.py -q   # ⇒ 10 passed（改前 7）
+  grep -c '<div class="card" hidden>' api/static/web/chat.html # ⇒ 1（改前 0）
+  grep -c 'DEMO 版' api/static/web/chat.html                   # ⇒ 0（改前 1）
+  ```
+
 - 🟢 **一条新规矩：`docs/规范/开发规范.md` §2.6·5「开新分支后，先核它从哪儿分出来的」**（2026-10-06）——
   起因是**同一天真栽了**：`git checkout -b <名>` 的 base 是 **`HEAD`**（⛔ 不是 `main`），
   而 HEAD 还停在刚合并的 `feat/approvals-page` 上 ⇒ 新分支从**上一件事**分出去。
@@ -983,6 +1050,11 @@ All notable changes to this project will be documented in this file.
   📄 该节现含三条轴对照表 + `ci-local.sh` 用法与判据。
 
 ### Changed
+
+- ⚠️ **`docs/specs/README.md` 的模块表重生成**（2026-10-06）—— `bash scripts/spec_status.sh --write`。
+  本次是**生成物的例行同步**：除本刀（`DEC-089`）的 `answer_with_citations.py` 78→84 ·
+  `api_v1_rag.py` 1106→1111 外，还带出**一处此前就漂了的** —— `main.py` 743→752
+  （`F1` 那刀加了两条页面路由，但**当时没重生成**）。
 
 - 🔴 **四处后端契约改动（为对话页）**（2026-10-06 · `DEC-085` 契约 A–D + 裁定 #12）—— ⚠️ **帧序、历史键、`is_active` 都动了**，逐条如下。
 

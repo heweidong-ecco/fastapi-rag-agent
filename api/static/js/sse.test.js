@@ -6,7 +6,7 @@ const assert = require('node:assert');
 
 const {
   parseSseChunk, payloadKind, citationIndexes, splitCitations, resolveCitations,
-  classifyExit, formatCost,
+  classifyExit, formatCost, formatSource, toggleOpen, breakerCard,
 } = require('./sse.js');
 
 test('parseSseChunk 只吐【完整】的帧，半截留在 rest 里', () => {
@@ -138,7 +138,8 @@ test('把 sse.js 当【经典脚本】跑一遍 ⇒ window.RagSse 存在且接�
   const w = loadInBrowserLikeSandbox();
   assert.strictEqual(typeof w.RagSse, 'object', 'sse.js 没有挂 window.RagSse ⇒ 页面里 RagSse.xxx 全报 ReferenceError');
   for (const k of ['parseSseChunk', 'payloadKind', 'citationIndexes', 'splitCitations',
-                   'resolveCitations', 'classifyExit', 'formatCost']) {
+                   'resolveCitations', 'classifyExit', 'formatCost',
+                   'formatSource', 'toggleOpen', 'breakerCard']) {
     assert.strictEqual(typeof w.RagSse[k], 'function', `window.RagSse.${k} 不是函数`);
   }
 });
@@ -204,4 +205,121 @@ test('formatCost 是 6 位小数且带 $', () => {
   assert.strictEqual(formatCost(0.0123456), '$0.012346');
   assert.strictEqual(formatCost(0), '$0.000000');
   assert.strictEqual(formatCost(null), '—');
+});
+
+// ---------- 引用卡片：卡片头 / 就地展开（`DEC-089` · 硬门 B 的另外两句） ----------
+//
+// 🔴 为什么这两件抽进本文件：硬门 B 的判定有三句，其中两句是
+//    「再点能跳到原文位置」与「点开能看到 chunk id + 相似度分」—— 它们**能写成命令**
+//    （本仓立场：写不出命令的，就是还没核过）。DOM 怎么挂仍留在 `chat.html`（手工验）。
+
+test('formatSource 拼出卡片头：[编号] 来源 · chunk id · 相似度', () => {
+  const out = formatSource({ index: 1, source: 'handbook.md', id: 812, similarity: 0.8312 });
+  assert.strictEqual(out.title, '[1] handbook.md');
+  assert.strictEqual(out.meta, 'id=812 · 相似度 0.831');
+});
+
+test('formatSource 缺字段画 —，⛔ 不许把 undefined / NaN 画到页面上', () => {
+  // ⚠️ 这不是假想：非流式那条链（`answer_with_citations.py`）的上下文里**没有** similarity
+  //    ⇒ 它会诚实地传 `None` 过来。页面显示 `undefined` 会被读成"这个功能坏了"。
+  const out = formatSource({ index: 2, source: 'b.md' });
+  assert.strictEqual(out.meta, 'id=— · 相似度 —');
+  for (const v of Object.values(out)) {
+    assert.ok(!/undefined|NaN|null/.test(v), `卡片头里出现了 ${v}`);
+  }
+});
+
+test('formatSource：相似度 0 与「没有相似度」是两件事（⛔ 别都画成 —）', () => {
+  // 同 `formatCost` 的立场：`null` ⇒ `—`（"不知道"），`0` ⇒ 真值。
+  assert.strictEqual(
+    formatSource({ index: 3, source: 'c.md', similarity: 0 }).meta, 'id=— · 相似度 0.000');
+  assert.strictEqual(
+    formatSource({ index: 3, source: 'c.md', similarity: null }).meta, 'id=— · 相似度 —');
+});
+
+test('toggleOpen：没展开就展开、点同一条收起、点另一条换内容（= 判定里的「再点」）', () => {
+  assert.strictEqual(toggleOpen(null, 1), 1, '第一次点 ⇒ 展开');
+  assert.strictEqual(toggleOpen(1, 1), null, '🔴 再点同一条 ⇒ 收起（本仓 2026-10-06 裁的「甲」）');
+  assert.strictEqual(toggleOpen(1, 2), 2, '点另一条 ⇒ 换内容，⛔ 不是同时开着两张卡片');
+});
+
+test('卡片头只许有一份实现（结构型：数的是【文件】，⛔ 不是"我记得没写第二份"）', () => {
+  // 🔴 与上面那条「引用正则只许有一份」同型：两处一旦漂移，页面上的编号与卡片里的数
+  //    不是同一批，而**页面上不报任何错**（本仓原话：「有结构才执行，只有文字就漏」）。
+  const hit = frontendSources()
+    .filter((f) => fs.readFileSync(f, 'utf8').includes('相似度'))
+    .map((f) => path.relative(path.join(JS_DIR, '..', '..'), f).replace(/\\/g, '/'));
+  assert.deepStrictEqual(hit, ['static/js/sse.js'],
+    '「相似度」在别处又出现了一份 ⇒ 卡片头有两套格式，会漂移');
+});
+
+// ---------- 熔断提示卡片：`R3.2`「明确卡片」的四件事 ----------
+//
+// 🔴 为什么抽进本文件：`R3.2` 的验收原文是「卡片上写清四件事 ——
+//    **现状 / 这不是故障 / 何时恢复 / 怎么联系**」（`施工单-本项目.md` §要求 R3）。
+//    这四件里**三件是常量**，只有「何时恢复」随**熔断的两种**变 —— 而它**能写成命令**。
+//
+// 🔴 为什么非分两种不可（改这一刀之前**页面上的真缺陷**）：
+//    `chat.html` 原先 429 只写一句「今日额度已用完 / 会话额度已用完」——
+//    **把两种恢复条件完全不同的熔断混成了一句**：
+//      · 全站日级（`B11`）⇒ 全站共享，你**做什么都救不回来**，只能等跨天
+//      · 会话级（`B8`）  ⇒ 是你**自己这个 thread** 的今日用量 ⇒ **开个新会话立刻能继续**
+//    两者 `code` **都是 `QUOTA_EXCEEDED`**（`api/exceptions.py` 就一个枚举）⇒
+//    **靠前端从 `code` 分不出是哪种**，所以后端补了 `scope` 字段（`DEC-090`）。
+
+const _FOUR = ['现状', '这不是故障', '何时恢复', '怎么联系'];
+
+function _rows(card) {
+  return Object.fromEntries(card.items.map((it) => [it.k, it.v]));
+}
+
+test('breakerCard：四件事一件不少，且⛔ 一行都不许空', () => {
+  const card = breakerCard('global', '今日全站额度已用完（已使用 1000000 / 上限 1000000 tokens）');
+  assert.deepStrictEqual(card.items.map((it) => it.k), _FOUR,
+    'R3.2 的四件事必须原样都在、且顺序固定（卡片是照着念的）');
+  for (const [k, v] of Object.entries(_rows(card))) {
+    assert.ok(typeof v === 'string' && v.trim().length > 0, `「${k}」是空的 —— 卡片上会是一块空白`);
+  }
+  assert.ok(card.title.trim().length > 0, '卡片没标题');
+});
+
+test('breakerCard：后端原文案【原样】进「现状」，⛔ 不自己重编一句', () => {
+  // 🔴 原文案里带着「已使用 X / 上限 Y tokens」—— 那正是 `R3.1` 要的「可识别」那半。
+  //    前端重编 = 两处各写一份数字口径 ⇒ 会漂移，且**页面上不报错**。
+  const why = '今日全站额度已用完（已使用 1000000 / 上限 1000000 tokens），请明日再试';
+  assert.strictEqual(_rows(breakerCard('global', why))['现状'], why);
+})
+
+test('breakerCard(global)：何时恢复 = 等跨天，⛔ 不许说"开新会话"（那样说就是骗人）', () => {
+  const v = _rows(breakerCard('global', 'x'))['何时恢复'];
+  assert.ok(/明日|自然日/.test(v), `全站级的恢复口径是跨天，实测拿到：${v}`);
+  assert.ok(!/新会话/.test(v), '全站共享，开新会话一样吃 429 —— ⛔ 别给一个做不到的出路');
+});
+
+test('breakerCard(session)：何时恢复 = 开新会话立刻可继续（`chat.html` 有「＋ 新会话」按钮）', () => {
+  const v = _rows(breakerCard('session', '本会话预算已用完（已使用 50000 tokens，会话上限 50000 tokens）'))['何时恢复'];
+  assert.ok(/新会话/.test(v), `会话级是可自救的，实测拿到：${v}`);
+  assert.ok(!/明日/.test(v),
+    '🔴 会话级不是"明日恢复" —— 「开新会话立刻能继续」才是实话；这正是改前那句混话的错');
+});
+
+test('breakerCard：认不出的 scope（含缺字段）⇒「何时恢复」画 —，⛔ 不猜一个口径', () => {
+  // ⚠️ 这不是假想：中间件的限流 429 也走同一个 `error` 分支，它**没有** scope。
+  //    猜成 global 会让「明日起恢复」出现在一个**根本没有日级额度**的场合。
+  for (const s of [undefined, null, '', 'unknown']) {
+    const rows = _rows(breakerCard(s, 'x'));
+    assert.strictEqual(rows['何时恢复'], '—', `scope=${JSON.stringify(s)} 时不该编一个恢复口径`);
+    assert.strictEqual(rows['现状'], 'x', '认不出 scope ⛔ 不代表可以把后端原话也丢掉');
+  }
+});
+
+test('改前那句「混两种」的话已从 chat.html 删掉（结构型：数的是【文件】，⛔ 不是"我记得删了"）', () => {
+  // 🔴 与「引用正则只许有一份」同型。那句话**不报错**、只是把两种恢复条件说成一种 ⇒
+  //    页面上看着一切正常，只有真被熔断的人被引到错误的处置上。
+  // 针脚分两段拼，让本文件自身不含那个连续子串（否则这条守卫会被**自己**绊倒）。
+  const MERGED = '今日额度已用完' + ' / 会话额度已用完';
+  const hit = frontendSources()
+    .filter((f) => fs.readFileSync(f, 'utf8').includes(MERGED))
+    .map((f) => path.relative(path.join(JS_DIR, '..', '..'), f).replace(/\\/g, '/'));
+  assert.deepStrictEqual(hit, [], `那句把两种熔断混起来的话还在：${hit.join(', ')}`);
 });
