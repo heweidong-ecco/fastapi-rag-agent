@@ -3,7 +3,7 @@
 | 项 | 内容 |
 |---|---|
 | **状态** | 🟡 **可用** —— 应用装配 + **3 条中间件** + 全局异常处理 + 看板挂载<br>✅ 2026-09-30 起**限流分桶会验签了**（修 `B9-b`）· ✅ **4 处错误文案已修 + 加了 `retry_after`**（修 `B12`）<br>🔴 **2026-10-03（`①b` Task 6 · `DEC-046`）：`QuotaMiddleware` 的额度口径从「每日请求【次数】」换成「按用户按天 **token**」**（= `R1.3`）。<br>🔴 **2026-10-05（批 3 · `N9`）：两条中间件在【依赖不可用】时都改为 fail-open** —— 限流侧身份 `None` ⇒ 跳过用户级限流；额度侧身份 `None` ⇒ 跳过额度检查（`DEC-079`）。 |
-| **对外提供** | `app`（FastAPI 实例）· `MIDDLEWARE_EXEMPT_PATHS`（**:118** · 🔴 **2026-10-05 由 `PUBLIC_PATHS` 改名**，见下）· `resolve_rate_limit_identity()`（**:126**）<br>🔵 2026-10-03 新增三个**配额判定件**：`_next_day_reset_ts()`（**:322**）· `quota_reject_payload(info)`（**:329**）· `quota_headers(info)`（**:357**）—— **纯函数，不连 DB/Redis 就能单测**<br>🔵 **2026-10-05 新增** `resolve_quota_identity()`（**:180**）—— 同上理由抽出来的纯函数（`QuotaMiddleware` 那段的身份解析，原先**内联在 `dispatch` 里、没法单测**） |
+| **对外提供** | `app`（FastAPI 实例）· `MIDDLEWARE_EXEMPT_PATHS`（**:118** · 🔴 **2026-10-05 由 `PUBLIC_PATHS` 改名**，见下）· `resolve_rate_limit_identity()`（**:126**）<br>🔵 2026-10-03 新增三个**配额判定件**：`_next_day_reset_ts()`（**:322**）· `quota_reject_payload(info)`（**:329**）· `quota_headers(info)`（**:357**）—— **纯函数，不连 DB/Redis 就能单测**<br>🔵 **2026-10-05 新增** `resolve_quota_identity()`（**:180**）—— 同上理由抽出来的纯函数（`QuotaMiddleware` 那段的身份解析，原先**内联在 `dispatch` 里、没法单测**）<br>🆕 **2026-10-06 新增 `GET /chat`**（**:531**）—— 302 到 `/static/web/chat.html`，`include_in_schema=False` |
 | **谁在用** | 服务入口（uvicorn `main:app`）· ⚠️ **几乎每个测试**都经 `api/conftest.py` 的 `from main import app` |
 | **规模** | 🔴 **别写死行数** —— 跑 `wc -l api/main.py`（2026-10-05 时为 **733**；同一批编辑让它从 651 变过来）<br>⚠️ **本节行号同理，改完必须重取** —— 2026-10-05 那次编辑就把旧行号**全部**打歪过一次 |
 
@@ -22,6 +22,15 @@
   ⚠️ 现成反例就写在名单里：`/api/v1/admin/create_user` **在名单内，却要 `require_admin`**（`api_v1.py:161`）。
   ⛔ 判断一条端点"公不公开"，**别读这个名单** —— 跑 `scripts/check_route_auth.py`。
 - **全局异常处理器**（`:476` / `:495`）
+- 🔵 **2026-10-06（`DEC-085` 裁定 #10）：新增 `GET /chat` → 302 `/static/web/chat.html`**（`:531`）
+  —— 本仓**第一条面向人的页面路由**（此前 `/` 返回的是 JSON 服务索引，不是页面）。
+  ⚠️ `include_in_schema=False`（它不是 API，⛔ 不进 openapi）· ⚠️ 302 而**不是**直接返回文件
+  （页面本体由已挂的 `/static` 托管：零 CORS、零新服务、零构建）。
+  🔴 **它是一条【新的公开路由】** ⇒ 会让 `scripts/check_route_auth.py --baseline` 报"多了一条"
+  ⇒ **已显式写进 `scripts/route-auth-baseline.txt`**（一次有意识的操作，⛔ 不是顺手刷基线）。
+  📌 守卫：`api/test_chat_page.py` **3 条**（跳转目标正确 / 目标文件真在磁盘上且是 `text/html` / **不在 openapi 里**）
+  —— ⚠️ 最后那条是必需的：`check_route_auth.py --baseline` **抓不到"路由被删"**
+  （它会把少掉的那条报成"少了 1 条（修好了）"并 `exit 0`）。
 
 ## 🟡 做到哪 / 缺什么
 
@@ -57,6 +66,8 @@
 | ⚠️ **「`/metrics` 和 `/health` 受保护」** | ⛔ **被 `MIDDLEWARE_EXEMPT_PATHS` 豁免** ⇒ **绕过限流与配额**（**故意**的：否则 K8s/Docker 探针会被 429 打成不健康）<br>⚠️ **代价**：`/metrics` 可被无限刷。**已登记未做**（`B9-b` 风险说明） |
 | 🔴 **「`X-Quota-Limit` 说的是调用次数」** | ⛔ **2026-10-03 起它说的是【每天多少 token】**（头名**故意没改** —— 客户端已在读，改名的破坏面比改语义大）。<br>`X-Quota-Reset` 仍是**次日 0 点的 Unix 时间戳**（日预算由 SQL 的 `created_at >= CURRENT_DATE` 翻页）。 |
 | 🔴 **「配额那层拦不住就拒服务（fail-closed）」** | ⛔ **它是 fail-open 的** —— `get_daily_token_usage` **查库失败 ⇒ 退回内存缓存值 ⇒ 放行**。<br>**与 `B8` / `B10` 同取向**（额度是**成本控制**，不是安全边界）。<br>⛔ **别"顺手统一"成 `deps.py` 鉴权那套 fail-closed** —— 两者**故意不同**。 |
+| ⚠️ **「`/` 也是一个页面（或 `/chat` 与 `/` 是一回事）」** | ⛔ **不是**。**`/` 返回 JSON**（`{"status":"ok","services":{…}}` —— 一个**服务索引**，给人看有哪些 API 前缀），**`/chat` 才是页面**。<br>两者都**不在 openapi 里**（`/` 是普通 JSON 路由、`/chat` 显式 `include_in_schema=False`）⇒ ⛔ **别因为"都查不到"就把它们当一类**。<br>⚠️ **别想着把 `/` 改成跳转对话页** —— 那条是**线上契约**（已有人/脚本在读那个 JSON）。 |
+| ⚠️ **「`/chat` 在路由基线里 ⇒ 它被门保护着」** | ⛔ **基线只记录"有这条且无鉴权依赖"，⛔ 不防它被删**。<br>`check_route_auth.py --baseline` 见到**少一条**会报「少了 N 条（修好了）」并 **`exit 0`** ⇒ **删掉 `/chat` 全绿**。<br>⇒ 真正的守卫是 `api/test_chat_page.py` 那 3 条（含"路由必须 302 到 `/static/web/chat.html`"）。 |
 
 ## 关联
 
