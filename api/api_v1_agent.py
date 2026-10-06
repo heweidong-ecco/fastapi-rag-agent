@@ -27,6 +27,10 @@ from pending_approvals import (
     find_by_raw_thread_id,            # 丙段：按原 thread_id 反查**属主**
     approval_round_cap,               # 轮次上限（`DEC-062 §六·2`）
 )
+# 🔴 2026-10-06（`DEC-088` §3.2）：审批留痕。⚠️ 必须是**模块级名字绑定** ——
+#    测试靠 `monkeypatch.setattr(api_v1_agent, "record_decision", …)` 换掉它。
+#    ⛔ 别改成函数体里 `from approval_audit import …`：那样 patch 会失效、用例变**假绿**。
+from approval_audit import record_decision, summarize_tool_calls
 # 角色（`DEC-046`）—— `/agent/approve` 的「本人或 admin」判据走这里，
 # ⛔ 别在本文件另写 `user_name == "admin"`（那就又多一处口径）。
 from permission import UserRole, get_user_role
@@ -437,6 +441,7 @@ async def approve_agent_action(
     thread_id: str,
     approved: bool,
     edited_answer: str = None,
+    owner: str = None,
     user_name: str = Depends(get_current_user_hybrid),
 ):
     """
@@ -468,6 +473,16 @@ async def approve_agent_action(
        · 收尾成功 ⇒ `status="approved"/"rejected"` + **`forced_finish=True`** + `rounds`
        · 连收尾提示都拦不住（模型仍要敏感工具）⇒ `status="error"` + `rounds`，该轮终止、⛔ **不入队**
        ⚠️ 没有上限的后果：模型可**无限**要求敏感工具、人工就得无限批（实测 3 次收敛，但**没有任何机制阻止 30 次**）。
+
+    🔴 **2026-10-06（`DEC-088` 裁定 6）起多一个可选 `owner`**：`thread_id` 的默认值在
+       10 条 agent 端点上都是 `"default"` ⇒ 两个用户都不传就**撞车** ⇒ 本端点会走上面那条
+       「对应多条待审批会话」而**谁也批不了**。`owner` 用来**收窄候选**。
+       ⚠️ **只是收窄，⛔ 不是授权** —— 传了它照样走归属校验（给了却一条不匹配 ⇒ 落在「0 条」那支）。
+       ⚠️ 默认 `None` ⇒ **退回现有行为**（`DEC-056` 丙段"按 raw 反查属主"的语义**没动**）。
+
+    🔴 **2026-10-06（`DEC-088` §3.2）起每次真的裁决都留痕**（`approval_audit.record_decision`）——
+       记 `owner` / `actor` / `decision` / `edited` / `rounds` / `reason`。
+       写库失败**只打日志**（fail-open）⇒ ⛔ 不许让本端点 500。
     """
     # B8 · 会话级 token 上限（`DEC-041`）+ B11 · 全站日级熔断（`①b` Task 4）。
     # 🔴 2026-10-05（批 7 · `N11`）补 —— 本端点此前是全仓**唯一**既无 B8 也无 B11 的
@@ -486,6 +501,8 @@ async def approve_agent_action(
     # 🔴 丙段（`DEC-056`）：**先按【原 thread_id】查队列定属主，再按属主拼键**。
     #    ⛔ 别按调用方拼 —— admin 会拼出自己那个不存在的桶 ⇒ **永远批不了别人的**（硬门 D 死掉）。
     candidates = find_by_raw_thread_id(thread_id)
+    if owner is not None:                     # ← 裁定 6：先按 owner 收窄候选（⛔ 不是授权）
+        candidates = [c for c in candidates if c["user_name"] == owner]
     if not candidates:
         # ⚠️ 队列是**唯一**入口（`MemorySaver` 反查不出"谁卡住了"）⇒ 这里没有 = 没有可批的。
         #    已知代价：`AGENT_CHECKPOINT_BACKEND=sqlite` 重启后（图在盘上、队列在内存）
@@ -502,10 +519,13 @@ async def approve_agent_action(
                         f"请先看 `/agent/pending` 确认是哪一个"),
         }
 
-    owner = candidates[0]["user_name"]
+    owner_name = candidates[0]["user_name"]
     # 🔴 归属校验：**本人或 admin**（admin 那条不是可省的 —— 队列本来就跨用户）。
-    if user_name != owner and get_user_role(user_name) != UserRole.ADMIN:
-        return {"status": "error", "message": f"无权审批：该会话属于 {owner}"}
+    #    ⚠️ 局部名是 `owner_name` 而**不是** `owner`：`owner` 现在是本函数的**可选形参**
+    #       （裁定 6，用来收窄候选）⇒ 直接叫 `owner` 会**把形参就地覆盖掉**，
+    #       而那个值下面还要用（重新入队时按属主登记）。
+    if user_name != owner_name and get_user_role(user_name) != UserRole.ADMIN:
+        return {"status": "error", "message": f"无权审批：该会话属于 {owner_name}"}
 
     # ⚠️ 用**登记时拼好的**那个键（`candidates[0]["thread_id"]`），⛔ **不在这里重拼** ——
     #    重拼 = 又多一处"拼法"口径，两处一旦不一致，`resolve()` 会静默清不掉（幂等、不报错）。
@@ -543,6 +563,30 @@ async def approve_agent_action(
     pending_calls = (
         getattr(current_state.values["messages"][-1], "tool_calls", None) or []
     )
+
+    # 🔴 留痕（`DEC-088` §3.2）：**只记"真的落到图上的裁决"**。
+    #    ⚠️ 位置是刻意的 —— 必须在上面那道「图没停在审批点 ⇒ 登记陈了」的守卫**之后**：
+    #       那一条发生在归属校验**通过之后**，把它也算成一次裁决就是**假留痕**
+    #       （`DEC-088` §3.2 只列了三条"不记"，这是第四条，见施工单具体化 C）。
+    #    ⚠️ `owner_name` 是**会话的**、`user_name` 是**动手的**（admin 接管时**必然不同**）
+    #       —— ⛔ 别合成一个字段。
+    #    ⚠️ `edited` 的真实语义是「**代替模型给出了这次工具调用的结果**」，⛔ 不是"改写了答案"。
+    #    ⚠️ **两道 fail-open，⛔ 不是重复**：`record_decision` 内部那道拦的是"写库失败"；
+    #       外面这道拦的是**参数绑定失败**（它发生在**进函数之前** —— 日后签名漂移
+    #       ⇒ `TypeError` ⇒ 裸调用会把审批打成 500，而留痕是**旁路**）。
+    try:
+        record_decision(
+            owner=owner_name,
+            actor=user_name,
+            decision="approved" if approved else "rejected",
+            edited=bool(approved and edited_answer is not None),
+            raw_thread_id=thread_id,
+            graph=graph_name,
+            rounds=candidates[0].get("rounds", 1),
+            reason=summarize_tool_calls(pending_calls),
+        )
+    except Exception as e:
+        print(f"[ApprovalAudit] 留痕写入失败（已忽略）: {e}")
 
     if approved:
         if edited_answer is not None:
@@ -631,7 +675,7 @@ async def approve_agent_action(
             }
         # 未到上限 ⇒ **重新入队**（按**属主**登记，⛔ 不是按调用方 —— 批的人可能是 admin）。
         # ⚠️ `raw_thread_id` 用**请求里那个原值**（⛔ 不是拼过的 `sess`）—— `register` 的契约要求原值。
-        register(sess, owner, new_calls, raw_thread_id=thread_id, graph=graph_name,
+        register(sess, owner_name, new_calls, raw_thread_id=thread_id, graph=graph_name,
                  rounds=rounds + 1)
         return {
             "status": "pending_approval",       # 第三态：批了，但它**又**停下来了
