@@ -184,3 +184,84 @@ def test_answer_with_citations_sources_carry_the_same_shape(monkeypatch):
     assert sources[1]["content"] == "乙" * 150
     assert sources[1]["content_preview"] == "乙" * 100
     assert sources[1]["id"] == 2
+
+
+# ==================== 契约 B：末尾的 `usage` 汇总帧 ====================
+#
+# 🔴 一条贯穿三节的判据：**记账了才出帧**。
+#    帧不是"再算一遍"，是**把已经写进账本的那笔念回来** —— 两者同源。
+
+
+def test_usage_frame_is_last_and_after_sources(monkeypatch, rag_env):
+    """🔴 契约 B 的帧序：`content… → [DONE] → sources → usage`（usage **最后**）。
+
+    ⚠️ `[DONE]` 排在 `sources` 之前是本端点的**线上契约**（前端按它适配）——
+       本用例把三段一起钉住，⛔ 不许"顺手整理成先 sources 再 [DONE]"。
+    """
+    llm = _PromptCapturingLLM()
+    monkeypatch.setattr(rag_env.rag, "get_llm_stream", lambda: llm)
+
+    payloads = payloads_of(drive(rag_env, llm, citations=True)[0])
+
+    assert payloads[-1] != "[DONE]", "usage 必须排在 [DONE] 之后"
+    assert isinstance(payloads[-1], dict) and "usage" in payloads[-1], "最后一帧必须是 usage"
+
+    kinds = ["done" if p == "[DONE]" else
+             ("sources" if "sources" in p else
+              ("usage" if "usage" in p else
+               ("error" if "error" in p else "content")))
+             for p in payloads]
+    assert kinds[-3:] == ["done", "sources", "usage"], f"帧序不对：{kinds}"
+
+
+def test_usage_frame_reports_the_numbers_that_were_billed(monkeypatch, rag_env):
+    """🔴 契约 B 的同源判据：帧里的数 = 账本里的数。
+
+    ⚠️ 本用例**不桩** `record_from_response`（只桩了落库那一步）——
+       所以它同时钉住「**记账了才出帧**」：没记成的话 `record` 返回 None，帧根本不出现。
+
+    🔴 `cost_usd` 的期望值从 `PRICING` **现推**，⛔ 不是拿 `tt.compute_cost(...)` 当期望
+       —— 那是拿函数和自己比（同义反复）。本仓 2026-10-06 在 Task 2 栽过一次，见
+       `api/test_token_tracker_cost_helpers.py` 同款注释。
+    """
+    import token_tracker as tt
+
+    llm = _PromptCapturingLLM(
+        usage={"input_tokens": 1200, "output_tokens": 800, "total_tokens": 2000}
+    )
+    monkeypatch.setattr(rag_env.rag, "get_llm_stream", lambda: llm)
+
+    payloads = payloads_of(drive(rag_env, llm)[0])
+    # ⚠️ **按内容找帧，⛔ 不取 `payloads[-1]`** —— 「它在最后」是上面那条用例的事；
+    #    这里不写死位置，两条用例才各量一件事（否则位置一错，两条一起红，分不清是哪种坏）。
+    usage = next(p["usage"] for p in payloads if isinstance(p, dict) and "usage" in p)
+
+    assert usage["model"] == "fake-answer-model", "🔴 从 llm 对象取，⛔ 不许写死"
+    assert usage["prompt_tokens"] == 1200
+    assert usage["completion_tokens"] == 800
+    pricing = tt.PRICING.get("fake-answer-model", tt._DEFAULT_PRICING)
+    expected_cost = (1200 / 1000) * pricing["prompt"] + (800 / 1000) * pricing["completion"]
+    assert usage["cost_usd"] == expected_cost
+
+
+def test_no_usage_frame_when_nothing_was_billed(monkeypatch, rag_env):
+    """🔴 反面守卫：**没记账 ⇒ 不许出帧**（两者同源）。
+
+    ⚠️ 本用例在 Task 3 动工**之前就是绿的**（现状本来就不出帧）⇒
+       **"它现在绿"证明不了它在测那件事**。只有反证检验（把 `if payload is not None:`
+       改成无条件 yield）让它**变红**，才算数。见施工单 Step 6 ②。
+    """
+    class _NoUsageLLM(_PromptCapturingLLM):
+        async def astream(self, messages):
+            self.seen_messages = messages
+            for t in self._texts:
+                yield AIMessageChunk(content=t)
+            # ⛔ 末帧**不带** usage_metadata —— 模拟"服务没回用量"
+
+    llm = _NoUsageLLM()
+    monkeypatch.setattr(rag_env.rag, "get_llm_stream", lambda: llm)
+
+    payloads = payloads_of(drive(rag_env, llm)[0])
+    assert not any(isinstance(p, dict) and "usage" in p for p in payloads), \
+        "一笔账都没记，就不该有 usage 帧 —— 出了帧等于在报一个编出来的数"
+    assert payloads[-1] == "[DONE]"

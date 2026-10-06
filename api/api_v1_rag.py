@@ -20,7 +20,7 @@ from exceptions import ErrorCode, AppException
 # ⚠️ `token_tracker` 模块级只 import `os/json/threading` 等标准库 + `token_config`
 #    （`db` / `langchain` 都是**函数内**惰性导入）⇒ 放文件头**不破坏**本文件
 #    「导入期不拉 langchain」的既有做法（与上面 `MAX_TOKENS_ANSWER` 同一条理由）。
-from token_tracker import check_session_token_budget, record_from_response
+from token_tracker import check_session_token_budget, record_from_response, usage_summary
 # B11（①b Task 4）：全站日级熔断。与 B8 并列，⛔ 别合并（B8 按会话 / B11 按全站）。
 # ⚠️ breaker 只在**函数内**惰性导入 token_tracker ⇒ 放文件头不破坏本文件
 #    「导入期不拉重依赖」的既有做法（同上面 `token_tracker` 那条注释的道理）。
@@ -653,17 +653,24 @@ class _StreamUsageTap:
         return llm_chunk_text(chunk)
 
     def record(self, llm, *, user_name, thread_id):
-        """收尾（**只在这条出口**）时调用：聚合块交给 `record_from_response`。
+        """收尾（**只在这条出口**）时调用：先记账，**成了才返回帧载荷**。
+
+        🔴 `DEC-085` 契约 B：返回的是 `usage` 帧的载荷（`dict`），⛔ 不再是 `bool`。
+           判据只有一条 —— **记账了才出帧、没记账就不出帧**（两者同源）。
+           载荷由 `token_tracker.usage_summary` 拼，⛔ **不在这里重算一遍模型名与钱**
+           （那会造出第二份取数口径，`DEC-072` 的代价就是从那儿来的）。
 
         ⚠️ 它**只在正常跑完**那条路被调 —— 取消 / 异常时带 usage 的那一帧根本没到
-           ⇒ 如实不记，⛔ **不编一个数进账本**（`DEC-053` §遗留·2）。
+           ⇒ 如实不记、也不出帧，⛔ **不编一个数进账本**（`DEC-053` §遗留·2）。
         """
         if self._agg is None:
-            return False
-        return record_from_response(
+            return None
+        if not record_from_response(
             llm, self._agg, "answer_generation",
             user_name=user_name, thread_id=thread_id,
-        )
+        ):
+            return None
+        return usage_summary(llm, self._agg)
 
 
 # 🔴 2026-10-04（`DEC-055`）：`INTERRUPTED_SUFFIX` 与 `_persist_interrupted_turn` **搬去
@@ -790,7 +797,8 @@ async def stream_search(
         # 🔴 2026-10-06（`DEC-084`）：记账排在【任何 `yield` 之前】（`sse.py` 约束① 同源）——
         #    `yield` 是 await 点，被"二次投递的取消"打断 ⇒ 排在它后面的收尾**一件都不跑**，
         #    可钱**已经花了**。⚠️ `persist_turn` 仍留在原位（那是 `DEC-055` 定的，⛔ 本轮不动它）。
-        tap.record(get_llm_stream(), user_name=user_name, thread_id=thread_id)
+        # 🔴 `DEC-085` 契约 B：`record` 现在**返回载荷**（`None` = 没记成）。
+        payload = tap.record(get_llm_stream(), user_name=user_name, thread_id=thread_id)
         # 发送结束信号
         yield DONE_FRAME
         # ---- 在这里记录对话历史 ----
@@ -803,6 +811,11 @@ async def stream_search(
         # 如果有引用，在结束后发送来源列表
         if req.citations and sources_list:
             yield sse_frame({"sources": sources_list}, ensure_ascii=True)
+        # 🔴 `DEC-085` 契约 B：本轮的 token / 费用 —— **纯追加的最后一帧**。
+        #    ⛔ 不许挪到 `[DONE]` 之前（那是线上契约，前端按"见 [DONE] 后才收 sources/usage"适配）。
+        #    ⚠️ 取消 / 出错时**没有**这一帧 —— 前端按"缺这一帧"处理，⛔ 别补一个 0。
+        if payload is not None:
+            yield sse_frame({"usage": payload}, ensure_ascii=True)
 
     async def _on_error(exc, collected):
         """🔴 **错误路径的旧行为：只有 error 帧、没有 `[DONE]`** —— 显式覆盖骨架的默认尾巴。
