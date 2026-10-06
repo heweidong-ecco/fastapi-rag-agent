@@ -23,3 +23,8 @@
 #    （它是给人打开 HTML 的跳转，本身不含数据；真正的边界在它调的后端接口上 ——
 #     /agent/pending · /agent/pending/context · /agent/approve · /agent/approvals/history 四条都带鉴权）。
 /approvals
+# 🟢 2026-10-06（DEC-093 · F2）新增 1 条：/trace —— **执行轨迹页的入口 URL**，故意公开
+#    （同上：它是给人打开 HTML 的跳转，本身不含数据；真正的边界在它调的两条接口上 ——
+#     /agent/trace/{thread_id} · /agent/trace/{thread_id}/cost，两条都带鉴权）。
+#    ⚠️ 它替代了旧的 /static/trace_viewer.html —— 那个页面 fetch 时不带认证头 ⇒ 必 401。
+/trace

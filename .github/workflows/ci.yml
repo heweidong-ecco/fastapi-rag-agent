@@ -252,3 +252,4 @@ jobs:
           echo "--- 前端纯逻辑（node --test）---"
           node --test api/static/js/sse.test.js
           node --test api/static/js/approvals.test.js
+          node --test api/static/js/trace.test.js

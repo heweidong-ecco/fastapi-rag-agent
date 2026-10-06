@@ -30,6 +30,16 @@
   ③ 每日预算（**token**，`ROLE_TOKEN_BUDGET`，`:59` **别名** → `token_config.ROLE_DAILY_TOKEN`）
 - **10 个汇总函数**（⚠️ 行号 2026-10-04 重取）：`get_daily_token_usage`(:257) · `get_user_summary`(:316) · `get_purpose_summary`(:323) · `get_thread_summary`(:328) · ⭐ **`get_user_overview`(:336) ← Task 7 新增** · `get_recent_usage`(:399) · `get_token_budget_info`(:477) · `generate_monthly_report`(:493) · `get_daily_usage_cost`(:722) · `get_intercept_count`(:772)
 - **拦截记录**：`record_intercept`(:746)
+- 🆕 **2026-10-06（`DEC-093` · `F2`）：`thread_cost_breakdown(user_name, thread_id, *, include_all=False)`** ——
+  **逐笔**花费明细（成本轴的读侧出口，给 `/agent/trace/{thread_id}/cost` 用）。
+  回 `{items, total, truncated}`；`items` 按 `created_at DESC`、上限 `_BREAKDOWN_LIMIT = 2000`。
+  🔴 **`total` 由 SQL 对【整条线程】聚合，⛔ 不是对 `items` 求和** ——
+  明细有 `LIMIT`，让页面自己加会在笔数多时**静默偏小**且不报错。
+  🔴 **它带 `user_name`**（`WHERE user_name = %s AND thread_id = %s`）；
+  `include_all=True`（admin 例外）把条件换成 `1 = 1`，**⛔ 走同一条 SQL 不写第二份**。
+  · 同批加**私有**辅助 **`_iso_utc(dt)`** —— 把库里的**无时区**时间戳标成 `+00:00`（见下方「看代码会误判」）。
+  📌 判据：`api/test_trace_cost.py`（**15 例** · 假 pg · **进 CI**）·
+  `api/test_trace_cost_db.py`（**9 例** · `needs_db` · **不进 CI**）
 
 ## 🟡 做到哪 / 缺什么
 
@@ -67,6 +77,8 @@
 | 🔴 **「成本/模型名随便在哪算都行，反正同一个算式」** | ⛔ **2026-10-06 起不行了** —— 算式**只有一份**（`compute_cost` `:179` · `resolve_model_name` `:166`），**账本与 `usage` 帧共用**。<br>⚠️ 再在别处 `getattr(llm, "model_name", ...)` 或手写 `prompt/1000*pricing` **就是造第二份实现** —— 两处一旦漂移，**帧里报的钱与账本里的钱会对不上，而两边都不报错**（本仓因"模型名有两个来源"按错单价记过两次账，`DEC-072`）。<br>📌 判据：`api/test_token_tracker_cost_helpers.py` |
 | ⚠️ **「`usage_summary` 返回 `None` ⇒ 那就出个空帧/零值帧」** | ⛔ **必须【不出帧】** —— `None` 的含义是「这次响应里没有用量」（被拦下 / provider 没回），不是"花费为 0"。<br>⚠️ 出零值帧会让前端显示 **`$0.000000`**，而那是在说"这轮不要钱"。⇒ 「**记账了才出帧**」是判据，不是建议。 |
 | 🔴 **「`record_from_response` 返回 `False` = 出错」** | ⛔ **`False` = 「这次响应里没有 usage」**（如被拦下、或 provider 没回 usage）⇒ **有意跳过、不写 0 行** —— 写 0 会污染 `token_usage_logs` 的计数（它是额度权威源）。<br>⚠️ 想看"到底记没记"，**别只看返回值** ⇒ 查库（`T8` 端到端实测就是这么核的）。 |
+| 🔴 **「`get_thread_cost(thread_id)` —— 签名上没有 `user_name` ⇒ 越权洞」** | ⚠️ **看起来像，实测不是**（`DEC-093` §三·A 核过）。**全仓唯一调用点是本文件 `:888` 的线程预算检查**，传的正是**调用者自己的** thread_id（调用方在更上层按身份取）。⇒ **它只是一个"只给本人线程用"的内部函数**。<br>⛔ **别顺手给它加 `user_name`** —— 改它要动预算逻辑、有回归风险，且**加了也不会更安全**（上层本来就没法传别人的 id）。<br>⚠️ **但也⛔ 别把它当通用取数函数复用** —— 它没有归属条件，**换一个能把别人的 thread_id 传进来的调用点，它当场就变成真洞**。要对外展示线程花费，走 🆕 **`thread_cost_breakdown(user_name, thread_id)`**（带归属条件，见「✅ 做了什么」）。<br>📌 判据：`grep -rn "get_thread_cost" api/ --include="*.py"` ⇒ 只应命中定义 + `:888` 那一处 |
+| 🔴 **「`created_at` 跟 `approval_audit` 一样是带时区的，直接 `.isoformat()` 就行」** | ⛔ **两条轴的时间列类型不同**：`token_usage_logs.created_at` 是 **`TIMESTAMP`（无时区）**，而 PG 容器 `SHOW timezone` = **`Etc/UTC`** ⇒ 里面存的是**裸 UTC 数字**。`approval_audit` 那侧是 **`TIMESTAMPTZ`**、天生带区。<br>⚠️ 原样 `.isoformat()` 会回 `2026-10-06T13:14:21`（**不带区**），JS `new Date()` 把它当**浏览器本地时间**解析 ⇒ 东八区用户看到的时刻**静默早 8 小时**，**不报错**。<br>✅ 出口一律过 **`_iso_utc()`**（补 `+00:00`）；前端 `trace.js::parseWhen()` **主动拒绝**不带区的时间戳（回 `--`）—— 两层都拦。<br>📌 判据：`api/test_trace_cost.py::test_created_at_carries_utc_offset` · `api/test_trace_cost_db.py` 里那条"是绝对时刻"的用例<br>⚠️ 同族前科：`logs/api_*.log` 混了两套时区 |
 
 ## 关联
 
@@ -77,6 +89,8 @@
 `DEC-029`（两套口径，**已由 `DEC-040` 收口**）· **`DEC-046`**（次数那套的删除 + 原位换 token）·
 **`DEC-047`**（`①b` Task 7：**内存 vs 库 = 两个语义** · 全站额度的出口 = `get_user_overview` + 看板第 5 格）·
 **`DEC-072`**（**三条链不记账** —— 本文件新增 `record_from_response` = 取用量+记账的**唯一实现**；`BUDGET_EXCEEDED_MSG` 也在此集中）·
+🆕 **`DEC-093`**（`F2` Trace 页 —— 本文件加 **`thread_cost_breakdown` / `_iso_utc`** 作**成本轴的读侧出口**；
+同批核出 `get_thread_cost` "像洞而不是洞" 与 `created_at` 的时区陷阱，均见上表）·
 `后端补齐清单` **B7/B8/B10/B11/B13**
 
 ---

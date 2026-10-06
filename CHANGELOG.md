@@ -10,6 +10,47 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- ⭐ **Trace 页：两轴分屏 + 成本轴读端点（段 1 第六刀 · `F2`）**（2026-10-06 · `DEC-093`）——
+  `api/static/web/trace.html`（新）· `api/static/js/trace.js`（新，纯逻辑）· `api/token_tracker.py` ·
+  `api/api_v1_agent.py` · `api/main.py` · 两侧的用例 · `.github/workflows/ci.yml`（+1 行 `node --test`）。
+
+  **目标**：`docs/待办总表.md` 的 **`F2`「Trace 页」**，同时是 `docs/FAQ.md` 里一条**对外承诺地址**的所在地。
+
+  🔴 **动手前先核数据源 ⇒ 核出「原措辞没有单一数据源」**：`F2` 原文写的是
+  「span 树 + **每步** token/耗时/成本」，而这两样**分属两条轴**：
+
+  | | 追踪轴 | 成本轴 |
+  |---|---|---|
+  | 存储 | `tool_visualizer._traces`（**进程内存**） | PG 表 `token_usage_logs` |
+  | 粒度 | **工具调用** | **模型调用** |
+  | 谁在写 | 只有 `mcp_agent_chat(_stream)`（全仓 `start_trace(` **2 处**） | 所有花钱的地方 |
+  | 共同的步 id | ⛔ **没有** | ⛔ **没有** |
+
+  ⇒ **两轴只能对上 `(user_name, raw thread_id)` 这一对游标**，再往下**没有可判定的对应** ——
+  硬凑成一棵树只能靠"时间接近"**猜**层级，而**猜出来的层级不报错**。
+  **⇒ 业务方据此另裁「乙 · 两轴分屏」**（上半天追踪 · 下半天成本，**⛔ 不合并**）。
+
+  - **新（后端）**：只读端点 **`GET /agent/trace/{thread_id}/cost`** ⇒ 逐笔明细 + **整条线程合计** + `truncated`。
+    ⚠️ **⛔ 没复用**旁边的 `get_thread_cost(thread_id)` —— 它签名上没有 `user_name`，**看着像越权洞、实测不是**
+    （全仓唯一调用点是线程预算检查，传的是调用者本人的 id）；但它**没有归属条件** ⇒ 换一个调用点当场变成真洞。
+    取数走新函数 `thread_cost_breakdown(user_name, thread_id, include_all=…)`（**既有模块加函数，⛔ 没新建模块**）。
+    🔴 **合计由 SQL 对整条线程聚合，⛔ 不是对明细求和** —— 明细有 `LIMIT`，页面自己加会在笔数多时**静默偏小**。
+  - **新（前端）**：`GET /trace` → 302（**第三条面向人的页面路由**）+ `trace.html` / `trace.js`（`node --test` **24 条**）。
+    · 🔴 **页面必须解释"为什么空"**：对话页走检索链（`/api/v1/rag/stream_search`），
+    那条链**从不建 `start_trace`** ⇒ 演示路径上**上半页必然为空**（本条已另立账 **`N16`**）。
+    · 删掉旧页那两格**假概览卡**（「总 Token」/「总花费」在追踪轴上**恒为 0**，
+    因为 `finish_trace` 的两个调用点都没传这两个值）。
+  - 🔴 **时间戳两层设防**：`token_usage_logs.created_at` 是 **`TIMESTAMP`（无时区）**、容器 `Etc/UTC`
+    ⇒ 原样回 ISO 会被 JS 当**浏览器本地时间**解析 = 东八区**静默早 8 小时**。
+    ⇒ 后端一律过 `_iso_utc()` 补 `+00:00`；前端 `parseWhen()` **主动拒绝**不带区的时间戳。
+  - 🔴 **交付一件【结构】而不是一段文字**：**第 4 类页面守卫** ——
+    读页面源码，把 `getJSON(...)` / `fetch(...)` 的**字符串字面量**抠出来，**必须以 `/api/v1` 开头**
+    （`api/test_trace_page.py`，**7 条** = 3 条同构 + 4 条新的）。**它当场能把 `N15` 的 4 条全拦下**（实测）。
+
+  ⚠️ **本刀⛔ 不做的事**：其余 Agent 链不建轨迹（**`N16`**）· 追踪轴内存不搬 PG（**`N17`**）·
+  不修 `approvals.html`（**`N15`** · 属另一个功能的界面）· **不删** `api/static/trace_viewer.html`
+  （`FAQ.md` 写过它的地址 ⇒ 只加了条横幅；⚠️ 那个页面 **`fetch` 不带认证头、今天仍 401**，`F5` **仍成立**）。
+
 - ⭐ **无据拒答：给一个机器可读的信号（段 1 第五刀 · `F4` 第一条 · 硬门 B 第二半）**（2026-10-06 · `DEC-091`）——
   **后端两处 / 约 6 行**（`api/api_v1_rag.py`）· `api/static/js/sse.js` · `api/static/web/chat.html` · 两侧的用例。
 

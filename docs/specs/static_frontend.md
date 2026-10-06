@@ -2,11 +2,11 @@
 
 | 项 | 内容 |
 |---|---|
-| **状态** | 🟡 **部分可用**（2026-10-06 建 · `DEC-085` 段 1 第一刀 · 同日补 `DEC-089` 的 `F8` · `DEC-090` 的熔断卡片 · `DEC-091` 的无据拒答）—— **两个页面通了**：对话页（`DEC-085` · 引用卡片 `DEC-089` · **熔断卡片 `DEC-090`** · **无据拒答 `DEC-091`**）+ **接管页**（`DEC-088` · `F1`）；**Trace 页改造 / Eval 页仍没做** |
-| **对外提供** | `GET /chat` → **302** `/static/web/chat.html`（`api/main.py:538`，**`include_in_schema=False`**）<br>`GET /approvals` → **302** `/static/web/approvals.html`（`api/main.py:547`，**同上**）<br>· 页面本体由已挂的 `/static` 托管（零构建、零新服务、零 CORS）<br>⚠️ **两条 302 都在无鉴权基线里**（`scripts/route-auth-baseline.txt`）—— **故意公开**：它们是"给人打开 HTML"的跳转，**本身不含数据**；真正的边界在页面调的后端接口上 |
+| **状态** | 🟡 **部分可用**（2026-10-06 建 · `DEC-085` 段 1 第一刀 · 同日补 `DEC-089` 的 `F8` · `DEC-090` 的熔断卡片 · `DEC-091` 的无据拒答 · `DEC-093` 的 Trace 页）—— **三个页面通了**：对话页（`DEC-085` · 引用卡片 `DEC-089` · **熔断卡片 `DEC-090`** · **无据拒答 `DEC-091`**）+ **接管页**（`DEC-088` · `F1`）+ **Trace 页**（`DEC-093` · `F2`）；**Eval 页仍没做** |
+| **对外提供** | `GET /chat` → **302** `/static/web/chat.html`（`api/main.py:538`，**`include_in_schema=False`**）<br>`GET /approvals` → **302** `/static/web/approvals.html`（`api/main.py:547`，**同上**）<br>🆕 `GET /trace` → **302** `/static/web/trace.html`（`api/main.py:559`，**同上**）<br>· 页面本体由已挂的 `/static` 托管（零构建、零新服务、零 CORS）<br>⚠️ **三条 302 都在无鉴权基线里**（`scripts/route-auth-baseline.txt`）—— **故意公开**：它们是"给人打开 HTML"的跳转，**本身不含数据**；真正的边界在页面调的后端接口上 |
 | **谁在用** | 人（浏览器）。⚠️ **后端不 import 它、没有任何 `.py` 依赖它** —— 这就是本目录此前一直是"没人管"的原因 |
 
-**两个页面、各 3 个文件**（其余 3 个老页面见 §🟡）：
+**三个页面、各 3 个文件**（其余 3 个老页面见 §🟡）：
 
 | 文件 | 行数 | 是什么 |
 |---|---:|---|
@@ -16,6 +16,9 @@
 | `api/static/web/approvals.html` | 247 | **接管页**：待接管表 / 点开看完整上下文 / 批准·拒绝·代填工具结果 / 裁决历史 |
 | `api/static/js/approvals.js` | 86 | **纯逻辑**：消息归一 / 工具摘要 / 计时文案 / 轮询节拍 / 两个载荷构造 |
 | `api/static/js/approvals.test.js` | 120 | `node --test` 用例（**14 条**）—— 钉住 `approvals.js`（同上：⛔ 数量别抄） |
+| 🆕 `api/static/web/trace.html` | 336 | **Trace 页**：装配层（两轴分屏 / 取数 / 渲染 / 空态解释 / 页脚合计） |
+| 🆕 `api/static/js/trace.js` | 198 | **纯逻辑**：两轴的摘要与格式化 / 时间戳解析 / 空态判定 / 路径拼接 —— ⛔ 不碰 DOM、不发请求 |
+| 🆕 `api/static/js/trace.test.js` | 272 | `node --test` 用例（**24 条**）—— 钉住 `trace.js`（同上：⛔ 数量别抄） |
 
 ## ✅ 做了什么
 
@@ -76,6 +79,17 @@
     它的真实语义是把结论**当作工具结果**喂回去（见 `docs/specs/approval_audit.md` 那条 `edited`）。
   · 🔴 **接口的四类拒绝全是 HTTP 200 + `{"status":"error"}`** ⇒ 页面必须**读 body**，⛔ 只看 `r.ok` 会把
     "无权查看"当成成功（`explainStatus` 只管 401/429/5xx 那类**真错**的状态码）。
+- 🔵 **Trace 页（`DEC-093` · `F2` · 2026-10-06）** —— 入口 `GET /trace` → `/static/web/trace.html?thread_id=…`
+  （🔴 **它替代了 `api/static/trace_viewer.html`** —— 那个页面 fetch 轨迹**不带认证头** ⇒ 加了鉴权之后**打开必 401**）。
+  · **两轴分屏**：上半页**追踪轴**（`/agent/trace/{id}` · 工具调用逐步耗时）·
+    下半页**成本轴**（`/agent/trace/{id}/cost` · 逐笔 token / 花费）。
+    🔴 **⛔ 两条轴不合并、不相加** —— 它们**没有共同的步 id**，合成一棵树只能靠"时间接近"猜（详见下「看代码会误判」）。
+  · 🔴 **页面必须解释"为什么空"**（`RagTrace.emptyTraceReason` 三条分支）—— 对话页走的是检索链，
+    **那条链根本不建轨迹** ⇒ 演示时上半页**必然**是空的。只印一句"未找到"会让人以为整个功能坏了。
+  · 🔴 **时间戳两层设防**：后端一律回带 `+00:00` 的 ISO（`token_tracker._iso_utc`），
+    前端 `parseWhen()` **主动拒绝**不带区的时间戳（画 `--`）—— 因为库里那列是**无时区**的 `TIMESTAMP`。
+  · 删掉了旧页那两格**假概览卡**（「总 Token」/「总花费」在追踪轴上**恒为 0**，见下「看代码会误判」）。
+  · 📌 守卫：`node --test api/static/js/trace.test.js`（**24 条**）· `api/test_trace_page.py`（**7 条**）。
 
 ## 🟡 做到哪 / 缺什么
 
@@ -83,7 +97,7 @@
 |---|---|---|
 | 1 | **不显示历史消息** | 后端**没有**"取历史"的公开接口（`DEC-085` 契约 C 只把历史喂给**模型**）。⇒ 切回旧会话时页面给一句实话（`showEmptyLog`），⛔ **不留一块看不出所以然的空白** |
 | 2 | ~~**引用卡片固定放在 `#log` 末尾**~~ ✅ **2026-10-06 修**（`DEC-089` · `F8`） | 卡片现在**挂在该条回答下面**（每条自带 `.card`），再点收起。⚠️ 旧注释里那个被 `F8` 判据当"还没修"标记的词**已删** —— ⛔ 别写回来（`grep -c 'DEMO 版' api/static/web/chat.html` ⇒ 0） |
-| 3 | ~~**接管页**~~ ✅ **2026-10-06 做了**（`DEC-088` · `F1`）· **Trace 页改造 / Eval 页** | **后两个没做**。Trace 页改造的对象是 `api/static/trace_viewer.html`（⚰️ 见下） |
+| 3 | ~~**接管页**~~ ✅ **2026-10-06 做了**（`DEC-088` · `F1`）· ~~**Trace 页改造**~~ ✅ **同日做了**（`DEC-093` · `F2`）· **Eval 页** | **只剩 Eval 页没做**。⚠️ Trace 页是**新建** `web/trace.html`，旧页 `api/static/trace_viewer.html` **保留未删**（`FAQ.md` 写过它的地址）—— 见下 ⚰️ 表 |
 | 4 | ~~**硬门 A / C 的其余前端项**~~ ✅ **2026-10-06 结清**（`DEC-092`） | 本刀只做了"能流、能停" ⇒ ✅ **「无据拒答」那半同日做了**（`DEC-091`）· ✅ **剩下那条「C 的其余出口」经核【没有指称对象】⇒ 删除**（🔴 硬门 C 判定原文里**没有「出口」这个概念** `grep -c '出口'` ⇒ **0**；那个词的唯一出处是 `DEC-085` §六·1 的**桶话**，**从没被展开过**）⇒ ⛔ **别读成"做掉一件"**，是账上摘掉一个**空指针** |
 | 5 | ~~**R3.2 熔断提示卡片**~~ ✅ **2026-10-06 做了**（`DEC-090`） | ⚠️ 但「**怎么联系**」是**占位符**（业务方裁「后面我再设置」）⇒ 已登记 `N13`，⛔ 别当它做完了 |
 | 6 | **DOM 那层没有自动判据** | 滚动 / 按钮态 / 渲染仍靠 DevTools 手工。`sse.js` 覆盖的是**决策**，⛔ 不是**像素** |
@@ -94,13 +108,15 @@
 | 文件 | 什么毛病 |
 |---|---|
 | `api/static/stream_test.html` | 调**不存在**的 `/api/v1/user/chat_history` |
-| `api/static/trace_viewer.html` | `fetch` **不带认证头** ⇒ 现在 401 |
+| `api/static/trace_viewer.html` | `fetch` **不带认证头** ⇒ 现在 401。⚠️ **2026-10-06（`DEC-093`）它被 `/trace` 正式取代** —— 但**⛔ 没删**：`docs/FAQ.md` 写过它的地址，删掉那条指引会落到 404。只在它 `<body>` 顶部加了一条指向 `/trace` 的**红色横幅** |
 | `api/static/websocket_test.html` | 端点路径写错 + 浏览器 WebSocket **送不了 `X-API-Key` 头**（它自己的注释里就写了） |
 
-> ⇒ ⛔ **别读成"`api/static/` 下都是新做的东西"**。两刀加起来只动了 `web/`（`chat.html` · `approvals.html`）
-> + `js/`（`sse.js` · `approvals.js` 及其用例），
+> ⇒ ⛔ **别读成"`api/static/` 下都是新做的东西"**。三刀加起来只动了 `web/`（`chat.html` · `approvals.html` · `trace.html`）
+> + `js/`（`sse.js` · `approvals.js` · `trace.js` 及其用例），
 > 另外三个是同一批「没记录过、也没人管」的遗留。
-> ⚠️ **判据**：`ls api/static/*.html` ⇒ 三个；`ls api/static/web/ api/static/js/` ⇒ 只有上面那 6 个。
+> ⚠️ **判据**：`ls api/static/*.html` ⇒ 三个；`ls api/static/web/ api/static/js/` ⇒ 只有上面那 9 个。
+> ⚠️ **`trace_viewer.html` 现在是"半坏 + 已取代"** —— 它**仍在** `api/static/*.html` 那份清单里，
+> ⛔ 别因为"Trace 页做完了"就以为那份清单变成两条。
 
 ## ⚠️ 看代码会误判的地方 ⭐
 
@@ -128,6 +144,9 @@
 | 🔴 **「前端也该认一下拒答，双保险」** | ⛔ **不许** —— 判据（「这轮算不算拒答」）**只有后端那一份**（`REFUSAL_SENTENCE` + `_complete()` 里那个 `startswith`）。前端**只认帧**。两处各判一次 ⇒ 一旦漂移，**可能出现"后端发了帧、前端按另一套判"**，而**页面上不报任何错**。<br>📌 **有结构型用例盯着**：那句拒答语在 `static/js` + `static/web` 里**一个字都不许出现**（注释也算）。 |
 | ⚠️ **「拒答那一轮，正文里的 `[来源:X]` 应该也能点开」** | ⛔ **不能** —— `renderRefusal` **不切引用**。实测（`DEC-091` §二）见过一条拒答**后面挂着 3 个可点来源号**：一边说"答不了"、一边给来源，是**自相矛盾**的呈现。<br>⚠️ 但正文**原样显示**：那是模型说的话，⛔ 不替它改写、⛔ 也不吞掉。 |
 | 🔴 **「`no_answer` 帧没收到，说明这轮不是拒答」** | ⛔ **不能这么推** —— 判据是「答案**以那句拒答语开头**」。**换过措辞**的拒答（如「文档未提及净利润，因此无法回答该问题。」）**会被漏掉** ⇒ 那一轮按普通回答呈现。<br>⚠️ 这是**有意**的取舍：**误判比漏判有害**（把答得好的画成"资料里没有"）。取舍 + 代价 ⇒ `DEC-091` §五。 |
+| 🔴🔴 **「路由 302 对了 ⇒ 这个页面就能用」** | ⛔ **两件事，实测栽过** —— `approvals.html`（`F1`）**302 正确 · 目标文件在磁盘上 · 不在 openapi 里**（三条用例全绿），**而浏览器里 100% 打不开**：它 fetch 的 **4 条 URL 全少 `/api/v1`**。<br>🔴 **三层判据一条都不会红**：页面用例只看 302 · JS 用例全是**纯函数**（前缀不经过它们）· 路由门只管**后端有没有多余的无鉴权路由**。<br>⇒ 🆕 **加了一类新守卫**（`api/test_trace_page.py`）：**读页面源码，把 `getJSON(...)` / `fetch(...)` 的字符串字面量抠出来，必须以 `/api/v1` 开头**。<br>📌 **判据（可打印）**：`grep -n "getJSON('/\|fetch('/" api/static/web/approvals.html` ⇒ **4 条**（`:109` `:145` `:181` `:199`）。⚠️ **本批⛔ 未修那个页面**（属另一个功能），交业务方裁 ⇒ `DEC-093` §六·待裁 2 |
+| 🔴 **「Trace 页那两条轴是一条链的两段，能拼成一棵树」** | ⛔ **拼不成** —— 上半页读 `/agent/trace/{id}`（**追踪轴** · 进程内存 · 粒度 = **工具调用**），下半页读 `/agent/trace/{id}/cost`（**成本轴** · PG `token_usage_logs` · 粒度 = **模型调用**）。<br>🔴 **两轴没有共同的步 id** ⇒ 一个 `agent_decision`（模型）与一个 `search`（工具）之间**没有可判定的对应**。<br>⇒ 页面**并排画、⛔ 不相加**。⚠️ 想"合成树"只能靠**时间接近**猜层parent-child，而**猜出来的层级不报错**（本仓最恨的形态）。<br>📌 判据 ⇒ `trace.test.js` 里 `summarizeCost` **⛔ 不把 rows 加起来**那条 |
+| ⚠️ **「页面里的接口 URL 写相对路径（`/agent/…`）也行」** | ⛔ **不行** —— 后端路由前缀是 **`/api/v1`**（`api/main.py:517-519` 挂载），页面由 `/static` 托管**同源**，所以相对路径**不会**被补前缀，只会打到一个**不存在的路径**上（**404，而页面上通常看不出是路径错**）。<br>⇒ 有了上面那条守卫之后，**写字面量就会被用例拦下**；正确做法是走已被用例钉住的纯函数（`RagTrace.buildPath` / `buildCostPath`）。<br>⚠️ 同理：`X-API-Key` 要**显式带**（页面自己从 `localStorage` 取，⛔ 没有 cookie 会话） |
 
 ## 判据（可打印）
 
@@ -135,8 +154,10 @@
 # ① 纯逻辑（自动的，CI 里也有）
 node --test api/static/js/sse.test.js        # ⇒ ℹ tests 32 / pass 32 / fail 0（2026-10-06 实测；DEC-091 前是 29，DEC-090 前是 23）
 node --test api/static/js/approvals.test.js  # ⇒ ℹ tests 14 / pass 14 / fail 0（同批实测）
+node --test api/static/js/trace.test.js      # ⇒ ℹ tests 24 / pass 24 / fail 0（DEC-093 实测）
 venv/bin/python -m pytest api/test_chat_page.py -q        # ⇒ 3 passed（GET /chat 的三条守卫）
 venv/bin/python -m pytest api/test_approvals_page.py -q   # ⇒ 3 passed（GET /approvals 的三条守卫）
+venv/bin/python -m pytest api/test_trace_page.py -q       # ⇒ 7 passed（GET /trace：3 条同构 + 4 条「URL 前缀」类新守卫）
 #   对端（后端那半，本页消费的契约）——
 venv/bin/python -m pytest api/test_frontend_contract.py -q   # ⇒ 17 passed（契约 A/B + DEC-089 的 similarity + DEC-090 契约 E 的 scope 三条 + DEC-091 契约 F 四条）
 venv/bin/python -m pytest api/test_token_tracker_cost_helpers.py -q   # ⇒ 5 passed（费用行那三个纯函数）
@@ -167,13 +188,19 @@ grep -n 'REFUSAL_SENTENCE' api/api_v1_rag.py     # ⇒ 4 行：**两处是代码
 # ⚠️ **反证检验**（DEC-091 §六 实测）：`startswith` 改 `in` ⇒ **只红 1 条**；
 #    删掉那两行 `yield` ⇒ **红 2 条**（正反两条对照）。⛔ 别只看"它绿"。
 
-# ② 那两条路由
+# ② 那三条路由
 curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' http://127.0.0.1:8000/chat
 #   ⇒ 302 http://127.0.0.1:8000/static/web/chat.html
 curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' http://127.0.0.1:8000/approvals
 #   ⇒ 302 http://127.0.0.1:8000/static/web/approvals.html
-# 🔴 这两条**必须在** scripts/route-auth-baseline.txt 里（故意公开）—— `check_route_auth.py --baseline` **查不出"路径被删"**
-#    （少一条它报「少了 N 条（修好了）」并 exit 0）⇒ 真正的守卫是那两个 page 用例
+curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' http://127.0.0.1:8000/trace
+#   ⇒ 302 http://127.0.0.1:8000/static/web/trace.html
+# 🔴 这三条**必须在** scripts/route-auth-baseline.txt 里（故意公开）—— `check_route_auth.py --baseline` **查不出"路径被删"**
+#    （少一条它报「少了 N 条（修好了）」并 exit 0）⇒ 真正的守卫是那三个 page 用例
+
+# ②' 🔴 页面里的 URL 字面量（DEC-093 新加的那一类守卫）—— 两边的尺子
+grep -n "getJSON('/\|fetch('/" api/static/web/trace.html        # ⇒ 0 条（Trace 页走 buildPath/buildCostPath，⛔ 不写字面量）
+grep -n "getJSON('/\|fetch('/" api/static/web/approvals.html     # ⇒ 4 条（`F1` 的缺陷，本批未修 ⇒ 交业务方裁）
 
 # ③ ⛔ 写不成命令的（手工，2026-10-06 实测过一次）
 #   · 硬门 A：Network 里 type = text/event-stream，正文增长时连接未关
@@ -200,3 +227,9 @@ curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' http://127.0.0.1:8000/a
   `/agent/pending` · `/agent/pending/context` · `/agent/approve` · `/agent/approvals/history`）·
   `docs/specs/approval_audit.md`（**裁决历史那张表**）
 - 施工单 ⇒ `fastapi-rag-agent-TODO待办/施工单-20261006-接管页.md`
+- 🔴 `docs/decisions/DEC-093-Trace页两轴分屏.md` + 施工单 ⇒ `fastapi-rag-agent-TODO待办/施工单-20261006-Trace页.md`
+  （**`F2` Trace 页**：两轴分屏 · `/trace` 入口 · **第 4 类页面守卫（URL 前缀）** ·
+  ⭐ 同时是 **`approvals.html` 缺 `/api/v1` 那个事故的唯一记录处**）·
+  对端 `docs/specs/api_v1_agent.md`（`/agent/trace/{id}` 与 `/agent/trace/{id}/cost` 两条端点）·
+  `docs/specs/token_tracker.md`（**成本轴的本尊** —— `thread_cost_breakdown` / `_iso_utc` / 时区陷阱）·
+  `docs/specs/tool_visualizer.md`（**追踪轴的本尊** —— 进程内存 · 概览卡那两格恒为 0）

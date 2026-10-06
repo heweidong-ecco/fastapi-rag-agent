@@ -261,10 +261,15 @@ curl http://localhost:8000/api/v1/agent/tool_health -H "Authorization: Bearer <t
 通常是工具返回的结果不满足 Agent 预期，导致它反复重试。
 
 1. 先用 A1 的两个接口确认工具**本身**是否正常。
-2. 看执行轨迹（可视化页面真实存在：`api/static/trace_viewer.html`）：
+2. 看执行轨迹与花费（**2026-10-06 起换新页**，`DEC-093`）：
    ```
-   http://localhost:8000/static/trace_viewer.html
+   http://localhost:8000/trace?thread_id=<你的 thread_id>
    ```
+   ⚠️ 旧地址 `http://localhost:8000/static/trace_viewer.html` **仍在**（本文件曾对外写过它），
+   但那个页面调接口时**不带 API Key** ⇒ 启用鉴权后**必然 401**；而且它概览里的
+   「总 Token」「总花费」两格**一直是空的**（那份数据不在它读的那条轴上）。**用新页。**
+   ⚠️ **上半页（轨迹）是进程内存，重启 API 即清空**，而且目前只有 Agent 链会写它 ——
+   走 `/chat`（检索链）时**上半页必然是空的**，下半页的花费账仍然完整。
 3. 给最大工具调用次数加限制 —— 逻辑在 `api/agent_graph_advanced_learning.py:246` 的 `should_continue`。
 
 ### A4：Token 统计的数据重启后丢失？

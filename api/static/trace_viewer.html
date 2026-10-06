@@ -48,6 +48,19 @@
     </style>
 </head>
 <body>
+    <!-- 🔴 DEC-093（F2）：本页【已不再是】推荐入口。
+         为什么留着它而不是删掉：`docs/FAQ.md` 里写过它的地址（对外承诺），
+         直接删会让那条指引落到 404。⇒ 保留文件 + 在这里说清新入口在哪。
+         ⚠️ 本页 fetch 轨迹时【不带认证头】⇒ 加了鉴权之后它**必然 401**。 -->
+    <div style="background:#7f1d1d;border:1px solid #e94560;border-radius:8px;padding:12px 16px;margin-bottom:24px;">
+        <b>⚠️ 此页已升级，请改用新入口：<a href="/trace" style="color:#fca5a5;">/trace</a></b><br>
+        <span style="font-size:13px;color:#fecaca;">
+            新页把**执行轨迹**与**逐笔花费**分成两条轴并排显示（本页只有前者，而且概览里的
+            「总 Token」「总花费」两格一直是空的 —— 那份数据根本不在这条轴上）。<br>
+            本页调用接口时**没有带 API Key**，所以在启用鉴权之后它会直接报 401。
+        </span>
+    </div>
+
     <h1>🔍 Agent 执行轨迹</h1>
     <p class="subtitle">可视化每个工具调用的完整过程</p>
 

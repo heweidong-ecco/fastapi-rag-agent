@@ -549,6 +549,18 @@ async def approvals_page():
     """把人送到接管页。⚠️ `include_in_schema=False`：它不是 API，⛔ 别混进 openapi。"""
     return RedirectResponse(url="/static/web/approvals.html", status_code=302)
 
+# 🔴 `DEC-093`（`F2`）：Trace 页的**入口 URL**。形状与上面两条**逐字同款**。
+#    ⚠️ 它**替代**了原先那个 `/static/trace_viewer.html` —— 那个页面 fetch 轨迹时
+#       **不带任何认证头** ⇒ 加了鉴权之后**打开必 401**，等于一直坏着。
+#    🔴 代价已认：这是**新公开路由** ⇒ `check_route_auth.py --baseline` 会 exit 1
+#       ⇒ **已显式写进 `scripts/route-auth-baseline.txt`**（一次有意识的操作）。
+#       ⚠️ 它**不含数据**：真正的边界在它调的两条接口上，那两条都带鉴权
+#       （`/agent/trace/{thread_id}` · `/agent/trace/{thread_id}/cost`）。
+@app.get("/trace", include_in_schema=False)
+async def trace_page():
+    """把人送到执行轨迹页。⚠️ `include_in_schema=False`：它不是 API，⛔ 别混进 openapi。"""
+    return RedirectResponse(url="/static/web/trace.html", status_code=302)
+
 # 新增  嵌入了 Prometheus 指标采集
 # 指标暴露接口
 @app.get("/metrics")
