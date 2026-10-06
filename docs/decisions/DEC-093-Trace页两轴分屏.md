@@ -125,11 +125,19 @@ print('/api/v1/agent/pending ->', c.get('/api/v1/agent/pending').status_code)   
 
 ⇒ **URL 前缀硬编码在那一行 HTML 里，而那一行没有任何判据。**
 
-**本批的处理（⛔ 不顺手修）**：① 登记进 `docs/待办总表.md`；
-② **把这条缺口变成判据** —— `api/test_trace_page.py::test_page_url_literals_carry_the_api_prefix`
-对 **Trace 页**生效（实测把它拿去跑 `approvals.html` 会把 4 条全拦下）；
-③ **是否回头修 `approvals.html` 交业务方裁**（§六·待裁 2）。理由：那是**另一个功能**的界面，
-`DEC-051` 先例只允许"同 PR 顺手修**同一功能**的邻近缺陷"。
+**本刀当时的处理（⛔ 不顺手修）**：① 登记进 `docs/待办总表.md`（**`N15`**）；
+② **把这条缺口变成判据** —— 当时落在 `api/test_trace_page.py::test_page_url_literals_carry_the_api_prefix`，
+**只对 Trace 页生效**（实测把它拿去跑 `approvals.html` 会把 4 条全拦下）；
+③ **是否回头修 `approvals.html` 交业务方裁**（§六·待裁 2）。
+
+> ✅ **2026-10-06 已裁并已做**（业务方：**「现在修，并进 `F2` 这个 PR」**）⇒
+> **4 条 URL 全部补上 `/api/v1`**，「本批不修」那句**已作废**。
+> ⚠️ 同时**那条守卫搬了家** —— 从本刀只盯 `trace.html`，改成
+> **`api/test_web_pages.py` 扫 `api/static/` 下每一个 `.html`**
+> （⚠️ **本文件下文凡写"守卫在 `test_trace_page.py`"的，一律以这条为准**）。
+> 📄 **全文（含为什么⛔ 没改 helper 拼路径、glob 的反证实测）** ⇒ `DEC-094`。
+> 🔴 **`DEC-051` 先例**（只允许顺手修**同一功能**的邻近缺陷）**没有作废** ——
+> 这是一次**业务方拍下的例外**，⛔ 别当先例引用。
 
 ---
 
@@ -144,7 +152,8 @@ bash scripts/ci-local.sh                                                    # �
                                                                             #    pytest 794 passed, 3 skipped, 40 deselected
 ```
 
-**本批没有修 `approvals.html`** ⇒ 上面四条判据**都不涉及它**（这也是它至今绿着的原因之一）。
+**本刀当时没有修 `approvals.html`** ⇒ 那时上面四条判据**都不涉及它**（这也是它当时绿着的原因之一）。
+⚠️ **2026-10-06 已经修了**（§四末）⇒ 现在多两条判据，见 `DEC-094` §五。
 
 ### ⚠️ 判据的**反证检验**（逐条做过，⛔ 不是"跑了就算"）
 
@@ -178,12 +187,18 @@ bash scripts/ci-local.sh                                                    # �
 5. **⛔ 本批不动 `token_tracker.get_thread_cost`** —— 见 §三·A。
 6. **⛔ 本批不动 `api/static/stream_test.html`** —— `F5`，`DEC-085` §六·4 明文挂着。
 
-### §待裁（⛔ 本 Agent 不自拟）
+### §待裁 —— ✅ **2026-10-06 已全部裁定**（⛔ 本 Agent 一条都没自拟）
 
 1. **PR 频率** —— 2026-10-06 当天已开 8 个 PR（`#102`–`#109`）。本刀是现在开还是攒着？
+   ⇒ **业务方裁：⛔ 先不开，等发话。**
 2. **`approvals.html` 的 `/api/v1` 前缀要不要现在修**（§四）—— 4 行字符串，页面**目前 100% 不可用**。
+   ⇒ **业务方裁：✅ 现在修，并进本刀的 PR。**（🏁 **`N15` 已结清**）
 3. **`.github/workflows/ci.yml` 的 `node --test` 要不要改成 glob** ——
    现在是**逐个列名**（`sse` / `approvals` / 现在加 `trace`）。
    ⇒ **新增一个 `.test.js` 而忘了加行 = 那份用例永不跑，且没有任何门会红**（本批已踩过一次边缘）。
-   改成 `node --test api/static/js/*.test.js` 可从结构上消掉这一族。
-   ⛔ 本批**没改**（属于顺手清理）；只在 `docs/待办总表.md` 登记。
+   ⇒ **业务方裁：✅ 改。**（🏁 **`N18` 已结清**）
+   🔴 ⚠️ **落地时反证照出一件事**：**裸 glob 比逐名列名更弱** —— 一个都匹配不上时
+   `node --test` 回 **`tests 0` / 退出码 0**（逐名列名是 `Could not find …` / **退出码 1**）。
+   ⇒ **不能只换一行**，必须连防空跑一起写。📄 `DEC-094` §三·B
+
+> 📄 **三条裁定的全文 + 落地细节 + 反证表** ⇒ `docs/decisions/DEC-094-前缀事故收尾与CI用例改glob.md`

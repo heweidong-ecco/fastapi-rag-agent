@@ -4,17 +4,16 @@
    ⚠️ 别写成 `with TestClient(app) as client:`，那会触发 lifespan 的 startup
    （`init_pool()` 真去连 Postgres）⇒ **CI 没有库 ⇒ 直接红**。
 
-## 记着 `test_approvals_page.py` 的三条 + 一条新的
+## 本文件管什么
 
-前四条与接管页那份同款（入口路由最容易在"看着没事"的情况下被改坏）：
+前四条与 `test_approvals_page.py` 那份同款（入口路由最容易在"看着没事"的情况下被改坏）：
 路由被删 / 跳转目标写错 / 混进 openapi / 跳转目标不在盘上。
+后三条管**页面本体**：路径由测过的 helper 拼 · 脚本真的被引上 · 不印那两格死卡。
 
-🔴 **第五条是新增的，起因是一个真事故**：`api/static/web/approvals.html` 在
-   `GET /approvals`（`DEC-088`）里 fetch 的是 `/agent/pending`，而真实路由是
-   `/api/v1/agent/pending` ⇒ **那个页面在浏览器里 404，从合进去那天起就是坏的**，
-   而**没有任何用例红** —— 因为 14 条 JS 用例测的全是纯函数（`buildContextQuery()`
-   只回 query string），3 条 Python 用例只看 302。**URL 前缀硬编码在没人测的那一行里**。
-   ⇒ 本文件把它测上：**页面脚本里的 URL 字面量必须带 `/api/v1`**。
+⚠️ **"页面里的 URL 字面量必须带 `/api/v1`"这条【已经搬走】了** ——
+   现在在 `api/test_web_pages.py`，**扫 `api/static/` 下每一个 `.html`**
+   （**⛔ 别搬回来**：只盯一个页面的门，下一个页面照样能坏，这正是它当初没拦住
+   `approvals.html` 的原因）。
 
 📌 判据（可打印）：`venv/bin/python -m pytest api/test_trace_page.py -q -p no:warnings`
 """
@@ -70,30 +69,9 @@ def test_trace_is_not_in_openapi():
         "`/trace` 出现在 openapi 里了 —— 检查 `include_in_schema=False` 是不是被顺删了")
 
 
-# ==================== ⑤ 新增：URL 前缀（approvals.html 栽在这） ====================
-
-_URL_LITERAL = re.compile(r"(?:getJSON|fetch)\(\s*'([^']*)'")
-
-
-def test_page_url_literals_carry_the_api_prefix():
-    """🔴 页面脚本里**写死的 URL 字面量必须带 `/api/v1`**。
-
-    起因见文件头：`approvals.html` 把 `/agent/pending` 写死 ⇒ **整页 404 而无人察觉**。
-    ⚠️ 只查**调用点里的字面量**（`getJSON('…')` / `fetch('…')`），
-       ⛔ 不做全文件子串扫描 —— 那会连注释一起命中（本仓 `N14` 的原话）。
-
-    反证检验：把 `trace.html` 里的 `RagTrace.buildCostPath(threadId)` 换成
-    字面量 `'/agent/trace/default/cost'` ⇒ 本条立刻红。
-    """
-    text = _page_text()
-    found = _URL_LITERAL.findall(text)
-
-    bad = [u for u in found if not u.startswith("/api/v1")]
-    assert not bad, (
-        f"这些 URL 字面量没带 `/api/v1` 前缀，会 404：{bad}\n"
-        f"（真实路由前缀是 `/api/v1` —— 见 `api/api_v1_agent.py` 的 `APIRouter(prefix=...)`。"
-        f"浏览器里 404，但**服务端不会报任何错**。）"
-    )
+# ==================== 页面本体 ====================
+# ⚠️ 「URL 字面量必须带 /api/v1」**不在这里** ⇒ `api/test_web_pages.py`
+#    （它扫的是 `api/static/` 下的每一个 `.html`，比只盯本页强 —— 见文件头）。
 
 
 def test_page_builds_urls_via_the_tested_helper():

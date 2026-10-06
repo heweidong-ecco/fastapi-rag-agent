@@ -8,6 +8,58 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- 🔴 **`approvals.html` 的 4 条接口 URL 全少 `/api/v1` ⇒ 那个页面从上线起 100% 打不开**（2026-10-06 · `DEC-094` · 债 `N15`）——
+  `api/static/web/approvals.html`（**4 行字符串**）。
+
+  **怎么发现的**：做段 1 第六刀（`F2` Trace 页 · `DEC-093`）时顺带核出 —— ⚠️ **不是本刀引入的**，
+  引入者是 `F1`（`DEC-088` · PR `#105`）。
+
+  🔴 **为什么三层判据一条都没红**：① 页面用例（`api/test_approvals_page.py`，3 条）只看
+  `GET /approvals` 的 **302 与跳转目标**，⛔ 不看页面脚本里的 URL ② JS 用例（`approvals.test.js`，14 条）
+  全是**纯函数**，前缀根本不经过它们（`buildContextQuery()` 只回 query string）③ 路由门管的是
+  「后端有没有多余的无鉴权路由」，与页面打什么 URL **无关**。
+  ⇒ **URL 前缀硬编码在那一行 HTML 里，而那一行没有任何尺子。**
+
+  **实测（改前 → 改后）**：`/agent/pending` **404** → `/api/v1/agent/pending` **401** ·
+  `…/pending/context?` **404** → **401** · `…/approve?` **404** → **405**（它是 POST-only，
+  **405 也是"路由在"**）· `…/approvals/history?` **404** → **401**。
+  ⚠️ **四条路径本身都是对的，坏的只有前缀。**
+
+  ⚠️ **与 `DEC-051` 先例的张力**：那是**另一个功能的界面**，而先例只允许"同 PR 顺手修**同一功能**的
+  邻近缺陷" ⇒ 这是**业务方明确拍下的例外**，⛔ **别当先例引用**。
+  ⚠️ **本批给的是静态守卫**（源码里的字面量）—— 「点得动」仍要靠人拿浏览器开一次，**本次没做**（服务没起）。
+
+### Changed
+
+- 🔴 **页面 URL 守卫：从"盯一个页面"改成"盯全站"**（2026-10-06 · `DEC-094`）——
+  🆕 `api/test_web_pages.py`（`api/test_trace_page.py` 里那条**搬走**，那边 7 条 ⇒ **6 条**）。
+
+  原守卫**只读 `web/trace.html` 一个文件** —— 而它**当初就是为了 `approvals.html` 那个事故**建的
+  ⇒ **"只盯一个页面的门，挡不住下一个页面"正是它当初没拦住的原因**。
+  现在**扫 `api/static/` 下每一个 `.html`**（实测 **6 个**：`web/` 三个 + `stream_test.html` ·
+  `trace_viewer.html` · `websocket_test.html`），新页面**自动进网**；引号也扩到**单 / 双 / 反引号**
+  （`` fetch(`/agent/${id}`) `` **同样是坏的**）。
+  ⚠️ 配了一条 **`test_page_scan_is_not_vacuous()`** —— glob 写错时**参数化用例一条都不跑，而且是绿的**。
+  ⚠️ **看代码会误判**：某页若改用 JS helper 拼路径（`trace.html` 就是），这条守卫对它是**空过**的 ——
+  ⛔ **别把"扫不到字面量"读成"这个页面验过了"**。
+
+- 🔴 **CI 的前端用例：`node --test` 从"逐个列名"改成 glob**（2026-10-06 · `DEC-094` · 债 `N18`）——
+  `.github/workflows/ci.yml`。
+
+  **为什么**：逐行列名时，**新增一份 `.test.js` 而忘了加一行 ⇒ 那份用例永不跑，且没有任何门会红**。
+
+  ⚠️ **但只把三行换成一行 glob 是【退步】** —— **反证实测照出来的**（本机 **node v26.8.1**）：
+
+  | 写法 | 一个都匹配不上时 |
+  |---|---|
+  | 逐行列名（原状） | `Could not find '…'` ⇒ **退出码 1**（响亮） |
+  | 裸 glob | `ℹ tests 0` ⇒ **退出码 0**（🔴 **静默假通过**） |
+
+  ⇒ **连同防空跑一起写**（`[ ! -e "${test_files[0]}" ]` ⇒ `exit 1`）。
+  📌 **正向实测**：**`ℹ tests 70`**（= `sse` 32 + `approvals` 14 + `trace` 24 的**实测和**，⛔ 不是把三个数加起来）。
+
 ### Added
 
 - ⭐ **Trace 页：两轴分屏 + 成本轴读端点（段 1 第六刀 · `F2`）**（2026-10-06 · `DEC-093`）——
@@ -46,9 +98,12 @@ All notable changes to this project will be documented in this file.
   - 🔴 **交付一件【结构】而不是一段文字**：**第 4 类页面守卫** ——
     读页面源码，把 `getJSON(...)` / `fetch(...)` 的**字符串字面量**抠出来，**必须以 `/api/v1` 开头**
     （`api/test_trace_page.py`，**7 条** = 3 条同构 + 4 条新的）。**它当场能把 `N15` 的 4 条全拦下**（实测）。
+    ⚠️ **同日第三条（`DEC-094`）改动了它**：那条守卫**搬去 `api/test_web_pages.py` 并改成扫全站**
+    （⛔ 不再只盯 `trace.html`）⇒ `api/test_trace_page.py` 现为 **6 条**。
 
-  ⚠️ **本刀⛔ 不做的事**：其余 Agent 链不建轨迹（**`N16`**）· 追踪轴内存不搬 PG（**`N17`**）·
-  不修 `approvals.html`（**`N15`** · 属另一个功能的界面）· **不删** `api/static/trace_viewer.html`
+  ⚠️ **本刀⛔ 不做的事**：其余 Agent 链不建轨迹（**`N16`** ⇐ 仍挂着）· 追踪轴内存不搬 PG（**`N17`** ⇐ 仍挂着）·
+  不修 `approvals.html`（**`N15`** · 属另一个功能的界面）**—— ⚠️ 见上方 `### Fixed`：同日已由业务方裁定修掉** ·
+  **不删** `api/static/trace_viewer.html`
   （`FAQ.md` 写过它的地址 ⇒ 只加了条横幅；⚠️ 那个页面 **`fetch` 不带认证头、今天仍 401**，`F5` **仍成立**）。
 
 - ⭐ **无据拒答：给一个机器可读的信号（段 1 第五刀 · `F4` 第一条 · 硬门 B 第二半）**（2026-10-06 · `DEC-091`）——
