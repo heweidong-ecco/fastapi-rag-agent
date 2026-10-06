@@ -123,21 +123,41 @@ venv/bin/python -m pytest api/test_auth_api_key_active.py -q     # ⇒ 5 passed
    ⚠️ 这个手法的代价是**每加一列都要记得写一句**（现在有尺子盯着）。
 3. **`is_active` 的 NULL 语义仍是"放行"**（`COALESCE(x, 1)`）—— 本机真库实测 5 行全为 `1`，无 NULL 行。
 
-## 九 · 一次**未预期**的操作，如实记在这里
+## 九 · 一次**未预期**的操作（已复原），如实记在这里
 
 验 §五 ③ 的往返时用了 `scripts/issue_api_key.py admin --revoke`，
 而 `--revoke` 撤销的是**该用户名下的全部 key** ⇒
-**连带把 `admin` 在 2026-09-10 建的那把老 key 也置成了 `is_active = 0`**（明文只在签发时出现，**找不回**）。
+**连带把 `admin` 在 2026-09-10 建的那把老 key（`id=2`）也置成了 `is_active = 0`**。
 
-- 影响面：`api/ rag-agent-api.postman_collection.json` 里的 `{{admin_api_key}}`（**该文件里留空**，值在用户自己的 Postman 环境里）。
-- 恢复路径（手册里现成的一条，⚠️ 用 `venv/bin/python`；`ensure_admin_exists` **不会**自动补
-  —— 它判的是「admin 有没有行」，而现在有 2 行）：
-  ```bash
-  cd api && ../venv/bin/python -c "
-  import sys; sys.path.insert(0,'.')
-  from auth import create_user_api_key
-  print('新 admin API Key:', create_user_api_key('admin', expire_days=3650))"
-  ```
-  📄 全文 ⇒ `docs/凭据轮换手册.md` §（`create_user_api_key('admin', expire_days=3650)` 那条）
-- ⛔ **教训**：`--revoke` 是**按用户名**的，⛔ 不是"撤销我刚发的那把"。
-  要在共享用户名上验往返，应当**先确认该用户名下有几行**再动手。
+### ✅ 复原（2026-10-06，当天）
+
+⚠️ **我一度写成"明文找不回" —— 那句是错的。** 业务方指出凭据存放在**仓外**：
+`~/Desktop/Product-external/fastapi-rag-agent-凭据/userkey_from_test.md`（`Product-external/` 是
+「仓外受管地」，⛔ 不在任何 git 仓的路径闭包内，故可存明文）。
+
+那份文件 `:29` 就存着 `id=2` 的明文，且**哈希逐字符对得上**：
+
+```bash
+K=$(grep -oE 'sk-[0-9a-f]{32}' "<那份文件>" | head -1)
+echo -n "${K}" | shasum -a 256        # ⇒ bc2fc0f5…e56e3
+# 库里：SELECT key_hash FROM api_keys WHERE id=2;   ⇒ bc2fc0f5…e56e3   ← 同一条
+```
+
+⇒ **不必重发**（重发会新增一行，还得重新分发明文、并让那份文件的说明过期）。
+直接拨回即可：
+
+```sql
+UPDATE api_keys SET is_active = 1 WHERE id = 2;
+```
+
+**复原后实测**（真后端 + 真库）：
+带该 key ⇒ **200 `{"user_name":"admin",…,"requested_by":"admin"}`**（身份正确，⛔ 不是匿名）·
+乱写 key ⇒ **401**（⛔ 不再是 503）· 已撤销的 `id=7` ⇒ **401** · 三家 `isolation_*` ⇒ **均 200**。
+
+### ⛔ 教训
+
+1. **`--revoke` 是【按用户名】的**，⛔ 不是"撤销我刚发的那把"。
+   要在共享用户名上验往返，**先确认该用户名下有几行**再动手。
+2. **说"找不回"之前，先找一遍凭据存放地** —— 本仓有专门的仓外凭据目录，
+   而我当时只想着"库里只存哈希"。**"库里没有"≠"世上没有"**（同族：`docs/复盘` 那几篇
+   「结果为空就断言…」）。
