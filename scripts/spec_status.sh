@@ -70,9 +70,23 @@ if os.path.isdir(SPECS):
         if f.endswith(".md") and f != "README.md":
             have[f[:-3]] = f
 
+# ── 2b. 【非 .py 的子系统】── 2026-10-06 加（`DEC-085` 段 1 第一刀）
+# 上面那句「模块 = api/*.py」原先**默认每个子系统都有 .py 入口**。前端打破了这个默认：
+# 它是本仓第一个**没有 .py 模块**的子系统（代码是 `api/static/` 下的 .js / .html）。
+# ⚠️ 不加这张表的话，`static_frontend.md` 会掉进下面的 `extra`
+#    ⇒ 报成「🗑 spec 有、代码没了」—— 而**代码在、且是本轮新建的**。
+#    README 明写这一行「应为 0」⇒ 那是**一条假警报**，比不报还坏
+#    （本仓立场：「从不命中」与「没人违规」在机器痕迹上一样）。
+# 判据：这张表里的 spec 名，只要它指向的路径**真的存在**，就不算残留。
+NON_PY_MODULES = {"static_frontend": "api/static"}
+
 # ── 3. 对账 ──
 missing = [(m, p, n) for m, p, n in mods if m not in have]
-extra   = [k for k in have if k not in {m for m, _, _ in mods}]
+extra   = [
+    k for k in have
+    if k not in {m for m, _, _ in mods}
+    and not (k in NON_PY_MODULES and os.path.exists(os.path.join(REPO, NON_PY_MODULES[k])))
+]
 ok      = [(m, p, n) for m, p, n in mods if m in have]
 
 def spec_status(name):
@@ -133,6 +147,14 @@ print(f"  🗑  spec 有、代码没了 {len(extra)}   ← 模块删了，spec �
 if extra:
     for k in extra:
         print(f"        docs/specs/{have[k]}")
+# ⚠️ 这一行是【显示】的，不是"通过"的：非 .py 子系统**不在上面的 ok 里**（ok 由 api/*.py 推）
+#    ⇒ 不打出来就等于它**哪一档都不占**，看起来像漏了一批。
+nonpy = [k for k in have if k in NON_PY_MODULES
+         and os.path.exists(os.path.join(REPO, NON_PY_MODULES[k]))]
+if nonpy:
+    print(f"  🧩 非 .py 子系统   {len(nonpy)}   ← 没有 api/*.py 模块，代码在别处（见脚本里的 NON_PY_MODULES）")
+    for k in sorted(nonpy):
+        print(f"        docs/specs/{have[k]}  →  {NON_PY_MODULES[k]}/")
 print()
 if missing:
     print("没 spec 的（按行数降序，前 15）：")

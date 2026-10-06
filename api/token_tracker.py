@@ -82,8 +82,7 @@ def record_usage(
     from db import get_db
     total = prompt_tokens + completion_tokens
     # 计算成本（必须先于 TokenUsage 构造，否则引用未定义变量）
-    pricing = PRICING.get(model, _DEFAULT_PRICING)
-    cost = (prompt_tokens / 1000) * pricing["prompt"] + (completion_tokens / 1000) * pricing["completion"]
+    cost = compute_cost(model, prompt_tokens, completion_tokens)   # `DEC-085` 契约 B：唯一算式
     usage = TokenUsage(
         model=model,
         prompt_tokens=prompt_tokens,
@@ -156,6 +155,65 @@ def record_usage(
 BUDGET_EXCEEDED_MSG = "今日Token预算已用完，请明天再试。"
 
 
+# ==================== DEC-085 契约 B：计价与取用量的公共件 ====================
+# 🔴 这三个函数是 `/rag/stream_search` 的 `usage` 帧与【账本】**同源**的保证。
+#    ⛔ 别在端点里再写一遍 `getattr(llm, "model_name", …)` 或再算一次钱 ——
+#       那就是**第二份取数口径**，而 `DEC-072` 的全部代价正是从"模型名有两个来源"来的
+#       （本仓按错单价记过账，前科两处）。
+#    ⚠️ 这不是顺手清理：契约 B 的帧要报 `model` / 两个 token 数 / 钱，
+#       **本刀就要用**，不抽就得在端点里复制。
+
+def resolve_model_name(llm_obj) -> str:
+    """从 LLM 对象取模型名 —— **唯一实现**（`DEC-085` 契约 B）。
+
+    🔴 为什么要单独一个函数：账本（`record_from_response`）与 `usage` 帧
+       （`/rag/stream_search`）读的是**同一处**。⛔ 让两边各写一遍 `getattr`，
+       就是造第二个可能漂的实现 —— 而本仓因"模型名有两个来源"按错单价记过两次账（`DEC-072`）。
+
+    ⚠️ 取值顺序 `model_name` → `model` → `"unknown"` 是**照抄原实现**的，⛔ 别改；
+       两样都没有时返回 `"unknown"`（⛔ 不是 `None`）—— 下游要拿它去查 `PRICING`。
+    """
+    return getattr(llm_obj, "model_name", None) or getattr(llm_obj, "model", "unknown")
+
+
+def compute_cost(model: str, prompt_tokens: int, completion_tokens: int) -> float:
+    """一次调用的成本（元）—— **唯一实现**（`DEC-085` 契约 B）。
+
+    ⚠️ 改前同一个算式在**本文件里有两份**（`record_usage` 与 `record_cost`），
+       各写各的 ⇒ 未登记模型时两张表可能对不上账（`token_config.py` 顶部记过这条约定）。
+       本刀要用的钱数除了抽取**没有别的复用方式** ⇒ 抽出来三处共用，⛔ 不写第三份。
+    """
+    pricing = PRICING.get(model, _DEFAULT_PRICING)
+    return (prompt_tokens / 1000) * pricing["prompt"] + (completion_tokens / 1000) * pricing["completion"]
+
+
+def usage_summary(llm_obj, response) -> Optional[dict]:
+    """把一次响应的用量整理成 `usage` 帧的载荷；**没带用量 ⇒ `None`**。
+
+    键固定为 `{"model", "prompt_tokens", "completion_tokens", "cost_usd"}`。
+
+    🔴 判据与 `record_from_response` **同一个属性**：`usage_metadata`（`DEC-072`）。
+       ⛔ 不是 `.usage` —— `AIMessage` / `AIMessageChunk` **都没有**那个属性，
+       `hasattr(response, "usage")` **恒为假**（本仓墓碑：`agent_checkpointer.py` 那整段
+       记账从未执行过，而测试全绿）。
+
+    ⚠️ 返回 `None` 时调用方**必须不出帧** —— 「记账了才出帧」是一条判据，不是一个建议。
+       它保证帧里报的钱与账本里的钱**同一时刻、同一来源**。
+    """
+    usage = getattr(response, "usage_metadata", None)
+    if not usage:
+        return None
+    model = resolve_model_name(llm_obj)
+    prompt_tokens = usage.get("input_tokens", 0)
+    completion_tokens = usage.get("output_tokens", 0)
+    return {
+        "model": model,
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "cost_usd": compute_cost(model, prompt_tokens, completion_tokens),
+    }
+
+
 def record_from_response(
     llm_obj,
     response,
@@ -196,14 +254,14 @@ def record_from_response(
     （`agent_graph_advanced.py:352-354` · `agent_checkpointer.py:85-87` 两处前科）。
     """
     # ⛔ 不用 `hasattr(response, "usage")` —— 见 docstring 与那是墓碑的测试
-    usage = getattr(response, "usage_metadata", None)
-    if not usage:
+    summary = usage_summary(llm_obj, response)
+    if summary is None:
         return False
 
     record_usage(
-        model=getattr(llm_obj, "model_name", None) or getattr(llm_obj, "model", "unknown"),
-        prompt_tokens=usage.get("input_tokens", 0),
-        completion_tokens=usage.get("output_tokens", 0),
+        model=summary["model"],
+        prompt_tokens=summary["prompt_tokens"],
+        completion_tokens=summary["completion_tokens"],
         purpose=purpose,
         user_name=user_name,
         thread_id=thread_id,
@@ -229,9 +287,10 @@ def record_cost(
     """
     from db import get_db
     # 计算费用
-    pricing = PRICING.get(model, _DEFAULT_PRICING)
-    input_cost = (prompt_tokens / 1000) * pricing["prompt"]
-    output_cost = (completion_tokens / 1000) * pricing["completion"]
+    # `DEC-085` 契约 B：同一算式取 0 权重 ⇒ 分量与总数**结构上不可能对不上**。
+    # ⚠️ 那两个**分量列**是 `cost_records` 的表结构要的，⛔ 不能只留总数。
+    input_cost = compute_cost(model, prompt_tokens, 0)
+    output_cost = compute_cost(model, 0, completion_tokens)
     total_cost = input_cost + output_cost
     
     # 序列化工具参数

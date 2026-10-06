@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RAG 对话</title>
+<style>
+  :root { --line:#d8d8d8; --muted:#777; --bg:#fafafa; }
+  * { box-sizing: border-box; }
+  /* 🔴 2026-10-06 加（施工实测·订正⑧）—— **不是可有可无的一行**：
+     `#app` 身上写着内联 `style="display:flex"`，而作者样式的 `display` **压过**
+     UA 样式表里的 `[hidden] { display:none }` ⇒ `hidden` 属性**完全失效**，
+     登录页和主界面会**同时显示**（实测见施工单 Task 8）。
+     ⚠️ 只要页面上还有第二个「带 display 的 hidden 元素」，同一条就再犯一次 ⇒ 写成全局规则。 */
+  [hidden] { display: none !important; }
+  body { margin:0; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+         display:flex; height:100vh; color:#222; }
+  #side { width:220px; border-right:1px solid var(--line); background:var(--bg);
+          display:flex; flex-direction:column; }
+  #side h2 { font-size:14px; margin:12px; color:var(--muted); }
+  #threads { flex:1; overflow-y:auto; }
+  .thread { padding:8px 12px; cursor:pointer; font-size:13px; border-bottom:1px solid #eee;
+            white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .thread.active { background:#e8f0fe; font-weight:600; }
+  #main { flex:1; display:flex; flex-direction:column; }
+  #log { flex:1; overflow-y:auto; padding:16px; }
+  .turn { margin-bottom:18px; }
+  .q { font-weight:600; }
+  .a { white-space:pre-wrap; line-height:1.7; }
+  .meta { color:var(--muted); font-size:12px; margin-top:6px; }
+  .badge { display:inline-block; padding:1px 6px; border-radius:3px; font-size:11px;
+           background:#fde8e8; color:#a33; margin-left:6px; }
+  .cite { color:#1a73e8; cursor:pointer; text-decoration:underline; }
+  #card { border:1px solid var(--line); border-radius:6px; padding:10px; margin-top:8px;
+          background:#fffbe6; font-size:13px; }
+  #card .src { font-weight:600; margin-bottom:4px; }
+  #composer { border-top:1px solid var(--line); padding:12px; display:flex; gap:8px; }
+  #q { flex:1; padding:10px; font-size:15px; border:1px solid var(--line); border-radius:6px; }
+  button { padding:10px 18px; font-size:15px; cursor:pointer; border-radius:6px;
+           border:1px solid var(--line); background:#fff; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  #stop { background:#fff0f0; }
+  #login { max-width:520px; margin:80px auto; }
+  #login input { width:100%; padding:10px; font-size:15px; }
+  .hint { color:var(--muted); font-size:13px; }
+</style>
+</head>
+<body>
+
+<!-- ============ 登录态（没有 key 时唯一看得见的东西） ============ -->
+<div id="login" hidden>
+  <h1>RAG 对话</h1>
+  <p class="hint">粘一把 API Key（<code>sk-…</code>）。它只存在<strong>这台机器的 localStorage</strong> 里。</p>
+  <input id="apikey" type="password" placeholder="sk-…" autocomplete="off">
+  <p><button id="save">开始</button></p>
+  <p class="hint">没有 key ⇒ 在本机跑
+    <code>python3 scripts/issue_api_key.py &lt;你的名字&gt;</code></p>
+</div>
+
+<!-- ============ 主界面 ============ -->
+<div id="app" hidden style="display:flex; width:100%; height:100%">
+  <div id="side">
+    <h2>会话</h2>
+    <div id="threads"></div>
+    <div style="padding:8px"><button id="newthread" style="width:100%">＋ 新会话</button></div>
+  </div>
+  <div id="main">
+    <div id="log"></div>
+    <div id="composer">
+      <input id="q" placeholder="问点什么…" autocomplete="off">
+      <button id="send">发送</button>
+      <button id="stop" hidden>停止</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/js/sse.js"></script>
+<script>
+'use strict';
+/* 页面装配层。⛔ 纯逻辑（帧解析 / 引用映射 / 出口判定 / 费用格式）**不在这里**，
+   —— 它们在 /static/js/sse.js 里，且被 node --test 钉住（DEC-085 裁定 #9）。
+   ⚠️ 引用正则也**只有 sse.js 那一份**（`RagSse.splitCitations`）——
+      本文件里再写一份就会与它漂移，而那**不报错**（表现是"点了没反应"）。 */
+
+const KEY_STORE = 'rag_api_key';
+const THREAD_STORE = 'rag_threads';
+
+// 状态机：idle → 请求中 → 流式中 → 完成｜已中断｜出错
+let state = 'idle';
+let controller = null;      // AbortController：停止按钮就靠它
+let sawDone, sawError, aborted, firstContentAt, sentAt;
+
+const $ = (id) => document.getElementById(id);
+
+// ---------- 身份 ----------
+function currentKey() { return localStorage.getItem(KEY_STORE) || ''; }
+
+function showLogin() {
+  $('login').hidden = false;
+  $('app').hidden = true;
+  $('apikey').value = '';
+  $('apikey').focus();
+}
+function showApp() {
+  $('login').hidden = true;
+  $('app').hidden = false;
+}
+
+// 🔴 三种失败说三句话，⛔ 不许合并 —— `DEC-082`/`N9` 的口径：
+//    换 key 修不好"认证服务不可用"，而提示他换 key 会让他**查不出原因**。
+function explainStatus(status) {
+  if (status === 401 || status === 403) return { msg: 'API Key 无效或已过期', relogin: true };
+  if (status === 503) return { msg: '认证服务不可用，请稍后重试（⛔ 不是你的 key 的问题）', relogin: false };
+  if (status === 429) return { msg: '今日额度已用完 / 会话额度已用完', relogin: false };
+  return { msg: `请求失败（HTTP ${status}）`, relogin: false };
+}
+
+// ---------- 会话（真多会话：thread_id 由前端生成，历史由后端按 (user, thread) 存） ----------
+function loadThreads() {
+  try { return JSON.parse(localStorage.getItem(THREAD_STORE)) || null; }
+  catch (e) { console.warn('会话表坏了，已重置', e); return null; }
+}
+function saveThreads(t) { localStorage.setItem(THREAD_STORE, JSON.stringify(t)); }
+
+// 🔴 返回的一定是【可用】的表：没有就建一个。⛔ 别让调用方自己去判 null ——
+//    起草稿里 `renderThreads()` 直接 `loadThreads().threads` ⇒ **第一次打开必抛 TypeError**
+//    （`Cannot read properties of null`），页面白屏。实测见施工单 Task 8。
+function currentThread() {
+  let t = loadThreads();
+  if (!t || !t.threads.length) {
+    t = { threads: [], current: null };
+    newThread(t);
+  }
+  if (!t.current) t.current = t.threads[0].id;
+  return t;
+}
+
+function newThread(t) {
+  t = t || loadThreads() || { threads: [], current: null };
+  // ⚠️ `session_key` 两参必填 ⇒ thread_id **不许为空串**（空串会被后端 fail-closed 拒掉）
+  const id = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()));
+  t.threads.unshift({ id, title: '新会话', createdAt: Date.now() });
+  t.current = id;
+  saveThreads(t);
+  return t;
+}
+
+function renderThreads() {
+  const t = currentThread();
+  const box = $('threads');
+  box.innerHTML = '';
+  for (const th of t.threads) {
+    const d = document.createElement('div');
+    d.className = 'thread' + (th.id === t.current ? ' active' : '');
+    d.textContent = th.title;
+    d.onclick = () => { t.current = th.id; saveThreads(t); renderThreads(); showEmptyLog(); };
+    box.appendChild(d);
+  }
+}
+
+// ⚠️ 本页**不显示历史**（后端没有"取历史"的公开接口，`DEC-085` 契约 C 只把历史喂给模型）。
+//    ⇒ 切回旧会话时给一句实话，⛔ 别留一块**看不出所以然的空白**
+//    （空白会被读成"这个会话是空的"，而其实模型记得它 —— 见施工单 Task 8 的已知限制）。
+function showEmptyLog() {
+  $('log').innerHTML = '<p class="hint">（本页不显示历史消息；这个会话的上下文模型仍然记得）</p>';
+}
+
+// ---------- 渲染 ----------
+function addTurn(question) {
+  $('log').insertAdjacentHTML('beforeend',
+    `<div class="turn"><div class="q"></div><div class="a"></div><div class="meta"></div></div>`);
+  const turn = $('log').lastElementChild;
+  turn.querySelector('.q').textContent = question;
+  return turn;
+}
+
+// 把正文里的 [来源:X] 换成可点开的 span。
+// 🔴 切分走 `RagSse.splitCitations` —— **正则只有那一份**（⛔ 本文件里不许再有第二份）。
+function renderAnswer(el, text, sources) {
+  const byIndex = new Map(RagSse.resolveCitations(text, sources).map((r) => [r.index, r]));
+  el.innerHTML = '';
+  for (const seg of RagSse.splitCitations(text)) {
+    if (seg.index === undefined) {
+      el.appendChild(document.createTextNode(seg.text));
+      continue;
+    }
+    const span = document.createElement('span');
+    span.className = 'cite';
+    span.textContent = '[' + seg.index + ']';
+    // ⚠️ 找不到的编号**照样画出来、只是点不动** —— 让"模型吐了个不存在的号"看得见，
+    //    ⛔ 别悄悄吞掉（吞掉会让人以为模型没引用）。
+    if (byIndex.has(seg.index)) span.onclick = () => showCard(byIndex.get(seg.index));
+    el.appendChild(span);
+  }
+}
+
+// ⚠️ DEMO 版：卡片固定放在 `#log` 末尾（⛔ 不是插在该条回答下面），再点一次就换内容。
+function showCard(src) {
+  let card = $('card');
+  if (!card) {
+    card = document.createElement('div');
+    card.id = 'card';
+    $('log').appendChild(card);
+  }
+  card.innerHTML = '';
+  const h = document.createElement('div');
+  h.className = 'src';
+  h.textContent = `[${src.index}] ${src.source}`;
+  const p = document.createElement('div');
+  // 🔴 用 textContent：文档正文里可能有尖括号 ⇒ innerHTML 会把它变成标签
+  p.textContent = src.content;
+  card.appendChild(h);
+  card.appendChild(p);
+  card.scrollIntoView({ block: 'nearest' });   // 卡片在 log 末尾 ⇒ 把它滚进视野
+}
+
+// ---------- 发起一次提问 ----------
+async function ask() {
+  if (state !== 'idle') return;
+  const question = $('q').value.trim();
+  if (!question) return;
+
+  const t = currentThread();
+  const threadId = t.current;
+  const thread = t.threads.find((x) => x.id === threadId);
+  if (thread && thread.title === '新会话') {
+    thread.title = question.slice(0, 20);
+    saveThreads(t); renderThreads();
+  }
+
+  const turn = addTurn(question);
+  const aEl = turn.querySelector('.a');
+  const metaEl = turn.querySelector('.meta');
+
+  state = '请求中';
+  sawDone = false; sawError = false; aborted = false; firstContentAt = null;
+  let answer = '', sources = [], usage = null, exit = 'incomplete';
+  controller = new AbortController();
+  $('send').disabled = true; $('stop').hidden = false;
+  sentAt = performance.now();
+
+  try {
+    const resp = await fetch('/api/v1/rag/stream_search?thread_id=' + encodeURIComponent(threadId), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-API-Key': currentKey() },
+      // 🔴 三条前端必须遵守的（DEC-085 §3.3）：
+      //    ① citations 默认 False ⇒ 不显式传 true 就**根本没有 sources 帧**；
+      //    ② conversation_history 由后端按 (user, thread) 取 ⇒ 前端**不传**，
+      //       ⛔ 也别传 [] 去"清空"（后端那句 `if not req.conversation_history` 是 falsy 判断，[] 会被无视）。
+      body: JSON.stringify({ question, citations: true }),
+      signal: controller.signal,
+    });
+
+    if (!resp.ok) {
+      const { msg, relogin } = explainStatus(resp.status);
+      aEl.textContent = msg;
+      if (relogin) localStorage.removeItem(KEY_STORE);
+      // 🔴 2026-10-06 施工实测·订正⑧：起草稿这里**只写了 `metaEl.textContent = '出错'`，
+      //    没有置 `exit`** ⇒ `exit` 还是 'incomplete' ⇒ 下面 `finally` 会把这行**覆盖成
+      //    「本轮未计费 · 未收到结束标志」** ⇒ 用户看到的**不是"出错"**。
+      //    改法：把出口置成 'error'，让 `finally` 那段**唯一的**收尾逻辑去写这一行。
+      exit = 'error';
+      if (relogin) { showLogin(); return; }
+      return;
+    }
+
+    state = '流式中';
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    // 🔴 **直到连接关闭才收工** —— 见 [DONE] 就 return 会把 `sources` 与 `usage` 整段丢掉
+    //    （[DONE] 排在它们**之前**是线上契约，`api_v1_rag.py` 的 `_complete` 明写）。
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const { payloads, rest } = RagSse.parseSseChunk(buffer);
+      buffer = rest;
+      for (const p of payloads) {
+        const kind = RagSse.payloadKind(p);
+        if (kind === 'content') {
+          if (firstContentAt === null) firstContentAt = performance.now();
+          answer += p.content;
+          renderAnswer(aEl, answer, sources);       // 有了 sources 才能把引用变成可点的
+        } else if (kind === 'sources') {
+          sources = p.sources;
+          renderAnswer(aEl, answer, sources);
+        } else if (kind === 'usage') {
+          usage = p.usage;
+        } else if (kind === 'error') {
+          sawError = true;
+          answer += `\n[出错] ${p.error}`;
+          renderAnswer(aEl, answer, sources);
+        } else if (kind === 'done') {
+          sawDone = true;
+        }
+      }
+    }
+    exit = RagSse.classifyExit({ sawDone, sawError, aborted });
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      aborted = true;
+      exit = 'aborted';
+    } else {
+      sawError = true;
+      exit = 'error';
+      aEl.textContent = answer + `\n[网络出错] ${err.message}`;
+    }
+  } finally {
+    state = 'idle';
+    controller = null;
+    $('send').disabled = false; $('stop').hidden = true;
+
+    // 收场徽标 + 费用行
+    if (exit === 'aborted') {
+      turn.querySelector('.a').insertAdjacentHTML('beforeend', '<span class="badge">已中断</span>');
+    }
+    const parts = [];
+    if (exit === 'aborted') {
+      // 🔴 不是文案选择，是在说事实：usage 只在最后一帧回来，提前关流那帧到不了（DEC-084）
+      parts.push('中断未计费');
+    } else if (usage) {
+      parts.push(`${usage.model}`);
+      parts.push(`${usage.prompt_tokens}+${usage.completion_tokens} tok`);
+      parts.push(RagSse.formatCost(usage.cost_usd));
+    } else {
+      parts.push('本轮未计费');
+    }
+    // 首字延迟**前端自己测**（⛔ 不伪装成服务端指标 —— 本仓有"性能数字要先说清是目标还是实测"的前科）
+    if (firstContentAt !== null) parts.push(`首字 ${Math.round(firstContentAt - sentAt)} ms`);
+    parts.push({ done: '完成', aborted: '已中断', error: '出错', incomplete: '未收到结束标志' }[exit]);
+    metaEl.textContent = parts.join(' · ');
+    $('q').value = '';
+    $('log').scrollTop = $('log').scrollHeight;
+  }
+}
+
+// ---------- 停止 ----------
+$('stop').onclick = () => {
+  if (controller) controller.abort();   // 硬门 C：Network 里那条请求必须真的变成 (canceled)
+};
+
+// ---------- 装配 ----------
+$('save').onclick = () => {
+  const k = $('apikey').value.trim();
+  if (!k) return;
+  localStorage.setItem(KEY_STORE, k);
+  showApp(); renderThreads();
+};
+$('send').onclick = ask;
+$('q').addEventListener('keydown', (e) => { if (e.key === 'Enter') ask(); });
+$('newthread').onclick = () => { newThread(); renderThreads(); showEmptyLog(); };
+
+(currentKey() ? (showApp(), renderThreads()) : showLogin());
+</script>
+</body>
+</html>

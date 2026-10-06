@@ -240,3 +240,14 @@ jobs:
           bash scripts/test_remind_hooks.sh
 
           pytest api/ -m "not integration and not needs_db" -v
+
+          # ⭐ 前端纯逻辑（2026-10-06 加，`DEC-085` 裁定 #9）—— `node:test`，⛔ 零 npm 依赖。
+          #   🔴 **必须留在本 run 块里**，⛔ 不许新开 step：`scripts/ci-local.sh` 只跑
+          #      「含 pytest 的那一整块 run」（它靠 `next(s for s in steps if "pytest" in s["run"])` 挑块）
+          #      ⇒ 新开 step ⇒ 本地永远跑不到它 ⇒「本地 CI 等价」当场变成假话。
+          #   ⚠️ ubuntu-latest 自带 node（本机实测 v26）；`sse.js` 是经典脚本 +
+          #      末尾条件导出 ⇒ 不需要 package.json、不需要 npm install。
+          #   ⚠️ 它排在 pytest **之后**：pytest 是这几分钟里最贵的一条，
+          #      但这条只要 ~0.4s ⇒ 就算 pytest 先红也**不值得**为它调顺序（先跑的仍是三道路由/凭据/文档门）。
+          echo "--- 前端纯逻辑（node --test）---"
+          node --test api/static/js/sse.test.js

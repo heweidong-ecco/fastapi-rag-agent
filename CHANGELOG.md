@@ -10,6 +10,48 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- ⭐ **对话页一条线（段 1 第一刀）**（2026-10-06 · `DEC-085` 十二条裁定）—— `GET /chat` + `api/static/web/chat.html` + `api/static/js/sse.js`（纯逻辑，`node --test`）+ `scripts/issue_api_key.py`。
+
+  业务方的顺序裁定（`DEC-033` 🅱️「**先把后端做完，再进前端**」）在 2026-10-06 满足 ⇒ 进入**段 1**。
+  第一刀切在**对话页一条线**：登录（粘 API Key）→ 提问 → 流式逐字 → 引用点开 → 停止 → 每轮 token / 费用 / 首字延迟。
+  选它的理由（裁定 #1）：**一刀同时覆盖硬门 B（引用可点）· 硬门 A（`text/event-stream` 不关）· 硬门 C（停止按钮）**
+  ⇒ 落地当天就能演示。
+
+  **技术选型**（裁定 #2）：**原生单文件 HTML + 一个共享 js**，⛔ 不上 React/Vue。本仓**无 `package.json`、无构建、CI 是纯 Python**
+  ⇒ 上框架要么加整条构建链、要么走 CDN（外网依赖，而主线正是"上公网"）。已有先例：`api/static/` 下 3 个原生页。
+
+  🔴 **本仓第一条【面向人的页面】路由** —— `/` 此前返回的是 JSON 服务索引，**不是页面**。
+  ⚠️ `include_in_schema=False`（它不是 API，⛔ 不进 openapi）· ⚠️ 302 而⛔ 不是直接返回文件
+  （页面本体由已挂的 `/static` 托管：**零 CORS、零新服务、零构建**）。
+
+  🔴 **它是一条新的【公开路由】** ⇒ 会让 `scripts/check_route_auth.py --baseline` 报"多了一条"
+  ⇒ **已显式写进 `scripts/route-auth-baseline.txt`**（一次**有意识**的操作，⛔ 不是顺手刷基线；
+  模板注释与结果文件**两处一起改**，否则下次谁跑一次 `--write-baseline` 就会把新注释冲掉）。
+
+  ⭐ **前端判据的做法**（裁定 #9）：**纯逻辑抽成 `api/static/js/sse.js` + `node --test`**，并把那一步
+  **同时**接进 `ci.yml` 与 `scripts/ci-local.sh`（⚠️ **只接一处 ⇒「本地 CI 等价」这句话就是假的**）。
+  理由：硬门 B / C 都标着「**最容易假完成**」，而本仓立场是「**写不出命令的，就是还没核过**」
+  —— 零自动化等于主动在那一格写"没核过"。
+
+  🔴 **`sse.js` 是【唯一】解析引用的地方**（`window.RagSse`）—— 页面与用例**共用一份**正则，
+  ⛔ 别各写一份：两处一旦漂移，**画出来的编号与点开的编号不是同一批**，**而页面上不报错**
+  （表现是"点了没反应"）。
+
+  ⚠️ **本刀【没有】解决什么**（原话在 `DEC-085` §六）—— 接管页 / Trace 页改造 / Eval 页（前置 `B14`）**都不在本刀**；
+  硬门 A·C 的其余前端项、两个存量坏页、取消时的 token 补不上，**全部登记** `docs/待办总表.md` §三·附2（`F1`–`F8`）。
+  🔴 **其中 `F8` 不在 `DEC-085` §六 里** —— 它是**收 PR 时核硬门 B 判定原文才发现的漏登记**：
+  硬门 B 的判定是**三句**，本刀**只做掉第一句**（"点开能展开原文片段"），
+  「再点能跳到原文位置」与证真那句「能看到 **chunk id + 相似度分**」**两句都没做**
+  （卡片是固定挂在 `#log` 末尾的 **DEMO 版**，只渲染 `[index] source` + `content`）。
+  ⇒ **`ROADMAP` 那格的 🟡 一度只写了两条理由，已补成三条。**
+
+  **判据（可打印）**：
+  ```bash
+  node --test api/static/js/sse.test.js          # ⇒ ℹ tests 18 / pass 18 / fail 0
+  venv/bin/python -m pytest api/test_chat_page.py -q   # ⇒ 3 passed（跳转目标 / 目标文件真在磁盘 / 不在 openapi 里）
+  bash scripts/ci-local.sh                       # ⇒ 退出码 0（node 那步在本地的 run 块里）
+  ```
+
 - ⭐ **三家隔离用户的语料与会话【常驻】真库**（2026-10-04 · `DEC-071`）—— `testdata/isolation-seed/` + `scripts/seed_isolation_docs.sh`（documents 轴）+ `scripts/seed_isolation_threads.sh`（`thread_id` 轴）。
 
   业务方原话：「**调用接口模拟真实用户的操作，写入数据库和向量数据库，没有真实写入以后
@@ -897,6 +939,54 @@ All notable changes to this project will be documented in this file.
   📄 该节现含三条轴对照表 + `ci-local.sh` 用法与判据。
 
 ### Changed
+
+- 🔴 **四处后端契约改动（为对话页）**（2026-10-06 · `DEC-085` 契约 A–D + 裁定 #12）—— ⚠️ **帧序、历史键、`is_active` 都动了**，逐条如下。
+
+  **契约 A · `sources` 每条补 `index` 与 `content`（全文）** —— 截断到 100 字的 `content_preview` 演示时太短，
+  而**前端按下标硬猜**是"靠数组顺序 == 编号"这个**隐式契约**（谁插一项就静默错位）。
+  ⇒ **同一个 `i`** 同时写进 prompt 的 `[文档{i}]` 和帧里的 `index`；`content` 是**追加**，
+  老前端用的 `content_preview` **仍在**（⛔ 不是替换）。
+  ⚠️ **两个出口（`api_v1_rag.py` 的流式帧 · `answer_with_citations.py` 的非流式返回）是【手工对齐】的，
+  没有任何东西钉住它们同构** —— 改一边忘另一边 ⇒ 两个出口**悄悄分叉，而两边各自的用例都还是绿的**。
+
+  **契约 B · `/rag/stream_search` 末尾追加一个 `usage` 汇总帧** —— 每轮的 `model` / `prompt_tokens` /
+  `completion_tokens` / `cost_usd`。帧序变成 **`内容… → [DONE] → sources → usage`**
+  （⚠️ `_complete` 里那条"`[DONE]` 排在 `sources` 之前…前端已按此适配"的注释**同步改了**
+  —— ⛔ 别写行号，它漂过好几次：`grep -n '前端按"见 \[DONE\] 后才收' api/api_v1_rag.py`）。
+  🔴 **纯追加** ⇒ 老帧逐字零改动；⛔ 不许挪到 `[DONE]` 之前。
+  ⚠️ **取消 / 出错时【没有】这一帧** —— 前端按"缺这一帧"处理，⛔ **别补一个 0**（`DEC-084`：宁可空着，不编数）。
+  📌 三个纯函数从记账模块抽出来复用（`resolve_model_name` / `compute_cost` / `usage_summary`），
+  ⛔ **不在端点里写第三份公式**；`model` **从 llm 对象取**，⛔ 不写死字符串（本仓因写死 `"qwen-turbo"` 按错单价记过两次账）。
+
+  **契约 C · 历史键从 `{user}` 改成 `{session_key(user, thread)}`** —— 改前 `thread_id` **不切分历史**
+  （只用于 `B8` 额度）⇒ **同一人开两个会话会互相串上下文**。
+  ⇒ `cache.get_chat_history` / `append_chat_history` / `persist_turn` 三个函数加**必填关键字** `thread_id`
+  （⛔ **无默认值** —— 有默认值 ⇒「忘了传」会**静默**变成"都写进同一个桶"），**16 个调用点**跟着改。
+  ⚠️ **`thread_id` 不进 Redis 的字段**（键里已经有了），⛔ 别顺手写进 json。
+
+  **契约 D · 🔴 点活 `api_keys.is_active`** —— 改前**全仓没有一处读它**（详见 `DEC-086`），
+  ⇒ 发出去的 key **收不回来**。
+  🔴 **列类型必须是 `INTEGER` 0/1，⛔ 不是 `BOOLEAN`** —— 写侧 `scripts/issue_api_key.py` 用的是 `SET is_active = 0`。
+  ⚠️ 写法**防 NULL**（`COALESCE(is_active, 1) = 1`）：现有行都是激活的，本改**不改变任何现有行为**（⚠️ 该条已在真库上验过）。
+  📌 **落点是本仓自己的 DDL**（`api/db.py` + `api/schema.sql`），⛔ 不是去改 `auth.py` 的 `COALESCE` ——
+  那不是"列不在了"，是**从来没建过**。
+
+  **裁定 #12 · `?thread_id=` 空串挡成 422** —— **13 处**查询参数一律 `Query("default", min_length=1)`。
+  ⚠️ **原估 5 处是错的，实测 13 处**。空串若放进来会一路走到 `session_key()` 的 `ValueError`（fail-closed），
+  而那时**响应头已经发出去了**（流式端点）⇒ 只能变成 **500 或一个半截的流**。
+  ✅ 配**推导型**守卫 `api/test_thread_id_guard.py`（扫**路由表本身**，⛔ 不是逐个端点写一条
+  —— 那样只能钉住"我当时记得的"那 13 个，下一个人加第 14 个照样能漏）。
+  ⚠️ **2 条故意不加**（`ALLOWLIST`，唯一允许的例外）：`/agent/approve`（空串 ⇒「查不到」，**语义另裁**）·
+  `/agent/token/thread`（语义是「不传 = 所有线程」，加了会**改功能**）。
+
+  **判据（可打印）**：
+  ```bash
+  venv/bin/python -m pytest api/test_frontend_contract.py -q          # ⇒ 7 passed（含帧序）
+  venv/bin/python -m pytest api/test_token_tracker_cost_helpers.py -q # ⇒ 5 passed
+  venv/bin/python -m pytest api/test_auth_api_key_active.py -q        # ⇒ 5 passed
+  venv/bin/python -m pytest api/test_thread_id_guard.py -q            # ⇒ 4 passed
+  ```
+  📄 `docs/decisions/DEC-085-对话页一条线的四个契约.md` · `DEC-086-api-keys-is-active-列由本仓DDL保证.md`
 
 - ⭐ **把【反证检验】收进 `CLAUDE.md` 的『判据』表**（2026-10-05 · 业务方裁定）。
 

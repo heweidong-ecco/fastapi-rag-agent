@@ -14,6 +14,16 @@
   **从一次 LLM 响应里取用量并记账的唯一实现**。取 `getattr(response, "usage_metadata", None)`；
   无 usage ⇒ **返回 `False`、静默跳过**（⛔ 不写 0 行）；有 ⇒ 调 `record_usage(...)` 并返回 `True`。
   ⚠️ **参数 `llm_obj` 只是为了取 `model_name`**（`getattr(llm_obj, "model_name", None) or getattr(llm_obj, "model", "unknown")`）。
+- 🔵 **2026-10-06（`DEC-085` 契约 B 前置）：抽三个纯函数，算式不再有第二份**
+  · **`resolve_model_name(llm_obj)`（`:166`）** —— 模型名的**唯一实现**
+    （原先是 `record_from_response` 与 `usage` 帧各写一遍 `getattr`；本仓因"模型名两个来源"按错单价记过账）
+  · **`compute_cost(model, prompt_tokens, completion_tokens)`（`:179`）** —— 成本算式**唯一实现**
+    （⚠️ 改前**同一个算式在本文件里就有两份**：`record_usage` 与 `record_cost`）
+  · **`usage_summary(llm_obj, response)`（`:190`）** —— 把响应整理成 `usage` 帧的载荷，
+    键固定 `{model, prompt_tokens, completion_tokens, cost_usd}`；**没带用量 ⇒ `None`**。
+  📌 判据：`api/test_token_tracker_cost_helpers.py`（**5 例**）
+  ⚠️ **`usage_summary` 返回 `None` 时调用方必须【不出帧】** —— 「记账了才出帧」是一条判据，
+  它保证**帧里报的钱与账本里的钱同一时刻、同一来源**（守 ⇒ `api/test_frontend_contract.py`）。
 - **多级预算**（`:789` `check_multilevel_budget`）—— **自标「3 级」**：
   ① 单次上限（**元**，`MAX_SINGLE_CALL_COST=0.5`，`:787` 从 `token_config` import）
   ② 单线程上限（**元**，`MAX_THREAD_COST=5.0`，`:787`）
@@ -54,6 +64,8 @@
 | ⚠️ **「`GLOBAL_DAILY_TOKEN_LIMIT` = 1,000,000 是个随手写的默认值」** | 🟡 **2026-10-01 起它变成了【裁定值】**（`DEC-042`）—— 业务方在源文档 B10 那个空上填的。⚠️ 但**它仍不在环境变量契约里**（`.env.example` / `docs/契约/环境变量.md` 都无此项），想不改代码调它**得先补契约** |
 | 🔴 **「从响应取用量，`getattr(response, "usage", None)` 就行」** | ⛔ **属性名是 `usage_metadata`** —— `AIMessage` / `AIMessageChunk` 上**没有 `.usage`**，`hasattr` **恒为 False**。写错的后果是**静默不记账**（接口一切正常，只是没账）。本仓**真的栽过**：`agent_checkpointer.py` 那条链**从建立起就一笔都没记**（`DEC-072`）。<br>✅ **统一走 `record_from_response`**（`:159`）—— ⛔ 别在各链里自己 `getattr`。 |
 | 🔴 **「`record_from_response` 是全能的：取用量 + 拦预算」** | ⛔ **它只做「取+记」，⛔ 不做「拦」** —— 拦是 `check_token_budget` 的事，**必须由调用方在 `.stream()`/`.invoke()` 之【前】**自己调。<br>⚠️ 顺序反了（先调用后检查）⇒ 钱**已经花了**，只能丢结果、拦不住。 |
+| 🔴 **「成本/模型名随便在哪算都行，反正同一个算式」** | ⛔ **2026-10-06 起不行了** —— 算式**只有一份**（`compute_cost` `:179` · `resolve_model_name` `:166`），**账本与 `usage` 帧共用**。<br>⚠️ 再在别处 `getattr(llm, "model_name", ...)` 或手写 `prompt/1000*pricing` **就是造第二份实现** —— 两处一旦漂移，**帧里报的钱与账本里的钱会对不上，而两边都不报错**（本仓因"模型名有两个来源"按错单价记过两次账，`DEC-072`）。<br>📌 判据：`api/test_token_tracker_cost_helpers.py` |
+| ⚠️ **「`usage_summary` 返回 `None` ⇒ 那就出个空帧/零值帧」** | ⛔ **必须【不出帧】** —— `None` 的含义是「这次响应里没有用量」（被拦下 / provider 没回），不是"花费为 0"。<br>⚠️ 出零值帧会让前端显示 **`$0.000000`**，而那是在说"这轮不要钱"。⇒ 「**记账了才出帧**」是判据，不是建议。 |
 | 🔴 **「`record_from_response` 返回 `False` = 出错」** | ⛔ **`False` = 「这次响应里没有 usage」**（如被拦下、或 provider 没回 usage）⇒ **有意跳过、不写 0 行** —— 写 0 会污染 `token_usage_logs` 的计数（它是额度权威源）。<br>⚠️ 想看"到底记没记"，**别只看返回值** ⇒ 查库（`T8` 端到端实测就是这么核的）。 |
 
 ## 关联

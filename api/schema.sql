@@ -95,7 +95,8 @@ CREATE TABLE public.api_keys (
     user_name text NOT NULL,
     key_hash text NOT NULL,
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
-    expires_at timestamp without time zone NOT NULL
+    expires_at timestamp without time zone NOT NULL,
+    is_active integer DEFAULT 1   -- DEC-086：auth.py 按 COALESCE(is_active,1)=1 过滤；写侧是整数 0/1
 );
 
 

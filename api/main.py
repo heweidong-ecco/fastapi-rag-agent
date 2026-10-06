@@ -2,7 +2,7 @@ import uuid
 import time
 from contextvars import ContextVar
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from dotenv import load_dotenv
 
 from config import validate_config
@@ -522,6 +522,16 @@ async def root():
             "agent": "/api/v1/agent",
         },
     }
+
+# 🔴 `DEC-085` §3.1：对话页的**入口 URL**（裁定 #10）。
+#    ⚠️ `/` **已被占**（上面那条返回 JSON 服务索引）—— ⛔ 别动它，本路由**单独一条**。
+#    ⚠️ 302 而不是直接返回文件：页面本体由已挂的 `/static` 托管（零 CORS、零新服务、零构建）。
+#    🔴 代价已认：`scripts/check_route_auth.py --baseline` 在 CI 里 ⇒ 这是**新公开路由**，
+#       会让它 exit 1 ⇒ **已显式写进 `scripts/route-auth-baseline.txt`**（一次有意识的操作）。
+@app.get("/chat", include_in_schema=False)
+async def chat_page():
+    """把人送到对话页。⚠️ `include_in_schema=False`：它不是 API，⛔ 别混进 openapi。"""
+    return RedirectResponse(url="/static/web/chat.html", status_code=302)
 
 # 新增  嵌入了 Prometheus 指标采集
 # 指标暴露接口

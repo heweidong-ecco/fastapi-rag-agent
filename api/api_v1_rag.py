@@ -20,7 +20,7 @@ from exceptions import ErrorCode, AppException
 # ⚠️ `token_tracker` 模块级只 import `os/json/threading` 等标准库 + `token_config`
 #    （`db` / `langchain` 都是**函数内**惰性导入）⇒ 放文件头**不破坏**本文件
 #    「导入期不拉 langchain」的既有做法（与上面 `MAX_TOKENS_ANSWER` 同一条理由）。
-from token_tracker import check_session_token_budget, record_from_response
+from token_tracker import check_session_token_budget, record_from_response, usage_summary
 # B11（①b Task 4）：全站日级熔断。与 B8 并列，⛔ 别合并（B8 按会话 / B11 按全站）。
 # ⚠️ breaker 只在**函数内**惰性导入 token_tracker ⇒ 放文件头不破坏本文件
 #    「导入期不拉重依赖」的既有做法（同上面 `token_tracker` 那条注释的道理）。
@@ -472,7 +472,9 @@ async def rerank_search_api(
 @router.post("/rag/rewrite_search")
 async def rewrite_search_api(
     req: QuestionRequest,
-    thread_id: str = "default",       # 🔴 2026-10-05 加（B8 需要会话维度）—— 同 `/rag/stream_search`
+    # 🔴 `DEC-085` 裁定 #12：空串挡在**进端点之前**（422）—— ⛔ 否则它会一路走到
+    #    `session_key()` 的 `ValueError`，而那时**流已经开了一半**，只能变成 500。
+    thread_id: str = Query("default", min_length=1),   # 🔴 2026-10-05 加（B8 需要会话维度）
     user_name: str = Depends(get_current_user_hybrid),
 ):
     """带查询改写的混合检索（**只在该用户自己的文档内**）"""
@@ -516,7 +518,9 @@ PIPELINE_FACTORIES = {
 async def unified_search(
     req: QuestionRequest,
     mode: SearchMode = "accurate_norerank",
-    thread_id: str = "default",       # 🔴 2026-10-05 加（B8 需要会话维度）—— 同 `/rag/stream_search`
+    # 🔴 `DEC-085` 裁定 #12：空串挡在**进端点之前**（422）—— ⛔ 否则它会一路走到
+    #    `session_key()` 的 `ValueError`，而那时**流已经开了一半**，只能变成 500。
+    thread_id: str = Query("default", min_length=1),   # 🔴 2026-10-05 加（B8 需要会话维度）
     user_name: str = Depends(get_current_user_hybrid),
 ):
     """
@@ -653,17 +657,24 @@ class _StreamUsageTap:
         return llm_chunk_text(chunk)
 
     def record(self, llm, *, user_name, thread_id):
-        """收尾（**只在这条出口**）时调用：聚合块交给 `record_from_response`。
+        """收尾（**只在这条出口**）时调用：先记账，**成了才返回帧载荷**。
+
+        🔴 `DEC-085` 契约 B：返回的是 `usage` 帧的载荷（`dict`），⛔ 不再是 `bool`。
+           判据只有一条 —— **记账了才出帧、没记账就不出帧**（两者同源）。
+           载荷由 `token_tracker.usage_summary` 拼，⛔ **不在这里重算一遍模型名与钱**
+           （那会造出第二份取数口径，`DEC-072` 的代价就是从那儿来的）。
 
         ⚠️ 它**只在正常跑完**那条路被调 —— 取消 / 异常时带 usage 的那一帧根本没到
-           ⇒ 如实不记，⛔ **不编一个数进账本**（`DEC-053` §遗留·2）。
+           ⇒ 如实不记、也不出帧，⛔ **不编一个数进账本**（`DEC-053` §遗留·2）。
         """
         if self._agg is None:
-            return False
-        return record_from_response(
+            return None
+        if not record_from_response(
             llm, self._agg, "answer_generation",
             user_name=user_name, thread_id=thread_id,
-        )
+        ):
+            return None
+        return usage_summary(llm, self._agg)
 
 
 # 🔴 2026-10-04（`DEC-055`）：`INTERRUPTED_SUFFIX` 与 `_persist_interrupted_turn` **搬去
@@ -676,7 +687,9 @@ class _StreamUsageTap:
 @router.post("/rag/stream_search")
 async def stream_search(
     req: QuestionRequest,
-    thread_id: str = "default",       # ⚠️ B8 补：本端点原先**没有** thread_id
+    # 🔴 `DEC-085` 裁定 #12：空串挡在**进端点之前**（422）—— ⛔ 否则它会一路走到
+    #    `session_key()` 的 `ValueError`，而那时**流已经开了一半**，只能变成 500。
+    thread_id: str = Query("default", min_length=1),   # ⚠️ B8 补：本端点原先**没有** thread_id
     user_name: str = Depends(get_current_user_hybrid),
 ):
     """流式RAG问答接口（融合优化版）（支持引用溯源和历史补偿）。
@@ -687,7 +700,7 @@ async def stream_search(
     """
     # 0. 若前端未主动传历史，则从 Redis 加载该用户最近5轮对话
     if not req.conversation_history:
-        req.conversation_history = get_chat_history(user_name)
+        req.conversation_history = get_chat_history(user_name, thread_id=thread_id)
 
     # B8 · 会话级 token 上限（`DEC-041`）—— 触顶直接拒绝。
     # ⚠️ 放在**取历史之后、检索之前**：这是本端点**第一处真花钱**的位置之前。
@@ -728,9 +741,16 @@ async def stream_search(
         for i, doc in enumerate(contexts, start=1):
             context_parts.append(f"[文档{i}来源：{doc.get('source', '未知')}]\n{doc['content']}")
             sources_list.append({
+                # 🔴 `DEC-085` 契约 A：`index` 与上一行的 `[文档{i}]` **必须来自同一个 `i`**。
+                #    ⛔ 别在别处再算一次编号 —— 两处各写一遍 ⇒ 静默错位
+                #    （点开的是对的文档、内容是错的那篇），而没有任何报错。
+                "index": i,
                 "id": doc.get("id"),
                 "source": doc.get("source", "未知"),
-                "content_preview": doc["content"][:100]
+                # 🔴 `DEC-085` 契约 A：`content` 是**全文**，给"点开引用"看。
+                #    `content_preview` 仍在（老前端用它）—— ⛔ 不是替换，是追加。
+                "content": doc["content"],
+                "content_preview": doc["content"][:100],
             })
         context_text = "\n\n".join(context_parts)
 
@@ -783,7 +803,8 @@ async def stream_search(
         # 🔴 2026-10-06（`DEC-084`）：记账排在【任何 `yield` 之前】（`sse.py` 约束① 同源）——
         #    `yield` 是 await 点，被"二次投递的取消"打断 ⇒ 排在它后面的收尾**一件都不跑**，
         #    可钱**已经花了**。⚠️ `persist_turn` 仍留在原位（那是 `DEC-055` 定的，⛔ 本轮不动它）。
-        tap.record(get_llm_stream(), user_name=user_name, thread_id=thread_id)
+        # 🔴 `DEC-085` 契约 B：`record` 现在**返回载荷**（`None` = 没记成）。
+        payload = tap.record(get_llm_stream(), user_name=user_name, thread_id=thread_id)
         # 发送结束信号
         yield DONE_FRAME
         # ---- 在这里记录对话历史 ----
@@ -792,10 +813,15 @@ async def stream_search(
         #    ⇒ `status` 这个区分只有一份实现，⛔ 不是在这里手写一遍 `append_chat_history`。
         #    ⚠️ `done` 的字节与改前**逐字相同**（答案原样，⛔ 不 strip、⛔ 不带标记）。
         #    ⚠️ **唯一的行为变化**：空答案 ⇒ **连提问也不写**（旧代码会写下孤零零的提问）。
-        persist_turn(user_name, req.question, "".join(collected), status="done")
+        persist_turn(user_name, req.question, "".join(collected), thread_id=thread_id, status="done")
         # 如果有引用，在结束后发送来源列表
         if req.citations and sources_list:
             yield sse_frame({"sources": sources_list}, ensure_ascii=True)
+        # 🔴 `DEC-085` 契约 B：本轮的 token / 费用 —— **纯追加的最后一帧**。
+        #    ⛔ 不许挪到 `[DONE]` 之前（那是线上契约，前端按"见 [DONE] 后才收 sources/usage"适配）。
+        #    ⚠️ 取消 / 出错时**没有**这一帧 —— 前端按"缺这一帧"处理，⛔ 别补一个 0。
+        if payload is not None:
+            yield sse_frame({"usage": payload}, ensure_ascii=True)
 
     async def _on_error(exc, collected):
         """🔴 **错误路径的旧行为：只有 error 帧、没有 `[DONE]`** —— 显式覆盖骨架的默认尾巴。
@@ -825,7 +851,7 @@ async def stream_search(
         #       骨架会在 `await aclose()` **之前**调它，这正是"晚切也存得下"的原因（`DEC-054`）。
         #    ⚠️ 骨架的 `logger.info` 与 `_on_error` 里的 `print` 不冲突：前者进日志文件，后者仍在 stdout。
         on_incomplete=lambda collected, status: persist_turn(
-            user_name, req.question, "".join(collected), status=status,
+            user_name, req.question, "".join(collected), thread_id=thread_id, status=status,
         ),
         on_error=_on_error,
         # 🔴 **`ensure_ascii=True` 不是可有可无的**：本端点三帧一直用**默认的 `True`**

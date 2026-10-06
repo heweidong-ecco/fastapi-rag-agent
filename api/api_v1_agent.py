@@ -208,7 +208,9 @@ def _tool_rulings(pending_calls: list, ruling_text: str) -> list:
 @router.post("/agent/langgraph_chat")
 async def langgraph_chat(
     question: str,                    # 这是一个查询参数
-    thread_id: str = "default",       # 这也是一个查询参数
+    # 🔴 `DEC-085` 裁定 #12：空串挡在**进端点之前**（422）—— ⛔ 否则它会一路走到
+    #    `session_key()` 的 `ValueError`，而那时**流已经开了一半**，只能变成 500。
+    thread_id: str = Query("default", min_length=1),   # 这也是一个查询参数
     user_name: str = Depends(get_current_user_hybrid), # 这是依赖注入
 ):
     """
@@ -276,7 +278,9 @@ async def langgraph_chat(
 @router.post("/agent/langgraph_chat/stream")
 async def langgraph_chat_stream(
     question: str,
-    thread_id: str = "default",
+    # 🔴 `DEC-085` 裁定 #12：空串挡在**进端点之前**（422）—— ⛔ 否则它会一路走到
+    #    `session_key()` 的 `ValueError`，而那时**流已经开了一半**，只能变成 500。
+    thread_id: str = Query("default", min_length=1),
     user_name: str = Depends(get_current_user_hybrid),
 ):
     """`/agent/langgraph_chat` 的**流式**版本（`B1`）。SSE 逐 token 返回。
@@ -369,7 +373,7 @@ async def langgraph_chat_stream(
             yield sse_frame({"error": msg}, ensure_ascii=False)
             yield DONE_FRAME
             # ⚠️ 挪进了这一支（⛔ 别在末尾再写一处 `persist_turn`）—— 本轮**没答成**。
-            persist_turn(user_name, question, msg, status="error")
+            persist_turn(user_name, question, msg, thread_id=thread_id, status="error")
             return
 
         summary = summarize_agent_result(state.values or {})
@@ -392,7 +396,7 @@ async def langgraph_chat_stream(
         #    ⚠️ 位置：排在**帧之后** —— 与 `/rag/stream_search` 的 `_complete` 同款。
         #       redis 出问题时客户端**已经**拿到完整收尾，不会看到"答案被 error 帧顶掉"。
         if summary.get("status") == "answered":
-            persist_turn(user_name, question, summary.get("answer") or "", status="done")
+            persist_turn(user_name, question, summary.get("answer") or "", thread_id=thread_id, status="done")
 
     return sse_response(sse_stream(
         # ⚠️ 上游**必须返回一个可 `aclose()` 的句柄**（这里是个 lambda，返回 `astream` 对象）——
@@ -421,7 +425,7 @@ async def langgraph_chat_stream(
         #    ⚠️ 这里**只能用 `collected`**：取消/异常时图正跑到一半，**没有最终状态可查**
         #       （与 `_complete` 那条"答案取自 `aget_state`"不矛盾 —— 那条管 `done`）。
         on_incomplete=lambda collected, status: persist_turn(
-            user_name, question, "".join(collected), status=status,
+            user_name, question, "".join(collected), thread_id=thread_id, status=status,
         ),
     ))
 
@@ -680,7 +684,9 @@ advanced_agent = build_advanced_agent()
 # 新增Mem0 灵活 独立隔离的记忆空间，memory_space，默认：default
 async def advanced_agent_chat(
     question: str,
-    thread_id: str = "default",
+    # 🔴 `DEC-085` 裁定 #12：空串挡在**进端点之前**（422）—— ⛔ 否则它会一路走到
+    #    `session_key()` 的 `ValueError`，而那时**流已经开了一半**，只能变成 500。
+    thread_id: str = Query("default", min_length=1),
     memory_space: str = "default",
     user_name: str = Depends(get_current_user_hybrid),
 ):
@@ -731,7 +737,9 @@ async def advanced_agent_chat(
 @router.post("/agent/advanced_chat/stream")
 async def advanced_agent_chat_stream(
     question: str,
-    thread_id: str = "default",
+    # 🔴 `DEC-085` 裁定 #12：空串挡在**进端点之前**（422）—— ⛔ 否则它会一路走到
+    #    `session_key()` 的 `ValueError`，而那时**流已经开了一半**，只能变成 500。
+    thread_id: str = Query("default", min_length=1),
     memory_space: str = "default",
     user_name: str = Depends(get_current_user_hybrid),
 ):
@@ -789,7 +797,7 @@ async def advanced_agent_chat_stream(
             msg = agent_budget_intercept_message(why)
             yield sse_frame({"error": msg}, ensure_ascii=False)
             yield DONE_FRAME
-            persist_turn(user_name, question, msg, status="error")
+            persist_turn(user_name, question, msg, thread_id=thread_id, status="error")
             return
 
         yield sse_frame({
@@ -804,7 +812,7 @@ async def advanced_agent_chat_stream(
         #    与**上面那一帧**的占位串 `"处理完成"` **有意不同**：占位串是给前端看的兜底，
         #    而把一句假的"处理完成"存进历史，下一轮 prompt 会把它当成**真的回答内容**。
         #    ⚠️ 本链**没有** `status` 口径（不走 `summarize_agent_result`）⇒ 无审批点可停，不设 gate。
-        persist_turn(user_name, question, values.get("final_output") or "", status="done")
+        persist_turn(user_name, question, values.get("final_output") or "", thread_id=thread_id, status="done")
 
     return sse_response(sse_stream(
         lambda: advanced_agent.astream(
@@ -833,7 +841,7 @@ async def advanced_agent_chat_stream(
         on_complete=_complete,
         # 🔴 `DEC-055`：取消 / 异常两条出口的留痕（同步 · 排在 `await aclose()` 之前）。
         on_incomplete=lambda collected, status: persist_turn(
-            user_name, question, "".join(collected), status=status,
+            user_name, question, "".join(collected), thread_id=thread_id, status=status,
         ),
     ))
 
@@ -914,7 +922,9 @@ class _ThreadTokenBridge:
 @router.post("/agent/plan_execute")
 async def agent_plan_execute(
     goal: str,
-    thread_id: str = "default",       # ⚠️ B8 补：本端点原先**没有** thread_id
+    # 🔴 `DEC-085` 裁定 #12：空串挡在**进端点之前**（422）—— ⛔ 否则它会一路走到
+    #    `session_key()` 的 `ValueError`，而那时**流已经开了一半**，只能变成 500。
+    thread_id: str = Query("default", min_length=1),   # ⚠️ B8 补：本端点原先**没有** thread_id
     user_name: str = Depends(get_current_user_hybrid),
 ):
     """完整的 Plan-and-Execute 流程"""
@@ -966,7 +976,9 @@ async def agent_plan_execute(
 @router.post("/agent/plan_execute/stream")
 async def agent_plan_execute_stream(
     goal: str,
-    thread_id: str = "default",
+    # 🔴 `DEC-085` 裁定 #12：空串挡在**进端点之前**（422）—— ⛔ 否则它会一路走到
+    #    `session_key()` 的 `ValueError`，而那时**流已经开了一半**，只能变成 500。
+    thread_id: str = Query("default", min_length=1),
     user_name: str = Depends(get_current_user_hybrid),
 ):
     """`/agent/plan_execute` 的**流式**版本（`B1`）。SSE 逐块返回。
@@ -1057,7 +1069,7 @@ async def agent_plan_execute_stream(
         # 🔴 `DEC-055` · 留痕（`status="done"`）。答案取**执行结果**，⛔ 不是流出去的规划段 JSON 片段
         #    （那半截 `{"step"` 本就不是人读终稿，见本函数上方）。
         #    ⚠️ 与上面那一帧**同一个键**（`result_holder["execution_result"]`）⇒ 帧与历史不会对不上。
-        persist_turn(user_name, goal, result_holder.get("execution_result", ""), status="done")
+        persist_turn(user_name, goal, result_holder.get("execution_result", ""), thread_id=thread_id, status="done")
 
     return sse_response(sse_stream(
         _open_upstream,
@@ -1069,7 +1081,7 @@ async def agent_plan_execute_stream(
         #    ⚠️ **已知毛刺（登记，本轮不修）**：中途取消时存下去的是**半截 JSON**（`{"step"` 这种）
         #       —— 它的流本就不是人读终稿。**照实存**，⛔ 不许为了好看去 `json.loads` 那半截（可能非法）。
         on_incomplete=lambda collected, status: persist_turn(
-            user_name, goal, "".join(collected), status=status,
+            user_name, goal, "".join(collected), thread_id=thread_id, status=status,
         ),
     ))
 
@@ -1081,7 +1093,9 @@ async def agent_plan_execute_stream(
 @router.post("/agent/memory_chat")
 async def memory_chat(
     question: str,
-    thread_id: str = "default",
+    # 🔴 `DEC-085` 裁定 #12：空串挡在**进端点之前**（422）—— ⛔ 否则它会一路走到
+    #    `session_key()` 的 `ValueError`，而那时**流已经开了一半**，只能变成 500。
+    thread_id: str = Query("default", min_length=1),
     user_name: str = Depends(get_current_user_hybrid),
 ):
     """带持久化记忆的 Agent 对话接口。
@@ -1145,7 +1159,9 @@ async def memory_chat(
 @router.post("/agent/memory_chat/stream")
 async def memory_chat_stream(
     question: str,
-    thread_id: str = "default",
+    # 🔴 `DEC-085` 裁定 #12：空串挡在**进端点之前**（422）—— ⛔ 否则它会一路走到
+    #    `session_key()` 的 `ValueError`，而那时**流已经开了一半**，只能变成 500。
+    thread_id: str = Query("default", min_length=1),
     user_name: str = Depends(get_current_user_hybrid),
 ):
     """`/agent/memory_chat` 的**流式**版本（`B1`）。SSE 逐 token 返回。
@@ -1196,7 +1212,7 @@ async def memory_chat_stream(
             msg = agent_budget_intercept_message(why)
             yield sse_frame({"error": msg}, ensure_ascii=False)
             yield DONE_FRAME
-            persist_turn(user_name, question, msg, status="error")
+            persist_turn(user_name, question, msg, thread_id=thread_id, status="error")
             return
 
         summary = summarize_agent_result(state.values or {})
@@ -1214,7 +1230,7 @@ async def memory_chat_stream(
         #    模型输出，不 gate 会被写成 `done`（假信号）。停审批点**登记为边界、本轮不实现**。
         #    ⚠️ ⛔ **别动上面 `register`/`resolve` 的顺序**（B5 待接管队列）。
         if summary.get("status") == "answered":
-            persist_turn(user_name, question, summary.get("answer") or "", status="done")
+            persist_turn(user_name, question, summary.get("answer") or "", thread_id=thread_id, status="done")
 
     return sse_response(sse_stream(
         lambda: checkpointer_agent.astream(
@@ -1231,7 +1247,7 @@ async def memory_chat_stream(
         on_complete=_complete,
         # 🔴 `DEC-055`：取消 / 异常两条出口的留痕（同步 · 排在 `await aclose()` 之前）。
         on_incomplete=lambda collected, status: persist_turn(
-            user_name, question, "".join(collected), status=status,
+            user_name, question, "".join(collected), thread_id=thread_id, status=status,
         ),
     ))
 
@@ -1459,7 +1475,9 @@ async def agent_token_budget(
 @router.post("/agent/mcp_chat")
 async def mcp_agent_chat(
     question: str,
-    thread_id: str = "default",
+    # 🔴 `DEC-085` 裁定 #12：空串挡在**进端点之前**（422）—— ⛔ 否则它会一路走到
+    #    `session_key()` 的 `ValueError`，而那时**流已经开了一半**，只能变成 500。
+    thread_id: str = Query("default", min_length=1),
     memory_space: str = "default",
     # 在需要控制成本的接口中使用
     # 新增 Token预算检查依赖和查询
@@ -1541,7 +1559,9 @@ async def mcp_agent_chat(
 @router.post("/agent/mcp_chat/stream")
 async def mcp_agent_chat_stream(
     question: str,
-    thread_id: str = "default",
+    # 🔴 `DEC-085` 裁定 #12：空串挡在**进端点之前**（422）—— ⛔ 否则它会一路走到
+    #    `session_key()` 的 `ValueError`，而那时**流已经开了一半**，只能变成 500。
+    thread_id: str = Query("default", min_length=1),
     memory_space: str = "default",
     # ⚠️ 依赖**与 `/agent/mcp_chat` 一致**（`check_budget`，⛔ 不是 `get_current_user_hybrid`）——
     #    它判的是【用户**日**预算】，是本端点原有的一道门，与会话级 `B8` **并存**（两个东西）。
@@ -1611,7 +1631,7 @@ async def mcp_agent_chat_stream(
             yield DONE_FRAME
             # 🔴 `DEC-055`：留痕排在任何 `yield` 之前的那条约束这里**不适用**（本支不会异常），
             #    但"三条出口都要留痕"照办 —— 这条算 `error`（本轮没答成）。
-            persist_turn(user_name, question, msg, status="error")
+            persist_turn(user_name, question, msg, thread_id=thread_id, status="error")
             return
 
         # 预算提醒
@@ -1627,7 +1647,7 @@ async def mcp_agent_chat_stream(
         #    （图的最终状态末条消息），⛔ 不是攒流过的块（`DEC-050`）。
         #    ⚠️ ⛔ **别动 `finish_trace` 的顺序**（记录工具要的是"追踪先结束"）——
         #       本句排在最后，不碰它。
-        persist_turn(user_name, question, answer, status="done")
+        persist_turn(user_name, question, answer, thread_id=thread_id, status="done")
 
     return sse_response(sse_stream(
         lambda: mcp_agent.astream(
@@ -1647,7 +1667,7 @@ async def mcp_agent_chat_stream(
         on_complete=_complete,
         # 🔴 `DEC-055`：取消 / 异常两条出口的留痕（同步 · 排在 `await aclose()` 之前）。
         on_incomplete=lambda collected, status: persist_turn(
-            user_name, question, "".join(collected), status=status,
+            user_name, question, "".join(collected), thread_id=thread_id, status=status,
         ),
     ))
 

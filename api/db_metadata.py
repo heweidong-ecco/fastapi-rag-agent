@@ -8,8 +8,11 @@ SQLAlchemy 表结构声明（供 Alembic autogenerate 使用）。
 所以 `db.py` 可以安全地引用它，不会成环。
 
 ⚠️ **以下的声明与 `db.py:create_table()` 里的 DDL 并不完全一致** ——
-例如 `documents` 缺 `requested_by`、`embedding` 写成 `Text`，而 `api_keys` 多一个
-`is_active`。这是**既有差异**，本次切模块**原样搬移、未做任何修正**（修正属裁决工作）。
+例如 `documents` 缺 `requested_by`、`embedding` 写成 `Text`。这是**既有差异**，
+本次切模块**原样搬移、未做任何修正**（修正属裁决工作）。
+⚠️ **2026-10-06 更正（`DEC-086`）**：原文这里还举了「而 `api_keys` 多一个 `is_active`」——
+   **那句现在不成立了**：`is_active` 已补进 `db.py:create_table()` 的建表语句**与**老库补列那句
+   `ALTER TABLE api_keys ADD COLUMN`。⇒ **这一列两边一致了**，⛔ 别再把「多一个 is_active」当既有差异。
 
 📌 运行时**真正的建表语句是 `db.py:create_table()` 的 DDL**；本模块只是给
 Alembic autogenerate 用的声明式镜像，两者不一致时**以 DDL 为准**。
