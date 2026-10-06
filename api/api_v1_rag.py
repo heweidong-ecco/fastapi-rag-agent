@@ -684,6 +684,19 @@ class _StreamUsageTap:
 #       才不会在 6 处各写一遍、各漏一条。
 
 
+# 🔴 `F4` ①（`DEC-091`）：无据拒答的那句话**只说一次**，下面**两处共用** ——
+#    ① `citations` 分支的 system prompt（「请**直接说**…」）；
+#    ② 收尾时判定「这一轮算不算拒答」。
+#    ⚠️ 非抽常量不可的理由：这两处**必须一致**，而它们分家的表现是**静默的** ——
+#       prompt 里换了措辞 ⇒ 判据认不出来 ⇒ `no_answer` 帧永远不发 ⇒
+#       页面上只是一句普通回答，**没有任何报错**（本仓「两处各写一遍 ⇒ 静默漂移」那一族）。
+# ⚠️ 判据是「**以它开头**」，⛔ 不是"含"：2026-10-06 spike 实测 **8/8** 模型都把它放在**开头**
+#    （与 prompt 里那句「请**直接说**」相符）。**误判比漏判有害**（把答得好的那轮画成"资料里没有"）
+#    ⇒ 宁可严。代价写实：换过措辞的拒答（如「文档未提及净利润，因此无法回答该问题。」）会被漏掉，
+#    那只是**退化成今天的样子**，⛔ 不会更糟。取舍全文 ⇒ `docs/decisions/DEC-091`。
+REFUSAL_SENTENCE = "根据现有资料，无法回答"
+
+
 @router.post("/rag/stream_search")
 async def stream_search(
     req: QuestionRequest,
@@ -768,7 +781,7 @@ async def stream_search(
 **引用规则（必须遵守）：**
 1. 当你使用上下文中的某条信息时，必须在句末标注来源编号，格式为 `[来源:X]`，其中 X 是文档编号。
 2. 如果一句话使用了多个来源，标注为 `[来源:X, Y]`。
-3. 不要编造任何上下文以外的信息。如果上下文不足以回答问题，请直接说“根据现有资料，无法回答”。
+3. 不要编造任何上下文以外的信息。如果上下文不足以回答问题，请直接说“{REFUSAL_SENTENCE}”。
 
 **上下文文档：**
 {context_text}"""
@@ -816,6 +829,16 @@ async def stream_search(
         payload = tap.record(get_llm_stream(), user_name=user_name, thread_id=thread_id)
         # 发送结束信号
         yield DONE_FRAME
+        # 🔴 `F4` ①（`DEC-091`）：**这一轮算不算"无据拒答"** —— 让"拒答了"成为一个
+        #    **机器可读的字段**，⛔ 不是让前端去读正文猜。判据与 prompt 那句**共用同一个常量**
+        #    （`REFUSAL_SENTENCE`，理由见它的注释）。
+        # ⚠️ 位置：`[DONE]` 之后、`sources` **之前** —— 它描述的是**刚结束的那段答案**，
+        #    而 `sources` 那一趟前端会重画；标志先到，那一趟才能**一次画对**。
+        #    ⛔ 别挪到 `usage` 后面（前端得多收一帧才敢下判断，白多一次重画）。
+        # ⚠️ 它**只说"这轮拒答了"**，⛔ 不把提示文案塞进帧里 —— 文案属于呈现层，
+        #    塞进帧就变成又一份要两边同步的契约（`api/static/js/sse.js` 的 `refusalNotice`）。
+        if "".join(collected).lstrip().startswith(REFUSAL_SENTENCE):
+            yield sse_frame({"no_answer": True}, ensure_ascii=True)
         # ---- 在这里记录对话历史 ----
         # 生成完成后，将本轮问答自动存入 Redis
         # 🔴 `DEC-055`：三条出口（`done` / `cancelled` / `error`）**共用 `persist_turn`**

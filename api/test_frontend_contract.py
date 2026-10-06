@@ -427,3 +427,109 @@ def test_the_two_quota_scopes_are_distinguishable_without_reading_the_text(rag_e
     assert s["code"] == g["code"], "前提变了：`code` 现在能把两种分开 ⇒ 该重审 `scope` 还要不要"
     assert s["scope"] != g["scope"], (
         "两种熔断的 scope 是同一个值 ⇒ 前端又只能写一句混话，`R3.2` 白做")
+
+
+# ============ 契约 F：无据拒答要能被【机器】读出来（`F4` ① · 硬门 B 第二半）============
+#
+# 🔴 为什么这条契约必须存在：硬门 B 的判定是**两半** ——
+#    「问库里有的 ⇒ 点开看原文」＋「**再问一个库里没有的 ⇒ 明确拒答**」。
+#    前半由 `DEC-085` / `DEC-089` 做完；后半 2026-10-06 用**真栈 spike** 测过：
+#    **8/8 都在拒**（`deepseek-v4-flash` ＋ 本机语料，含 3 类「话题相邻但事实不在库里」的硬例）。
+#
+# ⚠️ 但它**只活在正文里**，于是三个消费者都够不着：
+#      · 前端 —— 拒答与普通回答是**同一句普通文字**，画不出区别；
+#      · 评测 —— `bad_cases.md` 正记着「评估集缺拒答类样本」，没有信号就刷不出样本；
+#      · 日志 —— 拒答率这个数**今天根本不存在**。
+#    ⇒ 本契约补的是**可观测性**，⛔ **不是拒答率**：prompt / 模型 / 检索一律不动（见 `DEC-091`）。
+#
+# 🔴 判据是「**以 prompt 那句拒答语开头**」，⛔ 不是"含"：
+#    误判（把正常回答画成"资料里没有"）比漏判（退化成今天的样子）**有害得多** ⇒ 宁可严。
+#    ⚠️ 代价是写实的：`文档未提及净利润，因此无法回答该问题。` 这种**换过措辞**的拒答会被漏掉。
+
+_REFUSAL_IN_PROMPT = re.compile(r"请直接说“([^”]+)”")
+
+
+def _refusal_sentence(prompt):
+    """从**真 prompt** 里现抠那句拒答语 —— ⛔ 不在这里抄第二份字面量。
+
+    🔴 本条要钉的不变量是「**判据 ≡ prompt**」。从 prompt 现抠 ⇒ 两处**一起**漂时用例
+       照样绿（那是对的 —— prompt 才是这句的出处），而**只有它们分家时**才红。
+       写死字面量反而抓不到分家，那正是要防的那件事。
+    """
+    m = _REFUSAL_IN_PROMPT.search(prompt)
+    assert m, "prompt 里找不到那句拒答语 —— 前提变了，本条没测到东西"
+    return m.group(1)
+
+
+def _prompt_of_one_turn(rag_env, monkeypatch):
+    """跑一轮（答案随便），只为拿**真 prompt**。"""
+    probe = _PromptCapturingLLM()
+    monkeypatch.setattr(rag_env.rag, "get_llm_stream", lambda: probe)
+    drive(rag_env, probe, citations=True)
+    return probe.seen_messages[0]["content"]
+
+
+def _frames_for_answer(rag_env, monkeypatch, answer_text):
+    """让桩模型吐 `answer_text`，返回整条流的 payload 列表。"""
+    llm = _PromptCapturingLLM(texts=(answer_text,))
+    monkeypatch.setattr(rag_env.rag, "get_llm_stream", lambda: llm)
+    return payloads_of(drive(rag_env, llm, citations=True)[0])
+
+
+def _kinds(payloads):
+    """把 payload 列表映射成帧名列表（含 `no_answer`）。"""
+    return [
+        "done" if p == "[DONE]" else
+        next((k for k in ("error", "usage", "sources", "no_answer", "content") if k in p), "unknown")
+        for p in payloads
+    ]
+
+
+def test_no_answer_frame_is_emitted_when_the_answer_refuses(monkeypatch, rag_env):
+    """🔴 拒答 ⇒ 必须出一帧 `{"no_answer": true}` —— 这就是 `F4` ① 的全部内容。"""
+    sentence = _refusal_sentence(_prompt_of_one_turn(rag_env, monkeypatch))
+
+    payloads = _frames_for_answer(rag_env, monkeypatch, sentence)
+
+    assert any(isinstance(p, dict) and p.get("no_answer") is True for p in payloads), (
+        "拒答了却没出 no_answer 帧 ⇒ 前端只能把拒答画成一句普通回答，评测也刷不出样本")
+
+
+def test_no_answer_frame_is_absent_for_a_normal_answer(monkeypatch, rag_env):
+    """🔴 反面守卫：正常回答**不许**带这一帧 —— 否则会把答得好的那轮画成「资料里没有」。
+
+    ⚠️ 与 `test_no_usage_frame_when_nothing_was_billed` 同一条须知：**反面守卫在功能还不存在时
+       照样是绿的** ⇒ "它现在绿"证明不了它在测那件事。真正钉住功能的是上面那条正向用例；
+       本条的职责只有一个 —— 挡住**误判**（把能答的画成拒答）。
+    """
+    payloads = _frames_for_answer(rag_env, monkeypatch, "根据检索到的资料，营收为 5800 万元。[来源:1]")
+
+    assert not any(isinstance(p, dict) and "no_answer" in p for p in payloads), (
+        "正常回答被打上了 no_answer ⇒ 页面上把能答的答成「资料中没有」")
+
+
+def test_no_answer_needs_the_sentence_at_the_start_not_just_somewhere(monkeypatch, rag_env):
+    """🔴 判据是「**以…开头**」：句中提到、但这轮**答了**的，⛔ 不许当成拒答。
+
+    ⚠️ 本条钉的是**取舍**（宁可漏、不可错），⛔ 不是在钉"更多能拒"。
+    """
+    sentence = _refusal_sentence(_prompt_of_one_turn(rag_env, monkeypatch))
+
+    payloads = _frames_for_answer(rag_env, monkeypatch, "上述资料未提及净利润；" + sentence)
+
+    assert not any(isinstance(p, dict) and "no_answer" in p for p in payloads), (
+        "句中一出现那句话就判成拒答 ⇒ 误判面被放大（本仓裁定：宁可漏，不可错）")
+
+
+def test_no_answer_frame_sits_between_done_and_sources(monkeypatch, rag_env):
+    """🔴 帧序：`… [DONE] → no_answer → sources → usage`。
+
+    ⚠️ 放在 `[DONE]` 之后、`sources` **之前**，是为了让 `sources` 那一趟渲染**一次就画对**
+       （前端收到 `sources` 会重画；标志先到才用得上）。
+       ⛔ 别"顺手"挪到 `usage` 后面 —— 那样前端得多收一帧才敢下判断。
+    """
+    sentence = _refusal_sentence(_prompt_of_one_turn(rag_env, monkeypatch))
+
+    kinds = _kinds(_frames_for_answer(rag_env, monkeypatch, sentence))
+
+    assert kinds[-4:] == ["done", "no_answer", "sources", "usage"], f"帧序不对：{kinds}"

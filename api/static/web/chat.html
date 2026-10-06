@@ -47,6 +47,15 @@
   .breaker .bk-title { font-weight:600; font-size:14px; margin-bottom:6px; }
   .breaker .bk-row { display:flex; gap:8px; margin:3px 0; }
   .breaker .bk-k { flex:0 0 5.5em; color:var(--muted); }
+  /* 🔴 `DEC-091` · `F4` ①：无据拒答的提示条。**与 `.breaker` 分开一个类** ——
+     那是"额度用完了"（该做的是等跨天 / 开新会话），这是"资料里没有"（该做的是换问法 / 补文档）：
+     两者出路相反，合成一张卡会把用户引到**做不到的处置**上。
+     ⚠️ 中性灰，⛔ 不用熔断那个警示黄 —— 拒答**不是故障**，不该看着像出事。 */
+  .noinfo { border:1px solid var(--line); border-left:4px solid var(--muted); border-radius:6px;
+            padding:10px 12px; margin-top:8px; background:#fafafa; font-size:13px; }
+  .noinfo[hidden] { display:none; }
+  .noinfo .ni-title { font-weight:600; font-size:14px; margin-bottom:4px; }
+  .noinfo .ni-body { color:var(--muted); }
   #composer { border-top:1px solid var(--line); padding:12px; display:flex; gap:8px; }
   #q { flex:1; padding:10px; font-size:15px; border:1px solid var(--line); border-radius:6px; }
   button { padding:10px 18px; font-size:15px; cursor:pointer; border-radius:6px;
@@ -188,13 +197,16 @@ function showEmptyLog() {
 // ---------- 渲染 ----------
 function addTurn(question) {
   $('log').insertAdjacentHTML('beforeend',
-    `<div class="turn"><div class="q"></div><div class="a"></div><div class="breaker" hidden></div><div class="card" hidden></div><div class="meta"></div></div>`);
+    `<div class="turn"><div class="q"></div><div class="a"></div><div class="breaker" hidden></div><div class="noinfo" hidden></div><div class="card" hidden></div><div class="meta"></div></div>`);
   const turn = $('log').lastElementChild;
   turn.querySelector('.q').textContent = question;
   // 🔴 本回合当前展开的引用编号（`null` = 都收着）。放**元素上**，⛔ 不放全局 ——
   //    否则两条回答的卡片会互相抢那一个状态（本页可以连问多轮）。
   turn._openIndex = null;
   turn._byIndex = new Map();
+  // 🔴 `F4` ①（`DEC-091`）：本回合是不是**无据拒答** —— 由后端那一帧说了算，⛔ 前端不自己判
+  //    （判据只该有一份，`sse.test.js` 有结构型守卫盯着）。同样放**元素上**：一页可以连问多轮。
+  turn._refused = false;
   return turn;
 }
 
@@ -202,6 +214,8 @@ function addTurn(question) {
 // 🔴 切分走 `RagSse.splitCitations` —— **正则只有那一份**（⛔ 本文件里不许再有第二份）。
 function renderAnswer(el, text, sources) {
   const turn = el.closest('.turn');
+  // 🔴 `F4` ①（`DEC-091`）：**无据拒答**那一轮走另一条路（见 `renderRefusal`）。
+  if (turn._refused) { renderRefusal(turn, el, text); return; }
   const byIndex = new Map(RagSse.resolveCitations(text, sources).map((r) => [r.index, r]));
   turn._byIndex = byIndex;
   el.innerHTML = '';
@@ -220,6 +234,35 @@ function renderAnswer(el, text, sources) {
     el.appendChild(span);
   }
   syncCard(turn);   // 重画后把"当前开着哪一条"补回去（流式期间本函数会被调很多次）
+}
+
+// 🔴 `F4` ①（`DEC-091` · 硬门 B 的**第二半**）：**无据拒答**的呈现 —— 与普通回答**分两条路**。
+//
+//    ⚠️ 为什么非得分开：拒答那一轮正文里**照样可能带** `[来源:X]` —— 实测（2026-10-06 spike）
+//       见过一条拒答**后面挂着 3 个可点来源号**（它列了手上有什么、但答不了）。
+//       一边说"答不了"、一边挂 3 个**可点**来源是**自相矛盾**的呈现 ⇒ 这条路上**不切引用**。
+//    ⚠️ 本注释**刻意不写那句拒答语**：前端出现它就会绊倒 `sse.test.js` 的结构型守卫
+//       （那条守卫数的是"哪些前端文件里出现了它" —— 注释也算，本仓栽过同型事故）。
+//    ⚠️ 正文仍**原样显示**：那是模型说的话，⛔ 不替它改写、⛔ 也不吞掉（吞掉等于替模型粉饰）。
+//    ⚠️ 文案由 `RagSse.refusalNotice` 给（有 `node --test` 钉着），本函数只管挂 DOM ——
+//       ⛔ 别在这里再拼一遍那份文字。
+function renderRefusal(turn, el, text) {
+  const n = RagSse.refusalNotice();
+  const box = turn.querySelector('.noinfo');
+  box.innerHTML = '';
+  const h = document.createElement('div');
+  h.className = 'ni-title';
+  h.textContent = n.title;
+  const b = document.createElement('div');
+  b.className = 'ni-body';
+  b.textContent = n.body;
+  box.appendChild(h); box.appendChild(b);
+  box.hidden = false;
+
+  el.textContent = text;          // ⛔ 走 textContent：不切引用、也不当 HTML（正文可能有尖括号）
+  turn._byIndex = new Map();      // 这条路上没有可点的引用 ⇒
+  turn._openIndex = null;         // ⇒ 卡片一定是收着的
+  syncCard(turn);
 }
 
 // 🔴 `DEC-089` · 硬门 B 的「再点能跳到原文位置」= 就地展开/收起（本仓 2026-10-06 裁的「甲」）：
@@ -382,6 +425,12 @@ async function ask() {
           renderAnswer(aEl, answer, sources);
         } else if (kind === 'usage') {
           usage = p.usage;
+        } else if (kind === 'no_answer') {
+          // 🔴 `F4` ①（`DEC-091`）：后端判定这一轮是**无据拒答** ⇒ 换渲染路径。
+          //    ⚠️ 重置一次引用状态：正文里可能带着 `[来源:X]`，那条路上**不切引用**、
+          //       卡片也必须是收着的（`renderRefusal` 负责），这里只置标志 + 重画。
+          turn._refused = true;
+          renderAnswer(aEl, answer, sources);
         } else if (kind === 'error') {
           sawError = true;
           answer += `\n[出错] ${p.error}`;
