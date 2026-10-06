@@ -348,3 +348,82 @@ def test_no_usage_frame_when_nothing_was_billed(monkeypatch, rag_env):
     assert not any(isinstance(p, dict) and "usage" in p for p in payloads), \
         "一笔账都没记，就不该有 usage 帧 —— 出了帧等于在报一个编出来的数"
     assert payloads[-1] == "[DONE]"
+
+
+# ==================== 契约 E：熔断 429 得说得出是【哪一种】熔断（`R3.2` · `DEC-090`）====================
+#
+# 🔴 为什么这条契约必须存在：`chat.html` 原先 429 只写一句
+#    「今日额度已用完 / 会话额度已用完」—— **把恢复条件完全不同的两种熔断混成了一句**：
+#      · 全站日级（`B11`）⇒ 全站共享，**做什么都救不回来**，只能等跨天
+#      · 会话级（`B8`）  ⇒ 是**你自己这个 thread** 的今日用量 ⇒ **开个新会话立刻能继续**
+#    两者 `code` **都是 `QUOTA_EXCEEDED`**（`api/exceptions.py` 就一个枚举）⇒
+#    **前端从 `code` 分不出是哪种** ⇒ `R3.2` 要的第三件事（「何时恢复」）**写不清**。
+#    ⇒ 后端在**对话页这条链**上补 `scope`（⛔ 有意只接这一个端点，见 `DEC-090`）。
+
+_QUOTA_WHY = {
+    "session": "本会话预算已用完（已使用 50000 tokens，会话上限 50000 tokens）",
+    "global": "今日全站额度已用完（已使用 1000000 / 上限 1000000 tokens），请明日再试",
+}
+
+
+def _quota_429_body(rag_env, monkeypatch, which):
+    """把对话页逼到 `which` 那种熔断，返回**处理器真会写出去的那份 JSON**。
+
+    ⚠️ **调的是真处理器**（`main.app_exception_handler`），⛔ 不是自己拼一份 body ——
+       自己拼就成了"我以为处理器会写什么"（本仓：桩打歪了 = 同义反复）。
+    """
+    import api_v1_rag as rag_mod
+    from exceptions import AppException
+    from main import app_exception_handler
+    from schemas import QuestionRequest
+
+    # 🔴 **两侧都显式置**，⛔ 不是"只打要失败的那侧" ——
+    #    端点的顺序是**先会话后全站**（`api_v1_rag.py` 的 `:709` / `:714`），
+    #    而 `monkeypatch` 要到用例**收尾**才还原 ⇒ 同一个用例里连调两次时，
+    #    第一次打的桩**还挂着**（实测：两条都返回 `session`，那条"可区分"的用例因此变红）。
+    #    ⇒ 写成「按 `which` 判」的纯函数，结果与调用顺序无关。
+    monkeypatch.setattr(
+        rag_mod, "check_session_token_budget",
+        lambda *a, **k: (False, _QUOTA_WHY["session"]) if which == "session" else (True, ""))
+    monkeypatch.setattr(
+        rag_mod, "circuit",
+        lambda *a, **k: (False, _QUOTA_WHY["global"]) if which == "global" else (True, ""))
+
+    async def go():
+        with pytest.raises(AppException) as ei:
+            await rag_mod.stream_search(QuestionRequest(question="你好"),
+                                        thread_id="t-quota", user_name="alice")
+        resp = await app_exception_handler(None, ei.value)   # 处理器不用 request（只读 exc）
+        return json.loads(resp.body)
+
+    return asyncio.run(go())
+
+
+def test_session_quota_429_is_marked_scope_session(rag_env, monkeypatch):
+    body = _quota_429_body(rag_env, monkeypatch, "session")
+    assert body["code"] == "QUOTA_EXCEEDED", "前提变了：这条链的 429 不再是配额错"
+    assert body.get("scope") == "session", (
+        f"会话级熔断的 429 没标出 scope（拿到 {body.get('scope')!r}）⇒ "
+        "前端只能退回那句把两种混起来的话")
+    assert _QUOTA_WHY["session"] in body["error"], "后端原话被换掉了 —— 那是 R3.1 要的「可识别」那半"
+
+
+def test_global_breaker_429_is_marked_scope_global(rag_env, monkeypatch):
+    body = _quota_429_body(rag_env, monkeypatch, "global")
+    assert body["code"] == "QUOTA_EXCEEDED"
+    assert body.get("scope") == "global", (
+        f"全站级熔断的 429 没标出 scope（拿到 {body.get('scope')!r}）")
+    assert _QUOTA_WHY["global"] in body["error"]
+
+
+def test_the_two_quota_scopes_are_distinguishable_without_reading_the_text(rag_env, monkeypatch):
+    """🔴 反面守卫：两种熔断**必须能不看文案就分开** —— 这正是 `scope` 存在的全部理由。
+
+    ⚠️ 头一行断言是**前提**，⛔ 不是凑数：若哪天有人把两者拆成两个 `ErrorCode`，
+       这条会先红在前提上，提醒重审整件事（而不是悄悄退化成一条恒真用例）。
+    """
+    s = _quota_429_body(rag_env, monkeypatch, "session")
+    g = _quota_429_body(rag_env, monkeypatch, "global")
+    assert s["code"] == g["code"], "前提变了：`code` 现在能把两种分开 ⇒ 该重审 `scope` 还要不要"
+    assert s["scope"] != g["scope"], (
+        "两种熔断的 scope 是同一个值 ⇒ 前端又只能写一句混话，`R3.2` 白做")

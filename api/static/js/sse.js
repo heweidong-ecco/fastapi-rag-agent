@@ -161,6 +161,56 @@ function toggleOpen(current, clicked) {
   return current === clicked ? null : clicked;
 }
 
+/**
+ * 🔴 **占位符** —— 上公网前**必须**换成真地址。
+ *
+ * ⛔ 别把它写成 `admin@example.com` 那种**看着像真的**假邮箱：那会变成**假话**
+ *    （本仓立场：宁可空着，不编数）。现在这串一眼认得出是没填。
+ * 📌 已登记进 `docs/待办总表.md`，免得它**静默上线**。
+ */
+const BREAKER_CONTACT = '（待设置 —— 联系入口尚未确定）';
+
+/**
+ * 熔断提示卡片的**四件事**（`R3.2` · `DEC-090`）。
+ *
+ * 🔴 `R3.2` 的验收原文：「卡片上写清四件事 —— **现状 / 这不是故障 / 何时恢复 / 怎么联系**」
+ *    （`施工单-本项目.md` §要求 R3）。四件里三件是常量，**只有「何时恢复」随 `scope` 变**。
+ *
+ * 🔴 为什么 `scope` 非得由后端给：两种熔断的 `ErrorCode` **都是 `QUOTA_EXCEEDED`**
+ *    ⇒ 前端不看文案**分不出**是哪种，而两者恢复条件**完全不同**：
+ *      · `global`（全站日级 · `B11`）⇒ 全站共享，**做什么都救不回来**，只能等跨天；
+ *      · `session`（会话级 · `B8`）  ⇒ 是**你自己这个 thread** 的今日用量
+ *        ⇒ **开个新会话立刻能继续**（`chat.html` 有「＋ 新会话」按钮，这句是真做得到的）。
+ *
+ * ⚠️ 认不出的 `scope`（含缺字段）⇒「何时恢复」画 `—`，⛔ **不猜一个口径** ——
+ *    中间件的限流 429 也走同一条 `error` 分支，它**没有** scope；猜成 `global`
+ *    会让「明日起恢复」出现在一个**根本没有日级额度**的场合。
+ *
+ * ⚠️ 「现状」用**后端原话**（里面有「已使用 X / 上限 Y tokens」）⇒ ⛔ 不在这里重编一句
+ *    （重编 = 数字口径有两份，会漂移，且**页面上不报错**）。
+ *
+ * ⛔ DOM 不进本文件 —— 这里只给文字，怎么挂留在 `chat.html`。
+ *
+ * @param {string} scope `"global"` / `"session"` / 认不出的值
+ * @param {string} message 后端 429 响应体里的 `error`
+ * @returns {{title: string, items: Array<{k: string, v: string}>}}
+ */
+function breakerCard(scope, message) {
+  const recovery = {
+    global: '明日起自动恢复（额度按自然日重置 · 全站共享 · ⛔ 无法提前）',
+    session: '开一个新会话立刻可继续（额度按会话计 · 跨天也会重置）',
+  }[scope] || '—';
+  return {
+    title: '额度已用完',
+    items: [
+      { k: '现状', v: (message === null || message === undefined) ? '—' : String(message) },
+      { k: '这不是故障', v: '额度上限是成本控制，不是服务坏了；超出后一律拒绝，⛔ 不是变慢。' },
+      { k: '何时恢复', v: recovery },
+      { k: '怎么联系', v: BREAKER_CONTACT },
+    ],
+  };
+}
+
 // 🔴 2026-10-06 施工实测·订正⑨ —— **本文件此前【没有】`RagSse` 这个对象。**
 //    起草时 Task 6 的 Interfaces 写着「Produces（全局对象 `RagSse`，浏览器）」，而实现只有
 //    末尾那段 `module.exports` ⇒ 顶层函数确实成了全局，但**没有一个叫 `RagSse` 的东西**。
@@ -170,7 +220,7 @@ function toggleOpen(current, clicked) {
 //    ⇒ 现在两侧都挂，且下面有两条用例钉住（浏览器那侧用 `node:vm` 造一个假 window 来测）。
 const RagSse = {
   DONE_SENTINEL, parseSseChunk, payloadKind, citationIndexes, splitCitations,
-  resolveCitations, classifyExit, formatCost, formatSource, toggleOpen,
+  resolveCitations, classifyExit, formatCost, formatSource, toggleOpen, breakerCard,
 };
 
 if (typeof module !== 'undefined' && module.exports) {

@@ -10,6 +10,41 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- ⭐ **熔断提示卡片：429 补 `scope`，卡片写清四件事（段 1 第四刀 · `F4` 第三条 · `R3.2`）**（2026-10-06 · `DEC-090`）——
+  **后端 3 处 / 约 8 行**（`api/exceptions.py` + `api/main.py` + `api/api_v1_rag.py`）· `api/static/js/sse.js` · `api/static/web/chat.html`。
+
+  **目标**：`施工单-本项目.md` 的 `R3.2` —— 熔断时前端必须画一张**明确的卡片**，写清**四件事**：
+  **现状 / 这不是故障 / 何时恢复 / 怎么联系**（`R3.3`：⛔ 不许退化成 500 / 白屏 / 通用错误页）。
+
+  - **改**：`chat.html` 的 429 分支从**一行字**改成**卡片**。`.breaker` **另起一个元素**，
+    ⛔ 不与引用卡片 `.card` 共用容器 —— 后者由 `_openIndex` 驱动、每次重画都被清空，共用一个会**互相抹掉**。
+  - **改（后端）**：`AppException` 加**可选 `scope`**；`stream_search` 那**两处**熔断各自标
+    `scope="session"` / `scope="global"`。
+    🔴 **为什么非标不可**：两种熔断 `ErrorCode` **都是 `QUOTA_EXCEEDED`**，光看 `code` **分不开**；
+    而它们的**出路不同** —— 会话级（`B8`）**开个新会话立刻能继续**，全站日级（`B11`）**只能等跨天**。
+    分不开 ⇒ 「何时恢复」**写不出来**，被会话级熔断的人会被那句「请明日再试」**白等一天**。
+  - **新**：`RagSse.breakerCard(scope, message)`（纯逻辑，`node --test` 钉着）。
+    ⚠️ 认不出的 `scope`（含字段缺失）⇒ 「何时恢复」画 `—`，**⛔ 不猜一个口径**。
+    ⚠️ 「现状」用**后端原话**，⛔ 前端不重编（重编 = 数字口径两份，会漂移且**页面上不报错**）。
+  - 🔴 **有意只接这一条链**：全仓 **35 处** `raise AppException(ErrorCode.QUOTA_EXCEEDED, …)`，
+    本刀只动 `stream_search` 那 **2 处**（其余不带 `scope` ⇒ 前端画 `—`，⚠️ **这是已知且有意的**）。改动面 = **bounded**。
+
+  ⚠️ **「怎么联系」现在是占位符**（业务方 2026-10-06 裁「先用占位符，后面我再设置」）——
+  ⛔ 写成 `admin@example.com` 那种**看着像真的**假邮箱 = 说假话（本仓：**宁可空着，不编数**）。
+  ⇒ 已登记 **`N13`**（`docs/待办总表.md`）。**它挡不住自己的上线；唯一拦法是本条被人读到。**
+
+  **判据（可打印）**：
+  ```bash
+  node --test api/static/js/sse.test.js                        # ⇒ ℹ tests 29 / pass 29 / fail 0（改前 23）
+  venv/bin/python -m pytest api/test_frontend_contract.py -q   # ⇒ 13 passed（改前 10）
+  grep -c '今日额度已用完 / 会话额度已用完' api/static/web/chat.html   # ⇒ 0（改前 1）
+  grep -c 'raise AppException(.*scope=' api/api_v1_rag.py      # ⇒ 2（改前 0）
+  ```
+  ⚠️ **⛔ 别把最后一条写成 `grep -c 'scope='`** —— 那样打出来是 **4**（**注释也算**），
+  正是本仓"拿一个混过的集合当计数"那一族（本刀写 `DEC` 时**自己已栽过一次**：35 写成了 39）。
+  🔴 **反证检验**：把 `global`/`session` 两句**对调** ⇒ **2 条红**；拿掉 `scope="session"` ⇒ **2 条红**。
+  两处都实测过并还原 ⇒ 这些断言**真在测那件事**（⛔ 不是"它绿"就算数）。
+
 - ⭐ **引用卡片：就地展开/收起 + 卡片头带 chunk id / 相似度（段 1 第三刀 · `F8`）**（2026-10-06 · `DEC-089`）——
   `api/static/js/sse.js`（纯逻辑 +2 个函数）· `api/static/web/chat.html` · **后端只动两行**。
 
