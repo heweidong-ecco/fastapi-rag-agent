@@ -728,9 +728,16 @@ async def stream_search(
         for i, doc in enumerate(contexts, start=1):
             context_parts.append(f"[文档{i}来源：{doc.get('source', '未知')}]\n{doc['content']}")
             sources_list.append({
+                # 🔴 `DEC-085` 契约 A：`index` 与上一行的 `[文档{i}]` **必须来自同一个 `i`**。
+                #    ⛔ 别在别处再算一次编号 —— 两处各写一遍 ⇒ 静默错位
+                #    （点开的是对的文档、内容是错的那篇），而没有任何报错。
+                "index": i,
                 "id": doc.get("id"),
                 "source": doc.get("source", "未知"),
-                "content_preview": doc["content"][:100]
+                # 🔴 `DEC-085` 契约 A：`content` 是**全文**，给"点开引用"看。
+                #    `content_preview` 仍在（老前端用它）—— ⛔ 不是替换，是追加。
+                "content": doc["content"],
+                "content_preview": doc["content"][:100],
             })
         context_text = "\n\n".join(context_parts)
 

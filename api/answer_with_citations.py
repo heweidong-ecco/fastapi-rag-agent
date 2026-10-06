@@ -51,9 +51,14 @@ def generate_answer_with_citations(
     for i, doc in enumerate(contexts, start=1):
         context_text_parts.append(f"[文档{i}来源：{doc.get('source', '未知')}]\n{doc['content']}")
         sources.append({
+            # 🔴 `DEC-085` 契约 A：与 `api_v1_rag.py` 的流式出口**同一条口径**
+            #    （同一个 `i` / 全文 + 预览并存）—— 非流式链的消费者拿到的形状必须一样。
+            #    ⛔ 改一边忘另一边 ⇒ 两个出口的形状悄悄分叉，而两边各自的用例都是绿的。
+            "index": i,
             "id": doc.get("id"),
             "source": doc.get("source", "未知"),
-            "content_preview": doc["content"][:100]
+            "content": doc["content"],
+            "content_preview": doc["content"][:100],
         })
     
     context_text = "\n\n".join(context_text_parts)
