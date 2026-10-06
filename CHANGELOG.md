@@ -10,6 +10,19 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- 🟢 **一条新规矩：`docs/规范/开发规范.md` §2.6·5「开新分支后，先核它从哪儿分出来的」**（2026-10-06）——
+  起因是**同一天真栽了**：`git checkout -b <名>` 的 base 是 **`HEAD`**（⛔ 不是 `main`），
+  而 HEAD 还停在刚合并的 `feat/approvals-page` 上 ⇒ 新分支从**上一件事**分出去。
+  **GitHub 三点 diff 打 25 文件 / +4134**（看着像把 `F1` 整批又塞了一遍），
+  而**本地三条常用命令全「正常」** —— 两点 diff 甚至打**空**（squash 之后两边树一样）。
+  已 `rebase --onto` + `push --force-with-lease` 修回 **3 文件 / +19 −4**。
+  - 📄 复盘：`docs/复盘/2026-10-06-新分支从HEAD起而不是从主干起.md`（含错 base 支的实测输出）
+  - ⚠️ 本条给的是**一条命令**（`merge-base` 判据），⛔ **不重复** `2026-09-17` 那句「工作习惯」式的措施 ——
+    **它抓不到这一种**（我是**真在开新分支**，`git branch --show-current` 打出来也是对的）
+- 📌 **`docs/文档地图.md`：`docs/复盘/` 份数 29 → 32**（2026-10-06）——
+  实测 `ls -1 docs/复盘/*.md | grep -vc 模板` ⇒ **32**。
+  ⚠️ **原值 29 在我加这一份之前就已经过期 2**（上次那两份没跟上）—— 顺手订正，⛔ 不是只 +1。
+
 - ⭐ **接管页（段 1 第二刀 · `F1`）**（2026-10-06 · `DEC-088`）—— `api/approval_audit.py` + `api/static/web/approvals.html` + `api/static/js/approvals.js`（纯逻辑，`node --test`）+ 三条后端接口。
 
   **目标**：**硬门 D（人工接管）的演示那一栏**。它的反例原文是「**界面上找不到**」——
