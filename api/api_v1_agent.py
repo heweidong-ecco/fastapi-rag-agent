@@ -684,6 +684,105 @@ async def list_pending_approvals(
         rows = [r for r in rows if r["user_name"] == user_name]
     return {"count": len(rows), "items": rows, "requested_by": user_name}
 
+
+def _serialize_messages(messages: list) -> list:
+    """把图里的消息序列转成 **JSON 可发的**形状（`DEC-088` §3.1）。
+
+    ⚠️ `content` **可能是 list**（多模态 parts）⇒ **原样带上**，⛔ 别假定是 `str`、
+       ⛔ 也别 `str()` 糊成一坨 —— 前端有 `messageText()` 负责归一。
+       真的碰到既不是 `str`/`list`/`None` 的东西时，**降级成 `str()`**：
+       宁可显示得难看，也⛔ 不能让整条端点 500。
+    """
+    out = []
+    for msg in messages:
+        content = getattr(msg, "content", None)
+        if content is not None and not isinstance(content, (str, list)):
+            content = str(content)
+        item = {
+            "type": getattr(msg, "type", None) or type(msg).__name__,
+            "content": content,
+        }
+        tool_calls = getattr(msg, "tool_calls", None)
+        if tool_calls:
+            item["tool_calls"] = [
+                {"name": tc.get("name"), "args": tc.get("args"), "id": tc.get("id")}
+                for tc in tool_calls
+            ]
+        for attr in ("name", "tool_call_id"):
+            value = getattr(msg, attr, None)
+            if value is not None:
+                item[attr] = value
+        out.append(item)
+    return out
+
+
+@router.get("/agent/pending/context")
+async def pending_approval_context(
+    thread_id: str = Query(..., min_length=1),
+    owner: str = Query(None),
+    user_name: str = Depends(get_current_user_hybrid),
+):
+    """取出**某个卡住的会话的完整上下文**（硬门 D 演示那一栏，`DEC-088` §3.1）。
+
+    🔴 **为什么必须有它**：`/agent/pending` 返回的只有登记表那 7 个字段 ——
+       没有 messages、没有用户问的原话。没有本端点，操作员就是**在不知道前因的
+       情况下放行**（而那正是"人工接管"要避免的事）。
+
+    ⚠️ 定位逻辑与 `/agent/approve` **同构**（⛔ 不另起一套）：反查候选 → 归属校验 →
+       按**登记的图**取 state。两条都拒绝时用 **200 + `{"status":"error"}`**，
+       ⛔ **不改 404** —— 与 `/agent/approve` 一致比"我认为更规范"重要。
+
+    🔴 `owner` **只是【收窄候选】，⛔ 不是授权** —— 传了它**照样**要走归属校验。
+       （给了 `owner` 却一条都不匹配 ⇒ 落在「0 条」那支。）
+       ⛔ 别把它读成"下游收拼过的键"：`/agent/approve` 收 raw 的语义没动（`DEC-056` 丙段）。
+
+    ⚠️ `thread_id` **必填、无默认值** —— 与那 10 条 agent 端点的 `Query("default", …)` **不同**，
+       是有意的：本端点的输入来自 `/agent/pending` 的输出，**它一定带着 raw_thread_id**；
+       给个 `"default"` 默认值只会让"忘了传"静默变成本不该命中的那个会话。
+    """
+    candidates = find_by_raw_thread_id(thread_id)
+    if owner is not None:                     # ← 裁定 6：先按 owner 收窄候选
+        candidates = [c for c in candidates if c["user_name"] == owner]
+
+    if not candidates:
+        return {"status": "error", "message": "当前没有等待审批的任务"}
+
+    if len(candidates) > 1:
+        owners = sorted({c["user_name"] for c in candidates})
+        return {
+            "status": "error",
+            "message": (f"thread_id={thread_id!r} 对应多条待审批会话（属主：{owners}）—— "
+                        f"请指定 owner 收窄"),
+        }
+
+    row = candidates[0]
+    # 🔴 归属校验：**本人或 admin** —— 与 `/agent/approve` 同一条（admin 那条不是可省的）。
+    if user_name != row["user_name"] and get_user_role(user_name) != UserRole.ADMIN:
+        return {"status": "error", "message": f"无权查看：该会话属于 {row['user_name']}"}
+
+    # 🔴 字典**在这里现建**（⛔ 不是模块级常量）：模块级常量会把图对象**早绑定**，
+    #    测试里 `monkeypatch.setattr(m, "agent_graph", …)` 就换不掉了。
+    GRAPHS = {"agent_graph": agent_graph, "checkpointer_agent": checkpointer_agent}
+    graph_name = row.get("graph", "agent_graph")
+    target = GRAPHS.get(graph_name)
+    if target is None:
+        return {
+            "status": "error",
+            "message": f"登记表里的图名不认识：{graph_name!r}（已知：{sorted(GRAPHS)}）",
+        }
+
+    state = await target.aget_state({"configurable": {"thread_id": row["thread_id"]}})
+
+    return {
+        "status": "ok",
+        "owner": row["user_name"],
+        "graph": graph_name,
+        "rounds": row.get("rounds", 1),
+        "next": list(state.next),
+        "messages": _serialize_messages(state.values.get("messages", [])),
+        "requested_by": user_name,
+    }
+
 # ==================== 高级图LangGraph进阶 接口：包含---条件边、循环、子图  ====================
 
 
