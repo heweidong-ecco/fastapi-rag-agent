@@ -94,7 +94,15 @@ def verify_api_key(api_key: str):
         with get_db() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT user_name, expires_at FROM api_keys WHERE key_hash = %s",
+                    # 🔴 `DEC-085` 契约 D：`is_active` 此前是**死列**（全仓没有一处读它）
+                    #    ⇒ 发出去的 key 收不回来。
+                    # 🔴 **必须 `COALESCE(is_active, 1)`，⛔ 不许写 `is_active = 1`** ——
+                    #    迁移 `828721f77ef2` 建列时是 `nullable=True`，NULL 行会被**静默排除**
+                    #    ⇒ 老 key 集体失效，而用户只看到一句"凭据无效"（查不到点上）。
+                    #    ⚠️ "现网有没有 NULL 行"**没验过**（当时库没起）—— 正因为没验过才必须防。
+                    #    守卫 ⇒ `api/test_auth_api_key_active.py::test_a_null_is_active_row_still_authenticates`
+                    "SELECT user_name, expires_at FROM api_keys "
+                    "WHERE key_hash = %s AND COALESCE(is_active, 1) = 1",
                     (hashed,)
                 )
                 row = cur.fetchone()
