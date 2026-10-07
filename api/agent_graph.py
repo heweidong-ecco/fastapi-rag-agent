@@ -2,8 +2,6 @@
 LangGraph Agent 示例：基于图结构的智能助理
 """
 import os
-import json
-import asyncio
 from typing import TypedDict, List, Annotated, Optional
 import operator
 
@@ -11,7 +9,7 @@ from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 from llm_factory import make_llm   # ①b Task 5：model / api_key / base_url / max_tokens 的唯一落点
 from langchain_core.tools import tool
-from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig   # B1：节点要靠它把回调接进模型调用
 from datetime import datetime
 from safe_math import calculate  # DEC-049：`calculator` 的求值实现 —— ⛔ 别改回 `eval`
