@@ -2,23 +2,19 @@
 API v1 路由集中定义
 所有 /api/v1 前缀的接口在此管理。
 """
-import json
 import time
 from fastapi import APIRouter, Depends
-from fastapi.responses import StreamingResponse, JSONResponse
 
 from config import ACCESS_TOKEN_EXPIRE_MINUTES
 from exceptions import ErrorCode, AppException
 from schemas import (
     QuestionRequest,
-    DocumentInsert,
-    BatchDocumentInsert,
     LoginRequest,
     RefreshRequest,
     UserCreate,
 )
-from deps import get_current_user_hybrid, get_current_user_jwt, require_admin
-from db import get_db, insert_document,insert_batch_documents
+from deps import require_admin
+from db import get_db
 from embedding_client import get_embedding
 # B11（①b Task 4）：全站日级熔断
 from breaker import circuit, global_key
@@ -35,25 +31,20 @@ from cache import redis_client
 # ⚠️ 批 6（`DEC-082`）删掉 `from embedding_client import client` —— 它**全仓只有这一处**，
 #    且**从未被使用**；而 `client` 已改成惰性构造，留着这行会让 `api_v1` 直接 ImportError。
 # ⚠️ 2026-10-04 删 `get_weather`（`DEC-065`）：它在本文件**只有** `/tool/benchmark` 一处用，
-#    那条端点已删。⚠️ `calculator` 是**既有未用导入**（`D1` 旧账），⛔ 本 PR 不碰。
-from tools_with_cache import calculator
-from db import invalidate_bm25_cache
-from hybrid_search import hybrid_search
-from hybrid_search import rerank_search
-from hybrid_search import hybrid_search_with_rewrite
-from rag_pipeline import create_fast_pipeline, create_accurate_pipeline, create_full_pipeline
-from fastapi import File, UploadFile
-import tempfile
+#    那条端点已删。
+#
+# ⚠️ 2026-10-07：本文件**又删掉 27 个从未被引用的导入**（`T6` 存量 · 判据 `ruff --select F401`）：
+#    `json` · `StreamingResponse`/`JSONResponse` · `DocumentInsert`/`BatchDocumentInsert` ·
+#    `get_current_user_hybrid`/`get_current_user_jwt` · `insert_document`/`insert_batch_documents` ·
+#    `calculator`（`D1` 旧账，本条即它的收口）· `invalidate_bm25_cache` ·
+#    `hybrid_search`/`rerank_search`/`hybrid_search_with_rewrite` ·
+#    `create_fast_pipeline`/`create_accurate_pipeline`/`create_full_pipeline` ·
+#    `File`/`UploadFile` · `tempfile` · `DocumentPreprocessor` · `split_text_with_filter` ·
+#    `parse_document` · `get_chat_history`/`append_chat_history` · `agent_graph` · `os`。
+#    🔴 **删的只是【本文件里的导入行】，⛔ 没有删任何模块** —— 那些模块本身照旧存在、照旧可 import，
+#       将来要接回来就是**补一行**的事。⚠️ `tools_with_cache.py` / `tool_cache.py` 两个**死模块**
+#       仍在 `T6` 的「先挂起」里，**本刀没碰**。
 
-from document_preprocessor import DocumentPreprocessor
-from chunker import split_text_with_filter
-from document_parser import parse_document
-
-from cache import get_chat_history, append_chat_history
-
-from agent_graph import agent_graph
-
-import os
 
 router = APIRouter(prefix="/api/v1")
 
