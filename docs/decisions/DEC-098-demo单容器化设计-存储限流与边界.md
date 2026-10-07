@@ -104,6 +104,25 @@
 
 ⛔ **`rate_limiter.py` · `cache.py` · `query_rewriter.py` 一行不动。**
 
+> ### 🔴 **2026-10-07 复核（`④` 收口做的 —— 本文 §五·3 要的就是这一步）：上面的「2 处 + 1 处」⛔ 低估了**
+>
+> **结论一句话**：**"收口在 `get_db()`" 对【连接】成立，对【SQL 文本】⛔ 不成立**
+> ⇒ **只改 `db.py` 一个文件不够**。实测：**可执行 PG 方言散在 6 个文件**，**8 张表的 DDL 散在 3 个模块**。
+>
+> | 判据（可打印） | 实测 |
+> |---|---|
+> | `grep -rn "CREATE TABLE" api/*.py \| grep -v "^api/test_"` | **8 张表 / 3 个模块** —— `db.py` **5**（`documents` · `api_keys` · `token_usage_logs` · `cost_records` · `cost_records_archive`）· `token_tracker.py:814`（`budget_intercepts`）· `approval_audit.py:22`（`approval_events`）<br>⚠️ **上表只点了 `token_usage_logs` / `cost_records`，另 2 个模块【一个字没提】** |
+> | `grep -rn "SERIAL\|vector(\|ivfflat\|::vector\|ON CONFLICT" api/*.py \| grep -v "^api/test_"` | **`db.py` 11 处**（`SERIAL` **5** · `vector(1536)` **1** · `ivfflat` **1** · `%s::vector` **3** · `<=>` **2**）· **`api_v1_rag.py` 4 处**（`:169` 还带 `RETURNING` · `:271` · `:422` `<=>` · `:425`）· `approval_audit.py` **1**（`SERIAL`）· `token_tracker.py` **1**（`SERIAL`）<br>🔴 **`api_v1_rag.py` 那 4 处是【裸 SQL】，⛔ 不在 `db.py` 里** ⇒ 改 `db.py` 碰不到它 |
+> | `grep -rn "CURRENT_DATE" api/*.py \| grep -v "^api/test_"` | **9 处可执行 / 3 个文件** —— `token_tracker.py` **5** · `cost_dashboard.py` **3** · `api_v1_agent.py` **1**（另 2 处在 `breaker.py` / `main.py` 的**注释**里，⛔ 不算）<br>🔴 **其中 3 处是 `CURRENT_DATE - %s`**（`cost_dashboard.py:90` · `:194` · `api_v1_agent.py:2058`）—— **SQLite 里语义不同**（它的 `CURRENT_DATE` 是**字符串**，减数字得到的是数字）⇒ ⛔ **不是"能跑就行"** |
+> | `grep -rn "psycopg2\?\.connect" api/*.py \| grep -v "^api/test_"` | **0 处** ⇒ **"连接收口在 `get_db()`" ✅ 这一半成立** |
+>
+> 🔴 **真正要裁的那一条（⛔ 本 Agent 不自拟）**：**"改动面 2 处"是本文末「反悔成本」那条论证的前提**
+> （B 行原话：「**B 的改动面是 2 处，把改动面做小本身就降低了反悔成本**」）。
+> **实测至少 6 个文件** ⇒ **那个分母变了** ⇒ **B 方案要不要重新算，业务方定。**
+>
+> ⚠️ **本文 §二·3 那三行的【期望输出已过期】**（`③` / `T6` 清理挪过行）—— 现行值是
+> `db.py:67`（原 69）· `db.py:128`（原 130）· `token_tracker.py:328`（原 330）⇒ ⛔ **别照旧数核**。
+
 **⚠️ 顺带改一处**：`embedding_client.py` 的 `get_embedding()` 现在**把模型名写死**
 （`def get_embedding(text: str, model="text-embedding-v2")`，`api/embedding_client.py:40`）
 ⇒ 改成**从 env 读**（沿用仓里既有的 `env 优先 → 回落 config` 写法）。
@@ -377,29 +396,34 @@ with tempfile.NamedTemporaryFile(delete=False, suffix=f".{ext}") as tmp:
 
 ```bash
 # ① 现状：库是 PG + pgvector，1536 维，有 ivfflat 索引
-grep -n 'embedding vector' api/db.py            # ⇒ 69:  embedding vector(1536),
-grep -n 'ivfflat'          api/db.py            # ⇒ 130: USING ivfflat (embedding vector_cosine_ops);
+grep -n 'embedding vector' api/db.py            # ⇒ 67:  embedding vector(1536),      （原写 69）
+grep -n 'ivfflat'          api/db.py            # ⇒ 128: USING ivfflat (…)           （原写 130）
 
 # ② 现状：embedding 模型名【写死】在签名里（就是要改的那一处）
 grep -n 'def get_embedding' api/embedding_client.py
-#   ⇒ 40: def get_embedding(text: str, model="text-embedding-v2") -> list:
+#   ⇒ 40: def get_embedding(text: str, model="text-embedding-v2") -> list:   ← 唯一没动的
 
 # ③ 现状：入库侧【只有类型白名单】，没有大小 / token / chunk / 额度 / 并发
-grep -n 'allowed_extensions' api/api_v1_rag.py # ⇒ 292 有
+grep -n 'allowed_extensions' api/api_v1_rag.py # ⇒ 297 有                          （原写 292）
 grep -cE 'max_size|MAX_SIZE|content_length|MAX_CHUNKS' api/api_v1_rag.py   # ⇒ 0
 
 # ④ 两条风险的落点
-grep -n 'await file.read()\|os.unlink(tmp_path)' api/api_v1_rag.py
-#   ⇒ 304:        tmp.write(await file.read())
-#   ⇒ 328:    os.unlink(tmp_path)          ← 在函数末尾（中途抛异常 ⇒ 残留）
+grep -n 'await file.read()' api/api_v1_rag.py  # ⇒ 309:  tmp.write(await file.read())  （原写 304）
+grep -n 'os.unlink(tmp_path)' api/api_v1_rag.py # ⇒ 333  ← 在函数末尾（中途抛异常 ⇒ 残留）（原写 328）
 
 # ⑤ 日额度是【每日】口径，而额度是【总量】口径（量纲错配，§二·3）
 grep -n 'GLOBAL_DAILY_TOKEN_LIMIT =' api/token_config.py   # ⇒ 41
-grep -n 'created_at >= CURRENT_DATE'  api/token_tracker.py # ⇒ 330
+grep -n 'created_at >= CURRENT_DATE'  api/token_tracker.py # ⇒ 328（⚠️ 该文件共 5 处，这是第 1 处）（原写 330）
 
 # ⑥ 限流的桶在 Redis（所以 Redis 不能丢）
-grep -n "redis.call\|redis_client" api/rate_limiter.py     # ⇒ 有（Lua 脚本 + Hash）
+grep -cn "redis.call\|redis_client" api/rate_limiter.py   # ⇒ 7（Lua 脚本 + Hash）
 ```
+
+> 🔴 **2026-10-07 复核：上面 9 条【5 条的行号已过期】**（`③` / `T6` 清理挪过行）。
+> **这是本仓那条老规律的又一次现场**：**写死的行号一定过期** ——
+> 改前 4 条命中、改后还是那 4 条命中，**只是行号变了**（69→67 · 130→128 · 292→297 · 304→309 · 330→328 + 328→333）。
+> ⇒ **读的人请【重新跑一遍】上面这几条命令**，⛔ 别拿本文的期望输出当判据
+> （**盯内容、⛔ 不盯行号** —— 内容没变，说明现状没变）。
 
 **⑦ 本地库规模** —— ⚠️ **口径说明**：这是**当时在 PG 上跑的一次性查询**，
 **未固化成脚本**（数据在库里，不在文件里）⇒ 记下数值与口径，⛔ 别把它当"可随时复现"：
@@ -434,16 +458,43 @@ SELECT count(*) AS chunks, sum(length(content)) AS chars FROM documents;
 > grep -c '⬜' docs/decisions/DEC-098-demo单容器化设计-存储限流与边界.md
 > ```
 
+### 5.0 🔴 「重启丢数据」—— **三处同形态，⛔ 一个说法**（2026-10-07 · `④` 收口做的）
+
+> **为什么单开一节**：本节 #8 说的那句「`N17` 与"平台重启丢数据"是同一形态」**原先只在两处各写各的** ⇒
+> **同一个失效模式，三套口径**。现在收成下面这一段，**别处只留指针**。
+
+| 谁 | 丢的是什么 | 载体 | 现状 |
+|---|---|---|---|
+| **`N17`** | `/agent/trace/*` 的**追踪轴**（工具调用 / 耗时） | **进程内存**（`api/tool_visualizer.py` 的模块级 `_traces`） | 🔴 **现在就丢**，**本机 / 上云都一样**；接口**不报错**（就是空） |
+| **`pending_approvals`** | **待接管队列** | 同上（模块级） | 🔴 **同一形态**，⚠️ `DEC-056` 丙段已标注「重启即空」 |
+| **demo 的 `SQLite` 文件** | **全部数据**（语料 / 记账 / 裁决） | **容器本地文件** | 🟠 **取决于放哪** —— 见下 |
+
+**统一说法（⛔ 别处不许再换一种）**：
+
+> **本 demo 的存储是【单容器本地】。平台【默认每次重启数据即丢】，
+> 只有 `/mnt/workspace` 是持久目录**（出处：`docs/说明/魔搭创空间-部署与平台约束.md` §3.6，🟢 已查证）。
+> ⇒ **语料与库文件往哪写，是 `①b` 要定的事**：写 `/mnt/workspace` ⇒ **重启不丢**；写容器可写层 ⇒ **重启清空**。
+> 🔴 **界面与文档都必须如实标注**（`N17` 那条正是**没标**才成了债）——
+> ⛔ **不许写成"持久化存储"**，也⛔ **不许因为"怕丢"就退回 PG**（那会推翻本文的单容器化决定）。
+
+⚠️ **两条边界，⛔ 别读串**：
+1. **本节收的是【说法】，⛔ 不是【那条账】。** `N17` / `N16` 在 `docs/待办总表.md` 里**依然挂着**，
+   ⛔ **不许因为这里"说清了"就去把它们的未结数打掉**（本仓前科：换口径 ≠ 结清）。
+2. **`/mnt/workspace` 能持久，⛔ ≠ `SQLite` 就适合放那儿** —— **并发 / 锁 / 文件大小都不在本文范围**，
+   那是 `①b` 的事。
+
+---
+
 | # | ⬜ 没定的 | 卡什么 | 什么时候回来填 |
 |---|---|---|---|
 | **1** | **语料放哪** —— 契约说"一个语料目录"，但 `demo/` **已被 `.gitignore` 排除**，**放不进那里**；而语料**必须进镜像**才叫"预置" | 这是**结构问题**，不是配置问题 | `①b` 写实施步骤时**第一个要定的** |
 | **2** | **demo 产物往哪推** —— 创空间是**平台自己的 git 仓**（分支必须 `master`，平台**禁强推**，首次 push 必因 Studio 自带 README 而 `add/add` 冲突）⇒ 本仓与 Studio 仓**不是同一个 remote** | 同上 | `①b` |
-| **3** | **③ 清理会改行号与文件清单** —— 本文**有意只写"文件 · 函数"**，⛔ 不写行号；§二·2 的"2 处 + 1 处"要**在清理之后再核一遍** | `③` 那批还没做 | `③` 完成后、`①b` 之前 |
+| **3** | ✅ **2026-10-07 已核（`④` 收口做的）** —— `③` 清理会改行号与文件清单，本文 §二·2 的"2 处 + 1 处"**核过了** | ✅ **已核，⚠️ 但结论【改了】** —— 见 §二·2 下面那个复核块：**改动面 ⛔ 不是 2 个文件，实测至少 6 个**（`db.py` · `token_tracker.py` · `api_v1_rag.py` · `approval_audit.py` · `cost_dashboard.py` · `api_v1_agent.py`），**8 张表的 DDL 散在 3 个模块**；⚠️ **连带 §六「反悔成本」B 行那条"2 处"的论证要重算** | 🔴 **升格为待裁**：`①b` 写实施步骤时**先按新事实重列改动面**，⛔ **别再引用"2 处"** |
 | **4** | **OOM 的确切阈值**（§二·4.2 ①） | 未实测，**⛔ 不写猜测值** | 实施后（见 §四 4.2 第 3 条） |
 | **5** | **`MODEL_PRICING` 登记 + 那条守卫测试会转红** | 依赖 §二·2.1 落地 | 实施时**一并**做，⛔ 不许绕过它 |
 | **6** | **边界标注的最终字样**（几个字、放哪一屏） | 依赖最终前端形态 | `⑤` 之前定稿 |
 | **7** | **"明文写什么"的边界**（§5.4 红线）—— 先按"只写用法与花谁的钱、⛔ 不写 key"理解 | ⚠️ **这是我按本仓红线推的，未逐字经业务方确认** | 业务方看到本份时**当场纠正** |
-| **8** | 🔴 **`N17` 与"平台重启丢数据"是同一形态** —— `N17`（追踪轴是进程内存，重启即空）还没结 | 两处**别留两套口径** | `④` 收口时**一并说清** |
+| **8** | ✅ **2026-10-07 已说清（`④` 收口做的）** —— 见下方 §5.0「重启丢数据」那一节 | ✅ **口径已收成一处**（⚠️ 但 `N17` **本身仍未结** —— 收的是**说法**，⛔ 不是那条账） | ✅ 已填 |
 | **9** | **①b（命令级执行方案）本身** | 依赖 `③④` 之后的代码最终形态 | `③④` 完成后 |
 | **10** | **项目乙（语料重建）** | 另开一轮 | `⑤` 之后，或业务方指定 |
 
