@@ -1,14 +1,18 @@
 """
-测试不同约束条件下的任务规划结果
+手动实验脚本：对比不同约束条件下的任务规划结果。
+
+⚠️ 2026-10-07：本文件原名 `test_plan_constraints.py`，但它 **不是 pytest 用例**
+   —— `test_plan` 的两个参数都是必填、没有对应夹具，pytest 收进去只会报错，
+   原来靠 `@pytest.mark.skip` 捂着。
+   ⇒ 去掉 `test_` 前缀，并删掉 skip 装饰器与随之无用的 `import pytest`。
+   运行方式：`cd api && python plan_constraints.py`（会真调 LLM）。
 """
-import pytest
 from plan_execute import planner_llm
 from langchain_core.messages import HumanMessage, SystemMessage
 
 GOAL = "帮我研究Python和Go在Web开发中的优劣，并给出推荐"
 
 
-@pytest.mark.skip(reason="手动实验脚本（需必填参数，运行方式：python test_plan_constraints.py），非 pytest 用例")
 def test_plan(prompt_version: str, extra_constraints: str):
     """用不同约束测试规划"""
     base_prompt = """你是一个专业的任务规划助手。你的职责是将用户的目标分解为可执行的步骤清单。

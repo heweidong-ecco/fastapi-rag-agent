@@ -33,6 +33,45 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- 🔴 **两个"名字叫 test、其实不是测试"的文件去掉 `test_` 前缀**（2026-10-07 · 债 `T5` · 同批
+  `丙-5` / `丙-6`）—— `api/test_preprocess.py` ⇒ **`api/preprocess.py`** ·
+  `api/test_plan_constraints.py` ⇒ **`api/plan_constraints.py`**。
+
+  **两个都是手动脚本**（一个跑 `DocumentPreprocessor` 看清洗效果，一个换约束看规划结果），
+  **顶 `test_` 前缀的唯一后果**是：被 pytest 当用例收集 —— 后者因此不得不用
+  `@pytest.mark.skip` 捂着（`test_plan` 的两个参数**没有对应夹具，不遮就收集期报错**）。
+  ⇒ **去掉前缀，`skip` 装饰器和随之无用的 `import pytest` 一并删掉**；两个文件各加一段模块
+  docstring 说明"这是脚本、怎么跑"。
+
+  🔴 **判据（跑得出来，⛔ 不是"我改完了"）**：
+  `ls api/test_preprocess.py api/test_plan_constraints.py` ⇒ **两个都不存在**；
+  `ls api/preprocess.py api/plan_constraints.py` ⇒ **两个都在**；
+  `pytest api/ --collect-only -q` ⇒ **848 → 847**（−1 = 那条假用例）·
+  `pytest api/ -m "not integration and not needs_db"` ⇒ **2 skipped**（原 3）·
+  `passed` 数**未下降** ⇒ **没有真用例被牵连**。
+
+- ⚠️ **`dev.sh` 的库名不再硬编码**（2026-10-07 · 债 `T5` · `丙-5`）——
+  `dev.sh:12` 的 `pg_isready -U postgres -d rag_db` ⇒
+  `sh -c 'pg_isready -U postgres -d "${POSTGRES_DB:-rag_db}"'`。
+
+  **治的病**：`docker-compose.yml` 里写的是 `${POSTGRES_DB:-rag_db}`，**库名是可以改的**
+  —— 改了 `.env` 而 `dev.sh` 还等 `rag_db` ⇒ **在 `until` 里空转到天荒地老**。
+  改成在**容器内**展开，读的就是 compose 注入给 postgres 的那个值。
+
+- ⚠️ **日志目录改成基于 `__file__` 的绝对路径**（2026-10-07 · 债 `T5` · `丙-6①`）——
+  `api/logger_config.py` 的 `"logs/api_*.log"` / `"logs/error_*.log"` ⇒
+  `_LOG_DIR = Path(__file__).resolve().parent / "logs"` 下的绝对路径。
+
+  **治的病**：`logs/` 按**相对 CWD** 解析 ⇒ **从 `api/` 起 uvicorn 进 `api/logs/`，
+  从仓根起就进 `<仓根>/logs/`** —— ⚠️ **本机两个目录都真的存在过**（`ls -d logs api/logs`）
+  ⇒ **日志被劈成两半，排查时只看一边**。改完**从哪儿起都一样**。
+
+  > 📌 **配套删掉一条已失效的 README 约束**（`README.md` 原文）：
+  > 「⚠️ **必须在 `api/` 目录下起 uvicorn**（有一处路径按相对位置解析）」——
+  > **那条约束的根因就是上面这个相对路径**，根因没了，约束也就没了。
+  > ⚠️ 业务方补充的另一个成因是"当时本机 Docker 起不来"（现已可用），**一并作废**。
+  > `bash dev.sh` 那句指路保留了下来。
+
 - 🔴 **熔断卡片「怎么联系」的占位值换掉**（2026-10-07 · `DEC-095` · 债 `N13`）——
   `api/static/js/sse.js` 一行常量：
 
@@ -79,6 +118,15 @@ All notable changes to this project will be documented in this file.
   📌 **正向实测**：**`ℹ tests 70`**（= `sse` 32 + `approvals` 14 + `trace` 24 的**实测和**，⛔ 不是把三个数加起来）。
 
 ### Removed
+
+- 🔴 **删掉 `api/chunker.py` 两个零引用常量**（2026-10-07 · 债 `T5` · `丙-1`）——
+  `DEFAULT_CHUNK_SIZE = 500` / `DEFAULT_CHUNK_OVERLAP = 50`。
+
+  **两条判据**（都跑得出来）：① 全仓零引用 ——
+  `grep -rn "DEFAULT_CHUNK_SIZE\|DEFAULT_CHUNK_OVERLAP" . --exclude-dir=venv` ⇒ **空**；
+  ② **值与 `CHUNK_CONFIGS["default"]` 里的 `{"chunk_size": 500, "chunk_overlap": 50}` 重复**
+  —— 同一个数两个来源，**必然漂移**（本仓 `DEC-051` 记的正是这个病根）。
+  ⚠️ `DEFAULT_SEPARATORS` **不删**：它是**真被 `get_text_splitter()` 用的**。
 
 - 🔴 **删掉 `api/static/` 下两个【存量坏页】**（2026-10-07 · `DEC-096` · 债 `F5`）——
   `api/static/stream_test.html`（218 行）· `api/static/trace_viewer.html`（168 行）。**两个都删。**

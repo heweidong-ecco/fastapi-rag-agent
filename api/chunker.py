@@ -7,8 +7,9 @@ from typing import List
 
 
 # ==================== 默认分块配置 ====================
-DEFAULT_CHUNK_SIZE = 500
-DEFAULT_CHUNK_OVERLAP = 50
+# ⚠️ 2026-10-07 删掉 `DEFAULT_CHUNK_SIZE` / `DEFAULT_CHUNK_OVERLAP` 两个常量：
+#    全仓零引用（判据：`grep -rn "DEFAULT_CHUNK_SIZE\|DEFAULT_CHUNK_OVERLAP" . --exclude-dir=venv`），
+#    且与下面 `CHUNK_CONFIGS["default"]` 里的 500/50 **重复** —— 同一个数两个来源必然漂移。
 DEFAULT_SEPARATORS = ["\n\n", "\n", "。", "！", "？", "，", " ", ""]
 
 # 针对不同文档类型的推荐配置

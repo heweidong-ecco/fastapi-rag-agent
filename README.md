@@ -226,7 +226,10 @@ venv/bin/pip install -r api/requirements.txt
 cd api && ENABLE_DASHBOARD=false ../venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
 ```
 
-> ⚠️ **必须在 `api/` 目录下起 uvicorn**（有一处路径按相对位置解析）。`bash dev.sh` 干的就是这一步。
+> 📌 `bash dev.sh` 干的就是这一步（起 postgres+redis → 等就绪 → 起 uvicorn）。
+> 🔴 **2026-10-07 删掉了原来那句「⚠️ 必须在 `api/` 目录下起 uvicorn（有一处路径按相对位置解析）」** ——
+> 那条约束的根因是 `logger_config.py` 里的 `logs/` 按**相对 CWD** 解析；现已改成基于 `__file__`
+> 的绝对路径，**从哪儿起都一样**。⚠️ 当时写这条的另一个理由是"本机 Docker 起不来"，现在 Docker 可用，一并作废。
 >
 > 📌 **依赖清单只有一份：`api/requirements.txt`。** 🔴 2026-09-20 删掉了此前那份"轻量版"
 > `api/requirements-test.txt` —— 业务方口径「**不用双 requirements.txt，这样会混**」。
