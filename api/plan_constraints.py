@@ -4,7 +4,9 @@
 ⚠️ 2026-10-07：本文件原名 `test_plan_constraints.py`，但它 **不是 pytest 用例**
    —— `test_plan` 的两个参数都是必填、没有对应夹具，pytest 收进去只会报错，
    原来靠 `@pytest.mark.skip` 捂着。
-   ⇒ 去掉 `test_` 前缀，并删掉 skip 装饰器与随之无用的 `import pytest`。
+   ⇒ 去掉 `test_` 前缀，并删掉 skip 装饰器与随之无用的 `import pytest`；
+   ⚠️ 2026-10-07 第二刀：**函数名 `test_plan` 也一并改成 `run_plan`** —— 文件去了前缀、
+      函数还叫 `test_*` 的话，`grep -rn "def test_"` 之类的排查口径照样会把它当用例。
    运行方式：`cd api && python plan_constraints.py`（会真调 LLM）。
 """
 from plan_execute import planner_llm
@@ -13,7 +15,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 GOAL = "帮我研究Python和Go在Web开发中的优劣，并给出推荐"
 
 
-def test_plan(prompt_version: str, extra_constraints: str):
+def run_plan(prompt_version: str, extra_constraints: str):
     """用不同约束测试规划"""
     base_prompt = """你是一个专业的任务规划助手。你的职责是将用户的目标分解为可执行的步骤清单。
 
@@ -50,14 +52,14 @@ def test_plan(prompt_version: str, extra_constraints: str):
 
 if __name__ == "__main__":
     # 测试1：无额外约束（基线）
-    test_plan("V1-基线（无额外约束）", "")
+    run_plan("V1-基线（无额外约束）", "")
     
     # 测试2：限制步骤数
-    test_plan("V2-限制步骤数", "6. 步骤总数不超过5个。")
+    run_plan("V2-限制步骤数", "6. 步骤总数不超过5个。")
     
     # 测试3：优先使用搜索工具
-    test_plan("V3-优先搜索", "6. 优先使用 search 工具获取信息，其他工具只在必要时使用。")
+    run_plan("V3-优先搜索", "6. 优先使用 search 工具获取信息，其他工具只在必要时使用。")
     
     # 测试4：组合约束
-    test_plan("V4-组合约束", "6. 步骤总数不超过5个。\n7. 优先使用 search 工具获取信息。")
+    run_plan("V4-组合约束", "6. 步骤总数不超过5个。\n7. 优先使用 search 工具获取信息。")
 # ==========预期结果 分析和对比：=============
