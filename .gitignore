@@ -57,3 +57,7 @@ fastapi-rag-agent-TODO待办/*.png
 #      —— 与 `Product/` 外层仓把 15 个嵌套仓记成 gitlink 是**同一件事**。
 #   📌 为什么放**结构**而不是写句纪律：纪律靠人记得，`git add -A` 不会读纪律。
 .claude/worktrees/
+
+
+# 新增
+demo/
