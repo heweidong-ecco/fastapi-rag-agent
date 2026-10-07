@@ -8,6 +8,39 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- 🧩 **乙单 · 第 2 步（乙-1）：补 9 份模块 spec**（2026-10-07）—— `docs/specs/`
+  新增 `auth` · `cache` · `chunker` · `config` · `db_metadata` · `permission` · `rag_pipeline` · `search_tools` · `tool_health`。
+
+  **对账结果（判据：`bash scripts/spec_status.sh`）**：**✅ 38 / 🔴 18**（56 个产品模块）⇒ **改前是 29 / 27**。
+  ⇒ **+9 / −9**，⛔ **不是 0**（剩的 18 见下「欠账」）。
+
+  **每份的主体是「⚠️ 看代码会误判的地方」** —— 前两节读代码也能推出来，只有这节推不出来。
+  本轮**顺带核出来**的（**都不是"文档整理"，是事实**）：
+
+  | 发现 | 位置 | 判据 |
+  |---|---|---|
+  | 🔴 **`elif` 是死代码** ⇒ 那句「根据现有资料，无法回答。」**从未执行过** | `api/rag_pipeline.py:212-213`（`:156` 已 `return`） | `grep -n 'total_ms' api/rag_pipeline.py` ⇒ 只有一处赋值，且在 `:156` **之后** |
+  | 🔴 **空结果出口的 `timing` 缺 `total_ms`**（两条出口键不一样） | 同文件 `:156` vs `:165` | 同上 |
+  | 🔴 **「无法回答」在仓里有【三个】地方，两活一死** | `rag_pipeline.py:213`（死）· `api_v1_rag.py:702`（活）· `answer_with_citations.py:17`（活，**写给模型的 prompt**） | `grep -rn '根据现有资料，无法回答' --include='*.py' api/` |
+  | 🔴 **`accurate_norerank` 档【没有任何相关性过滤】** —— 不是"少一层排序"，是**少了挡不相关文档的那层** | `api/rag_pipeline.py:150` 的前置是 `enable_rerank` | 同上 |
+  | 🔴 **本文件里注释与代码互相矛盾**（注释说按 `mcp_server.TOOLS` 遍历，`:103` 实际按 `TEST_ARGS_MAP`） | `api/tool_health.py:34` vs `:103` | `grep -n 'for tool_name in' api/tool_health.py` |
+  | 🔴 **环境变量的名字是 `DOCKER_ENV`，⛔ 不是 `IS_DOCKER`** —— 写错**静默无效** | `api/config.py:17` | `grep -rn 'IS_DOCKER\|DOCKER_ENV' --include='*.py' .` |
+  | 🔴 **文件末尾【无条件】改写 `POSTGRES_HOST` / `REDIS_HOST`** ⇒ `.env` 里改了不起作用、且无日志 | `api/config.py:88-90` | `grep -n 'if not IS_DOCKER' api/config.py` |
+  | 🔴 **`doc_type` 不是请求参数，是算出来的**（只有 pdf / 非 pdf 两档）⇒ 五档里**三档是死的** | `api/api_v1_rag.py:324` | `grep -rn 'doc_type' api/ \| grep -v '^api/chunker.py'` |
+  | 🔴 **`db_metadata.py` 零运行时调用点**（全仓唯一引用是 Alembic `env.py`）· 「`api_keys` 多一个 `is_active`」这句**已过期** | `api/db_metadata.py` | `grep -rn 'from db_metadata import' api/ scripts/` |
+  | 🔴 **`get_user_role` 对未知用户名返回 `FREE`** —— fail-**open**，⛔ 与鉴权的 fail-closed 取向相反 | `api/permission.py` | 读函数体（无查库、无异常） |
+  | 🔴 **`web_search` 的 docstring 是【写给 LLM 的】**（会进模型上下文）⇒ 改它 = 改产品行为 | `api/search_tools.py:88-98` | 同上 |
+
+  ⚠️ **欠账（⛔ 不在本轮，也⛔ 别顺手发明记法）**：**18 个模块仍没 spec** ——
+  即 `docs/specs/README.md`「🔴 缺」那一列。**它现在是一行【数字】，不是 0**。
+  ⇒ 「乙-2 的 17 个（已商定不写）+ `tools_with_cache.py`（乙-4 要**接线**，不是写文档）」
+  **要如何表示成「已核・不写」**，**等业务方裁**（本仓立场：**换口径 ≠ 结清**，⛔ 不许打 ✅ 了事）。
+
+  ⛔ **本次没开 PR** —— 文档类，与 ④ 收口那批**同一个 PR**（`docs/ledger-reconcile`），
+  按业务方口径「**push 都可以，别开 PR 就行**」。
+
 ### Changed
 
 - 🧩 **乙单开跑 · 第 1 步：`api/` 下**不是模块的 `.py`** 移出对账口径**（2026-10-07 · `DEC-101`）——
