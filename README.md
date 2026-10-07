@@ -297,6 +297,8 @@ curl -s -X POST localhost:8000/api/v1/rag/hybrid_search -H "Authorization: Beare
 | **有哪些文档 / 每份干什么** | ⭐ **`docs/文档地图.md`** |
 | **代码怎么组织的**（模块全景 / 请求流 / 依赖枢纽） | **`docs/原理/架构.md`** |
 | **表结构** | `docs/契约/数据模型.md` + **`api/schema.sql`** |
+| **这个仓还做过哪些「做完可用、但没进 Demo」的东西** | **`未进demo/`**（✅ **入库** —— 就是为了让 clone 的人看得见） |
+| **Demo 做到哪一步了** | 看 **`ROADMAP.md`**；施工区在 `demo/`（⚠️ 已 gitignore ⇒ **clone 你看不到**，故此处只给指针） |
 
 > 📌 **关于原 `Agent/` 目录（2026-09-20 已处置）** —— 🔴 **2026-09-29 移往 `docs/历史/`**：
 > 原系统（极狐 GitLab 的 `agent-assistant`）的文档曾以 `Agent/` 随仓携带，
