@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-PreToolUse hook —— **`git commit` 之前，自动跑本仓的五道门**。
+PreToolUse hook —— **`git commit` 之前，自动跑本仓的六道门**。
 
 ## 为什么要它（这不是"再提醒一次"，是补一个结构性缺口）
 
@@ -15,7 +15,7 @@ PreToolUse hook —— **`git commit` 之前，自动跑本仓的五道门**。
 * 改完文档**没跑链接检查**（一路靠"我记得"）
 * 新建文档**没登记 `docs/文档地图.md`**（脚本有了，但没人跑它）
 
-## 五道门
+## 六道门
 
 | # | 门 | 脚本 | 拦住什么 |
 |---|---|---|---|
@@ -24,14 +24,17 @@ PreToolUse hook —— **`git commit` 之前，自动跑本仓的五道门**。
 | ③ | **孤儿检查** | `scripts/check_doc_orphans.sh` | 建了文档**但没人指向它**（索引挂空） |
 | ④ | **模块 spec 门**（内联） | — | 新增 `api/*.py` 模块却没有 `docs/specs/<模块>.md` |
 | ⑤ | **路由鉴权门** | `scripts/check_route_auth.py --baseline` | 新引入了**没有鉴权依赖**的路由（含 WebSocket）|
+| ⑥ | **静态检查门** 🆕 | `scripts/check_lint_baseline.sh` | 新出现的**未使用导入 / 语法级错误**（ruff · **基线棘轮**，2026-10-07 加）|
 
-⚠️ **五道都会【跳过本次提交】吗** —— 不是，见下面「克制」。
+⚠️ **六道都会【跳过本次提交】吗** —— 不是，见下面「克制」。
+⚠️ **⑥ 与前五道的口径不同**：它拦的是「**比基线多出来的**」，⛔ 不是「一条都不许有」
+（存量 40 组 / 103 行已认下，业务方裁 `T6`「先挂起」；**只不许再变多**）。
 
 ## 行为
 
 ```
 命中 git commit
-  → 依次跑 ①②③（任一不通过 ⇒ 【阻止提交】exit 2，把输出带出来）
+  → 依次跑 ①②③⑥（任一不通过 ⇒ 【阻止提交】exit 2，把输出带出来）
   → 全通过 ⇒ 放行（exit 0），stderr 打一行汇总
 其它命令 ⇒ 直接放行（不做任何事）
 ```
@@ -57,6 +60,13 @@ GATES = [
     ("凭据门", "scripts/check_secrets.sh"),
     ("链接检查", "scripts/check_doc_links.sh"),
     ("孤儿检查", "scripts/check_doc_orphans.sh"),
+    # ── 第 ⑥ 道门：静态检查（ruff · **基线棘轮**）（2026-10-07 加）──
+    # 业务方当天裁「装 ruff」（⛔ 不装 pyflakes —— ruff 的 `F` 就是 pyflakes 的完整重实现）
+    # + 接门方式选「**基线棘轮**」：存量认了（`T6` 挂起），**但不许再变多**。
+    # 判据是【文件×规则 的集合】，⛔ 不是计数（计数量不到"这里修一条、那里加一条"）。
+    # ⚠️ **没装 ruff 时它 exit 0 并大声警告** —— 与下面「四条克制」② 一致（门坏了不锁死人）。
+    #    **真正的兜底在 CI**：`ci.yml` 的 `syntax` job 里装了钉版本的 ruff 后无条件跑。
+    ("静态检查门", "scripts/check_lint_baseline.sh"),
 ]
 
 # ── 第 ④ 道门（**内联，不是外部脚本**）：新增模块必须有 spec ──
@@ -177,8 +187,16 @@ def main() -> int:
         except Exception as e:
             skipped.append(f"{name}（跑不起来：{e}）")
             continue
+        # 🔴 退出码 **3 = 「本门没跑」**（环境缺件：没装工具 / 基线没了 / 工具自己出错）
+        #    —— 与「跑过且通过（0）」「跑过且不通过（1）」是**三件事**。
+        #    ⚠️ 原先只有 0 / 非 0 两分 ⇒ 一个"没跑"的门会被汇总行打成 **`✅`**
+        #    ⇒ **与"真跑过且干净"在机器痕迹上一模一样**（本仓原话：
+        #    「**『从不命中』与『没人违规』在机器痕迹上完全一样**」）。
+        #    有了 3 之后：本地标 **⏭ 未跑**（不锁死人），CI 那边**任何非 0 都算失败** ⇒ 兜底成立。
         if r.returncode == 0:
             passed.append(name)
+        elif r.returncode == 3:
+            skipped.append(f"{name}（⏭ 未跑：环境缺件，见它自己的警告）")
         else:
             failed.append((name, r))
 
@@ -281,7 +299,7 @@ def main() -> int:
         parts.append("路由鉴权门 ⚠️ 跳过（脚本不在 / 跑不起来 / git 读不到 staged）")
     if skipped:
         parts.append("⚠️ 跳过：" + " · ".join(skipped))
-    print(f"🔒 提交前五道门：{' ｜ '.join(parts) or '（无门可跑）'}", file=sys.stderr)
+    print(f"🔒 提交前六道门：{' ｜ '.join(parts) or '（无门可跑）'}", file=sys.stderr)
     return 0
 
 
