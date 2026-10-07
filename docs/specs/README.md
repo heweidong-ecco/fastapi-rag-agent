@@ -155,13 +155,41 @@
 | 4 | 想起来的时候 | 跑 `bash scripts/spec_status.sh` 看**还缺哪些 / 有没有残留** |
 
 ```bash
-bash scripts/spec_status.sh            # 对账：谁有 spec、谁没有、谁的模块没了
-bash scripts/spec_status.sh --write    # 顺带重写上面那张模块表
-bash scripts/spec_status.sh --missing  # 只列缺的
+bash scripts/spec_status.sh                # 对账：谁有 spec、谁没有、谁的模块没了
+bash scripts/spec_status.sh --write        # 顺带重写上面那张模块表
+bash scripts/spec_status.sh --missing      # 只列缺的
+bash scripts/spec_status.sh --non-modules  # 只列【不是模块】的（第 ④ 道门用它，见下）
 ```
 
 📌 **也可以打 `/specs`**（斜杠命令，见 `.claude/commands/`）。
 📌 **第 3 条的判据（可打印）**：`bash scripts/spec_status.sh` 的 **`🗑 spec 有、代码没了`** 一行 —— **应为 0**。
+
+---
+
+### 🧩 「不是模块的 `.py`」—— 为什么不给它们建 spec（**2026-10-07 加**）
+
+`api/*.py` 里有 **3 个** 是**手动 / 离线脚本**，**⛔ 不是产品模块**：
+
+| 文件 | 是什么 |
+|---|---|
+| `api/preprocess.py` | 手动脚本：跑一遍 `DocumentPreprocessor`，**肉眼比对**输入输出 |
+| `api/plan_constraints.py` | 手动实验脚本：对比不同约束下的任务规划（**会真调 LLM**） |
+| `api/evaluate_with_ragas.py` | RAGAS **离线**评测脚本（有 `__main__`，不在服务路径上） |
+
+**判据**：`bash scripts/spec_status.sh` 的 **`🧩 非模块脚本`** 一行 —— **应为 3**（名单在脚本的 `NON_MODULE_FILES`）。
+
+**为什么不给它们建 spec**：它们**不参与服务路径**、**没有调用方**、**跑法就是 `python xxx.py`**（docstring 自己写着）。
+给它们建 spec **= 为了让计数器归零而造文档** —— 把代码转录一遍，之后还得跟着改（**转录即负债**），
+与本页那句「**那条本身就是信息**」**正好相反**。
+
+> 🔴 **⛔ 别把这理解成"可以自动判"** —— 2026-10-07 试过「**没人 import ⇒ 不是模块**」，**被证伪**：
+> 全仓**零 import 的是 5 个**，多出来的两个恰恰**是模块**：
+> · `browser_tools.py` —— 两个导入点都被**注释掉**了（等 chromium）⇒ **停放的能力**，不是脚本
+> · `tools_with_cache.py` —— 业务方 2026-10-07 裁：**⛔ 不删，要接回 LangGraph 调用链**
+>
+> ⇒ 机械规则**把「脚本」与「模块，只是没接上」混成一类** ⇒ 只能用**逐条给理由的白名单**。
+> 白名单**自带两条自检**（脚本 §3b，命中即 🔴）：**名字必须还在 `api/` 下** · **不许有 spec**。
+> 📄 裁定 ⇒ `docs/decisions/DEC-101-乙单spec口径-非模块白名单.md`
 （脚本只扫 `docs/specs/*.md`、**不递归子目录** ⇒ 移进 `归档/` 就等于解掉这条告警。）
 **2026-10-03 首次用到**：`quota_limiter.md`（`DEC-046` 删了那个模块）。
 
@@ -182,7 +210,7 @@ bash scripts/spec_status.sh --missing  # 只列缺的
 
 | 机制 | 在哪 | 拦不拦 |
 |---|---|---|
-| **提交前第 ④ 道门** | `.claude/hooks/pre-commit-gates.py` | ✅ **硬拦**：**新增了 `api/X.py` 但 `docs/specs/` 下与模块同名的那个文件 不存在** |
+| **提交前第 ④ 道门** | `.claude/hooks/pre-commit-gates.py` | ✅ **硬拦**：**新增了 `api/X.py` 但 `docs/specs/` 下与模块同名的那个文件 不存在**<br>⚠️ **⛔ 别为脚本造 spec 去骗过它** —— 那道门**会去问** `scripts/spec_status.sh --non-modules`（**同一个来源**，⛔ 不是自己另存一份名单，见上节）；是脚本 ⇒ 加进 `NON_MODULE_FILES` 即可<br>🔴 2026-10-07（`DEC-101`）**之前它看不见那张白名单** ⇒ 照上节走的人会被**卡死**，只能绕门（⛔ 禁止） |
 | **写完 `api/*.py` 后提醒** | `.claude/hooks/spec-remind.py` | ⛔ 不拦（写代码过程中太频繁） |
 | **`/specs` 命令** | `.claude/commands/specs.md` | 手动跑对账 |
 

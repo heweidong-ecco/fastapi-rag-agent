@@ -78,6 +78,25 @@ SPECS_DIR = ("docs", "specs")
 NOT_A_MODULE = ("conftest.py",)
 
 
+def non_module_files(repo: str):
+    """`api/*.py` 里被 `spec_status.sh` 认定为【不是产品模块】的名字集合。
+
+    ⚠️ **为什么是"去问脚本"、而不是在本文件里再抄一份名单**（2026-10-07 · `DEC-101`）：
+        本仓有明文教训 —— **一个名字两个来源必然漂移，而漂移是静默的**（`DEC-051`）。
+        那道门与脚本对"什么算模块"**必须只有一个答案**。
+    ⚠️ **读不到就返回空集**（= 退回旧行为：一律要求 spec）—— ⛔ **不猜、不放过**。
+        理由：**放过的代价是"悄悄少拦一个"，而那与"本来就没这条"在机器痕迹上一样**。
+    """
+    try:
+        r = subprocess.run(["bash", os.path.join(repo, "scripts", "spec_status.sh"), "--non-modules"],
+                           cwd=repo, capture_output=True, text=True, timeout=30)
+    except Exception:
+        return set()
+    if r.returncode != 0:
+        return set()
+    return {x.strip() for x in r.stdout.splitlines() if x.strip()}
+
+
 def new_modules_without_spec(repo: str):
     """返回：**本次新增、但没有 spec** 的模块文件列表。"""
     try:
@@ -87,6 +106,7 @@ def new_modules_without_spec(repo: str):
         return None                      # git 跑不起来 ⇒ 交给调用方按"跳过"处理
     if r.returncode != 0:
         return None
+    nonmods = non_module_files(repo)
     bad = []
     for f in r.stdout.splitlines():
         f = f.strip()
@@ -95,6 +115,8 @@ def new_modules_without_spec(repo: str):
         base = os.path.basename(f)
         if base.startswith("test_") or base in NOT_A_MODULE:
             continue                     # 测试不算产品模块
+        if base[:-3] in nonmods:
+            continue                     # 【不是模块】（手动/离线脚本）⇒ 不要求 spec
         spec = os.path.join(repo, *SPECS_DIR, base[:-3] + ".md")
         if not os.path.exists(spec):
             bad.append((f, os.path.join(*SPECS_DIR, base[:-3] + ".md")))
@@ -255,6 +277,10 @@ def main() -> int:
             print("   ⇒ 为什么硬拦：**没有 spec 的模块，别人不知道它存在、也不知道做到哪。**",
                   file=sys.stderr)
             print("   ⇒ 建 spec 的模板见 docs/specs/README.md（**⭐ 关键节是「看代码会误判的地方」**）",
+                  file=sys.stderr)
+            print("   ⇒ ⚠️ 但它**如果是手动/离线脚本、不是产品模块** —— ⛔ 别为它造 spec：",
+                  file=sys.stderr)
+            print("        把它加进 `scripts/spec_status.sh` 的 `NON_MODULE_FILES`（附一行理由）即可。",
                   file=sys.stderr)
         if route_bad is not None:
             print("", file=sys.stderr)
