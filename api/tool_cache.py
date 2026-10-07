@@ -5,7 +5,6 @@ import time
 import random
 import redis
 from functools import wraps
-import os
 from config import REDIS_HOST, REDIS_PORT
 
 redis_client = redis.Redis(

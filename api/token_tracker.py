@@ -2,7 +2,6 @@
 Token 统计与成本追踪模块（支持数据库持久化）
 """
 import time
-import asyncio
 from typing import Optional, Dict
 from dataclasses import dataclass, field
 from collections import defaultdict
@@ -14,7 +13,6 @@ from collections import defaultdict
 #    与本文件既有的 `from permission import ...`（L291）、`import calendar`（L377）同一写法。
 #    ⚠️ 位置放在函数体最前、`try` 之前 —— 放 `try` 里会被本函数自己的 `except` 吞掉，掩盖 ImportError。
 import threading
-import os
 import json
 from datetime import timezone          # `_iso_utc` 用（stdlib，无副作用，⛔ 与 db 的惰性导入无关）
 
@@ -493,7 +491,7 @@ def get_user_token_budget(user_name: str) -> float:
     获取用户的每日Token预算。
     根据用户角色返回对应的预算上限。
     """
-    from permission import get_user_role, UserRole
+    from permission import get_user_role
     role = get_user_role(user_name)
     return ROLE_TOKEN_BUDGET.get(role, DEFAULT_DAILY_TOKEN_BUDGET)
 

@@ -1,7 +1,5 @@
-import psycopg2
 from contextlib import contextmanager
 from psycopg2.extras import execute_values
-import os
 import asyncio
 from config import DB_MIN_CONN, DB_MAX_CONN, POSTGRES_DB, POSTGRES_HOST, POSTGRES_PORT, POSTGRES_PASSWORD,POSTGRES_USER
 

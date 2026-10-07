@@ -1,9 +1,7 @@
 """
 MCP 工具工厂：将 LangChain @tool 函数自动封装为 MCP 标准接口
 """
-import asyncio
-from typing import Dict, Any
-from mcp.types import Tool
+from typing import Dict
 
 # 新增：version 版本号
 def create_mcp_tool_definition(tool_func,version: str = "1.0.0") -> Dict:

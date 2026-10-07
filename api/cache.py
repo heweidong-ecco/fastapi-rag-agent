@@ -1,7 +1,6 @@
 import redis
 import hashlib
 import json
-import os
 from config import REDIS_HOST, REDIS_PORT
 
 

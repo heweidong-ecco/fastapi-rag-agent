@@ -15,9 +15,7 @@ from llm_factory import make_llm   # ①b Task 5：model / api_key / base_url / 
 #    标准库 + `token_config`（`db` / `langchain` 都是**函数内**惰性导入）
 #    —— 同一条理由见 `api_v1_rag.py:21-23` 那段注释。
 from token_tracker import record_from_response
-import os
 
-import asyncio
 
 class RAGPipeline:
     """可配置的 RAG 检索管线 （带耗时统计） """
