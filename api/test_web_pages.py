@@ -37,9 +37,11 @@
   ⇒ ⛔ **别把"扫不到字面量"读成"这个页面验过了"**。
 * 只查**调用点里的字面量**（`getJSON('…')` / `fetch('…')`），
   ⛔ **不做全文件子串扫描** —— 那会连注释一起命中（本仓 `N14` 的原话）。
-* `api/static/` 根下那三个（`stream_test.html` · `trace_viewer.html` ·
-  `websocket_test.html`）也在扫描面内。它们目前是干净的；
-  ⚠️ 对 `stream_test.html` 的改动**另有挂起令**（`DEC-085` §六·4 的 `F5`）。
+* `api/static/` 根下的页面也在扫描面内。🔴 **2026-10-07（`DEC-096` · `F5`）起只剩
+  `websocket_test.html` 一个** —— 原先那两个（`stream_test.html`：调**不存在**的
+  `/api/v1/user/chat_history`；`trace_viewer.html`：`fetch` **不带认证头** ⇒ 必然 401）
+  **已经删掉**。⇒ ⚠️ **本文件的用例数会跟着页数自动变**（当时 7 ⇒ 现在 5），
+  **⛔ 别把"少了两条"读成"守卫变松了"** —— 少的是**两个不存在的页面**。
 
 📌 判据（可打印）：`venv/bin/python -m pytest api/test_web_pages.py -q -p no:warnings`
 """

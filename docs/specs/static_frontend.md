@@ -19,7 +19,7 @@
 | 🆕 `api/static/web/trace.html` | 336 | **Trace 页**：装配层（两轴分屏 / 取数 / 渲染 / 空态解释 / 页脚合计） |
 | 🆕 `api/static/js/trace.js` | 198 | **纯逻辑**：两轴的摘要与格式化 / 时间戳解析 / 空态判定 / 路径拼接 —— ⛔ 不碰 DOM、不发请求 |
 | 🆕 `api/static/js/trace.test.js` | 272 | `node --test` 用例（**24 条**）—— 钉住 `trace.js`（同上：⛔ 数量别抄） |
-| 🆕 `api/test_web_pages.py` | 110 | **全站页面守卫**（Python · 不连库）—— **扫 `api/static/` 下每个 `.html`**：`getJSON(…)`/`fetch(…)` 的字面量必须以 `/api/v1` 开头 + 1 条**防空跑**。<br>🔴 **2026-10-06（`DEC-094`）建的**：原先这条守卫只在 `api/test_trace_page.py` 里、**只读 `trace.html`** ⇒ 下一个页面照样能坏 |
+| 🆕 `api/test_web_pages.py` | 112 | **全站页面守卫**（Python · 不连库）—— **扫 `api/static/` 下每个 `.html`**：`getJSON(…)`/`fetch(…)` 的字面量必须以 `/api/v1` 开头 + 1 条**防空跑**。<br>🔴 **2026-10-06（`DEC-094`）建的**：原先这条守卫只在 `api/test_trace_page.py` 里、**只读 `trace.html`** ⇒ 下一个页面照样能坏<br>⚠️ **2026-10-07 起用例数 7 ⇒ 5**（`DEC-096` 删了两个存量坏页）—— **页面一少，它自动跟着少**，⛔ 那不是守卫变松 |
 
 ## ✅ 做了什么
 
@@ -81,7 +81,7 @@
   · 🔴 **接口的四类拒绝全是 HTTP 200 + `{"status":"error"}`** ⇒ 页面必须**读 body**，⛔ 只看 `r.ok` 会把
     "无权查看"当成成功（`explainStatus` 只管 401/429/5xx 那类**真错**的状态码）。
 - 🔵 **Trace 页（`DEC-093` · `F2` · 2026-10-06）** —— 入口 `GET /trace` → `/static/web/trace.html?thread_id=…`
-  （🔴 **它替代了 `api/static/trace_viewer.html`** —— 那个页面 fetch 轨迹**不带认证头** ⇒ 加了鉴权之后**打开必 401**）。
+  （🔴 **它替代了 `api/static/trace_viewer.html`** —— 那个页面 fetch 轨迹**不带认证头** ⇒ 加了鉴权之后**打开必 401**。🗑️ **该旧页已于 2026-10-07 删除** · `DEC-096`）。
   · **两轴分屏**：上半页**追踪轴**（`/agent/trace/{id}` · 工具调用逐步耗时）·
     下半页**成本轴**（`/agent/trace/{id}/cost` · 逐笔 token / 花费）。
     🔴 **⛔ 两条轴不合并、不相加** —— 它们**没有共同的步 id**，合成一棵树只能靠"时间接近"猜（详见下「看代码会误判」）。
@@ -98,26 +98,26 @@
 |---|---|---|
 | 1 | **不显示历史消息** | 后端**没有**"取历史"的公开接口（`DEC-085` 契约 C 只把历史喂给**模型**）。⇒ 切回旧会话时页面给一句实话（`showEmptyLog`），⛔ **不留一块看不出所以然的空白** |
 | 2 | ~~**引用卡片固定放在 `#log` 末尾**~~ ✅ **2026-10-06 修**（`DEC-089` · `F8`） | 卡片现在**挂在该条回答下面**（每条自带 `.card`），再点收起。⚠️ 旧注释里那个被 `F8` 判据当"还没修"标记的词**已删** —— ⛔ 别写回来（`grep -c 'DEMO 版' api/static/web/chat.html` ⇒ 0） |
-| 3 | ~~**接管页**~~ ✅ **2026-10-06 做了**（`DEC-088` · `F1`）· ~~**Trace 页改造**~~ ✅ **同日做了**（`DEC-093` · `F2`）· **Eval 页** | **只剩 Eval 页没做**。⚠️ Trace 页是**新建** `web/trace.html`，旧页 `api/static/trace_viewer.html` **保留未删**（`FAQ.md` 写过它的地址）—— 见下 ⚰️ 表 |
+| 3 | ~~**接管页**~~ ✅ **2026-10-06 做了**（`DEC-088` · `F1`）· ~~**Trace 页改造**~~ ✅ **同日做了**（`DEC-093` · `F2`）· **Eval 页** | **只剩 Eval 页没做**。⚠️ Trace 页是**新建** `web/trace.html`；旧页 `api/static/trace_viewer.html` 曾**保留未删**（`FAQ.md` 写过它的地址）⇒ 🗑️ **2026-10-07 已删，同时改了 `FAQ.md` 那条旧地址**（`DEC-096` · `F5`）—— 见下 ⚰️ 表 |
 | 4 | ~~**硬门 A / C 的其余前端项**~~ ✅ **2026-10-06 结清**（`DEC-092`） | 本刀只做了"能流、能停" ⇒ ✅ **「无据拒答」那半同日做了**（`DEC-091`）· ✅ **剩下那条「C 的其余出口」经核【没有指称对象】⇒ 删除**（🔴 硬门 C 判定原文里**没有「出口」这个概念** `grep -c '出口'` ⇒ **0**；那个词的唯一出处是 `DEC-085` §六·1 的**桶话**，**从没被展开过**）⇒ ⛔ **别读成"做掉一件"**，是账上摘掉一个**空指针** |
 | 5 | ~~**R3.2 熔断提示卡片**~~ ✅ **2026-10-06 做了**（`DEC-090`） | ⚠️ 但「**怎么联系**」是**占位符** ⇒ 登记在 `N13`，⛔ 别当它做完了。<br>🔴 **2026-10-07 值按业务方裁定改过**（`DEC-095`）：`'（待设置 —— 联系入口尚未确定）'` ⇒ **`'example@example.com'`**（**RFC 2606 保留域**，公网永不解析）。⚠️ **⛔ 别把这次改动读成"联系入口已经有了"** —— 换的是值、不是那个真入口；而且理由**变强了**（旧值**自曝没填**，新值**看着像真的**）。<br>📌 判据（现取）：`grep -n 'BREAKER_CONTACT = ' api/static/js/sse.js`<br>⚠️ **没有用例钉这个值** —— `sse.test.js` 只钉四件事的**键**都在且非空 ⇒ 改它不会有用例红 |
 | 6 | **DOM 那层没有自动判据** | 滚动 / 按钮态 / 渲染仍靠 DevTools 手工。`sse.js` 覆盖的是**决策**，⛔ 不是**像素** |
 | 7 | ~~🔴 **硬门 B 判定里的另外两句**~~ ✅ **2026-10-06 做**（`DEC-089` · `F8`） | 判定是**三句**（**⛔ 权威原文** ⇒ `fastapi-rag-agent-TODO待办/通用/四硬门-定义与验收标准.md` 硬门 B）。①「点开能展开原文片段」`DEC-085` 做的；②「**再点能跳到原文位置**」+③「**chunk id + 相似度分**」本刀做掉 ⇒ **三句齐了**。⚠️ 但**硬门 B 整体⛔ 不等于翻 ✅** —— 判定里还有「非流式链」那类前提，见 `ROADMAP` |
 
-### ⚰️ 同目录下三个【存量坏页】—— 本刀**没碰**（本仓：⛔ 不顺手清理）
+### ⚰️ `api/static/` 根下的存量页 —— 2026-10-07 起**只剩一个**
 
-| 文件 | 什么毛病 |
+| 文件 | 状况 |
 |---|---|
-| `api/static/stream_test.html` | 调**不存在**的 `/api/v1/user/chat_history` |
-| `api/static/trace_viewer.html` | `fetch` **不带认证头** ⇒ 现在 401。⚠️ **2026-10-06（`DEC-093`）它被 `/trace` 正式取代** —— 但**⛔ 没删**：`docs/FAQ.md` 写过它的地址，删掉那条指引会落到 404。只在它 `<body>` 顶部加了一条指向 `/trace` 的**红色横幅** |
-| `api/static/websocket_test.html` | 端点路径写错 + 浏览器 WebSocket **送不了 `X-API-Key` 头**（它自己的注释里就写了） |
+| ~~`api/static/stream_test.html`~~ | 🗑️ **2026-10-07 删**（`DEC-096` · `F5`）—— 它调的 `/api/v1/user/chat_history` **根本不存在** ⇒ 从这个文件写下那天起就是**死的** |
+| ~~`api/static/trace_viewer.html`~~ | 🗑️ **同日删** —— `fetch` **不带认证头**（加鉴权后打开必 401）；2026-10-06 起已被 `/trace` 取代。⚠️ 删它**同时改了 `docs/FAQ.md` 里那条【对外写过的旧地址】**（现在写明：打它是 404，请用 `/trace`）<br>⚠️ **删前它 `<body>` 顶部有一条指向 `/trace` 的红色横幅**（`DEC-093` 加的）—— 随文件一起没了，⛔ 别去别处找它 |
+| `api/static/websocket_test.html` | ⬜ **仍在**（本批有意不碰）—— 端点路径写错 + 浏览器 WebSocket **送不了 `X-API-Key` 头**（它自己的注释里就写了） |
 
-> ⇒ ⛔ **别读成"`api/static/` 下都是新做的东西"**。三刀加起来只动了 `web/`（`chat.html` · `approvals.html` · `trace.html`）
-> + `js/`（`sse.js` · `approvals.js` · `trace.js` 及其用例），
-> 另外三个是同一批「没记录过、也没人管」的遗留。
-> ⚠️ **判据**：`ls api/static/*.html` ⇒ 三个；`ls api/static/web/ api/static/js/` ⇒ 只有上面那 9 个。
-> ⚠️ **`trace_viewer.html` 现在是"半坏 + 已取代"** —— 它**仍在** `api/static/*.html` 那份清单里，
-> ⛔ 别因为"Trace 页做完了"就以为那份清单变成两条。
+> ⇒ ⛔ **别读成"`api/static/` 下都是新做的东西"**。段 1 的几刀只动了 `web/`（`chat.html` · `approvals.html` · `trace.html`）
+> + `js/`（`sse.js` · `approvals.js` · `trace.js` 及其用例）；根下剩的这个是**没记录过、也没人管**的遗留。
+> ⚠️ **判据（现取，⛔ 别抄旧数）**：`ls api/static/*.html` ⇒ **1 个**（`websocket_test.html`）·
+> `ls api/static/web/*.html` ⇒ **3 个**。
+> 🔴 **2026-10-07 之前这两行写的是「三个」** —— 那条判据**当时是对的**，现在**变了**；
+> ⛔ 别因为"Trace 页做完了"就以为清单少了一个，**是两个都删了**。
 
 ## ⚠️ 看代码会误判的地方 ⭐
 
@@ -159,7 +159,7 @@ node --test api/static/js/trace.test.js      # ⇒ ℹ tests 24 / pass 24 / fail
 venv/bin/python -m pytest api/test_chat_page.py -q        # ⇒ 3 passed（GET /chat 的三条守卫）
 venv/bin/python -m pytest api/test_approvals_page.py -q   # ⇒ 3 passed（GET /approvals 的三条守卫）
 venv/bin/python -m pytest api/test_trace_page.py -q       # ⇒ 6 passed（GET /trace：3 条同构 + 3 条页面坏法的守卫）
-venv/bin/python -m pytest api/test_web_pages.py -q        # ⇒ 7 passed（6 个页面的 URL 前缀 + 1 条防空跑）
+venv/bin/python -m pytest api/test_web_pages.py -q        # ⇒ 5 passed（4 个页面的 URL 前缀 + 1 条防空跑）
 #   对端（后端那半，本页消费的契约）——
 venv/bin/python -m pytest api/test_frontend_contract.py -q   # ⇒ 17 passed（契约 A/B + DEC-089 的 similarity + DEC-090 契约 E 的 scope 三条 + DEC-091 契约 F 四条）
 venv/bin/python -m pytest api/test_token_tracker_cost_helpers.py -q   # ⇒ 5 passed（费用行那三个纯函数）
@@ -203,7 +203,7 @@ curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' http://127.0.0.1:8000/t
 # ②' 🔴 页面里的 URL 字面量（DEC-093 建的那类守卫，DEC-094 起扫全站）—— 三把尺子
 grep -n "getJSON('/\|fetch('/" api/static/web/trace.html        # ⇒ 0 条（Trace 页走 buildPath/buildCostPath，⛔ 不写字面量）
 grep -n "getJSON('/\|fetch('/" api/static/web/approvals.html     # ⇒ 4 条，**全部带 /api/v1**（✅ 2026-10-06 修完；改前 4 条均无）
-venv/bin/python -m pytest api/test_web_pages.py -q               # ⇒ 7 passed（扫 6 个页面 + 防空跑；⚠️ 某页若走 helper，对它【空过】）
+venv/bin/python -m pytest api/test_web_pages.py -q               # ⇒ 5 passed（扫 4 个页面 + 防空跑；⚠️ 某页若走 helper，对它【空过】）
 
 # ③ ⛔ 写不成命令的（手工，2026-10-06 实测过一次）
 #   · 硬门 A：Network 里 type = text/event-stream，正文增长时连接未关

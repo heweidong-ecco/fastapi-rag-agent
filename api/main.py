@@ -746,7 +746,10 @@ import os
 current_dir = os.path.dirname(os.path.abspath(__file__))
 static_dir = os.path.join(current_dir, "static")
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
-# 访问路径：http://localhost:8000/static/stream_test.html
+# 访问路径（示例）：http://localhost:8000/static/websocket_test.html
+# ⚠️ 2026-10-07（`DEC-096` · `F5`）：原先那两个调试页 `static/stream_test.html` 与
+#    `static/trace_viewer.html` **已删** —— 前者调的 `/api/v1/user/chat_history` **根本不存在**，
+#    后者 `fetch` 轨迹**不带认证头**（加了鉴权后打开必 401）⇒ 两个都是**存量的坏页**。
 
 # ==================== 挂载Gradio成本统计可视化面板 ====================
 # ⚠️ 2026-09-17 重构 ⑥ 切开点 4：加环境门控。业务方裁决取 **A 方案（默认值保持现状）**。

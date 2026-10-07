@@ -55,8 +55,9 @@ All notable changes to this project will be documented in this file.
 
   原守卫**只读 `web/trace.html` 一个文件** —— 而它**当初就是为了 `approvals.html` 那个事故**建的
   ⇒ **"只盯一个页面的门，挡不住下一个页面"正是它当初没拦住的原因**。
-  现在**扫 `api/static/` 下每一个 `.html`**（实测 **6 个**：`web/` 三个 + `stream_test.html` ·
-  `trace_viewer.html` · `websocket_test.html`），新页面**自动进网**；引号也扩到**单 / 双 / 反引号**
+  现在**扫 `api/static/` 下每一个 `.html`**（当时实测 **6 个**：`web/` 三个 + `stream_test.html` ·
+  `trace_viewer.html` · `websocket_test.html`；⚠️ **2026-10-07 起是 4 个** —— 两个坏页已删，见下 `Removed`），
+  新页面**自动进网**；引号也扩到**单 / 双 / 反引号**
   （`` fetch(`/agent/${id}`) `` **同样是坏的**）。
   ⚠️ 配了一条 **`test_page_scan_is_not_vacuous()`** —— glob 写错时**参数化用例一条都不跑，而且是绿的**。
   ⚠️ **看代码会误判**：某页若改用 JS helper 拼路径（`trace.html` 就是），这条守卫对它是**空过**的 ——
@@ -76,6 +77,30 @@ All notable changes to this project will be documented in this file.
 
   ⇒ **连同防空跑一起写**（`[ ! -e "${test_files[0]}" ]` ⇒ `exit 1`）。
   📌 **正向实测**：**`ℹ tests 70`**（= `sse` 32 + `approvals` 14 + `trace` 24 的**实测和**，⛔ 不是把三个数加起来）。
+
+### Removed
+
+- 🔴 **删掉 `api/static/` 下两个【存量坏页】**（2026-10-07 · `DEC-096` · 债 `F5`）——
+  `api/static/stream_test.html`（218 行）· `api/static/trace_viewer.html`（168 行）。**两个都删。**
+
+  **为什么不修只删**：两个页**自我引入起就是坏的**，且**没有任何路由/脚本依赖它们**。
+  · `stream_test.html`：调 **`/api/v1/user/chat_history`** —— 🔴 **该路由全仓不存在**
+  （`grep -rn 'user/chat_history' api/ --include='*.py'` 只命中注释）。
+  · `trace_viewer.html`：`fetch` **不带任何认证头**（`git show HEAD:… | grep -c 'X-API-Key'` ⇒ **0**）
+  ⇒ 加了鉴权后打开**必 401**；2026-10-06 起已被新页 `/trace` 取代。
+
+  🔴 **原裁定是「不碰」**（`DEC-085` §六·4，本仓纪律「⛔ 不顺手清理」）——
+  本次是**业务方就着 `F5` 这个登记条目改判为「两个都删」**。⚠️ **先例仍然有效**，
+  ⛔ 别把这条读成"以后这类文件可以顺手删"（同批 `F6`/`F7` 就都裁了「不动」）。
+
+  ⚠️ **删前已改 `docs/FAQ.md` 那条【对外写过的旧地址】**（`A3` §2 ⇒ 改向 `/trace`）
+  —— 那是「不留断链」的配套动作，⛔ 不是顺带。
+
+  **实测（前 → 后）**：`ls api/static/*.html` **3 → 1**（只剩 `websocket_test.html`）·
+  `venv/bin/python -m pytest api/test_web_pages.py -q` **7 → 5 passed**。
+  ⚠️ **用例少 2 条不是"守卫变松"** —— 那个守卫**扫目录**（`api/static/**/*.html`），
+  页没了用例**自动**少；它盯的**三个页面**（`web/approvals.html` / `web/chat.html` / `web/trace.html`）
+  一个没少。
 
 ### Added
 

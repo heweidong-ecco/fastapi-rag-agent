@@ -265,9 +265,11 @@ curl http://localhost:8000/api/v1/agent/tool_health -H "Authorization: Bearer <t
    ```
    http://localhost:8000/trace?thread_id=<你的 thread_id>
    ```
-   ⚠️ 旧地址 `http://localhost:8000/static/trace_viewer.html` **仍在**（本文件曾对外写过它），
-   但那个页面调接口时**不带 API Key** ⇒ 启用鉴权后**必然 401**；而且它概览里的
-   「总 Token」「总花费」两格**一直是空的**（那份数据不在它读的那条轴上）。**用新页。**
+   🔴 **旧地址 `http://localhost:8000/static/trace_viewer.html` 已于 2026-10-07 【删除】**
+   （`DEC-096`）—— 现在打它**是 404**。本文件曾对外写过那个旧地址，这里说明白：那个页面
+   **从一开始就是坏的** —— 调接口时**不带 API Key**（启用鉴权后**必然 401**），而且它概览里的
+   「总 Token」「总花费」两格**一直是空的**（那份数据不在它读的那条轴上）。
+   ⇒ ⛔ **别再用旧地址，用上面的 `/trace`。**
    ⚠️ **上半页（轨迹）是进程内存，重启 API 即清空**，而且目前只有 Agent 链会写它 ——
    走 `/chat`（检索链）时**上半页必然是空的**，下半页的花费账仍然完整。
 3. 给最大工具调用次数加限制 —— 逻辑在 `api/agent_graph_advanced_learning.py:246` 的 `should_continue`。
