@@ -104,6 +104,36 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- 🟢 **新增 `docs/说明/魔搭创空间-部署与平台约束.md`**（2026-10-07 · 399 行）——
+  魔搭创空间（ModelScope Studio）的**部署流程 + 平台硬约束 + 实测事实**。
+
+  **为什么单独一份**：本仓 `docs/说明/部署.md` 的 §二/§三 讲的是「**你自己有机器**」的部署
+  （Docker Compose / 云 ECS）；**创空间是托管平台**，它的约束是**平台强加的**，
+  会直接改写架构选择（**一个 Studio = 一个容器** · 端口**只能 `0.0.0.0:7860`** ·
+  **重启即丢数据** · 免费档实测**只有 2 vCPU / 8 GiB / Swap=0**）⇒ **两者不是一回事，混读会出事**。
+
+  ⭐ **写法上的一条硬要求：全文逐条标【可信度】🟢官方 / 🔵实测 / ⚪推断。**
+  ⚠️ 理由：平台文档会过期，而「我以为」和「我验过」在纸面上长得一样 ——
+  下一个人会**按你最自信的那句去设计架构**。
+
+  🔴 **三条实测、官方文档里没有的硬事实**（本次落盘的**主要价值**）：
+  ① 免费档真实规格 = **2 vCPU / 8 GiB / `SwapTotal=0`**（≠ 对外宣传的「8 核 32GB」）
+  ⇒ **`Swap=0` 意味着「整个文件读进内存」的写法本身就是一个 DoS 面**；
+  ② **平台会往每个请求注入一个 449 字符的 `Authorization` 头** ⇒ 自家鉴权**必须换头名**，
+  且**绝不能读它当「用户已登录」**；
+  ③ **删除 Studio 没有程序化接口**（OpenAPI `DELETE` 返回 404，CLI `delete_repo` 已废弃且不支持 studio）。
+
+  ⚠️ **有意写成【自足】** —— 不引用本仓任何路径与模块，**供整份复制到其它仓库**
+  （业务方 2026-10-07：放本仓，由他自行分发；⛔ 不放 `Product/` 级 —— 那会让别的项目
+  **以为「我也要做成 demo」**⇒ 污染 + 跑错方向）。
+
+  **入站指针 3 处**：`docs/文档地图.md` ×2 · `docs/说明/部署.md` ×1。
+
+  📌 **判据（可打印）**：
+  `bash scripts/check_doc_orphans.sh` ⇒ 无孤儿（⚠️ **已做反证检验**：临时藏掉入站指针
+  ⇒ 门变红并**点名该文件** ⇒ 证明门确实在看它，⛔ 不是「没扫到」）·
+  `bash scripts/check_doc_links.sh` ⇒ 无真断链 · `bash scripts/check_secrets.sh` ⇒ 0 命中。
+
 - 🔶 **Eval 页【占位版】：一个按钮 + 子页一行字（段 1 第七刀 · `F3`）**（2026-10-07 · `DEC-097`）——
   `api/static/web/eval.html`（新）· `api/static/web/eval_gate.html`（新）· `api/main.py`（`GET /eval`）·
   `scripts/route-auth-baseline.txt`（+1 条）· `api/test_eval_page.py`（新，5 条用例）。
