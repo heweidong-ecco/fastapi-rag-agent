@@ -8,9 +8,7 @@ import json
 import uuid
 from typing import Literal
 from fastapi import APIRouter, Depends, Path, Query
-from fastapi.responses import JSONResponse
 
-from config import ACCESS_TOKEN_EXPIRE_MINUTES
 # ①b Task 5：LLM 的唯一构造落点（`model` / `api_key` / `base_url` / `max_tokens` 都收在那一处）。
 # ⚠️ `llm_factory` 模块级只 import `os`（langchain 是在 `make_llm()` **函数内**才 import）
 # ⇒ 放文件头**不破坏**本文件「导入期不拉 langchain」的既有做法（原 `MAX_TOKENS_ANSWER` 同理）。
@@ -29,24 +27,22 @@ from schemas import (
     QuestionRequest,
     DocumentInsert,
     BatchDocumentInsert,
-    LoginRequest,
-    RefreshRequest,
-    UserCreate,
 )
 # ⚠️ 2026-10-04 删 `get_current_user_jwt`（`DEC-064`）：它在本文件**只有** `jwt_ask_question` 一处用，
 #    随该端点一起删 ⇒ 留着就是没人用的 import。
-# ⚠️ `require_admin` **保持原样**（本文件从未用过它）—— 那是**既有**的未使用导入，
-#    归 `docs/待办总表.md` 的 **T6**（103 个未使用导入 · 业务方裁「先挂起」）管，⛔ 本次不顺手清理。
-from deps import get_current_user_hybrid, require_admin
+# ⚠️ `require_admin` 原先挂在这里、**本文件从未用过**（`T6` 的「先挂起」那批）。
+#    2026-10-07 清存量时**已删** —— 同批删掉的还有：`JSONResponse` · `ACCESS_TOKEN_EXPIRE_MINUTES` ·
+#    `LoginRequest`/`RefreshRequest`/`UserCreate` · `insert_batch_documents` · `get_weather` ·
+#    `append_chat_history`/`INTERRUPTED_SUFFIX` · `agent_graph`。⛔ **没删任何模块**，只删导入行。
+from deps import get_current_user_hybrid
 # `DEC-075`：WebSocket 的首帧认证依赖 —— ⛔ 它与上面那两个**不能互换**（浏览器 WS
 # 不能自定义请求头，`X-API-Key` / `Authorization` 送不上来）。
 from deps import require_ws_user
-from db import get_db, insert_document,insert_batch_documents
+from db import get_db, insert_document
 from db import search_similar  # 🔴 2026-10-03 乙段（DEC-056）：stream_search 改走共享层
 from embedding_client import get_embedding
 
 from permission import get_user_role, UserRole  # ⚠️ 2026-10-03 删 `get_user_quota`（本文件从未使用；该函数已随 DEC-046 一起删）
-from tools_with_cache import get_weather  # ⚠️ 2026-09-20 删 `calculator`（D1）：它在被下方那个**函数内的局部 calculator** 覆盖前从未使用
 from db import invalidate_bm25_cache
 from hybrid_search import hybrid_search
 from hybrid_search import rerank_search
@@ -61,9 +57,13 @@ from document_preprocessor import DocumentPreprocessor
 from chunker import split_text_with_filter
 from document_parser import parse_document
 
-from cache import get_chat_history, append_chat_history, persist_turn, INTERRUPTED_SUFFIX
+# 🔴 `INTERRUPTED_SUFFIX` 看着"没用"，但**必须留** —— 它是不是死导入，`ruff` 判不了：
+#    `api/test_cancel_propagation.py` **6 处**写作 `rag_mod.INTERRUPTED_SUFFIX`（**属性访问**，
+#    ⛔ 不是 `from ... import`）。2026-10-07 清存量时**删过一次**，那 6 条用例当场全红
+#    （`AttributeError: module 'api_v1_rag' has no attribute 'INTERRUPTED_SUFFIX'`）⇒ 已还原。
+#    ⛔ **这就是"F401 不等于死导入"的实例**：ruff 只看本文件的名字，看不见**别人按属性取**。
+from cache import get_chat_history, persist_turn, INTERRUPTED_SUFFIX
 
-from agent_graph import agent_graph
 
 import os
 
