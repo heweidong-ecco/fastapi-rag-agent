@@ -4,7 +4,7 @@
 |---|---|
 | **状态** | 🟡 **部分可用** —— 记录与查询都在，但① 存储是**进程内存**（重启即空）② **只有一个端点**（`/agent/mcp_chat`）往里写 |
 | **对外提供** | `start_trace` · `finish_trace` · `record_tool_start` · `record_tool_end` · `record_agent_decision` · `get_trace` · `get_trace_of_any_owner` · `get_all_traces` · 数据类 `AgentTrace` / `ToolCallRecord` |
-| **谁在用** | 写：`api_v1_agent.mcp_agent_chat`（建轨迹）· `agent_graph_advanced` 的两个节点（工具与决策）。<br>读：`/agent/trace/{thread_id}` · `/agent/traces` 两个端点 |
+| **谁在用** | 写：`api_v1_agent.mcp_agent_chat`（建轨迹）· `agent_graph_advanced` 的两个节点（工具与决策）。<br>读：`/agent/trace/{thread_id}` · `/agent/traces` 两个端点<br>🆕 **2026-10-06（`DEC-093` · `F2`）**：新页面 **`/trace`**（`api/static/web/trace.html`）读**本轴**画上半页，读**成本轴**画下半页 —— 同一个页面上**两条轴并排、互不相加** |
 | **存储** | 模块级字典 `_traces`，**键 = `session_key(user_name, thread_id)`**（`DEC-056` 决策 9 / N4） |
 
 ## ✅ 做了什么
@@ -34,6 +34,8 @@
 | ⚠️ **「`get_all_traces()` 不带参数」** | 现在**必须传 `user_name`**（位置形参、无默认值）。⚠️ 与 `session_key` 同一取向：**漏传要 `TypeError`，⛔ 不是悄悄返回全量** |
 | ⚠️ **「身份漏传会落到某个默认桶」** | 本模块**不会**（形参无默认值）。🔴 **但上游会** —— `agent_graph_advanced` 从 state 取身份用的是 `state.get("user_name", "default_user")` / `"unknown"` ⇒ 那些**默认值本身是 fail-open**，是 **N5** 那一族的病，⛔ 不在本模块修 |
 | ⚠️ **「追踪轴和花费轴是一回事，改了一处另一处跟上」** | ⛔ **两条轴**：本模块是**追踪**（进程内存）；`token_tracker.check_session_token_budget(user_name, thread_id)` 是**花费**（查 `token_usage_logs` 表）。⚠️ **花费轴本来就带 `user_name`** ⇒ **它没这个病，⛔ 别去"顺手统一"** |
+| 🔴 **「用户的演示路径上也查得到轨迹」** | ⛔ **多半查不到**。对话页走 `/api/v1/rag/stream_search`（`api_v1_rag.py`），那条链**⛔ 不调 `start_trace`** ⇒ 本轴的键**根本没建过**。<br>⇒ 凡是"页面打开是空的"这类反馈，**先分三种**：① 走的是检索链（最常见）② API 重启过 ③ thread_id 真没用过。<br>🔴 **这也是 `DEC-093` 的 Trace 页强制要求"空的时候要解释为什么"的原因** —— 只印一句"未找到"会让人以为整个功能坏了。<br>📌 判据：`api/static/js/trace.test.js::emptyTraceReason` 的三条分支 |
+| 🔴 **「`/agent/trace` 的概览卡印的总 Token / 总花费是 [0] 就是没花钱」** | ⛔ **不是** —— `finish_trace(user_name, thread_id, <answer>)` 的**两个调用点都没传 `total_tokens` / `total_cost`** ⇒ `AgentTrace.to_dict()` 里那**恒为 `0`**。<br>⇒ 那两个量在本模块里**没有数据源**，⛔ 换页面也变不出来。真金额在**成本轴**（`token_usage_logs`）。<br>🔴 **2026-10-06（`DEC-093`）已把那两格从页面上删掉** —— 当时旧页 `api/static/trace_viewer.html` 里还留着；🗑️ **该旧页已于 2026-10-07 删除**（`DEC-096` · `F5`）⇒ **这个坑现在只在本文留痕** |
 | ⚠️ **「`record_tool_*` 找不到轨迹就是 bug」** | **不是** —— 查不到时**静默 `return`**（`if key not in _traces`）。设计如此：没建过轨迹的会话不记。⚠️ 但副作用是「**身份拼错 ⇒ 记录悄悄丢**」，⛔ 不报错 |
 
 ## 关联

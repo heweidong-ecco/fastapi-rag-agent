@@ -76,6 +76,11 @@
 <script src="/static/js/approvals.js"></script>
 <script>
 'use strict';
+
+/* 🔴 **本页每一个 URL 都必须带 `/api/v1` 前缀。**
+   少一个前缀 = 浏览器打到 404，而**服务端不会报任何错** —— 本页就这么坏过：
+   4 条 fetch 全写成了 `/agent/…`，页面从合进去那天起 100% 不可用，且没有任何用例红
+   （见 `DEC-093` §四）。⇒ 不靠自觉：`api/test_web_pages.py` 会把它们拦下。 */
 const KEY_STORE = 'rag_api_key';       // ⚠️ 与 chat.html 同一个 localStorage 键
 const $ = (id) => document.getElementById(id);
 let picked = null;                     // 当前选中的那一行
@@ -106,7 +111,7 @@ async function getJSON(url) {
 /* ==================== 上 · 待接管列表 ==================== */
 
 async function loadPending() {
-  const data = await getJSON('/agent/pending');
+  const data = await getJSON('/api/v1/agent/pending');
   const body = $('pending').querySelector('tbody');
   body.innerHTML = '';
   const now = Date.now() / 1000;
@@ -142,7 +147,7 @@ async function loadPending() {
 
 async function openContext(row) {
   const q = RagApprovals.buildContextQuery(row.raw_thread_id, row.user_name);
-  const data = await getJSON('/agent/pending/context?' + q);
+  const data = await getJSON('/api/v1/agent/pending/context?' + q);
   if (data.status !== 'ok') { notice(data.message, true); return; }
   picked = { thread_id: row.raw_thread_id, owner: row.user_name };
   $('opbox').hidden = false;
@@ -178,7 +183,7 @@ async function decide(decision) {
   if (!picked) { notice('先点一行选一个会话', true); return; }
   const q = RagApprovals.buildApprovePayload(
     picked.thread_id, picked.owner, decision, $('edited').value);
-  const r = await fetch('/agent/approve?' + q, {
+  const r = await fetch('/api/v1/agent/approve?' + q, {
     method: 'POST',
     headers: { 'X-API-Key': key() },
   });
@@ -196,7 +201,7 @@ async function decide(decision) {
 /* ==================== 下 · 裁决历史 ==================== */
 
 async function loadHistory() {
-  const data = await getJSON('/agent/approvals/history?limit=50');
+  const data = await getJSON('/api/v1/agent/approvals/history?limit=50');
   const body = $('history').querySelector('tbody');
   body.innerHTML = '';
   for (const ev of data.events) {

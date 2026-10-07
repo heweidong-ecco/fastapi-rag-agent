@@ -549,6 +549,31 @@ async def approvals_page():
     """把人送到接管页。⚠️ `include_in_schema=False`：它不是 API，⛔ 别混进 openapi。"""
     return RedirectResponse(url="/static/web/approvals.html", status_code=302)
 
+# 🔴 `DEC-093`（`F2`）：Trace 页的**入口 URL**。形状与上面两条**逐字同款**。
+#    ⚠️ 它**替代**了原先那个 `/static/trace_viewer.html` —— 那个页面 fetch 轨迹时
+#       **不带任何认证头** ⇒ 加了鉴权之后**打开必 401**，等于一直坏着。
+#    🔴 代价已认：这是**新公开路由** ⇒ `check_route_auth.py --baseline` 会 exit 1
+#       ⇒ **已显式写进 `scripts/route-auth-baseline.txt`**（一次有意识的操作）。
+#       ⚠️ 它**不含数据**：真正的边界在它调的两条接口上，那两条都带鉴权
+#       （`/agent/trace/{thread_id}` · `/agent/trace/{thread_id}/cost`）。
+@app.get("/trace", include_in_schema=False)
+async def trace_page():
+    """把人送到执行轨迹页。⚠️ `include_in_schema=False`：它不是 API，⛔ 别混进 openapi。"""
+    return RedirectResponse(url="/static/web/trace.html", status_code=302)
+
+# 🔴 `DEC-097`（`F3`）：Eval 页的**入口 URL**。形状与上面三条**逐字同款**。
+#    ⚠️ 本页是**占位页**（业务方 2026-10-07 裁剪的口径）：**一个按钮** → 点开是**一行字**。
+#       ⛔ 不是原先 `F3` 写的「跑分 + 与上一版的对比箭头」——**没有数据源**
+#       （后端**没有任何 `/agent/eval*` 路由**，`B14` 仍是 ⬜）⇒ 硬做只会做出一个假页面。
+#    🔴 代价已认：这是**新公开路由** ⇒ `check_route_auth.py --baseline` 会 exit 1
+#       ⇒ **已显式写进 `scripts/route-auth-baseline.txt`**（一次有意识的操作）。
+#       ⚠️ 它**不含数据**（子页上那一行是**静态文字**，不取任何接口）——
+#       这也是它比另外三页**更没风险**的地方。
+@app.get("/eval", include_in_schema=False)
+async def eval_page():
+    """把人送到 Eval 页。⚠️ `include_in_schema=False`：它不是 API，⛔ 别混进 openapi。"""
+    return RedirectResponse(url="/static/web/eval.html", status_code=302)
+
 # 新增  嵌入了 Prometheus 指标采集
 # 指标暴露接口
 @app.get("/metrics")
@@ -734,7 +759,10 @@ import os
 current_dir = os.path.dirname(os.path.abspath(__file__))
 static_dir = os.path.join(current_dir, "static")
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
-# 访问路径：http://localhost:8000/static/stream_test.html
+# 访问路径（示例）：http://localhost:8000/static/websocket_test.html
+# ⚠️ 2026-10-07（`DEC-096` · `F5`）：原先那两个调试页 `static/stream_test.html` 与
+#    `static/trace_viewer.html` **已删** —— 前者调的 `/api/v1/user/chat_history` **根本不存在**，
+#    后者 `fetch` 轨迹**不带认证头**（加了鉴权后打开必 401）⇒ 两个都是**存量的坏页**。
 
 # ==================== 挂载Gradio成本统计可视化面板 ====================
 # ⚠️ 2026-09-17 重构 ⑥ 切开点 4：加环境门控。业务方裁决取 **A 方案（默认值保持现状）**。

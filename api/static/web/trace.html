@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>执行轨迹与花费</title>
+<style>
+  :root { --fg:#1a1a1a; --muted:#6b7280; --line:#e5e7eb; --bg:#fafafa;
+          --trace:#1d4ed8; --cost:#047857; --bad:#b91c1c; --warn:#b45309; }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }        /* ⚠️ 全局兜底：别让 hidden 被 display 覆盖 */
+  body { font: 14px/1.6 system-ui, sans-serif; color: var(--fg); background: var(--bg);
+         margin: 0; padding: 16px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 20px 0 8px; }
+  .sub { color: var(--muted); margin: 0 0 12px; }
+  input, button { font: inherit; }
+  input[type=password] { width: 320px; }
+  input[type=text] { width: 260px; }
+  button { cursor: pointer; padding: 4px 12px; border: 1px solid var(--line);
+           background: #fff; border-radius: 6px; }
+  button.primary { border-color: #1d4ed8; color: #1d4ed8; }
+  #notice { margin: 8px 0; min-height: 1.4em; color: var(--muted); }
+  #notice.bad { color: var(--bad); }
+  table { border-collapse: collapse; width: 100%; background: #fff; }
+  th, td { border: 1px solid var(--line); padding: 6px 8px; text-align: left;
+           vertical-align: top; }
+  th { background: #f3f4f6; font-weight: 600; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tfoot td { background: #f9fafb; font-weight: 600; }
+
+  /* 两条轴用颜色分开 —— 它们**不是同一种东西**，⛔ 别让人以为能按步对齐 */
+  .axis { border-top: 3px solid var(--line); padding-top: 4px; margin-top: 24px; }
+  #traceaxis { border-color: var(--trace); }
+  #costaxis  { border-color: var(--cost); }
+  .tag { font-size: 12px; color: #fff; border-radius: 4px; padding: 1px 6px; margin-left: 6px;
+         font-weight: 400; vertical-align: 2px; }
+  #traceaxis .tag { background: var(--trace); }
+  #costaxis  .tag { background: var(--cost); }
+
+  .cards { display: flex; gap: 12px; flex-wrap: wrap; margin: 8px 0; }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 8px;
+          padding: 10px 16px; min-width: 130px; }
+  .card .k { font-size: 12px; color: var(--muted); }
+  .card .v { font-size: 20px; font-variant-numeric: tabular-nums; }
+
+  #empty { background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px;
+           padding: 10px 12px; margin: 8px 0; }
+  #empty:empty { display: none; }
+  .step.err { color: var(--bad); }
+  details > summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+  pre { white-space: pre-wrap; word-break: break-word; margin: 2px 0; }
+  #warn { color: var(--warn); font-size: 13px; }
+</style>
+</head>
+<body>
+<h1>执行轨迹与花费</h1>
+<p class="sub">
+  同一个线程，**两条轴各画各的** —— 它们的数据源不同、粒度不同，
+  <b>⛔ 对不上号</b>（没有共同的步 id，所以这里不画成一棵树）。
+</p>
+
+<p>
+  <label>API Key：<input id="apikey" type="password" placeholder="X-API-Key"></label>
+  <button id="save">保存</button>
+  <label style="margin-left:16px">thread_id：<input id="thread" type="text" placeholder="default"></label>
+  <button id="load" class="primary">查询</button>
+</p>
+<div id="notice"></div>
+
+<!-- ==================== 上 · 追踪轴 ==================== -->
+<section id="traceaxis" class="axis">
+  <h2>追踪轴 <span class="tag">进程内存 · 一次工具调用一条</span></h2>
+  <p class="sub" id="tracewho"></p>
+
+  <div class="cards">
+    <!-- ⚠️ 这里【只有两格】。原先还印过「总 Token」「总花费」——
+         它们的来源是追踪轴，而 `finish_trace` 的两个调用点都没传那两个值
+         ⇒ 那两格**从上线起恒为 `--` / `¥0.0000`**。把假数印在页面上
+         正是「最容易假完成」那条硬门要防的（DEC-093 具体化 D）。
+         真金额在下半页的成本轴，那里是查库的。 -->
+    <div class="card"><div class="k">耗时</div><div class="v" id="ovDur">--</div></div>
+    <div class="card"><div class="k">工具调用</div><div class="v" id="ovTools">--</div></div>
+  </div>
+
+  <div id="empty"></div>
+
+  <div id="tracebox" hidden>
+    <p><b>提问：</b><span id="query"></span></p>
+    <table id="steps">
+      <thead><tr><th style="width:36px">#</th><th>工具</th><th style="width:90px">状态</th>
+                 <th style="width:90px">耗时</th><th>结果</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <div id="decbox" hidden>
+      <h3 style="font-size:13px;margin:12px 0 4px">决策过程</h3>
+      <ul id="decisions" style="margin:0;padding-left:20px"></ul>
+    </div>
+    <details id="finalbox" hidden>
+      <summary>最终输出</summary>
+      <pre id="finalout"></pre>
+    </details>
+  </div>
+</section>
+
+<!-- ==================== 下 · 成本轴 ==================== -->
+<section id="costaxis" class="axis">
+  <h2>成本轴 <span class="tag">PostgreSQL · 一次模型调用一条</span></h2>
+  <p class="sub" id="costwho"></p>
+  <table id="costs">
+    <thead><tr><th style="width:36px">#</th><th style="width:170px">时间</th><th>用途</th>
+               <th>模型</th><th style="width:90px">token</th><th style="width:100px">花费</th></tr></thead>
+    <tbody></tbody>
+    <tfoot><tr id="costtotal"></tr></tfoot>
+  </table>
+  <p id="warn"></p>
+</section>
+
+<p class="sub" style="margin-top:24px">
+  ⚠️ 上半页（追踪轴）读的是 API 进程的<b>内存</b> —— <b>重启即清空</b>，而且目前只有
+  Agent 链（<code>/agent/mcp_chat</code> 系列）会写它。<br>
+  下半页（成本轴）读的是 <b>PostgreSQL</b>，不受重启影响，覆盖所有花钱的地方。
+</p>
+
+<script src="/static/js/trace.js"></script>
+<script>
+'use strict';
+const KEY_STORE = 'rag_api_key';       // ⚠️ 与 chat.html / approvals.html 同一个 localStorage 键
+const $ = (id) => document.getElementById(id);
+
+function key() { return localStorage.getItem(KEY_STORE) || ''; }
+
+function notice(msg, bad) {
+  const el = $('notice');
+  el.textContent = msg || '';
+  el.classList.toggle('bad', !!bad);
+}
+
+/* 🔴 401/403 与 503/429 要分开说 —— 与 chat.html / approvals.html 同款口径（DEC-082/N9）。 */
+function explainStatus(status) {
+  if (status === 401 || status === 403) return 'Key 不对或没权限（401/403）';
+  if (status === 429) return '被限额拦下了（429）—— 稍后再试';
+  if (status >= 500) return '服务端出问题了（' + status + '）';
+  return '请求失败（' + status + '）';
+}
+
+async function getJSON(url) {
+  const r = await fetch(url, { headers: { 'X-API-Key': key() } });
+  if (!r.ok) throw new Error(explainStatus(r.status));
+  return r.json();
+}
+
+let costCount = 0;      // 给 emptyTraceReason 用：有账没轨迹 = 走了别的链
+
+/* ==================== 上 · 追踪轴 ==================== */
+
+function renderTrace(json) {
+  const t = RagTrace.summarizeTrace(json);
+  $('ovDur').textContent = RagTrace.formatMs(t.durationMs);
+  $('ovTools').textContent = t.hasTrace ? RagTrace.formatInt(t.toolCount) : '--';
+  $('tracewho').textContent = t.hasTrace
+    ? ('线程 ' + t.threadId + ' · 耗时 ' + RagTrace.formatMs(t.durationMs))
+    : '';
+
+  const box = $('empty');
+  const reason = RagTrace.emptyTraceReason({
+    hasTrace: t.hasTrace, error: t.error, costCount: costCount,
+  });
+  box.textContent = reason || '';
+
+  $('tracebox').hidden = !t.hasTrace;
+  if (!t.hasTrace) return;
+
+  $('query').textContent = t.userQuery || '（没有记录到提问）';
+
+  const body = $('steps').querySelector('tbody');
+  body.innerHTML = '';
+  for (let i = 0; i < t.steps.length; i++) {
+    const s = t.steps[i];
+    const tr = document.createElement('tr');
+    if (s.status === 'error') tr.className = 'step err';
+    const cells = [String(i + 1), s.name, s.status, RagTrace.formatMs(s.durationMs)];
+    for (const text of cells) {
+      const td = document.createElement('td');
+      td.textContent = text;
+      tr.appendChild(td);
+    }
+    const td = document.createElement('td');
+    if (s.errorMessage) {
+      const p = document.createElement('div');
+      p.textContent = s.errorMessage;
+      td.appendChild(p);
+    }
+    const pre = document.createElement('pre');
+    pre.textContent = s.resultPreview || '（无结果）';
+    td.appendChild(pre);
+    if (s.argsPreview && s.argsPreview !== 'undefined') {
+      const d = document.createElement('details');
+      const sm = document.createElement('summary');
+      sm.textContent = '入参';
+      d.appendChild(sm);
+      const pp = document.createElement('pre');
+      pp.textContent = s.argsPreview;
+      d.appendChild(pp);
+      td.appendChild(d);
+    }
+    tr.appendChild(td);
+    body.appendChild(tr);
+  }
+  if (t.steps.length === 0) {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 5;
+    td.textContent = '（这次执行没有工具调用）';
+    tr.appendChild(td);
+    body.appendChild(tr);
+  }
+
+  $('decbox').hidden = t.decisions.length === 0;
+  const ul = $('decisions');
+  ul.innerHTML = '';
+  for (const d of t.decisions) {
+    const li = document.createElement('li');
+    li.textContent = '#' + d.index + ' ' + d.text;
+    ul.appendChild(li);
+  }
+
+  $('finalbox').hidden = !t.finalOutput;
+  $('finalout').textContent = t.finalOutput;
+}
+
+/* ==================== 下 · 成本轴 ==================== */
+
+function renderCost(json) {
+  const c = RagTrace.summarizeCost(json);
+  costCount = c.count;
+  $('costwho').textContent = c.count
+    ? ('共 ' + c.count + ' 笔模型调用 · 合计 ' + RagTrace.formatYuan(c.totalCost))
+    : '';
+
+  const body = $('costs').querySelector('tbody');
+  body.innerHTML = '';
+  for (let i = 0; i < c.rows.length; i++) {
+    const r = c.rows[i];
+    const tr = document.createElement('tr');
+    const cells = [String(i + 1), r.when, r.purpose, r.model,
+                   RagTrace.formatInt(r.totalTokens), RagTrace.formatYuan(r.cost)];
+    for (let j = 0; j < cells.length; j++) {
+      const td = document.createElement('td');
+      td.textContent = cells[j];
+      if (j >= 4) td.className = 'num';
+      tr.appendChild(td);
+    }
+    body.appendChild(tr);
+  }
+  if (c.rows.length === 0 && c.count === 0) {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 6;
+    td.textContent = '（这个线程上一笔模型调用都没有）';
+    tr.appendChild(td);
+    body.appendChild(tr);
+  }
+
+  /* 🔴 合计【用服务端给的那个】，⛔ 不是把上面几行加起来 ——
+     明细有 LIMIT，页面自己求和会在笔数多时静默偏小。
+     ⚠️ 表格里是本页的行数、合计是整条线程 ⇒ 两者不等时必须说出来。 */
+  const foot = $('costtotal');
+  foot.innerHTML = '';
+  const label = document.createElement('td');
+  label.colSpan = 4;
+  label.textContent = c.truncated ? '合计（整条线程）' : '合计';
+  foot.appendChild(label);
+  for (const v of [RagTrace.formatInt(c.totalTokens), RagTrace.formatYuan(c.totalCost)]) {
+    const td = document.createElement('td');
+    td.textContent = v;
+    td.className = 'num';
+    foot.appendChild(td);
+  }
+
+  $('warn').textContent = c.truncated
+    ? '⚠️ 明细只显示最近若干笔（本页 ' + c.rows.length + ' 行），上面的「合计」是【整条线程】的 ' +
+      c.count + ' 笔 —— 两者数字不同是正常的。'
+    : '';
+}
+
+/* ==================== 刷新 ==================== */
+
+async function refreshAll() {
+  if (!key()) { notice('先填 API Key', true); return; }
+  const threadId = RagTrace.readThreadId('?thread_id=' + encodeURIComponent($('thread').value));
+  $('thread').value = threadId;
+  notice('');
+
+  /* 🔴 两半**各发各的请求、各自 catch** —— 上半页挂掉不许把下半页拖下水
+     （追踪轴是内存、成本轴是 PG，一个坏另一个常常还是好的）。
+     ⚠️ 并发发出去，但**先渲染成本再渲染轨迹** —— 上半页那句"为什么空"要用到
+        成本轴的笔数（"有账没轨迹"= 走了别的链，与"重启即空"是两句不同的话）。 */
+  const [costRes, traceRes] = await Promise.allSettled([
+    getJSON(RagTrace.buildCostPath(threadId)),
+    getJSON(RagTrace.buildPath(threadId)),
+  ]);
+
+  costCount = 0;
+  if (costRes.status === 'fulfilled') {
+    renderCost(costRes.value);
+  } else {
+    renderCost(null);
+    notice('成本轴：' + costRes.reason.message, true);
+  }
+
+  if (traceRes.status === 'fulfilled') {
+    renderTrace(traceRes.value);
+  } else {
+    $('ovDur').textContent = '--';
+    $('ovTools').textContent = '--';
+    $('tracebox').hidden = true;
+    $('empty').textContent = '';
+    notice('追踪轴：' + traceRes.reason.message, true);
+  }
+}
+
+$('apikey').value = key();
+$('thread').value = RagTrace.readThreadId(location.search);
+$('save').onclick = () => {
+  localStorage.setItem(KEY_STORE, $('apikey').value.trim());
+  notice('已保存');
+  refreshAll();
+};
+$('load').onclick = () => refreshAll();
+$('thread').addEventListener('keydown', (e) => { if (e.key === 'Enter') refreshAll(); });
+
+if (key()) { refreshAll(); } else { notice('先填 API Key', true); }
+</script>
+</body>
+</html>

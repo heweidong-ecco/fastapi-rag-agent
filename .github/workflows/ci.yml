@@ -250,5 +250,15 @@ jobs:
           #   ⚠️ 它排在 pytest **之后**：pytest 是这几分钟里最贵的一条，
           #      但这条只要 ~0.4s ⇒ 就算 pytest 先红也**不值得**为它调顺序（先跑的仍是三道路由/凭据/文档门）。
           echo "--- 前端纯逻辑（node --test）---"
-          node --test api/static/js/sse.test.js
-          node --test api/static/js/approvals.test.js
+          # 🔴 **一条 glob，不是逐行列名**（`N18`）：逐行列名时，新加一份 `.test.js`
+          #    而忘了在这儿加一行 ⇒ **那份用例永不跑，而且没有任何门会红**。
+          # 🔴 但 glob 自带一个新坑，**本机实测过**（node v26）：把模式改成匹配不到任何文件
+          #    （`node --test api/static/js/*.nope.js`）⇒ **`tests 0` 且退出码 0 = 静默假通过**。
+          #    对照：原先逐行列名时，文件不在了会 `Could not find …` ⇒ 退出码 1（响亮）。
+          #    ⇒ **换 glob 必须连同这条防空跑一起写**，否则是拿一种静默失败换另一种。
+          test_files=(api/static/js/*.test.js)
+          if [ ! -e "${test_files[0]}" ]; then
+            echo "🔴 一个 .test.js 都没匹配到：api/static/js/*.test.js"; exit 1
+          fi
+          echo "    匹配到 ${#test_files[@]} 份"
+          node --test "${test_files[@]}"

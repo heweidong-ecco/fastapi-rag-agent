@@ -56,6 +56,7 @@ from token_tracker import (
     check_session_token_budget,       # B8（①b Task 2）：会话级上限
     get_user_overview,                # B13（①b Task 7）：**读库**的全时总览
     get_global_daily_token_usage,     # B13（①b Task 7）：全站日级用量（B10 的数）
+    thread_cost_breakdown,            # DEC-093（F2）：Trace 页**成本轴**的逐笔明细
 )
 # B13（①b Task 7）：全站日级**上限**常量。⚠️ 与 `get_global_daily_token_usage()`
 #    **成对使用** —— 只给"已用"不给"上限"，客户端算不出"全站还剩多少"。
@@ -2104,6 +2105,38 @@ async def agent_trace_detail(
     if trace is None:
         return {"error": f"未找到线程 {thread_id} 的执行轨迹"}
     return {"trace": trace, "requested_by": user_name}
+
+
+@router.get("/agent/trace/{thread_id}/cost")
+async def agent_trace_cost(
+    thread_id: str,
+    user_name: str = Depends(get_current_user_hybrid),
+):
+    """获取**本人**在指定线程上的**逐笔花费明细**（成本轴）。
+
+    🔴 **2026-10-06（`DEC-093` · `F2`）新增。为什么另开一条，而不是塞进
+       `/agent/trace/{thread_id}`**：那一条读的是 `tool_visualizer` 的**进程内存**（追踪轴），
+       这一条查的是 PG `token_usage_logs`（成本轴）。**两条轴的数据源、粒度、
+       写入方全不同**，合一个响应只会让人以为它们能按步对齐 —— **对不上**（没有共同的 step id）。
+
+    ⚠️ **与上面那条的第二个差别：本端点【不进 `route-auth-baseline.txt`】**
+       —— 它带 `Depends(get_current_user_hybrid)`，是真有鉴权的。
+
+    ⚠️ **属主过滤**：`thread_cost_breakdown` 内部走 `WHERE user_name = %s AND thread_id = %s`。
+       ⛔ **别图省事去调 `token_tracker.get_thread_cost()`** —— 那个函数**没有用户条件**。
+       （它本身不是洞：全仓唯一调用点是本人的线程预算检查。但用在这里就是越权。）
+
+    ⚠️ **0 条回 `200` + 空 `items`，⛔ 不是 404** —— 与 `/agent/trace/{thread_id}`、
+       `/agent/approve` 一致：不给"这个 thread_id 存在但不属于你"这个 oracle
+       （非属主与"真不存在"**返回同一个答复**）。
+    """
+    data = thread_cost_breakdown(
+        user_name,
+        thread_id,
+        include_all=get_user_role(user_name) == UserRole.ADMIN,   # ⚠️ admin 例外，显式一行（照 :2122）
+    )
+    return {**data, "thread_id": thread_id, "requested_by": user_name}
+
 
 @router.get("/agent/traces")
 async def agent_trace_list(

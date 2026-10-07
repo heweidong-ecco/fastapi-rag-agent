@@ -16,6 +16,7 @@ from collections import defaultdict
 import threading
 import os
 import json
+from datetime import timezone          # `_iso_utc` 用（stdlib，无副作用，⛔ 与 db 的惰性导入无关）
 
 # ==================== 数据模型 ====================
 @dataclass
@@ -912,6 +913,144 @@ def get_thread_cost(thread_id: str) -> float:
     except Exception as e:
         print(f"[Budget] 查询线程花费失败: {e}")
         return 0.0
+
+
+# ==================== Trace 页 · 成本轴明细（DEC-093，F2） ====================
+#
+# ⚠️ **上面那个 `get_thread_cost` 与本节的 `thread_cost_breakdown` 就差一件事：`user_name`。**
+#    `get_thread_cost(thread_id)` **不带用户过滤** —— 单看签名像是越权洞，
+#    **实测不是**：全仓只有 1 个调用点（本文件线程预算检查，用的正是调用者自己的 thread_id）。
+#    ⇒ **⛔ 别"顺手统一"成一个函数** —— 预算那条路不需要按用户过滤，
+#      强行合进来只会把"要不要过滤"变成调用方的一个布尔参数（本仓最恨的"忘了传=静默全量"）。
+#
+# ⚠️ **它在版图上的位置**：本模块 = **成本轴**（PG `token_usage_logs`，一笔模型调用一行）。
+#    `tool_visualizer` = **追踪轴**（进程内存，一次工具调用一条）。**两条轴对不上号**
+#    ⇒ 两边各画各的，⛔ 别在这里做"按 step 对齐"（没有共同的 step id，凑出来的层级是编的）。
+
+# 单条线程最多回多少笔明细。⚠️ 有它就【必须】有 `total`（整条线程聚合）——
+# 否则"总花费"会变成"最近 N 笔之和"，**小而无人察觉**。
+_BREAKDOWN_LIMIT = 2000
+
+
+def _iso_utc(dt) -> Optional[str]:
+    """把库里取出的时间戳转成**带显式时区**的 ISO-8601 串（`…+00:00`）。
+
+    🔴 **为什么必须显式标区**：`token_usage_logs.created_at` 的类型是 `TIMESTAMP`
+       （**无时区**），而 PG 容器实测是 `Etc/UTC`（`SHOW timezone`）⇒ 存进去的是**裸的 UTC**。
+       若原样 `.isoformat()` 回给前端，JS 的 `new Date("2026-10-06T13:14:21")`
+       会**当成浏览器本地时间**解析 ⇒ 东八区用户看到的时刻**静默早 8 小时**。
+       （同族前科：`logs/api_*.log 混了两套时区`。）
+
+    ⚠️ **别照抄 `approval_audit` 的 `.isoformat()`** —— 那张表的列是 `TIMESTAMPTZ`，**天生带区**，
+       两者不同源。表结构一旦从 `TIMESTAMP` 改成 `TIMESTAMPTZ`，本函数该跟着删。
+    """
+    if dt is None:
+        return None
+    return dt.replace(tzinfo=timezone.utc).isoformat()
+
+
+def thread_cost_breakdown(
+    user_name: str,
+    thread_id: str,
+    *,
+    include_all: bool = False,
+) -> dict:
+    """某用户在某线程上的**逐笔**花费明细（成本轴）。**查表**，⛔ 不读内存。
+
+    参数
+    ----
+    - `user_name` —— **必填，⛔ 不给默认值**。理由同 `get_session_token_usage`：
+      给了默认值，漏传的调用点不会报错，会**静默**落进一个人人共用的桶。
+    - `include_all` —— **admin 例外**用。`True` 时把 `user_name` 条件换成 `1 = 1`。
+      ⚠️ **它走的是同一条 SQL，只是换个条件**（⛔ 别为此再写第二条 SQL —— 两份会漂）。
+      ⛔ **它【不是】"跳过归属校验"的开关** —— 谁有资格传 `True` 由**端点**判
+      （`get_user_role(user_name) == UserRole.ADMIN`，显式一行）。
+
+    返回
+    ----
+    ``{"items": [...], "total": {...}, "truncated": bool}``
+
+    - `items` —— **按发生时间倒序**（最新在前），每项：
+      ``{purpose, model, prompt_tokens, completion_tokens, total_tokens, cost, created_at}``
+    - `total` —— **对【整条线程】聚合**（⛔ 不是对 `items` 求和）：
+      ``{count, total_tokens, total_cost}``
+      🔴 **这就是为什么它必须由 SQL 算**：`items` 有 `LIMIT`，
+      若让页面自己把 `items` 加起来，"总花费"会在笔数多时**静默变小**，而且不报错。
+      ⇒ **页面显示 `total`，页面【不自己求和】**（求和只有这一份实现）。
+    - `truncated` —— `total.count > len(items)` ⇒ 列表被截断（页面必须**说出来**）
+    - `created_at` 是 `_iso_utc()` 处理过的**带区**串
+
+    失败时 **fail-open**：打一行日志，回**空 items + 零 total**，⛔ 不抛
+    （同 `get_thread_cost` / `record_intercept` 的风格 —— 查账失败不该把页面打成 500）。
+    """
+    user_name = user_name or "unknown"
+    thread_id = thread_id or "unknown"
+    from db import get_db
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                # ⚠️ 条件句与它的参数**必须在同一个分支里一起定** ——
+                #    分开各写一个三元表达式，改了一处忘了另一处 ⇒ 参数个数对不上 ⇒ 运行期报错。
+                #    （这不是假想的：本函数第一次写成两行三元式，靠一次变异实验才照出来。）
+                # ⚠️ 下面这个字面量是**常量二选一**，⛔ 不含任何用户输入 —— 不是 SQL 注入面。
+                #    两个分支的唯一区别是"要不要按 user_name 过滤"。
+                if include_all:
+                    owner_clause, owner_params = "1 = 1", ()
+                else:
+                    owner_clause, owner_params = "user_name = %s", (user_name,)
+
+                cur.execute(
+                    f"""SELECT purpose, model, prompt_tokens, completion_tokens,
+                               total_tokens, cost, created_at
+                          FROM token_usage_logs
+                         WHERE {owner_clause}
+                           AND thread_id = %s
+                         ORDER BY created_at DESC, id DESC
+                         LIMIT %s""",
+                    (*owner_params, thread_id, _BREAKDOWN_LIMIT),
+                )
+                rows = cur.fetchall()
+
+                # 合计走【整条线程】—— 不受上面的 LIMIT 影响
+                cur.execute(
+                    f"""SELECT COUNT(*),
+                               COALESCE(SUM(total_tokens), 0),
+                               COALESCE(SUM(cost), 0)
+                          FROM token_usage_logs
+                         WHERE {owner_clause}
+                           AND thread_id = %s""",
+                    (*owner_params, thread_id),
+                )
+                count, sum_tokens, sum_cost = cur.fetchone()
+
+        items = [
+            {
+                "purpose": r[0],
+                "model": r[1],
+                "prompt_tokens": r[2],
+                "completion_tokens": r[3],
+                "total_tokens": r[4],
+                "cost": r[5],
+                "created_at": _iso_utc(r[6]),
+            }
+            for r in rows
+        ]
+        return {
+            "items": items,
+            "total": {
+                "count": int(count or 0),
+                "total_tokens": int(sum_tokens or 0),
+                "total_cost": float(sum_cost or 0.0),
+            },
+            "truncated": int(count or 0) > len(items),
+        }
+    except Exception as e:
+        print(f"[Trace] 查询线程成本明细失败: {e}")
+        return {
+            "items": [],
+            "total": {"count": 0, "total_tokens": 0, "total_cost": 0.0},
+            "truncated": False,
+        }
 
 
 # ==================== B8 · 会话级 token 上限（①b Task 2） ====================
