@@ -35,7 +35,6 @@ venv/bin/python scripts/check_route_auth.py        # ⇒ 无鉴权路由 1 条�
 """
 import asyncio
 import json
-from pathlib import Path
 
 import pytest
 from starlette.websockets import WebSocketDisconnect

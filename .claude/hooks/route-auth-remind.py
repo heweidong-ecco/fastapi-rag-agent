@@ -25,7 +25,6 @@ r"""PostToolUse hook：**改了路由文件就问一句「这条新路由有鉴�
 Python 标准库一句话的事，`.sh` 要引 `jq`。**与同目录已有的 `spec-remind.py` 保持一致。**
 """
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -91,7 +90,7 @@ def main() -> int:
             capture_output=True, text=True, timeout=55, cwd=str(REPO),
         )
     except subprocess.TimeoutExpired:
-        print(f"⚠️ 路由鉴权检查超时（>55s）—— 手工跑：`python3 scripts/check_route_auth.py`")
+        print("⚠️ 路由鉴权检查超时（>55s）—— 手工跑：`python3 scripts/check_route_auth.py`")
         return 0
 
     if r.returncode != 0:

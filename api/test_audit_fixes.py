@@ -12,8 +12,6 @@ import ast
 import contextlib
 import pathlib
 
-import pytest
-
 
 # ===========================================================================
 # 🔴A · /ready 健康检查不通过时必须是 503，不是 500

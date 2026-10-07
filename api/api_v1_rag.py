@@ -62,7 +62,12 @@ from document_parser import parse_document
 #    ⛔ 不是 `from ... import`）。2026-10-07 清存量时**删过一次**，那 6 条用例当场全红
 #    （`AttributeError: module 'api_v1_rag' has no attribute 'INTERRUPTED_SUFFIX'`）⇒ 已还原。
 #    ⛔ **这就是"F401 不等于死导入"的实例**：ruff 只看本文件的名字，看不见**别人按属性取**。
-from cache import get_chat_history, persist_turn, INTERRUPTED_SUFFIX
+#    📌 下面 import 行行尾那条 `noqa` 指令（`F401`）是**收尾动作**（2026-10-07，与本批清存量
+#       同一刀，⚠️ 注释里⛔不写那个井号，写了 ruff 会把它当成一条坏 noqa 指令打警告）：存量清零后
+#       基线空了，本来可以把它留成基线的一条；**⛔ 没有那样做** —— 基线的键是 `(文件, 规则)`，
+#       挂一条 = 把 `api/api_v1_rag.py` **所有** F401 一律放行（将来真加了死导入也不报）。
+#       行尾 `noqa` 只放行**这一行**，且理由写在行边上。同理见 `api/agent_checkpointer.py:31`。
+from cache import get_chat_history, persist_turn, INTERRUPTED_SUFFIX  # noqa: F401
 
 
 import os

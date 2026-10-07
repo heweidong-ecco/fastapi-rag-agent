@@ -28,7 +28,16 @@ from search_tools import web_search  # DEC-051：换掉本机不可达的 DuckDu
 #    （`ac` / `ag` 是那两个模块的**别名** ⇒ 全仓 grep `agent_checkpointer.SENSITIVE_TOOLS` **搜不到**）。
 #    2026-10-07 清存量时删过一次 ⇒ 那条守卫当场红 ⇒ 已还原。
 #    ⚠️ 那条守卫的语义是「**白名单只能有一份**」（⛔ 别在这里抄一份）—— 删掉它等于**把守卫拆了**。
-from agent_graph import SENSITIVE_TOOLS, should_continue, human_approval
+#    📌 下面 import 行行尾那条 `noqa` 指令（`F401`）是**收尾动作**（2026-10-07，与本批清存量同一刀）：
+#       ⚠️ **本注释里⛔不写那个井号** —— 写了的话 ruff 会把注释本身当成一条 noqa 指令，
+#          然后在 stderr 上打一句 "Invalid `noqa` directive"（实测踩过）。
+#       存量清零后基线空了，本来可以把它留成基线的第 1 条；**⛔ 没有那样做** ——
+#       基线的键是 `(文件, 规则)`，挂一条 = **把 `api/agent_checkpointer.py` 这个文件的
+#       【所有】 F401 一律放行**（将来真加了死导入也不报）。行尾 `noqa` 只放行**这一行**。
+#       ⇒ 粒度更细，且理由就写在行边上（⛔ 不用去翻基线文件）。
+#       ⚠️ 代价：**哪天那条守卫被删了、`SENSITIVE_TOOLS` 真成了死导入，这里也不会报** ——
+#          但在基线里同样不会报（同一个盲区），故不构成反对理由。
+from agent_graph import SENSITIVE_TOOLS, should_continue, human_approval  # noqa: F401
 
 # ==================== 初始化模型 ====================
 # ⚠️ 角色 = 「模型轴 fast」+「长度轴 agent(1024)」—— 见 `api/llm_factory.py` 的模块 docstring。

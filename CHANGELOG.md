@@ -56,7 +56,8 @@ All notable changes to this project will be documented in this file.
 
   📌 **判据（跑得出来）**：
   `bash scripts/check_lint_baseline.sh --self-test` ⇒ **6/6 通过**；
-  `bash scripts/check_lint_baseline.sh` ⇒ **40 组 / 103 行 · 没有新组**（exit 0）；
+  `bash scripts/check_lint_baseline.sh` ⇒ 建时 **40 组 / 103 行 · 没有新组**（exit 0）
+  ⚠️ **当晚即归零**（存量清空 ⇒ 基线 0 组 ⇒ 门自动变成"全绿门"）—— 见下面 `### Changed` 那条；
   反证：往 `api/chunker.py` 加一行 `import uuid` ⇒ **🔴 未通过**（exit 1），撤掉后复绿。
   ⚠️ **同批更正了一处计数口径**：`docs/文档地图.md` / `docs/待办总表.md` 里写的
   「**103 个未使用导入**」**是把 `E9`+`F` 的全仓总数当成了未使用导入数** ——
@@ -87,6 +88,54 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- 🟢 **清空 `T6` 那笔存量：103 行未使用导入 / 空 f-string 全部修掉**（2026-10-07）——
+  **40 组 → 0 组**，`scripts/ruff-baseline.txt` **40 行全删**，第 ⑥ 道门**从"棘轮"变成"全绿门"**。
+
+  **业务方原话**：「**100 条未使用导入，这个问题放在什么顺序处理，你安排顺序，并执行**」
+  ⇒ 排在 **④ 记账之前**（④ 是"把账按事实重写"的一遍，先清再记 ⇒ `T6` 那行**一次写成 0**，
+  ⛔ 不用写一个马上就要变的数）。⚠️ **这不是推翻 `T6` 的「先挂起」** —— 那条裁的是
+  「**不为了开门去清存量**」，本次是业务方**单独发的话**（`DEC-099` §三 备选②否掉它的理由正是**不许夹带**）。
+
+  **分 5 段按风险做，⛔ 不是按文件顺序**（最大最险的 `api_v1.py` 单独一段）：
+  A `api_v1.py` 27 条（`2bae0bb`）· B 两个路由文件 17 条（`0e9ca48`）· C `agent_graph*` 家族 14 条（`a8b3bf2`）·
+  D 其余 19 个非测试模块 29 条（`df2a326`）· E 12 条 `api/test_*` + 2 条 `.claude/hooks/route-auth-remind.py`。
+  📌 **删的只是导入行，⛔ 没删任何模块** —— 接回来就是补一行的事。
+
+  🔴🔴 **这一段最该记住的是：`F401` ≠ 死导入 —— 删之前必须跑测试。同一种形状，本批真红过两次**：
+
+  | 段 | 名字 | 谁在用 | 症状 |
+  |---|---|---|---|
+  | **B** | `api_v1_rag.INTERRUPTED_SUFFIX` | `test_cancel_propagation.py` **6 处** `rag_mod.…`（**属性访问**） | 6 条用例 `AttributeError` |
+  | **C** | `agent_checkpointer.SENSITIVE_TOOLS` | `test_memory_chat_approval.py` 1 处 **`ac.…`（模块别名）** | 那条「白名单只能有一份」的结构守卫红 |
+
+  ⚠️ **别名那种 grep 兜不住**（搜 `agent_checkpointer.SENSITIVE_TOOLS` 搜不到）
+  ⇒ **两处都当场还原**，源码里各留一段"这一条⛔不许删"的说明。
+  ⇒ **规矩**：清未使用导入时**每一段都要跑全量 `pytest`**，⛔ **不能只看 `ruff` 报绿**。
+  📌 这段判据已写进 `scripts/check_lint_baseline.sh` 的脚本头。
+
+  🔴 **一处【偏离 `T6` 字面】的地方，写在这里备查**：`T6` 的"追加登记"第三条列的是
+  **`api/api_v1_rag.py:46 from tools_with_cache import get_weather`（既有未用导入）**，
+  处置栏写的也是「先挂起 / 不删」。**本批把它删了**（段 B）。
+  理由：`T6` 那条保的是**那个模块**（`tools_with_cache.py` —— 缓存机制"不是废物、是没接上"），
+  **⛔ 不是路由文件里一行悬空导入**；模块**原封没动**（判据：`ls api/tools_with_cache.py api/tool_cache.py` ⇒ **两个都在**）。
+  ⇒ 将来要接回来是**补 1 行**的事。
+  ⚠️ 但**字面上确实是 `T6` 说过"不删"的那一行** ⇒ 📌 **业务方若要还原，说一声即可，一行之事。**
+
+  ⚠️ **最后剩的 2 条是工具误报，用行尾 `noqa` 就地标注，⛔ 没有留在基线里**：
+  基线的键是 **`(文件, 规则)`** ⇒ 挂一条 = **把那个文件的【所有】 `F401` 一律放行**
+  （`comm -13` 比集合，同文件同规则只算一组）；行尾 `noqa` **只放行那一行**，且理由就写在行边。
+  ⚠️ 两者有同一个盲区（哪天守卫被删、名字真成死导入，都不会报）⇒ 不构成反对 `noqa` 的理由。
+  🔴 **踩过的坑**：注释里写了那个井号，`ruff` 会把**注释本身**当成一条坏 `noqa` 指令，
+  在 stderr 上打 `Invalid noqa directive` ⇒ **注释里⛔不写井号**。
+
+  📌 **判据（跑得出来）**：
+  `venv/bin/ruff check . --select E9,F --output-format concise` ⇒ **`All checks passed!`**（⛔ 无 noqa 警告）；
+  `bash scripts/check_lint_baseline.sh` ⇒ **0 组 · 没有新组**（exit 0）；
+  `git diff --stat scripts/ruff-baseline.txt` ⇒ **40 行删除**；
+  `bash scripts/check_lint_baseline.sh --self-test` ⇒ **6/6**（**门仍会红** —— 反证：加一行 `import uuid` ⇒ exit 1）；
+  **每段**都跑 `pytest api/ -m "not integration and not needs_db" -q` ⇒ **805 passed / 2 skipped**（**五段一个数都没变**）
+  ＋ `check_route_auth.py --baseline` ⇒ **与基线一致**。
+
 - 🔴 **两个"名字叫 test、其实不是测试"的文件去掉 `test_` 前缀**（2026-10-07 · 债 `T5` · 同批
   `丙-5` / `丙-6`）—— `api/test_preprocess.py` ⇒ **`api/preprocess.py`** ·
   `api/test_plan_constraints.py` ⇒ **`api/plan_constraints.py`**。
@@ -103,6 +152,15 @@ All notable changes to this project will be documented in this file.
   `pytest api/ --collect-only -q` ⇒ **848 → 847**（−1 = 那条假用例）·
   `pytest api/ -m "not integration and not needs_db"` ⇒ **2 skipped**（原 3）·
   `passed` 数**未下降** ⇒ **没有真用例被牵连**。
+
+  🔴 **第二刀（同日 · `501dc69`）：函数名 `test_plan` 也一并改成 `run_plan`**（业务方裁「去除」）——
+  文件去了前缀、**函数还叫 `test_*`** 的话，`grep -rn "def test_"` 之类的排查口径
+  **照样会把它当用例**（本次清存量时我自己就差点被它误导）。
+  判据：`grep -rn "def test_plan(" api/` ⇒ **空**（rc=1）；
+  `grep -c "run_plan" api/plan_constraints.py` ⇒ **6**（定义 1 + 调用 4 + docstring 提及 1）。
+  ⚠️ **量这条时差点用错尺子**：写成 `grep -rn "def test_plan"`（⛔ 不带括号）**照样命中 11 行** ——
+  全是 `def test_plan_execute_*` 之类**真用例**（前缀匹配）⇒ **判据必须带 `(` 或词边界**。
+  📌 本仓判据纪律里「选的那个量对不对」那一类，这是又一个实例。
 
 - ⚠️ **`dev.sh` 的库名不再硬编码**（2026-10-07 · 债 `T5` · `丙-5`）——
   `dev.sh:12` 的 `pg_isready -U postgres -d rag_db` ⇒

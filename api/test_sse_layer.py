@@ -10,8 +10,6 @@
 import asyncio
 import json
 
-import pytest
-
 import sse
 
 
