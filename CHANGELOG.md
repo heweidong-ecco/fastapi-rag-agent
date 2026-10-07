@@ -8,6 +8,61 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- 🟢 **补上本仓的【第 ⑥ 道门】：静态检查（`ruff` · **基线棘轮**）**（2026-10-07）——
+  新增 `scripts/check_lint_baseline.sh`＋`scripts/ruff-baseline.txt`＋仓根 `ruff.toml`，
+  本地挂在 `.claude/hooks/pre-commit-gates.py`，CI 挂在 `ci.yml` 的 **`syntax`** job。
+
+  **它治什么病**：本仓**从来没有 lint 门**（`docs/规范/开发规范.md` 原文「本仓【没有 linter】」）
+  ⇒ **攒出了 100 条未使用导入，而且没人知道是什么时候多出来的**。
+  这正是本仓那句老话的又一个实例：**「门挂在别处，就等于没有门」**。
+
+  🔴 **它为什么不是"全绿"而是"棘轮"** —— 业务方 2026-10-07 在三选一里裁的 **③**：
+  存量 **40 组 / 103 行**（`F401`×38 · `F541`×2）按 `T6` 的「**先挂起**」**认下**，
+  **门只拦"比基线多出来的"**，⛔ 不拦存量。（前两个方案被否：① 先不开 `F401` ⇒
+  那两条**恰是最常见的新增错误**；② 先清那 100 条 ⇒ 与 `T6` 冲突，要先推翻它。）
+  📌 **同型先例**：`scripts/check_route_auth.py --baseline`。
+
+  🔴 **判据是【集合】，⛔ 不是【计数】** —— 基线存的是 `<文件>\t<规则号>` 的**集合**。
+  为什么不能用 `wc -l` 比个数：计数**量不到**「**这里修掉一条、那里新增一条**」——
+  总数不变 ⇒ 门绿 ⇒ **而它本该拦的那件事恰好发生了**。
+  **反证检验**（本仓 2026-10-05 收进 `CLAUDE.md` 判据表的那条）：「把结论取反，这条命令的输出会变吗？」
+  —— 用计数，答案是**不会**。⇒ 自测第 ③ 支就是拿这个做的：**组数不变、只换了文件 ⇒ 必须红**。
+
+  🔴 **自测 6 个分支**（`bash scripts/check_lint_baseline.sh --self-test`，CI 里也跑）——
+  它拿**假 ruff + 假基线**跑**真流程**，逐个验退出码：
+  ① 清单一致 ⇒ 绿【①是②的反证】· ② 多出一组 ⇒ 红 · ③ 组数不变只换文件 ⇒ 红 ·
+  ④ ruff 版本对不上 ⇒ 红 · ⑤ ruff 自己出错(rc=2) ⇒ **未跑** · ⑥ 基线文件不存在 ⇒ **未跑**。
+  📌 依据是本仓已记两次的教训（`DEC-061` / `DEC-066`）：**「写了守卫 ≠ 守卫有效」**。
+
+  ⚠️ **退出码 3 = 「本门没跑」**（环境缺件），与「跑过且通过（0）」「跑过且不通过（1）」是**三件事** ——
+  hook 里新加了 `rc==3 ⇒ ⏭ 未跑` 这一支。**为什么**：原先只有 0/非 0 两分
+  ⇒ 一个"没跑"的门会被汇总行打成 **`✅`**，**与"真跑过且干净"在机器痕迹上一模一样**
+  （本仓原话：「**『从不命中』与『没人违规』在机器痕迹上完全一样**」）。
+
+  ⚠️ **自己审出来的一个洞（改前是静默假通过）**：原先写法是
+  `ruff check . | sed …` ⇒ **只看管道输出、不看 ruff 退出码** ——
+  ruff 报 `rc=2`（配置坏 / 参数错）时输出为空 ⇒ 集合为空 ⇒ 打 **`✅ 通过`**。
+  ⇒ 现在把 ruff 跑一次落成临时文件并**核退出码**，`∉ {0,1}` 一律按「**未跑**」计。
+
+  ⚠️ **版本必须钉死**：基线头记了 ruff 版本，对不上**直接红**（实测：把基线头改成 `9.9.9` ⇒ 立刻红）。
+  **为什么**：规则集在各版本间会变 ⇒ 基线会**静默失真**（要么假红一片，要么该拦的不拦）。
+
+  ⚠️ **装上但⛔ 不写进 `api/requirements.txt`** —— 那份清单会进 demo 镜像，往里塞 linter 是给交付物增肥。
+  本机装 `venv/bin/ruff`（`ruff 0.16.10`），CI 在 `syntax` job 里临时 `pip install "ruff==0.16.10"`。
+  ⛔ **也不装 `pyflakes`** —— ruff 的 `F` 规则集就是它的完整重实现，
+  两个都装 = 同一判据两个来源，必然漂移（`DEC-051` 那个病根）。
+
+  📌 **判据（跑得出来）**：
+  `bash scripts/check_lint_baseline.sh --self-test` ⇒ **6/6 通过**；
+  `bash scripts/check_lint_baseline.sh` ⇒ 建时 **40 组 / 103 行 · 没有新组**（exit 0）
+  ⚠️ **当晚即归零**（存量清空 ⇒ 基线 0 组 ⇒ 门自动变成"全绿门"）—— 见下面 `### Changed` 那条；
+  反证：往 `api/chunker.py` 加一行 `import uuid` ⇒ **🔴 未通过**（exit 1），撤掉后复绿。
+  ⚠️ **同批更正了一处计数口径**：`docs/文档地图.md` / `docs/待办总表.md` 里写的
+  「**103 个未使用导入**」**是把 `E9`+`F` 的全仓总数当成了未使用导入数** ——
+  未使用导入实测 **100（`api/` 内）/ 101（全仓）**（多的一条在 `.claude/hooks/route-auth-remind.py:28`）。
+
 ### Fixed
 
 - 🔴 **`approvals.html` 的 4 条接口 URL 全少 `/api/v1` ⇒ 那个页面从上线起 100% 打不开**（2026-10-06 · `DEC-094` · 债 `N15`）——
@@ -32,6 +87,102 @@ All notable changes to this project will be documented in this file.
   ⚠️ **本批给的是静态守卫**（源码里的字面量）—— 「点得动」仍要靠人拿浏览器开一次，**本次没做**（服务没起）。
 
 ### Changed
+
+- 🟢 **清空 `T6` 那笔存量：103 行未使用导入 / 空 f-string 全部修掉**（2026-10-07）——
+  **40 组 → 0 组**，`scripts/ruff-baseline.txt` **40 行全删**，第 ⑥ 道门**从"棘轮"变成"全绿门"**。
+
+  **业务方原话**：「**100 条未使用导入，这个问题放在什么顺序处理，你安排顺序，并执行**」
+  ⇒ 排在 **④ 记账之前**（④ 是"把账按事实重写"的一遍，先清再记 ⇒ `T6` 那行**一次写成 0**，
+  ⛔ 不用写一个马上就要变的数）。⚠️ **这不是推翻 `T6` 的「先挂起」** —— 那条裁的是
+  「**不为了开门去清存量**」，本次是业务方**单独发的话**（`DEC-099` §三 备选②否掉它的理由正是**不许夹带**）。
+
+  **分 5 段按风险做，⛔ 不是按文件顺序**（最大最险的 `api_v1.py` 单独一段）：
+  A `api_v1.py` 27 条（`2bae0bb`）· B 两个路由文件 17 条（`0e9ca48`）· C `agent_graph*` 家族 14 条（`a8b3bf2`）·
+  D 其余 19 个非测试模块 29 条（`df2a326`）· E 12 条 `api/test_*` + 2 条 `.claude/hooks/route-auth-remind.py`。
+  📌 **删的只是导入行，⛔ 没删任何模块** —— 接回来就是补一行的事。
+
+  🔴🔴 **这一段最该记住的是：`F401` ≠ 死导入 —— 删之前必须跑测试。同一种形状，本批真红过两次**：
+
+  | 段 | 名字 | 谁在用 | 症状 |
+  |---|---|---|---|
+  | **B** | `api_v1_rag.INTERRUPTED_SUFFIX` | `test_cancel_propagation.py` **6 处** `rag_mod.…`（**属性访问**） | 6 条用例 `AttributeError` |
+  | **C** | `agent_checkpointer.SENSITIVE_TOOLS` | `test_memory_chat_approval.py` 1 处 **`ac.…`（模块别名）** | 那条「白名单只能有一份」的结构守卫红 |
+
+  ⚠️ **别名那种 grep 兜不住**（搜 `agent_checkpointer.SENSITIVE_TOOLS` 搜不到）
+  ⇒ **两处都当场还原**，源码里各留一段"这一条⛔不许删"的说明。
+  ⇒ **规矩**：清未使用导入时**每一段都要跑全量 `pytest`**，⛔ **不能只看 `ruff` 报绿**。
+  📌 这段判据已写进 `scripts/check_lint_baseline.sh` 的脚本头。
+
+  🔴 **一处【偏离 `T6` 字面】的地方，写在这里备查**：`T6` 的"追加登记"第三条列的是
+  **`api/api_v1_rag.py:46 from tools_with_cache import get_weather`（既有未用导入）**，
+  处置栏写的也是「先挂起 / 不删」。**本批把它删了**（段 B）。
+  理由：`T6` 那条保的是**那个模块**（`tools_with_cache.py` —— 缓存机制"不是废物、是没接上"），
+  **⛔ 不是路由文件里一行悬空导入**；模块**原封没动**（判据：`ls api/tools_with_cache.py api/tool_cache.py` ⇒ **两个都在**）。
+  ⇒ 将来要接回来是**补 1 行**的事。
+  ⚠️ 但**字面上确实是 `T6` 说过"不删"的那一行** ⇒ 📌 **业务方若要还原，说一声即可，一行之事。**
+
+  ⚠️ **最后剩的 2 条是工具误报，用行尾 `noqa` 就地标注，⛔ 没有留在基线里**：
+  基线的键是 **`(文件, 规则)`** ⇒ 挂一条 = **把那个文件的【所有】 `F401` 一律放行**
+  （`comm -13` 比集合，同文件同规则只算一组）；行尾 `noqa` **只放行那一行**，且理由就写在行边。
+  ⚠️ 两者有同一个盲区（哪天守卫被删、名字真成死导入，都不会报）⇒ 不构成反对 `noqa` 的理由。
+  🔴 **踩过的坑**：注释里写了那个井号，`ruff` 会把**注释本身**当成一条坏 `noqa` 指令，
+  在 stderr 上打 `Invalid noqa directive` ⇒ **注释里⛔不写井号**。
+
+  📌 **判据（跑得出来）**：
+  `venv/bin/ruff check . --select E9,F --output-format concise` ⇒ **`All checks passed!`**（⛔ 无 noqa 警告）；
+  `bash scripts/check_lint_baseline.sh` ⇒ **0 组 · 没有新组**（exit 0）；
+  `git diff --stat scripts/ruff-baseline.txt` ⇒ **40 行删除**；
+  `bash scripts/check_lint_baseline.sh --self-test` ⇒ **6/6**（**门仍会红** —— 反证：加一行 `import uuid` ⇒ exit 1）；
+  **每段**都跑 `pytest api/ -m "not integration and not needs_db" -q` ⇒ **805 passed / 2 skipped**（**五段一个数都没变**）
+  ＋ `check_route_auth.py --baseline` ⇒ **与基线一致**。
+
+- 🔴 **两个"名字叫 test、其实不是测试"的文件去掉 `test_` 前缀**（2026-10-07 · 债 `T5` · 同批
+  `丙-5` / `丙-6`）—— `api/test_preprocess.py` ⇒ **`api/preprocess.py`** ·
+  `api/test_plan_constraints.py` ⇒ **`api/plan_constraints.py`**。
+
+  **两个都是手动脚本**（一个跑 `DocumentPreprocessor` 看清洗效果，一个换约束看规划结果），
+  **顶 `test_` 前缀的唯一后果**是：被 pytest 当用例收集 —— 后者因此不得不用
+  `@pytest.mark.skip` 捂着（`test_plan` 的两个参数**没有对应夹具，不遮就收集期报错**）。
+  ⇒ **去掉前缀，`skip` 装饰器和随之无用的 `import pytest` 一并删掉**；两个文件各加一段模块
+  docstring 说明"这是脚本、怎么跑"。
+
+  🔴 **判据（跑得出来，⛔ 不是"我改完了"）**：
+  `ls api/test_preprocess.py api/test_plan_constraints.py` ⇒ **两个都不存在**；
+  `ls api/preprocess.py api/plan_constraints.py` ⇒ **两个都在**；
+  `pytest api/ --collect-only -q` ⇒ **848 → 847**（−1 = 那条假用例）·
+  `pytest api/ -m "not integration and not needs_db"` ⇒ **2 skipped**（原 3）·
+  `passed` 数**未下降** ⇒ **没有真用例被牵连**。
+
+  🔴 **第二刀（同日 · `501dc69`）：函数名 `test_plan` 也一并改成 `run_plan`**（业务方裁「去除」）——
+  文件去了前缀、**函数还叫 `test_*`** 的话，`grep -rn "def test_"` 之类的排查口径
+  **照样会把它当用例**（本次清存量时我自己就差点被它误导）。
+  判据：`grep -rn "def test_plan(" api/` ⇒ **空**（rc=1）；
+  `grep -c "run_plan" api/plan_constraints.py` ⇒ **6**（定义 1 + 调用 4 + docstring 提及 1）。
+  ⚠️ **量这条时差点用错尺子**：写成 `grep -rn "def test_plan"`（⛔ 不带括号）**照样命中 11 行** ——
+  全是 `def test_plan_execute_*` 之类**真用例**（前缀匹配）⇒ **判据必须带 `(` 或词边界**。
+  📌 本仓判据纪律里「选的那个量对不对」那一类，这是又一个实例。
+
+- ⚠️ **`dev.sh` 的库名不再硬编码**（2026-10-07 · 债 `T5` · `丙-5`）——
+  `dev.sh:12` 的 `pg_isready -U postgres -d rag_db` ⇒
+  `sh -c 'pg_isready -U postgres -d "${POSTGRES_DB:-rag_db}"'`。
+
+  **治的病**：`docker-compose.yml` 里写的是 `${POSTGRES_DB:-rag_db}`，**库名是可以改的**
+  —— 改了 `.env` 而 `dev.sh` 还等 `rag_db` ⇒ **在 `until` 里空转到天荒地老**。
+  改成在**容器内**展开，读的就是 compose 注入给 postgres 的那个值。
+
+- ⚠️ **日志目录改成基于 `__file__` 的绝对路径**（2026-10-07 · 债 `T5` · `丙-6①`）——
+  `api/logger_config.py` 的 `"logs/api_*.log"` / `"logs/error_*.log"` ⇒
+  `_LOG_DIR = Path(__file__).resolve().parent / "logs"` 下的绝对路径。
+
+  **治的病**：`logs/` 按**相对 CWD** 解析 ⇒ **从 `api/` 起 uvicorn 进 `api/logs/`，
+  从仓根起就进 `<仓根>/logs/`** —— ⚠️ **本机两个目录都真的存在过**（`ls -d logs api/logs`）
+  ⇒ **日志被劈成两半，排查时只看一边**。改完**从哪儿起都一样**。
+
+  > 📌 **配套删掉一条已失效的 README 约束**（`README.md` 原文）：
+  > 「⚠️ **必须在 `api/` 目录下起 uvicorn**（有一处路径按相对位置解析）」——
+  > **那条约束的根因就是上面这个相对路径**，根因没了，约束也就没了。
+  > ⚠️ 业务方补充的另一个成因是"当时本机 Docker 起不来"（现已可用），**一并作废**。
+  > `bash dev.sh` 那句指路保留了下来。
 
 - 🔴 **熔断卡片「怎么联系」的占位值换掉**（2026-10-07 · `DEC-095` · 债 `N13`）——
   `api/static/js/sse.js` 一行常量：
@@ -80,6 +231,15 @@ All notable changes to this project will be documented in this file.
 
 ### Removed
 
+- 🔴 **删掉 `api/chunker.py` 两个零引用常量**（2026-10-07 · 债 `T5` · `丙-1`）——
+  `DEFAULT_CHUNK_SIZE = 500` / `DEFAULT_CHUNK_OVERLAP = 50`。
+
+  **两条判据**（都跑得出来）：① 全仓零引用 ——
+  `grep -rn "DEFAULT_CHUNK_SIZE\|DEFAULT_CHUNK_OVERLAP" . --exclude-dir=venv` ⇒ **空**；
+  ② **值与 `CHUNK_CONFIGS["default"]` 里的 `{"chunk_size": 500, "chunk_overlap": 50}` 重复**
+  —— 同一个数两个来源，**必然漂移**（本仓 `DEC-051` 记的正是这个病根）。
+  ⚠️ `DEFAULT_SEPARATORS` **不删**：它是**真被 `get_text_splitter()` 用的**。
+
 - 🔴 **删掉 `api/static/` 下两个【存量坏页】**（2026-10-07 · `DEC-096` · 债 `F5`）——
   `api/static/stream_test.html`（218 行）· `api/static/trace_viewer.html`（168 行）。**两个都删。**
 
@@ -103,6 +263,67 @@ All notable changes to this project will be documented in this file.
   一个没少。
 
 ### Added
+
+- 🟢 **新增 `docs/decisions/DEC-098-demo单容器化设计-存储限流与边界.md`**（2026-10-07）——
+  **demo 的设计裁定**：把 `fastapi-rag-agent` 做成**魔搭创空间单容器 Demo** 的
+  **存储 / 限流 / 边界**三条轴，一次裁完。
+
+  **裁了什么**（逐条 ⇒ 见该 DEC §二）：拆成**甲 Demo 化 / 乙 语料重建**两个项目，顺序**先甲后乙**（接口 = 一个语料目录）·
+  容器里跑 **uvicorn + redis-server + SQLite** · 改动面 **2 处**（`api/db.py` · `api/token_tracker.py`，
+  ⛔ `rate_limiter.py` / `cache.py` / `query_rewriter.py` **一行不动**）·
+  限流**四层**（新增 per-IP 短窗与**全站【总额】度**）· ingest **七条上限** · 边界**明标**且**归因给平台** ·
+  前端**只要一张问答页**、认证走 `X-API-Key`。
+
+  🔴 **两条本轮查出的真缺陷**（与"换存储"无关，但必须一起修）：
+  ① `api/api_v1_rag.py` 的 `upload_document` **没有任何入库侧上限**，且
+  **`tmp.write(await file.read())` 把整个文件一次性读进内存**（`:304`）——
+  容器 **8 GiB / `SwapTotal=0`** ⇒ **OOM 直接 kill，没有缓冲**；
+  ② 同一个函数 `os.unlink(tmp_path)` 在**末尾**（`:328`）⇒ 中途抛异常**残留临时文件** ⇒ 改 `try/finally`。
+
+  🔴 **量纲错配**：`GLOBAL_DAILY_TOKEN_LIMIT` 是 **【每日】**，而业务方的额度是 **【总量】** ⇒
+  **一天就能烧光全部额度，闸门第二天照常重置** ⇒ 补一条同口径的总额闸门。
+
+  ⚠️ **本份【只记决策】** —— 执行细节（命令级）**还没写**：`③` 那批要删代码，
+  **删完行号与文件清单都会变** ⇒ 按业务方「没定的先留占位」的口径，
+  依赖最终代码形态的部分**全部标成 ⬜ 占位**（§五 逐条列，且**每条给了"什么时候回来填/删它"**）。
+
+  **顺带补记一条先前【没落过任何 DEC】的裁定**：平台 / 部署类文档**放本仓**、⛔ **不放 `Product/` 级**
+  （业务方 2026-10-07，四条理由，见该 DEC §二·8）—— 此前只活在会话里。
+
+  **判据（可打印）**：该 DEC §四 分**已实测**（现在就能跑）与**待实施后填**两类。
+  ⚠️ **"已实测"那部分每条都核过**，例如 `grep -n 'embedding vector' api/db.py` ⇒ `69: embedding vector(1536),`。
+
+  **入站指针（3 处）**：`docs/文档地图.md` §一 🥉 · `ROADMAP.md`「一屏总览」的 demo 段 · 本条目。
+
+- 🟢 **新增 `docs/说明/魔搭创空间-部署与平台约束.md`**（2026-10-07 · 399 行）——
+  魔搭创空间（ModelScope Studio）的**部署流程 + 平台硬约束 + 实测事实**。
+
+  **为什么单独一份**：本仓 `docs/说明/部署.md` 的 §二/§三 讲的是「**你自己有机器**」的部署
+  （Docker Compose / 云 ECS）；**创空间是托管平台**，它的约束是**平台强加的**，
+  会直接改写架构选择（**一个 Studio = 一个容器** · 端口**只能 `0.0.0.0:7860`** ·
+  **重启即丢数据** · 免费档实测**只有 2 vCPU / 8 GiB / Swap=0**）⇒ **两者不是一回事，混读会出事**。
+
+  ⭐ **写法上的一条硬要求：全文逐条标【可信度】🟢官方 / 🔵实测 / ⚪推断。**
+  ⚠️ 理由：平台文档会过期，而「我以为」和「我验过」在纸面上长得一样 ——
+  下一个人会**按你最自信的那句去设计架构**。
+
+  🔴 **三条实测、官方文档里没有的硬事实**（本次落盘的**主要价值**）：
+  ① 免费档真实规格 = **2 vCPU / 8 GiB / `SwapTotal=0`**（≠ 对外宣传的「8 核 32GB」）
+  ⇒ **`Swap=0` 意味着「整个文件读进内存」的写法本身就是一个 DoS 面**；
+  ② **平台会往每个请求注入一个 449 字符的 `Authorization` 头** ⇒ 自家鉴权**必须换头名**，
+  且**绝不能读它当「用户已登录」**；
+  ③ **删除 Studio 没有程序化接口**（OpenAPI `DELETE` 返回 404，CLI `delete_repo` 已废弃且不支持 studio）。
+
+  ⚠️ **有意写成【自足】** —— 不引用本仓任何路径与模块，**供整份复制到其它仓库**
+  （业务方 2026-10-07：放本仓，由他自行分发；⛔ 不放 `Product/` 级 —— 那会让别的项目
+  **以为「我也要做成 demo」**⇒ 污染 + 跑错方向）。
+
+  **入站指针 3 处**：`docs/文档地图.md` ×2 · `docs/说明/部署.md` ×1。
+
+  📌 **判据（可打印）**：
+  `bash scripts/check_doc_orphans.sh` ⇒ 无孤儿（⚠️ **已做反证检验**：临时藏掉入站指针
+  ⇒ 门变红并**点名该文件** ⇒ 证明门确实在看它，⛔ 不是「没扫到」）·
+  `bash scripts/check_doc_links.sh` ⇒ 无真断链 · `bash scripts/check_secrets.sh` ⇒ 0 命中。
 
 - 🔶 **Eval 页【占位版】：一个按钮 + 子页一行字（段 1 第七刀 · `F3`）**（2026-10-07 · `DEC-097`）——
   `api/static/web/eval.html`（新）· `api/static/web/eval_gate.html`（新）· `api/main.py`（`GET /eval`）·

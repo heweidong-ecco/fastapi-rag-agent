@@ -5,7 +5,7 @@
 import asyncio
 import json
 from typing import Optional
-from fastapi import Header, Depends, HTTPException, WebSocket, WebSocketException
+from fastapi import Header, Depends, WebSocket, WebSocketException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from starlette.websockets import WebSocketDisconnect
 

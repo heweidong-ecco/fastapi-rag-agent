@@ -3,10 +3,9 @@ API v1 路由集中定义
 所有 /api/v1 前缀的接口在此管理。
 """
 import asyncio
-import time
-from fastapi import APIRouter, Depends, Path, Query
+from fastapi import APIRouter, Depends, Query
 from exceptions import ErrorCode, AppException
-from deps import get_current_user_hybrid, get_current_user_jwt, require_admin
+from deps import get_current_user_hybrid
 
 # `③` Task 4 · `B1`：SSE 骨架 —— 本仓**所有**流式端点共用一份（含那 5 条实测约束的顺序）。
 # ⚠️ 2026-10-04（批 3）：`anyio` / `json` / `StreamingResponse` / `logger` / `track_stream_cancel`
@@ -34,7 +33,7 @@ from approval_audit import record_decision, summarize_tool_calls, list_decisions
 # 角色（`DEC-046`）—— `/agent/approve` 的「本人或 admin」判据走这里，
 # ⛔ 别在本文件另写 `user_name == "admin"`（那就又多一处口径）。
 from permission import UserRole, get_user_role
-from langchain_core.messages import HumanMessage, ToolMessage, AIMessage
+from langchain_core.messages import HumanMessage, ToolMessage
 # 多分支路由（意图分类）高级 Agent：定义在 agent_graph_advanced_learning.py
 from agent_graph_advanced_learning import build_advanced_agent
 from plan_execute import plan_task, execute_plan, BudgetExceededError
@@ -52,8 +51,7 @@ from token_tracker import (
     get_user_history, generate_monthly_report,
     check_budget_before_call, estimate_tool_cost,
     TOOL_ESTIMATED_COST, PURPOSE_ESTIMATED_COST,
-    get_intercept_count, record_cost,
-    check_session_token_budget,       # B8（①b Task 2）：会话级上限
+    get_intercept_count, check_session_token_budget,       # B8（①b Task 2）：会话级上限
     get_user_overview,                # B13（①b Task 7）：**读库**的全时总览
     get_global_daily_token_usage,     # B13（①b Task 7）：全站日级用量（B10 的数）
     thread_cost_breakdown,            # DEC-093（F2）：Trace 页**成本轴**的逐笔明细
@@ -88,7 +86,6 @@ from tool_visualizer import (
 # MCP Client 高级 Agent（会话池版）及动态工具列表
 from agent_graph_advanced import mcp_agent, get_mcp_tools
 
-import os
 
 router = APIRouter(prefix="/api/v1")
 

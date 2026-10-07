@@ -25,9 +25,7 @@ grep 会把「注释里提到」误判成「代码里用了」。
 import ast
 import pathlib
 
-import pytest
-
-_API = pathlib.Path(__file__).parent
+_API =pathlib.Path(__file__).parent
 
 
 # ==================== 工具（AST，⛔ 不是 grep） ====================

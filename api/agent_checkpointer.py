@@ -11,7 +11,7 @@ from langgraph.checkpoint.memory import MemorySaver
 # from langgraph.checkpoint.redis import RedisSaver  
 from llm_factory import make_llm   # ①b Task 5：model / api_key / base_url / max_tokens 的唯一落点
 from langchain_core.tools import tool
-from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig   # B1：节点要靠它把回调接进模型调用
 from datetime import datetime
 from safe_math import calculate  # DEC-049：`calculator` 的求值实现 —— ⛔ 别改回 `eval`
@@ -22,7 +22,22 @@ from search_tools import web_search  # DEC-051：换掉本机不可达的 DuckDu
 #       一边改了另一边不知道，而**不一致时不报错** ⇒ 审批静默地永不触发 / 对错的工具触发）。
 #    ⚠️ `agent_graph.py` 末行在 **import 期**就跑 `validate_approval_config()` ⇒
 #       白名单为空 / 名字不存在，会在这里**一并响亮地报**（不用再调一次）。
-from agent_graph import SENSITIVE_TOOLS, should_continue, human_approval
+# 🔴 `SENSITIVE_TOOLS` **必须留在这个导入行里** —— 它不是死导入，`ruff` 判不了：
+#    `api/test_memory_chat_approval.py` 有一条**结构性守卫**写作
+#        `assert ac.SENSITIVE_TOOLS is ag.SENSITIVE_TOOLS`
+#    （`ac` / `ag` 是那两个模块的**别名** ⇒ 全仓 grep `agent_checkpointer.SENSITIVE_TOOLS` **搜不到**）。
+#    2026-10-07 清存量时删过一次 ⇒ 那条守卫当场红 ⇒ 已还原。
+#    ⚠️ 那条守卫的语义是「**白名单只能有一份**」（⛔ 别在这里抄一份）—— 删掉它等于**把守卫拆了**。
+#    📌 下面 import 行行尾那条 `noqa` 指令（`F401`）是**收尾动作**（2026-10-07，与本批清存量同一刀）：
+#       ⚠️ **本注释里⛔不写那个井号** —— 写了的话 ruff 会把注释本身当成一条 noqa 指令，
+#          然后在 stderr 上打一句 "Invalid `noqa` directive"（实测踩过）。
+#       存量清零后基线空了，本来可以把它留成基线的第 1 条；**⛔ 没有那样做** ——
+#       基线的键是 `(文件, 规则)`，挂一条 = **把 `api/agent_checkpointer.py` 这个文件的
+#       【所有】 F401 一律放行**（将来真加了死导入也不报）。行尾 `noqa` 只放行**这一行**。
+#       ⇒ 粒度更细，且理由就写在行边上（⛔ 不用去翻基线文件）。
+#       ⚠️ 代价：**哪天那条守卫被删了、`SENSITIVE_TOOLS` 真成了死导入，这里也不会报** ——
+#          但在基线里同样不会报（同一个盲区），故不构成反对理由。
+from agent_graph import SENSITIVE_TOOLS, should_continue, human_approval  # noqa: F401
 
 # ==================== 初始化模型 ====================
 # ⚠️ 角色 = 「模型轴 fast」+「长度轴 agent(1024)」—— 见 `api/llm_factory.py` 的模块 docstring。

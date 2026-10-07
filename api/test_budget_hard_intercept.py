@@ -36,7 +36,7 @@ import asyncio
 import json
 
 import pytest
-from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
 
 import agent_graph_advanced as aga
 import api_v1_agent as m

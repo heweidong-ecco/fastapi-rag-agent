@@ -4,7 +4,6 @@
 敏感信息禁止设默认值，启动时强制校验缺失。
 """
 import os
-import sys
 from dotenv import load_dotenv
 
 # 加载项目根目录的 .env 文件（注意路径关系）

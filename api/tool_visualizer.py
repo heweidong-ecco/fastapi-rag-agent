@@ -14,10 +14,8 @@
    **漏传要崩（`TypeError`），⛔ 不是悄悄记到公共桶里。**
 """
 import time
-import json
 from typing import Dict, List
 from dataclasses import dataclass, field
-from collections import defaultdict
 
 # ⚠️ 身份键走**全仓唯一**那一份（`DEC-056` 决策 8-1 `api/session_key.py`）——
 #    ⛔ 别在本文件另拼一个 `f"{user}:{thread}"`（那个有歧义，见该模块 docstring）。

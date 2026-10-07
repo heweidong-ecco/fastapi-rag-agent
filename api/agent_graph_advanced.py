@@ -2,24 +2,19 @@
 Agent 图（集成 MCP Client）
 LangGraph 进阶示例：多分支路由与子图协作
 """
-import os
 import json
-import asyncio
 from typing import TypedDict, List, Annotated, Optional
 import operator
 
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 from llm_factory import make_llm   # ①b Task 5：model / api_key / base_url / max_tokens 的唯一落点
-from langchain_core.tools import tool
-from langchain_core.messages import HumanMessage, AIMessage, ToolMessage,SystemMessage
+from langchain_core.messages import AIMessage, ToolMessage,SystemMessage
 from langchain_core.runnables import RunnableConfig   # B1：节点要靠它把回调接进模型调用
-from datetime import datetime
 from token_tracker import record_usage
 # 新增 预估消耗的前置检查
 from token_tracker import check_token_budget
 # 工具调用前插入预算检查 Token预算
-from token_tracker import check_budget_before_call
 from token_tracker import check_multilevel_budget
 
 # ==================== 导入 MCP Client ====================
@@ -173,8 +168,10 @@ import hashlib
 # ⚠️ 2026-09-20 删（D1/pyflakes 报 redefinition）：此处的 `import json` / `import os`
 #    与文件头（`:5`/`:6`）**重复** ⇒ 删这两行。⚠️ 同段的 `hashlib`/`redis`/`functools`
 #    **不是重复**（文件头没有），**必须留**。
+# ⚠️ 2026-10-07 补一笔：上面那句「`functools` 必须留」**只针对"重复"这一条**，⛔ 不是说它有用 ——
+#    同批清存量时 `from functools import wraps` 被删了，因为 `wraps` 在本文件**零引用**
+#    （判据：`grep -n "wraps" api/agent_graph_advanced.py` ⇒ 空）。`hashlib` / `redis` **仍在**。
 import redis
-from functools import wraps
 
 # 复用现有的 Redis 客户端（与 cache.py 相同配置）
 # 从 config 导入 host/port，以正确应用本地开发时 localhost 的覆盖

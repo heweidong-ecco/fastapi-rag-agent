@@ -1,7 +1,6 @@
 """
 MCP Server：使用工厂函数自动注册所有工具
 """
-import os
 import asyncio
 from mcp.server import Server
 from mcp.server.stdio import stdio_server

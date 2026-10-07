@@ -7,11 +7,11 @@ import matplotlib
 matplotlib.use('Agg')  # 非交互式后端，避免线程问题
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
-from datetime import datetime, timedelta
+from datetime import datetime
 from db import get_db
 from io import BytesIO
 import base64
-from token_tracker import (get_user_summary, get_purpose_summary,
+from token_tracker import (get_purpose_summary,
                            get_daily_usage_cost, get_token_budget_info,
                            get_global_daily_token_usage)
 # B13（①b Task 7）：全站日级**上限** —— 与 `get_global_daily_token_usage()` 成对用。

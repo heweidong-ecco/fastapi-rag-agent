@@ -4,7 +4,6 @@
 （带 Redis 缓存）
 优化查询：结合对话历史补全上下文、转书面语、消解指代。
 """
-import os
 import hashlib
 import json
 from openai import OpenAI

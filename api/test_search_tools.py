@@ -12,9 +12,7 @@
 import ast
 import pathlib
 
-import pytest
-
-_HERE = pathlib.Path(__file__).parent
+_HERE =pathlib.Path(__file__).parent
 
 
 # ===========================================================================

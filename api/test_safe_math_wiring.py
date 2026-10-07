@@ -12,13 +12,19 @@
 | **AST 静态** | 5 处（含 `tools_with_cache`） | "还留着 `eval` 调用" / "没把入口指向 `calculate`" |
 
 ⚠️ **`tools_with_cache` 只进静态那道**：它被 `@cached_tool` 包着 ⇒ 调一次就要连 Redis，
-   放进离线套件会让 CI 依赖外部服务。而它在生产里**本就不可达**（`api_v1.py:36` 导入了但全文件只用这一次）。
+   放进离线套件会让 CI 依赖外部服务。而它在生产里**本就不可达** ——
+   ⚠️ **2026-10-07 更新**：原先这里写的是「`api_v1.py:36` 导入了但全文件只用这一次」。
+   那天清 `T6` 存量（段 A · `2bae0bb`）把 `api_v1.py` 里那行 `from tools_with_cache import calculator`
+   **删了** ⇒ **`api_v1.py` 那个行号现在指向一段注释，⛔ 不再成立**。
+   现状更强：**全仓没有任何文件导入它**（判据 ⇒ `grep -rn --include='*.py' "tools_with_cache" api/`
+   ⇒ 只剩它自己那行 `from tool_cache import cached_tool`）。
+   ⚠️ **但【静态那道仍必须留着】** —— 模块本身还在仓里（`T6`「先挂起」），
+   哪天有人把它重新接回某个路由 ⇒ 这一条要能当场红。
 ⇒ 它的安全性由静态那条 + 代码本身（`return calculate(...)`）共同保证，**这里如实写明，不假装它也验了行为**。
 """
 
 import ast
 import importlib
-import os
 from pathlib import Path
 
 import pytest

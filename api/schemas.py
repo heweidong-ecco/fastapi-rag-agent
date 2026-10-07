@@ -2,7 +2,7 @@
 Pydantic 数据模型集中定义
 所有请求体、响应体、路径参数、查询参数的模型在此管理。
 """
-from typing import List, Optional
+from typing import List
 from pydantic import BaseModel, Field
 # ==================== Pydantic模型 ====================
 # ==================== 检索相关 ====================

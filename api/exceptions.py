@@ -3,8 +3,6 @@
 所有业务异常和错误码在此集中管理，其他模块从此导入。
 """
 from enum import Enum
-from fastapi import Request
-from fastapi.responses import JSONResponse
 
 
 # ==================== 业务错误码枚举 ====================

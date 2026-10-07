@@ -10,7 +10,6 @@ from datasets import Dataset
 from ragas import evaluate
 from ragas.metrics import (
     Faithfulness,       # ← 2026-09-21 加：本脚本要用【修正过的子类】替掉它（见下方 ZhFaithfulness）
-    faithfulness,
     answer_relevancy,
     context_recall,
     context_precision  # 新增：上下文精确率
@@ -304,7 +303,7 @@ def main():
     report["timestamp"] = time.strftime("%Y-%m-%d %H:%M:%S")
     with open("ragas_report.json", "w", encoding="utf-8") as f:
         json.dump(report, f, ensure_ascii=False, indent=2)
-    print(f"\n✅ 报告已保存至 ragas_report.json")
+    print("\n✅ 报告已保存至 ragas_report.json")
     # ===== 新增：保存详细对比数据 =====
     with open("ragas_detailed_report.json", "w", encoding="utf-8") as f:
         json.dump(detailed_results, f, ensure_ascii=False, indent=2)

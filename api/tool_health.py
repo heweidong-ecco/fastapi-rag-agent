@@ -15,7 +15,6 @@
    真正的降级是"**把不健康的工具移出清单**"，不是"换一个备用工具"—— 已在上方写明。
 """
 import time
-import os
 from typing import Dict
 
 HEALTHY = "healthy"

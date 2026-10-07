@@ -14,7 +14,6 @@
 import asyncio
 import types
 
-import pytest
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 
 import agent_checkpointer as ac
