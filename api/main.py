@@ -561,6 +561,19 @@ async def trace_page():
     """把人送到执行轨迹页。⚠️ `include_in_schema=False`：它不是 API，⛔ 别混进 openapi。"""
     return RedirectResponse(url="/static/web/trace.html", status_code=302)
 
+# 🔴 `DEC-097`（`F3`）：Eval 页的**入口 URL**。形状与上面三条**逐字同款**。
+#    ⚠️ 本页是**占位页**（业务方 2026-10-07 裁剪的口径）：**一个按钮** → 点开是**一行字**。
+#       ⛔ 不是原先 `F3` 写的「跑分 + 与上一版的对比箭头」——**没有数据源**
+#       （后端**没有任何 `/agent/eval*` 路由**，`B14` 仍是 ⬜）⇒ 硬做只会做出一个假页面。
+#    🔴 代价已认：这是**新公开路由** ⇒ `check_route_auth.py --baseline` 会 exit 1
+#       ⇒ **已显式写进 `scripts/route-auth-baseline.txt`**（一次有意识的操作）。
+#       ⚠️ 它**不含数据**（子页上那一行是**静态文字**，不取任何接口）——
+#       这也是它比另外三页**更没风险**的地方。
+@app.get("/eval", include_in_schema=False)
+async def eval_page():
+    """把人送到 Eval 页。⚠️ `include_in_schema=False`：它不是 API，⛔ 别混进 openapi。"""
+    return RedirectResponse(url="/static/web/eval.html", status_code=302)
+
 # 新增  嵌入了 Prometheus 指标采集
 # 指标暴露接口
 @app.get("/metrics")

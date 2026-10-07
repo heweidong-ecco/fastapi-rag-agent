@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Eval 评测</title>
+<style>
+  :root { --line:#d8d8d8; --muted:#777; --bg:#fafafa; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+         color:#222; background:#fff; }
+  .wrap { max-width:680px; margin:64px auto; padding:0 20px; }
+  h1 { font-size:20px; margin:0 0 8px; }
+  .hint { color:var(--muted); font-size:13px; line-height:1.7; margin:0 0 24px; }
+  /* 🔴 它就是业务方要的那个「按钮」（`DEC-097`）：**一个 <a>**，样式做成按钮。
+     ⚠️ 用 <a href> 而不是 <button onclick="location=…">：
+        ① 它是**跳转**，不是动作 —— 语义上就是链接；
+        ② 中键 / 右键"在新标签页打开"照常可用（`<button>` 上做不到）；
+        ③ `api/test_eval_page.py` 直接扫 `href` 就能钉住目标 ⇒ **判据是个字面量**。 */
+  .btn { display:inline-block; padding:10px 18px; font-size:15px; border-radius:6px;
+         border:1px solid var(--line); background:var(--bg); color:#1a73e8;
+         text-decoration:none; }
+  .btn:hover { background:#e8f0fe; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Eval 评测</h1>
+  <p class="hint">
+    这是评测结果的展示入口。<br>
+    ⚠️ 目前<strong>只有占位</strong>：后端还没有评测相关的接口（<code>B14</code> 仍是未做），
+    所以这里没有任何分数、也没有与上一版的对比箭头 —— 点开是一句实话。
+  </p>
+  <p><a class="btn" href="/static/web/eval_gate.html">打开评测门</a></p>
+</div>
+</body>
+</html>

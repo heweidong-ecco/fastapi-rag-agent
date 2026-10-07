@@ -104,6 +104,40 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- 🔶 **Eval 页【占位版】：一个按钮 + 子页一行字（段 1 第七刀 · `F3`）**（2026-10-07 · `DEC-097`）——
+  `api/static/web/eval.html`（新）· `api/static/web/eval_gate.html`（新）· `api/main.py`（`GET /eval`）·
+  `scripts/route-auth-baseline.txt`（+1 条）· `api/test_eval_page.py`（新，5 条用例）。
+
+  **目标**：`docs/待办总表.md` 的 **`F3`「Eval 页」**—— 但它原来的措辞是
+  「**跑分 + 与上一版的对比箭头**（数据来自 `agent-eval-gate`）」。
+
+  🔴 **动手前先核数据源 ⇒ 那两件事一件都做不了**：
+
+  | 原 `F3` 要的 | 卡在哪（可打印核过） |
+  |---|---|
+  | **跑分**（分数从哪来） | 后端**没有任何 `/agent/eval*` 路由**（`B14` 仍 ⬜）⇒ **没有可取的数** |
+  | **与上一版的对比箭头** | 「上一次的结果」本仓**从来没存过**一个基线 ⇒ **没有可比的对象** |
+
+  ⇒ 按原文硬做，**唯一产出是假数字 + 摆出来的箭头**。**业务方 2026-10-07 当场把口径换成**
+  「一个数据展示页面 + 一个按钮跳到子页 + 子页一行字」，并加一句「**之后如果没有提这个就不用管**」。
+
+  🔴 **⛔ 这不是"把功能做完了"，是换了交付口径** —— 若按 ✅ 记进账，
+  下一个接手人会以为评测功能已经能用。⇒ `docs/待办总表.md` 里那一格记的是 **`🔶 占位版已做`**，
+  **未结数【不动】（仍是 25）** —— 与 `N13` 换值（`DEC-095`）**同一条规矩：换口径 ≠ 结清**。
+
+  **落成什么样**：`GET /eval` → **302** `/static/web/eval.html`（页上**一个做成按钮的 `<a>`**）
+  → 点开 `/static/web/eval_gate.html`，**正文只有一行**：`agent-eval-gate · Agent 生产就绪评测门 · TODO`。
+  · ⚠️ **子页刻意不加"返回"链接** —— 业务方原话是「**就显示一行**」，加一条链接**就是第二行**。
+  · 🔴 **两页一个 `fetch` 都没有** ⇒ 它比 `/chat` `/approvals` `/trace` **更没有暴露面**
+    （那三页各自调带鉴权的接口，边界在那几条接口上）。⚠️ **也正因如此**，
+    `api/test_web_pages.py`（那条"扫全站 `.html`"的守卫）**对这两页空过** —— 没有字面量可查。
+
+  **判据（可打印）**：`venv/bin/python -m pytest api/test_eval_page.py -q` ⇒ **5 passed** ·
+  `bash scripts/ci-local.sh` ⇒ **exit 0**，pytest **798 → 805 passed**（**+7** = 新用例文件 **+5**
+  + `api/test_web_pages.py` **5 → 7**，它扫目录、多两个 `.html` 就多两条）。
+  🔴 **反证检验（实测，⛔ 别只看"它绿"）**：`href` 改成 `#` ⇒ 红 **1** 条 ·
+  子页那一行改一个字 ⇒ 红 **1** 条 —— **两条各只红一条**，说明这两条守卫各管各的。
+
 - ⭐ **Trace 页：两轴分屏 + 成本轴读端点（段 1 第六刀 · `F2`）**（2026-10-06 · `DEC-093`）——
   `api/static/web/trace.html`（新）· `api/static/js/trace.js`（新，纯逻辑）· `api/token_tracker.py` ·
   `api/api_v1_agent.py` · `api/main.py` · 两侧的用例 · `.github/workflows/ci.yml`（+1 行 `node --test`）。
