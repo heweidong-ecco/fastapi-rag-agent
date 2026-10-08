@@ -745,6 +745,14 @@ bash scripts/list_endpoints.sh >/dev/null   # 确认服务在
 | `docs/specs/cache.md`（**在，8901 B**） | 缓存键格式**变了** ⇒ **必须写**（`get_cache_key` 多了必填形参 `model`） | `grep -n 'emb:\|get_cache_key' docs/specs/cache.md` |
 | `docs/specs/token_tracker.md:488` | 单价表加新模型 | `grep -n 'qwen3.7-text-embedding-flash' docs/specs/token_tracker.md` |
 | `README.md:32` · `ROADMAP.md:49` | 「Embedding 走 DashScope `text-embedding-v2`」⇒ 变量口径 | `grep -n 'text-embedding-v2' README.md ROADMAP.md` |
+| 🔴 `docs/specs/config.md:77` | 「**embedding 仍固定走 `DASHSCOPE_API_KEY`**（`text-embedding-v2`）」 | `grep -n 'text-embedding-v2' docs/specs/config.md` |
+
+🔴 **别靠上面这张表**（它是人手列的，会漏）—— **用这条命令现数**（**2026-10-08 自查时就是它照出 `config.md` 漏了的**）：
+```bash
+grep -rn 'text-embedding-v2' --include='*.md' README.md ROADMAP.md docs/specs docs/契约 | grep -v '^docs/specs/归档'
+# ⚠️ 【不是要打成 0】—— 历史（CHANGELOG / DEC / 复盘）里的**必须留着**（⛔ 历史不改写）。
+# 🔴 判据是：**活文档 + 活代码里不再有它**。⛔ 命令的范围**只框活文档**，别扩到全仓。
+```
 
 🔴 **判据（一条打尽）**：
 ```bash
