@@ -128,6 +128,27 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- 🔴 **批② · Task 4：应用侧接上执行器 —— `EXECUTOR_URL` 有值走容器，没值回落本地**（2026-10-08）——
+
+  `code_executor_impl.py` 新增 `EXECUTOR_URL`（import 期读 env）+ `_run_remote()`。
+  `execute_python_impl` 在**意图检测之后**分岔：有 URL ⇒ 远端容器；没 URL ⇒ 现有本地子进程。
+  ⚠️ **只 import 标准库**（`urllib.request`），⛔ 没破本模块的不变量。
+
+  🔴 **远端失败【如实报错】，⛔ 绝不静默回落本地** —— 这是本笔最重要的一条。
+  理由：若"远端挂了就悄悄回落"，**运维把执行器停了 / 地址配错了 ⇒ 一切照常工作**，
+  代码**又回到宿主同权限的进程里跑**，而**没有一个人会发现** ⇒ **那层隔离是装饰性的**。
+  （本仓原话：**「『从不命中』与『没人违规』在机器痕迹上完全一样。」**）
+
+  🔴 **「意图检测」留在应用侧**（"只执行代码、不生成代码"是**产品策略**，⛔ 不是执行机制）
+  ⇒ 它**在决定走本地还是远端之前**执行，⛔ 不许被远端路径绕过。
+
+  📌 **判据**：`cd api && ../venv/bin/python -m pytest test_code_executor_remote.py -q` ⇒ **4 passed**
+  · 全量离线 ⇒ **817 passed / 2 skipped / 0 failed**（813 + 4）
+  · 两条路径**真跑过**：无 URL ⇒ `'42\n'`；坏 URL ⇒ `无法访问**执行器容器**（URLError…）`、**没回落**
+
+  ⚠️ **测试用【真的本地 HTTP 服务】当替身**，⛔ 没 mock `urlopen` ——
+  mock 掉的话，测的是"我有没有调用那个名字"，**不是"请求有没有真的发出去"**。
+
 - 🔵 **批② · Task 3：`docker-compose.yml` 加执行器服务 + 硬化配置**（2026-10-08）——
 
   **新增 `executor` 服务**（`rag-executor`），硬化逐条落地：

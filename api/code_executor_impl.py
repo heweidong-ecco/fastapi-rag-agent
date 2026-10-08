@@ -18,6 +18,14 @@ import json
 import os
 import subprocess
 import sys
+import urllib.request
+
+# 🔴 2026-10-08（批② Task 4）：**执行器容器的地址**。
+#    有值 ⇒ `execute_python_impl` 走**远端**（容器里跑）；⛔ 没值 ⇒ **回落**本地子进程。
+#    ⚠️ 回落的目的是「本机开发 / 离线 CI ⛔ 不许被这个功能拖成"必须有容器"」，
+#       ⛔ **不是**"远端挂了就自动回落" —— 那件事见 `_run_remote` 里的说明。
+#    📌 容器里由 `docker-compose.yml` 的 `api` 服务注入（`EXECUTOR_URL=http://executor:8000`）。
+EXECUTOR_URL = os.getenv("EXECUTOR_URL", "").strip()
 
 # 安全沙箱配置
 ALLOWED_BUILTINS = [
@@ -86,6 +94,11 @@ ALLOWED_MODULES = [
 # 最大执行时间和输出长度限制
 MAX_EXEC_TIME = 5  # 最长执行5秒
 MAX_OUTPUT_LENGTH = 2000  # 最大输出字符数
+
+# ⚠️ 远端调用要给**执行器自己**那 5 秒留出余量（它内部还有一次子进程往返）。
+# 🔴 2026-10-08（批② Task 4）—— ⛔ 别把两者设成一样：那会让"执行器还没跑完"
+#    被本地判成"远端超时"，于是**正常的慢代码**变成报错。
+EXECUTOR_TIMEOUT = MAX_EXEC_TIME + 10
 
 # 🔴 2026-09-21（§十四 · ③-a）：**真·超时 —— 把执行放进【子进程】，超时【硬杀】。**
 
@@ -187,9 +200,51 @@ def execute_python_impl(code: str) -> str:
                 f"请先生成代码文本，再将代码作为参数传入。"
             )
 
-    # 🔴 2026-09-21（③-a）：执行搬进**子进程**，超时**硬杀**（详见上面 `_SANDBOX_CHILD` 的注释）。
-    ok, out = run_in_sandbox_subprocess(code)
+    # 🔴 2026-10-08（批② Task 4）：**先看有没有执行器** —— 有则走**容器**，没有则**本地子进程**。
+    #    ⚠️ 这一句必须在**意图检测之后**：那个检测是**产品策略**（"这个工具只执行、不生成"），
+    #       ⛔ 不许因为"走远端了"就跳过它。
+    #       守卫：`test_code_executor_remote.py::test_intent_check_still_applies_before_any_remote_call`
+    if EXECUTOR_URL:
+        ok, out = _run_remote(code)
+    else:
+        # 🔴 2026-09-21（③-a）：执行搬进**子进程**，超时**硬杀**（详见上面 `_SANDBOX_CHILD` 的注释）。
+        ok, out = run_in_sandbox_subprocess(code)
     return out
+
+
+def _run_remote(code: str) -> tuple:
+    """把 `code` 发给**执行器容器**跑。返回 `(ok, out)`。
+
+    🔴 **远端失败时【如实报错】，⛔ 绝不静默回落本地。**
+
+    为什么这条这么硬：若"远端挂了就悄悄回落"，那么
+    **运维把执行器停了 / 地址配错了 ⇒ 一切照常工作** ——
+    代码**又回到宿主同权限的进程里跑**，而**没有任何人会知道**。
+    那等于这道隔离**是装饰性的**。
+    （本仓原话：**「『从不命中』与『没人违规』在机器痕迹上完全一样。」**）
+
+    守卫：`test_code_executor_remote.py::test_remote_failure_is_reported_and_does_not_silently_fall_back`
+    （判据是**结果里没有本地跑出来的 `42`** —— ⛔ 不是"函数返回了一个字符串"）。
+    """
+    url = EXECUTOR_URL.rstrip("/") + "/execute"
+    body = json.dumps({"code": code}).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=EXECUTOR_TIMEOUT) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except Exception as e:                       # noqa: BLE001 —— 见 docstring：**⛔ 不回落**
+        return False, (
+            f"代码执行出错: 无法访问**执行器容器**（{type(e).__name__}: {e}）。\n"
+            f"⛔ 本次【没有】执行任何代码，也【没有】回落到本机进程 —— "
+            f"悄悄回落会让这层隔离形同虚设，且没人会发现。"
+        )
+
+    return bool(payload.get("ok")), payload.get("out", "")
 
 
 def run_in_sandbox_subprocess(code: str) -> tuple:
