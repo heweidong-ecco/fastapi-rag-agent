@@ -252,10 +252,13 @@ async def get_llm_with_mcp_tools():
     """获取绑定了 MCP 工具的 LLM 实例。
 
     🔴 2026-09-20 修（依赖漂移）:此前写的是 `for mcp_tool in tools:` —— 而
-       `mcp 1.30.0` 的 `list_tools()` 返回的是 **`ListToolsResult`**（列表在 `.tools`），
+       `session.list_tools()` 返回的是 **`ListToolsResult`**（列表在 `.tools`），
        **不是列表本身**。直接遍历它 ⇒ pydantic 模型迭代出的是 **(key, value) 元组**
        ⇒ `AttributeError: 'tuple' object has no attribute 'name'`
        ⇒ `/agent/mcp_chat`（三代）**500**。
+       ⚠️ 2026-10-08（批④）**去掉了这里的版本号**（原写「`mcp 1.30.0` 的」）——
+       结论与 mcp 版本无关（2.x 仍是 `ListToolsResult` / `.tools`），而**版本号会过期**：
+       本仓 `N8` 的教训就是"别把话说死在一个会变的东西上"。
        回归测试:`api/test_agent_repairs.py::test_get_llm_with_mcp_tools_unpacks_list_tools_result`
     """
     tools_result = await get_mcp_tools()
@@ -265,7 +268,13 @@ async def get_llm_with_mcp_tools():
         langchain_tools.append({
             "name": mcp_tool.name,
             "description": mcp_tool.description,
-            "parameters": mcp_tool.inputSchema
+            # 🔴 2026-10-08（批④）：**`inputSchema` → `input_schema`**（mcp 2.x）。
+            #    ⚠️ 这是个**只读属性名变了**的坑，别读成"整个类型换了"：
+            #      · **构造**仍然两种都能写（`Tool(inputSchema=…)` 也行 —— `populate_by_name`）
+            #      · **读属性**只认**字段名** `input_schema` ⇒ 写 `.inputSchema` 会
+            #        `AttributeError: 'Tool' object has no attribute 'inputSchema'. Did you mean: 'input_schema'?`
+            #      · 要**线上拼法**就 `model_dump(by_alias=True)["inputSchema"]`
+            "parameters": mcp_tool.input_schema
         })
     return llm.bind_tools(langchain_tools)
 

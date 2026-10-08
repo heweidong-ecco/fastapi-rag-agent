@@ -90,9 +90,15 @@ matplotlib
 playwright>=1.48.0
 
 # MCP Server
-# ⚠️ 必须加上界：mcp 2.x 的 `Server` 去掉了 `list_tools()` 方法，而
-#    api/mcp_server.py:49 用的是 `@server.list_tools()` → AttributeError（2026-09-15 实测）。
-mcp>=1.0.0,<2
+# 🔴 2026-10-08（批④）：**上界从 `<2` 解到 `<3`** —— 原锁的理由（2.x 的 `Server` 去掉
+#    `list_tools()`）**属实**（解包 mcp 2.3.0 核实：`grep -n "def list_tools" ` 在
+#    `mcp/server/lowlevel/server.py` **0 命中**），而 `api/mcp_server.py` **已同一提交迁移**
+#    到 2.x 的**构造器回调**（`on_list_tools=` / `on_call_tool=`）。
+# ⚠️ **为什么留 `<3` 而不是完全不加界**：本仓对重依赖的既有惯例就是**大版本上界**
+#    （`langchain>=0.3.13,<0.4` · `langgraph>=1.0,<2`）。
+#    ⇒ 3.x 那天，升级是**一次显式动作**，⛔ 不是被 `pip install` 静默拉上去炸在运行时。
+#    下界钉 `2.3.0` = **本批实测过的版本**。
+mcp>=2.3.0,<3
 
 # 成本可视化面板（main.py 挂载 Gradio）
 gradio>=4.0.0

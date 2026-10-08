@@ -8,6 +8,45 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- 🔌 **批④-A · 解 `mcp` SDK 上界到 2.x + 服务端 API 迁移**（2026-10-08）——
+  `api/requirements.txt`：`mcp>=1.0.0,<2` → **`mcp>=2.3.0,<3`**。
+
+  **服务端**（`api/mcp_server.py`）：`@server.list_tools()` / `@server.call_tool()`
+  **装饰器 → 2.x 的构造器回调** `Server(on_list_tools=…, on_call_tool=…)`；
+  处理器改成 `(ctx, params)`，返回值改成 `ListToolsResult` / `CallToolResult`；
+  🔴 **`params.arguments` 缺省是 `None`、⛔ 不是 `{}`** ⇒ 必须 `or {}`。
+  ⚠️ `Server(...)` 的创建点跟着挪到两个处理器**定义之后**（2.x 的处理器是构造参数）。
+
+  🔴 **客户端的【读属性】也要改 —— 这一条是【既有守卫先红】照出来的**：
+  `mcp` 的 `Tool` 换了字段名 —— **构造**两种写法都行（`populate_by_name`），
+  **读属性只认 `input_schema`**（写 `inputSchema` ⇒ `AttributeError: … Did you mean: 'input_schema'?`）。
+  ⇒ `api/agent_graph_advanced.py` 与 `api/api_v1_agent.py` 各改 1 行。
+  ⚠️ `api_v1_agent.py` 那个 dict 的**键** `"inputSchema"` 是**本接口的响应契约，未动**。
+  ⇒ **教训：「客户端的 API 没变」≠「客户端不用改」** —— 施工单初版就是在这儿判错的。
+
+  🆕 **`api/test_mcp_protocol_e2e.py`** —— 本仓**第一条**真起 MCP 子进程、真走 stdio 协议的守卫
+  （此前那几条**全 monkeypatch 掉**了 `stdio_client`/`ClientSession` ⇒ 服务端接错了**一条都不会红**）。
+  🔴 **先在 1.30.0 上跑绿再迁移** —— 那是证明这把尺子量得住东西。
+
+  ⚠️ **依赖只动了两个包**（装前装后逐行 diff 实测）：`mcp 1.30.0→2.3.0` · `mcp-types 2.2.0→2.3.0`；
+  `fastapi` / `starlette` / `pydantic` / `httpx` / `anyio` / `langchain` / `langgraph` / `gradio`
+  **八个数逐行相同** ⇒ `DEC-104` §六·7「一次只动一个变量」**满足**。
+
+  ⚠️ **⛔ 本批【不含】长驻会话** —— 那是 **批④-B**，业务方 2026-10-08 裁定「**先 A，B 另起一批**」。
+  `DEC-104` §2.1 那道 anyio cancel-scope 的坎**还在**。
+
+  📌 **判据（可打印）**：`bash scripts/ci-local.sh` ⇒ **850 passed, 2 skipped, 40 deselected**（exit 0）
+  · ⚠️ **【改前】= 848**（`64902ad`）⇒ **+2** = 新增的两条端到端
+  · `venv/bin/python -m pytest api/test_mcp_protocol_e2e.py -q` ⇒ **2 passed**
+  · 🔴 **反证已做**：拿掉 `on_list_tools=list_tools,` ⇒ 该守卫红（`ExceptionGroup … TaskGroup`）；
+  还原后 `git diff --stat` **为空**。⚠️ **诚实边界**：它是在**协议请求那一刻**炸的，
+  ⛔ 没走到那条 `assert` ⇒ 抓得住「根本没接上」，**抓不住「接上了却返回空清单」**。
+
+  📄 决策全文 ⇒ `docs/decisions/DEC-110-解mcp上界与2x服务端API迁移.md`
+  · 母体路线 ⇒ `DEC-104` · 事实依据 ⇒ `docs/reference/mcp-stateless-and-transport.md`
+
 ### Added
 
 - 🧩 **批③ · 三个新工具：`date_calc` / `json_extract` / `stats`**（2026-10-08）——

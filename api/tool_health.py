@@ -4,6 +4,8 @@
 
 ⚠️ **降级不在这里** —— 见 `api/mcp_server.py` 的 `list_tools()`：
    它把 `UNHEALTHY` 的工具**移出工具清单**（那是当前实际生效的降级机制）。
+   🔵 **2026-10-08（批④）**：它是 2.x 的**构造器回调**（`Server(on_list_tools=…)`），
+   ⛔ 不再是 `@server.list_tools()` 装饰器 —— **函数名与所在文件都没变**，照旧去那里找。
 
 🔴 2026-09-20 删（§三·B9 · 业务方裁「删代码 + 把 docstring 改成实话」）：
    本文件原先自称「工具健康检查**与自动降级**」，并带一份 `FALLBACK_MAP` + `get_fallback_tool()`。
@@ -103,6 +105,8 @@ def get_tool_health(tool_name: str) -> str:
 #           return FALLBACK_MAP.get(tool_name, "chat")
 #    —— 它**零调用**，且引用的 `fallback_search` / `chat` **全仓都不存在**。
 #    降级（把不健康工具移出清单）在 `mcp_server.py` 的 `list_tools()` 里，不在本文件。
+#    🔵 2026-10-08（批④）：那个函数现在是 **2.x 的构造器回调**（`Server(on_list_tools=…)`），
+#       ⛔ 不是装饰器了 —— 名字没变，去 `mcp_server.py` 搜 `list_tools` 就能找到。
 
 async def run_health_check():
     """

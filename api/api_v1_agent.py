@@ -1838,9 +1838,12 @@ async def agent_mcp_tools_dynamic(
     return {
         "tools": [
             {
+                # ⚠️ 左边那个 `"inputSchema"` 是**本接口的响应键**（对外契约，⛔ 不动）；
+                #    右边那个是 **mcp `Tool` 的字段名**（2.x 起是 `input_schema`）。
+                #    🔴 2026-10-08（批④）：改前两边同名，改后**必须不一样** —— 别顺手统一。
                 "name": t.name,
                 "description": t.description,
-                "inputSchema": t.inputSchema
+                "inputSchema": t.input_schema
             }
             for t in _tools
         ],

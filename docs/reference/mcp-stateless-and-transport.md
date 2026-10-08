@@ -206,6 +206,13 @@ curl -sSL --max-time 20 https://modelcontextprotocol.io/specification/2025-06-18
 
 ## 八 · 本项目当前处在哪（🔵 实测 · 随代码变，**用命令核对别抄**）
 
+> 🔴 **2026-10-08（批④-A）更正：下表前两行【已过时】** —— SDK 上界已解到 `mcp>=2.3.0,<3`、
+> 实装 **2.3.0**，`api/mcp_server.py` 也已从装饰器迁到 **2.x 的构造器回调**。
+> ⚠️ **下表是 2026-10-08 上午的快照，⛔ 不改写**；**现行值一律跑右边那列命令**。
+> ⚠️ **"上锁的理由"那一行仍然是【真的】** —— 解包 mcp 2.3.0 实测，
+> `Server` **确实没有** `list_tools()`（`grep -n "def list_tools" mcp/server/lowlevel/server.py` ⇒ 0 命中）。
+> 📄 迁移的裁定与实测 ⇒ `DEC-110`。
+
 | 项 | 现状 | 判据（可打印） |
 |---|---|---|
 | SDK 版本要求 | **`mcp>=1.0.0,<2`**（**上了锁**） | `grep -n '^mcp' api/requirements.txt` |
