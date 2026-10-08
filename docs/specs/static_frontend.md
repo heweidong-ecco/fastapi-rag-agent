@@ -3,6 +3,7 @@
 | 项 | 内容 |
 |---|---|
 | **状态** | 🟡 **部分可用**（2026-10-06 建 · `DEC-085` 段 1 第一刀 · 同日补 `DEC-089` 的 `F8` · `DEC-090` 的熔断卡片 · `DEC-091` 的无据拒答 · `DEC-093` 的 Trace 页 · 2026-10-07 补 `DEC-097` 的 Eval 页）—— **四个页面通了**：对话页（`DEC-085` · 引用卡片 `DEC-089` · **熔断卡片 `DEC-090`** · **无据拒答 `DEC-091`**）+ **接管页**（`DEC-088` · `F1`）+ **Trace 页**（`DEC-093` · `F2`）+ **Eval 页**（`DEC-097` · `F3`，🔴 **是【占位页】不是功能页** —— 见下） |
+| 🔴 **找前端的东西** | ⭐ **`frontend/索引.md`** —— **唯一查找入口**（业务方 2026-10-09 立的：「**不要用 grep 去找，也不准**」） |
 | **对外提供** | `GET /chat` → **302** `/static/web/chat.html`（`api/main.py:538`，**`include_in_schema=False`**）<br>`GET /approvals` → **302** `/static/web/approvals.html`（`api/main.py:547`，**同上**）<br>`GET /trace` → **302** `/static/web/trace.html`（`api/main.py:559`，**同上**）<br>🆕 `GET /eval` → **302** `/static/web/eval.html`（`api/main.py:572`，**同上**）<br>· 页面本体由已挂的 `/static` 托管（零构建、零新服务、零 CORS）<br>⚠️ **四条 302 都在无鉴权基线里**（`scripts/route-auth-baseline.txt`）—— **故意公开**：它们是"给人打开 HTML"的跳转，**本身不含数据**；真正的边界在页面调的后端接口上（⚠️ **`/eval` 例外**：它连后端接口都不调，见下） |
 | **谁在用** | 人（浏览器）。⚠️ **后端不 import 它、没有任何 `.py` 依赖它** —— 这就是本目录此前一直是"没人管"的原因 |
 
