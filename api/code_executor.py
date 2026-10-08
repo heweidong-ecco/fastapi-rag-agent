@@ -1,7 +1,9 @@
 """
 代码执行器：安全沙箱（**面向 LLM 的工具外壳**）。
 让 Agent 能编写并执行 Python 代码，处理精确计算和自动化任务。
-更多高级沙箱方案：本代码最下方，只备注了 Docker 容器隔离 的方法。
+更多高级沙箱方案：本代码最下方有一段 **Docker 容器隔离的方案记录**。
+🔴 2026-10-08 更正：那句话一度**是假的** —— 那段记录**被删过**（`2c1a922` 上有、工作树里没有），
+   而本行仍在声称它在。**现已加回**（业务方明确要求），并标明**未生效**。落地点 = 批②。
 更多的方案：RestrictedPython nsjail / Firejail 云函数服务 Pyodide
 等等方案有局限 和安全性，详细对比在"#第68天：代码执行器——安全沙箱执行Python代码"
 详细查看，且有"代码执行器"更多具体用法拓展，高级沙箱的混合布置方案和思路。
@@ -76,3 +78,73 @@ def execute_python(code: str) -> str:
     # ⚠️ 上面这段 docstring 是**给 LLM 读的工具描述**，故留在本层；
     #    真正的逻辑在 code_executor_impl.execute_python_impl（纯 stdlib）。
     return _cached_execute(code)
+
+
+# ============================================================================
+# 以下是**方案记录**，⛔ **不是正在生效的实现**。
+#
+# 🔴 2026-10-08：本段是**业务方自己写的**，原文在 `2c1a922` 上 —— 后来被删了，
+#    而本文件开头那句「本代码最下方，只备注了 Docker 容器隔离 的方法」**仍留着**
+#    ⇒ 那句话一度**是假的**。现按业务方要求（「我之前有注释和 `'''...'''` 注释了
+#    这个方案**如果不在，现在要加**」）**照原文加回**，并在此标明：
+#
+# ⚠️ **现状**：`execute_python_impl` 走的是**本地子进程 + 白名单 + 5 秒硬杀**
+#    （`api/code_executor_impl.py`）—— 那是**与宿主同权限**的，⛔ **没有 OS 级隔离**。
+# 🔴 **业务方 2026-10-07 原话**：「不要暴露在系统中执行，**是安全事故**」
+#    ⇒ 本方案**待落地**，落地点 = **批②**（`fastapi-rag-agent-TODO待办/施工单-20261008-代码执行器进容器.md`）。
+# ⛔ **删本段前先问业务方** —— 他明确要求过保留。
+#
+# ⚠️ 另注：本段里那个 `docker.from_env()` 的写法**正是批② 要避开的** ——
+#    它要求**应用挂 `/var/run/docker.sock`**，那等于把宿主 root 交给应用。
+#    批② 改走**独立执行器容器**（应用只发 HTTP）。见该施工单「为什么不是挂 docker.sock」。
+# ============================================================================
+'''
+以下只是最基础的 简单的Docker 容器隔离 代码，不够完整，只是基础的代码。
+更详细完整的代码和方案在“第68天：⭐️代码执行器 安全沙箱执行Python代码”“将代码执行器升级为 Docker 容器隔离 执行方案和代码。”
+
+Docker 容器隔离
+
+原理：为每次代码执行启动一个全新的、最小化的 Docker 容器（如 python:3.10-slim），将代码注入容器，执行后立即销毁。容器天然提供进程、文件系统、网络和内存的隔离。
+优点：
+
+近乎完美的隔离性，即使代码有恶意也几乎无法影响宿主机。
+可自由配置容器环境（预装库、资源限制等）。
+生态成熟，工具链丰富。
+缺点：
+
+启动延迟高：容器启动需要1-3秒，不适合高频实时调用。
+资源消耗较大（每个容器占用内存、CPU）。
+需要管理 Docker 环境和镜像。
+推荐实现：
+
+python
+import docker
+import tempfile
+import os
+
+client = docker.from_env()
+
+def run_code_in_docker(code: str) -> str:
+    # 将代码写入临时文件
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+        f.write(code)
+        tmp_path = f.name
+
+    try:
+        # 启动容器执行代码
+        container = client.containers.run(
+            image='python:3.10-slim',
+            command=f'python /code/{os.path.basename(tmp_path)}',
+            volumes={os.path.dirname(tmp_path): {'bind': '/code', 'mode': 'ro'}},
+            network_disabled=True,      # 禁用网络
+            mem_limit='128m',           # 内存限制
+            cpu_period=100000,
+            cpu_quota=50000,            # 限制CPU使用
+            remove=True,                # 执行后自动删除
+            timeout=10,                 # 超时10秒
+            stderr=True,
+        )
+        return container.decode('utf-8')
+    finally:
+        os.unlink(tmp_path)
+'''
