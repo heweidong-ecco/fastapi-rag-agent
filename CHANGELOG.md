@@ -10,6 +10,17 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- 🔴 **「禁子串」守卫盯的是【字节】、不是【行为】**（2026-10-08 · `N14`）——
+  `api/static/js/sse.test.js` 那条结构型守卫要求那句拒答语在前端**一个字都不许出现**，
+  而它落地成了 `readFileSync(f).includes(REFUSE)` ⇒ **整份文件扫，注释也算**。
+  🔴 **2026-10-06 当场撞上**：我把那句写进 `chat.html` 的**注释**当例证 ⇒ 守卫红 ⇒ **我把注释改掉了**
+  ⇒ **同一块石头还在原地**（下一个写注释解释这条守卫的人会再红一次）。
+  **修法**：拆出 `stripComments` / `refusalOwners` 两个**纯函数**（可拿夹具测），守卫改走它们。
+  ⛔ **有意不剥行尾 `//`**（剥它要区分 `https://` 里的 `//`，而**剥错的方向是"守卫变瞎"**，比多报一次糟得多）。
+  📌 **判据**：`node --test api/static/js/sse.test.js` ⇒ **34 passed**（改前 32）；
+  🔴 **反证两条**：探针文件**代码**里含那串 ⇒ 守卫**红**（退出码 1）；**注释**里含那串 ⇒ **绿**（退出码 0）。
+  📄 `DEC-112`
+
 - 🔴 **MCP 长驻会话【不会自愈】—— 子进程被杀之后永远起不来**（2026-10-08 · 批④-B **验证**阶段抓出）——
   **业务方点名要验的一条**（「真杀子进程的恢复」）。
 
@@ -78,6 +89,38 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- 🔴 **`/rag/stream_search` 现在【建轨迹】了 —— 演示路径 `/trace` 上半页不再必然空白**（2026-10-08 · `N16` · `DEC-093` §六·1）——
+  改前全仓只有 **2 处** `start_trace`、**都在 Agent 链** ⇒ 对话页走的那条检索链**从不建轨迹**
+  ⇒ 打开 `/trace`，上半页**是空的**（⚠️ 不是坏，是**从没建过**）。业务方 2026-10-07 裁「**要做到，修复好**」。
+  **落点**：端点开头 `start_trace(user_name, thread_id, req.question)`（**排在 B8/B11 两道闸之前** ——
+  与 `api_v1_agent.py:1646` 同序：「超限被拒时，追踪里仍留得下这次尝试的痕迹」）
+  ＋ `_complete` 里 `finish_trace(...)`（**任何 `yield` 之前**，理由同 `DEC-084` 的记账）。
+  ⚠️ **取消 / 出错两条出口【不收尾】**（与 Agent 链同款）；`total_tokens` / `total_cost` **不传**（与另两个调用点一致）。
+  ⚠️ **范围有意收窄**：**只补这一条链**，其余花钱的链**仍不建轨迹**。
+  🔴 **连带**：`api/static/js/trace.js` 的 `emptyTraceReason` 那句「演示路径本来就不写轨迹」**因此变成假话** ⇒
+  文案与 `trace.test.js` 的断言都跟着改了（⚠️ 旧断言 `/检索链/` 是那句假话的**翻版**，留着会把假话钉死）。
+  📌 **判据**：`grep -rn '^[[:space:]]*start_trace(' api/ --include='*.py' \| grep -v '^api/test_'` ⇒ **2 → 3** ·
+  `pytest api/test_rag_trace_wiring.py` ⇒ **3 passed**。📄 `DEC-093` §七
+
+- **`N13` 熔断卡片「怎么联系」填入真联系入口**（2026-10-08）——
+  `api/static/js/sse.js` 的 `BREAKER_CONTACT`：`'example@example.com'`（RFC 2606 **保留域**）⇒ **真地址**。
+  ✅ `N13` 的判据原文就是「**换成一串【真】地址那天，本条才该关**」⇒ **已结清**。
+  ⚠️ **本值【没有用例钉】**（`sse.test.js` 只钉四个**键**都在且非空 ⇒ 改值后 **32 条全绿**）⇒ 它靠的仍是「有人读到」。
+  📌 **判据**：`grep -n 'BREAKER_CONTACT = ' api/static/js/sse.js`。📄 `DEC-095` §七
+
+- **`docs/specs/` 立「函数名锚点」规**（2026-10-08 · `N8` · `DEC-100` §一·①）——
+  spec 里指代代码位置时**写函数名 / 类名**，⛔ 不写 `:NNN`（行号**系统性漂移**，且漂移是**静默**的）。
+  ⚠️ **只立规**，存量 `:NNN` **一个都没清**（`DEC-100` 明文禁止顺手清）。
+  📌 **判据**：`grep -n '锚点约定' docs/specs/README.md` ⇒ 3 命中；
+  🔴 **反证**：`grep -o ':[0-9][0-9][0-9]' docs/specs/*.md | grep -v README | wc -l` **落地前后都是 644**。
+
+- **`§二 8` `calculator` 的间接提示注入面 —— 按「措施已存在」落终态**（2026-10-08 · `DEC-100` §一·②）——
+  那三条方向里的 **①「prompt 加固」从来没被定义成一件可执行的事**（`DEC-100` 全文只有一句「✅ 最便宜」，
+  **无落点、无判据**）⇒ Agent 替它拟一条就是**替业务方拍板**。
+  ✅ **实质缓解早已在场**：`safe_math` 三道闸 ＋ 守卫 `api/test_safe_math_wiring.py`，把面收到「**纯算术**」。
+  🔴 **⛔ 不是「不做」，是「已覆盖」**（依 `docs/待办总表.md` 头部：「已经覆盖能力的就可以删除」）。
+  ⚠️ **注入面在原理上拆不掉**（`DEC-075` §五·2）—— 它换的是**攻击者**，不是可行性。⛔ `safe_math` 三道闸一条都不能撤。
+
 - 🔌 **批④-A · 解 `mcp` SDK 上界到 2.x + 服务端 API 迁移**（2026-10-08）——
   `api/requirements.txt`：`mcp>=1.0.0,<2` → **`mcp>=2.3.0,<3`**。
 
@@ -116,6 +159,18 @@ All notable changes to this project will be documented in this file.
   · 母体路线 ⇒ `DEC-104` · 事实依据 ⇒ `docs/reference/mcp-stateless-and-transport.md`
 
 ### Added
+
+- 🚦 **CI 形状门：每个 job 必须带 `timeout-minutes`**（2026-10-08 · `§七·2` · `DEC-081` §四·附）——
+  `ci.yml` 现两个 job **都配了**（`syntax` 5 · `offline-tests` 15），但**靠人记得**：
+  新建第 3 个 job 时忘了配 ⇒ **静默没有上限**。
+  🔴 **为什么值得一道门**：卡住的 job **不消耗失败次数、只消耗时间**，
+  而「卡住」与「跑得很慢」在机器痕迹上**完全一样** ⇒ 没有上限时，「卡住」**不是一个显式状态**。
+  **落点**：新增 `scripts/check_ci_job_timeouts.py`（**纯标准库**）＋ `scripts/test_check_ci_job_timeouts.sh`（**自测 8 条**）
+  ＋ 接进 `.github/workflows/ci.yml` 的 run 块（⛔ 不新开 step —— `ci-local.sh` 只跑含 `pytest` 的那一整块）。
+  **三个取舍**：⛔ **不 `import yaml`**（`PyYAML` 不在 `api/requirements.txt` ⇒ CI 里没有；⛔ 不为一道门给 demo 镜像加依赖）·
+  退出码 **`0` / `1` / `2`** 三分（**`2` = 没能判定，⛔ 不是通过**）· 必须**点名**是哪个 job。
+  📌 **判据**：`python3 scripts/check_ci_job_timeouts.py` ⇒ `✅ … syntax=5 · offline-tests=15`，退出码 **0**。
+  ⚠️ **已知边界**：本门跑在 `ci.yml` 里而它检查的就是 `ci.yml` ⇒ 谁把 `offline-tests` 整个删掉，本门**连同它一起消失**。
 
 - 🧩 **批③ · 三个新工具：`date_calc` / `json_extract` / `stats`**（2026-10-08）——
   **工具数 4 → 7**。三个都是**本地纯函数**，⛔ 不联网、⛔ 不新建模块。

@@ -210,14 +210,20 @@ test('有轨迹时不返回任何理由', () => {
   assert.strictEqual(emptyTraceReason({ hasTrace: true }), null);
 });
 
-test('🔴 有成本记录但没轨迹 ⇒ 必须点出"走的是检索链"', () => {
-  /* 演示路径（/chat → /rag/stream_search）**必然**落到这一支：
-     全仓只有 mcp_agent_chat / mcp_agent_chat_stream 调 start_trace。
-     ⇒ 这句话是页面上唯一能阻止"看起来整个功能坏了"的东西。 */
+test('🔴 有成本记录但没轨迹 ⇒ 必须把两条真原因都解释出来', () => {
+  /* 靶子没变：**花钱了却没轨迹，页面必须解释清楚**（那是唯一能阻止
+     "看起来整个功能坏了"的东西）。
+     🔴 但 **2026-10-08（`N16`）改过文案** —— 旧文案写的是「走的是检索链，而本仓目前
+     **只有 Agent 链**会写轨迹」，而 `N16` 之后 `/rag/stream_search` **也建轨迹了**
+     ⇒ 那句**变成了假话**。旧的断言 `assert.match(s, /检索链/)` 是那句假话的**翻版**
+     ⇒ 留着它会把假话**钉死**，所以一并改掉。
+     ⚠️ 本条的靶子是「**有没有解释清楚**」，⛔ 不是「页面上有没有出现某三个字」。 */
   const s = emptyTraceReason({ hasTrace: false, costCount: 6 });
-  assert.match(s, /6 笔模型调用记录/);
-  assert.match(s, /检索链/);
-  assert.match(s, /下半页/);
+  assert.match(s, /6 笔模型调用记录/, '要点出"确实发生过"的那个证据');
+  assert.match(s, /不建轨迹/, '要说清"那条链不建轨迹"这条原因');
+  assert.match(s, /重启/, '也要给出"重启即空"这条原因（两种都可能，页面分不出来）');
+  assert.match(s, /stream_search/, '要点出【哪些】链会建，⛔ 不是含糊说"有些链"');
+  assert.match(s, /下半页/, '要说清成本账是完整的 —— 别让人以为整个功能坏了');
 });
 
 test('一点记录都没有 ⇒ 要点出"重启即空"', () => {

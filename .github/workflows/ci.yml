@@ -255,6 +255,18 @@ jobs:
           bash scripts/test_check_doc_links.sh
           bash scripts/test_check_doc_orphans.sh
 
+          # ⭐ CI 形状门（2026-10-08 加，`§七·2`）—— **每个 job 必须带 `timeout-minutes`**。
+          #   理由：卡住的 job **只烧时间、不烧失败次数**，而「卡住」与「跑得很慢」在
+          #   机器痕迹上**完全一样** ⇒ 没有上限时，「卡住」不是一个**显式状态**。
+          #   现状两个 job 都配了（`syntax` 5 · `offline-tests` 15），但**靠人记得**。
+          #   🔴 退出码：`0` 全带 · `1` 有点名的 job 缺/值非法 · **`2` = 没能判定（⛔ 不是通过）**。
+          #   🔴 **纯标准库**，⛔ 不 `import yaml` —— `PyYAML` 本机 `venv` 里有，
+          #      但**不在 `api/requirements.txt`** ⇒ CI 里没有；⛔ 不为一道门给 demo 镜像加依赖
+          #      （同「`ruff` 不进 requirements」那条理由）。
+          #   ⚠️ 自测是 `.sh`（8 条），必须用 `bash` 跑 —— ⛔ 不能用 `"$PY_ROUTE"`。
+          "$PY_ROUTE" scripts/check_ci_job_timeouts.py
+          bash scripts/test_check_ci_job_timeouts.sh
+
           # ⭐ 两个【提醒型】hook 的自测（2026-10-05 加，`DEC-080`）—— 10 条，~1s。
           #   ⚠️ hook 只在 Claude 会话里跑，**CI 里不会触发它们** —— 那为什么还要在这儿测？
           #      因为被测的是**脚本本身**（判据 / 路径剪枝 / 不崩），⛔ 不是"CI 里会发生什么"；

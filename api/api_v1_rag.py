@@ -41,6 +41,8 @@ from deps import require_ws_user
 from db import get_db, insert_document
 from db import search_similar  # 🔴 2026-10-03 乙段（DEC-056）：stream_search 改走共享层
 from embedding_client import get_embedding
+# 🔴 `N16`（2026-10-08 · `DEC-093` §六·1）：检索链也要建轨迹 —— 见 `stream_search` 里那两处调用。
+from tool_visualizer import start_trace, finish_trace
 
 from permission import get_user_role, UserRole  # ⚠️ 2026-10-03 删 `get_user_quota`（本文件从未使用；该函数已随 DEC-046 一起删）
 from db import invalidate_bm25_cache
@@ -716,6 +718,18 @@ async def stream_search(
     ⚠️ 2026-09-20 修：这段 docstring 原先**躺在两句代码之后**（函数体第三句），
        是**空操作** —— 函数本身**没有 docstring**。已上移到签名正下方。
     """
+    # 🔴 `N16`（2026-10-08 · `DEC-093` §六·1）：**检索链也要建轨迹**。
+    #    改前全仓只有 2 处 `start_trace`、**都在 Agent 链** ⇒ 演示路径（`/chat` 走的就是本端点）
+    #    **从不建轨迹** ⇒ 打开 `/trace`，上半页**是空的**（⚠️ 不是坏，是**从没建过**）。
+    #
+    # 🔴 **位置：排在 B8 / B11 两道闸【之前】** —— 与 Agent 链**同序**，理由抄
+    #    `api/api_v1_agent.py:1646` 那句原话：「超限被拒时，追踪里仍留得下这次尝试的痕迹」。
+    #    ⛔ 别"顺手"挪到闸后面 —— 那会让**被拦下的请求**在页面上**消失**，
+    #    而"被拦下的请求"恰恰是排查时最想看到的那一类。
+    # 🔴 `user_name` 是端点参数（`Depends(get_current_user_hybrid)`）⇒ 追踪轴也是**按人分**的
+    #    （存储键 = `session_key(user_name, thread_id)`，见 `tool_visualizer` 模块头）。
+    start_trace(user_name, thread_id, req.question)
+
     # 0. 若前端未主动传历史，则从 Redis 加载该用户最近5轮对话
     if not req.conversation_history:
         req.conversation_history = get_chat_history(user_name, thread_id=thread_id)
@@ -832,6 +846,14 @@ async def stream_search(
         #    可钱**已经花了**。⚠️ `persist_turn` 仍留在原位（那是 `DEC-055` 定的，⛔ 本轮不动它）。
         # 🔴 `DEC-085` 契约 B：`record` 现在**返回载荷**（`None` = 没记成）。
         payload = tap.record(get_llm_stream(), user_name=user_name, thread_id=thread_id)
+        # 🔴 `N16`（2026-10-08 · `DEC-093` §六·1）：**收尾**这条轨迹。
+        #    ⚠️ 与上面 `tap.record` **同一个位置理由**（`DEC-084`）：排在**任何 `yield` 之前** ——
+        #       `yield` 是 await 点，被"二次投递的取消"打断 ⇒ 排在它后面的收尾**一件都不跑**。
+        #    ⚠️ `total_tokens` / `total_cost` **不传** —— 与另两个调用点保持一致。
+        #       `api/static/js/trace.js` 的 `summarizeTrace` 明写：「服务端这两个字段【现在恒为 0】……
+        #       ⇒ 本页**不显示**它们（免得把假数印出来）」⇒ 要传它们是**另一件事**（得连页面一起改）。
+        #    ⚠️ 取消 / 出错两条出口**不收尾** —— 与 Agent 链同款（「追踪里留一条'开了没结束'」）。
+        finish_trace(user_name, thread_id, "".join(collected))
         # 发送结束信号
         yield DONE_FRAME
         # 🔴 `F4` ①（`DEC-091`）：**这一轮算不算"无据拒答"** —— 让"拒答了"成为一个

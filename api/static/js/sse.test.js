@@ -101,6 +101,44 @@ function frontendSources() {
   return out;
 }
 
+// ============ 剥注释：让「禁子串」守卫盯着【代码】，⛔ 不是字节（`N14` · 2026-10-08） ============
+//
+// 🔴 原先那条守卫是 `readFileSync(f).includes(REFUSE)` —— **整份文件扫，注释也算**，
+//    而它的靶子其实是**行为**（前端不许自己认拒答）。
+//    2026-10-06 施工时当场撞上：我把那句拒答语写进 `chat.html` 的**注释**当例证 ⇒ 守卫红
+//    ⇒ **我把注释改写掉了**。⇒ **同一块石头还在原地**：下一个写注释解释这条守卫的人，
+//    会**再红一次**（而红了之后最省事的做法，还是把注释改掉 —— 那就是**每次都要有人白查一遍**）。
+//    📄 `docs/复盘/2026-10-06-守卫的靶子没定准.md`（本条的正式出处）。
+
+// ⚠️ 针脚**分两段拼** —— 理由同上面那条 `NEEDLE`：让本文件自身不含那个连续子串。
+//    🔴 `N14` 起它挂在**模块作用域**（下面 `refusalOwners` 也要用它）。
+const REFUSE = '无法' + '回答';
+
+/** 剥掉注释 —— 只剥**三种**，取【保守】策略。
+ *
+ * ⛔ **有意不剥行尾 `//` 注释**：剥它要区分 `https://` 里的 `//`（那需要一个真词法器）。
+ *    而"剥错"的方向是**守卫变瞎**（假绿）—— 比多报一次**糟得多**。
+ *    `N14` 的事故是一整块注释，本剥法覆盖得到。
+ * ⛔ **剥的是注释，不是字符串**：把串拆成 `'无法' + '回答'` 那种**代码**照旧会命中 ——
+ *    那属于**故意规避**，⛔ 不是本守卫要解决的问题（本守卫防的是**漂移**）。
+ */
+function stripComments(text) {
+  return String(text)
+    .replace(/<!--[\s\S]*?-->/g, '')      // HTML 注释
+    .replace(/\/\*[\s\S]*?\*\//g, '')     // JS 块注释
+    .replace(/^[ \t]*\/\/.*$/gm, '');     // JS【整行】注释
+}
+
+/** 纯逻辑：给定一组 `{name, text}`，回「谁在【代码】里认了拒答」。
+ *
+ * ⚠️ 拆出来是为了**能拿夹具测** —— 否则只能拿真仓的文件测，而真仓的文件**不会为了测它而变脏**。
+ */
+function refusalOwners(sources) {
+  return sources
+    .filter((s) => stripComments(s.text).includes(REFUSE))
+    .map((s) => s.name);
+}
+
 test('尺子有读数：前端确实扫到了文件，且 sse.js 在里面', () => {
   // 🔴 本仓 `DEC-065`（空清单静默假通过）：下面那条拿**空集合**断言会一路绿着放行。
   const files = frontendSources();
@@ -358,15 +396,44 @@ test('refusalNotice：⛔ 不许暗示"等一会儿/重试就好"（那是做不
     `把无据拒答当成了限流类问题（暗示"等/重试就好"）：${text}`);
 });
 
+test('stripComments：三种注释里的那串【都不算】', () => {
+  // 🔴 `N14` 的正身：注释里写它是**允许**的（那正是在解释这条守卫）。
+  const src = stripComments(
+    '<p>ok</p><!-- ' + REFUSE + ' 当例证 -->\n' +
+    '/* 块注释里的 ' + REFUSE + ' */\n' +
+    '   // 整行注释里的 ' + REFUSE + '\n' +
+    'const keep = 1;\n',
+  );
+  assert.ok(!src.includes(REFUSE), `注释没被剥干净：${JSON.stringify(src)}`);
+  assert.ok(src.includes('const keep = 1;'), '剥过头了 —— 把代码也吃掉了');
+});
+
+test('🔴 反证：代码里的那串【要算】—— 防「剥多了 ⇒ 守卫变瞎」', () => {
+  // ⚠️ 这条是**取反检验**：把「剥注释」做过头（比如按整行丢），下面这条会**静默变绿**。
+  //    没有它，「剥干净了」与「把守卫剥瞎了」在输出上**长得一样**。
+  assert.deepStrictEqual(
+    refusalOwners([
+      { name: 'a.js', text: 'if (t.includes("' + REFUSE + '")) {}' },
+      { name: 'b.html', text: '<!-- ' + REFUSE + ' -->' },
+    ]),
+    ['a.js'],
+  );
+});
+
 test('前端 ⛔ 不许自己认拒答 —— 判据只有后端一份（结构型：数的是【文件】）', () => {
   // 🔴 与「引用正则只许有一份」同型。拒答那句在 `api_v1_rag.py` 的 prompt 里。
   //    前端若也写一份去认，两处一旦漂移：**后端发了帧、前端却按另一套判**，
   //    或者反过来 —— 而**页面上不报任何错**。
-  // 针脚分两段拼，让本文件自身不含那个连续子串（否则这条守卫会被**自己**绊倒）。
-  const REFUSE = '无法' + '回答';
-  const hit = frontendSources()
-    .filter((f) => fs.readFileSync(f, 'utf8').includes(REFUSE))
-    .map((f) => path.relative(path.join(JS_DIR, '..', '..'), f).replace(/\\/g, '/'));
-  assert.deepStrictEqual(hit, [],
-    `前端自己认起拒答来了：${hit.join(', ')} —— 判据只该在后端一处，前端只认帧`);
+  // 🔴 `N14`（2026-10-08）：靶子是【代码】，⛔ 不是字节 —— 走 `stripComments`，**注释不算**。
+  //    ⚠️ 上面那条「引用正则」守卫（用 `NEEDLE`）**没有**跟着改：它的针脚是
+  //    `来源\s*:` 那种**正则字面量**形状，**解释性文字里不会自然出现**；
+  //    而本条那句是**中文白话**，写注释时**极易**被引到。⇒ 风险不同，⛔ **不顺手一起改**。
+  assert.deepStrictEqual(
+    refusalOwners(frontendSources().map((f) => ({
+      name: path.relative(path.join(JS_DIR, '..', '..'), f).replace(/\\/g, '/'),
+      text: fs.readFileSync(f, 'utf8'),
+    }))),
+    [],
+    '前端自己认起拒答来了 —— 判据只该在后端一处，前端只认帧',
+  );
 });

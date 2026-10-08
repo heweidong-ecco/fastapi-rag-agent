@@ -131,6 +131,16 @@
   ✅ ~~**仍未修（且都不是隔离问题）**：`jwt_ask` 的「拿到 `question` 却不拿它做检索」~~ ⇒ **2026-10-04 端点整体删除**（`DEC-064`）⇒ 该项**已消账**。
   ⚠️ **说清楚是哪种消账**：那是**把矛盾体删掉了**，⛔ **不是"把它修成会检索了"** —— 见上方专节。
   ✅ **`/rag/ask` 的定位**已在 2026-10-03 由「已裁待删」变为**已删**（`DEC-057`）⇒ 该项已消账。
+- ✅ **2026-10-08（`N16` · `DEC-093` §六·1）：`/rag/stream_search` 也【建轨迹】了**。
+  改前全仓只有 **2 处** `start_trace`（**都在 Agent 链**）⇒ 演示路径（`/chat` 走的就是本端点）
+  **从不建轨迹** ⇒ `/trace` 上半页**必然是空的**（⚠️ 不是坏，是**从没建过**）。
+  · **两处**：端点开头 `start_trace(user_name, thread_id, req.question)`（**排在 B8/B11 两道闸之前**，
+    与 `api_v1_agent.py:1646` 那句「超限被拒时，追踪里仍留得下这次尝试的痕迹」**同序**）·
+    `_complete` 里 `finish_trace(...)`（**任何 `yield` 之前**，理由同 `DEC-084` 的记账）。
+  · ⚠️ **取消 / 出错两条出口【不收尾】** —— 与 Agent 链同款（追踪里留一条"开了没结束"）。
+  · ⚠️ `total_tokens` / `total_cost` **不传** —— 与另两个调用点一致（`trace.js` 明写那两格**恒为 0**）。
+  📌 判据：`api/test_rag_trace_wiring.py`（**3 条**：建了 / 收尾了 / 键写对了 + 被拒也留痕）·
+  `grep -rn '^[[:space:]]*start_trace(' api/ --include='*.py' | grep -v '^api/test_'` ⇒ **现跑**
 
 ## ⚠️ 看代码会误判的地方 ⭐
 
@@ -151,6 +161,7 @@
 | 🔴 **「`/rag/upload_document` 里没看到 `invalidate_bm25_cache()` ⇒ 它不清 BM25 缓存」** | ⛔ **2026-10-04 起这是误读**（`DEC-063`）—— 不变量**下沉到了写操作自己那层**：它的插入走 `db.insert_document()`（`:321`），而**那个 helper 自己清缓存**。<br>⚠️ **改前它确实不清**（待办 **N3**）：上传的新文档在本进程的 BM25 召回里"不存在"，直到别的写路径顺手清了或重启 —— 而**同一个坑 2026-09-11 修过一次、只修给了 `/rag/insert`**。<br>⇒ **判据不是"这个函数里有没有那句话"，是"它写库的那一层有没有"** —— 守卫 `api/test_bm25_cache_invalidation_wiring.py` 正是**从 AST 推导写路径**来判这件事的。 |
 | 🔴🔴 **「流式拿不到 `usage_metadata`，除非先开 `stream_usage`」** | ⛔ **错的，而且这条错话在本仓活了两天、进了三份文档**（`DEC-084` §二 · 复盘 `2026-10-06-未核的推断被当成前提写进文档.md`）。<br>**实测**：本仓 provider 把 `usage_metadata` 挂在**最后一帧**（`content=''`）上，**默认 `stream_usage=False` 也拿得到**；且开与不开，按 `llm_chunk_text` 口径过滤后**帧序列逐帧相同**。<br>📌 **判据（可打印，别信这句话，去跑）**：<br>`venv/bin/python "fastapi-rag-agent-TODO待办/探针-流式与记账.py"` ⇒ 默认参数下 `聚合 usage_metadata = {input_tokens …}` 非空。<br>⇒ **真根因是"没人读那一帧"**：`llm_chunk_text` 返回 `chunk.content or None`，`''` 被判空丢掉。 |
 | 🔴 **「`stream_search` 传 `extract=llm_chunk_text`，所以它只负责发帧」** | ⛔ **2026-10-06（`DEC-084`）起不是** —— 现在传的是 **`tap.extract`**（`_StreamUsageTap` 的方法）：它**返回的仍是 `llm_chunk_text(chunk)`**（发帧口径一字未动），但**顺手把每一块 `+` 进聚合**（`self._agg`），收尾时交给 `record_from_response`。<br>⚠️ **为什么必须塞在 `extract` 里**：骨架唯一能看到**每一块**的钩子就是它（`sse.py`：`text = extract(item) …` **排在 `if not text: continue` 之前**）；骨架自己攒的 `collected` 只收**过滤后**的文本 ⇒ 那份里永远没有 usage。<br>📌 判据：`grep -n 'extract=' api/api_v1_rag.py` ⇒ **`tap.extract`**，⛔ 不是 `llm_chunk_text`。 |
+| 🔴 **「`stream_search` 不建轨迹 ⇒ `/trace` 上半页永远是空的」** | ⛔ **2026-10-08（`N16`）起不成立**。改前全仓只有 2 处 `start_trace`、**都在 Agent 链** ⇒ 演示路径（`/chat` 走的就是本端点）**从没建过轨迹**（当时 `DEC-093` §62 的原话：「演示路径上，上半页**必然**是空的」）。<br>现在本端点在**两道闸之前** `start_trace(...)`、在 `_complete`（**任何 `yield` 之前**）`finish_trace(...)`。<br>🔴 **顺序是有意的**：排在闸之前 ⇒ **被拦下的请求也留痕**（排查时最想看到的就是那一类）。⛔ 别"顺手"挪到闸后面 —— `api/test_rag_trace_wiring.py::test_rejected_request_still_leaves_a_trace` 钉的就是这个顺序。<br>⚠️ **取消 / 出错两条出口【不收尾】**；`total_tokens` / `total_cost` 也**不传**（与另两个调用点一致）。<br>📌 判据（可打印）：`grep -rn '^[[:space:]]*start_trace(' api/ --include='*.py' \| grep -v '^api/test_'` ⇒ **现跑**（⛔ 别抄数） |
 | ⚠️ **「把 `api_v1_rag.py` 加进 `test_rag_billing_wiring._RAG_LLM_FILES` 就能守住了」** | ⛔ **加不进去**：那条 AST 守卫的 `_called_names(fn)` **刻意不下钻嵌套函数**，而本端点的记账必然在 `_complete`（嵌套 async gen）里 ⇒ 加进去**恒红**。⇒ 该端点的守卫是**行为判据**（`test_rag_billing_wiring.py` 末尾 5 条，驱动真端点 + 真骨架）—— 对这条链它**严格更强**。 |
 | 🔴🔴 **「看到帧序 `内容 → [DONE]` 就到头了」** | ⛔ **`[DONE]` 后面还有帧** —— 完整帧序是 **`内容… → [DONE] → no_answer（仅拒答时）→ sources → usage`**（`:831` 先发 `DONE_FRAME`，`:841` 才发 `no_answer`，`:851` 才发 `sources`）。<br>⇒ 见 `[DONE]` 就 `return` / 断流 = **拒答标志、引用、费用整段丢**，而**页面上不报任何错**（表现就是"这次没有引用、也没有费用行"）。<br>⚠️ **对【所有】消费者都成立**，⛔ 不只是对话页 —— 任何"读到 `[DONE]` 就收工"的客户端都会静默丢这几段。 |
 | 🔴 **「没有 `usage` 帧 ⇒ 这轮不要钱」** | ⛔ **另一种可能：通道提前断了。** `usage` 只在**最后一帧**回来 ⇒ **取消 / 出错时那帧根本到不了**。<br>⚠️ 所以"没有费用行"是**两个原因共用的一个表现**，⛔ 别合并读：**被中断**（真没计费 · `DEC-084` §五）vs **半路断了而钱已经花了**（账在库里、只是没报给前端）。<br>📌 区分靠**出口**（`aborted` / `error` / `done`），⛔ 不靠"有没有 usage"。 |
