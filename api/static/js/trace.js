@@ -140,10 +140,16 @@ function summarizeTrace(traceJson) {
 
 /* 上半页为空时**必须解释为什么**（⛔ 不是印一句"未找到"）。
 
-   本仓实测的三条真原因，按可能性排：
-   ① **演示路径本来就不写轨迹** —— `/chat` → `/rag/stream_search` 走的是检索链，
-      而全仓只有 `mcp_agent_chat` / `mcp_agent_chat_stream` 调 `start_trace`；
-   ② **重启即空** —— 追踪轴是**进程内存**；
+   🔴 **2026-10-08（`N16`）改过一次文案** —— 原先这里写的是
+      「**演示路径本来就不写轨迹** —— `/chat` → `/rag/stream_search` 走的是检索链」，
+      而 `N16` 之后**那条链也建轨迹了** ⇒ 那句话**变成了假话**。
+   ⚠️ **页面里印假话比印"未找到"更糟**：它会把排查引到**错的方向**上，
+      而且看的人**没有理由怀疑它**。⇒ 文案必须跟着事实走。
+
+   今天**仍然成立**的三条原因：
+   ① **那条链不建轨迹** —— 会建的是 `/agent/mcp_chat` · `/agent/mcp_chat_stream`
+      （`DEC-093`）与 `/rag/stream_search`（`N16`）；**其余花钱的链仍不建**；
+   ② **重启即空** —— 追踪轴是**进程内存**，重启清空，而下半页的成本在 PG 里活着；
    ③ 这个 thread_id 真没被用过。 */
 function emptyTraceReason(info) {
   const it = info || {};
@@ -153,10 +159,11 @@ function emptyTraceReason(info) {
   const head = '这个线程没有执行轨迹。';
   if ((it.costCount || 0) > 0) {
     return head +
-      '⚠️ 但它【有 ' + it.costCount + ' 笔模型调用记录】⇒ 请求确实发生、只是没被记轨迹。' +
-      '最可能的原因：它走的是 RAG 检索链，而本仓目前**只有 Agent 链**' +
-      '（/agent/mcp_chat 与 /agent/mcp_chat_stream）会写轨迹（DEC-093）。' +
-      '⇒ 下半页的成本账是完整的，上半页空【不代表】这次请求没花钱。';
+      '⚠️ 但它【有 ' + it.costCount + ' 笔模型调用记录】⇒ 请求确实发生、只是没被记进追踪轴。' +
+      '两种可能：① 它走的那条链不建轨迹（会建的只有 /agent/mcp_chat、' +
+      '/agent/mcp_chat_stream 与 /rag/stream_search 三条）；' +
+      '② API 进程重启过 —— 追踪轴在进程内存里，重启即清空（它不落库）。' +
+      '⚠️ 两种情况下，下半页的成本账都是完整的 ⇒ 上半页空【不代表】这次请求没花钱。';
   }
   return head +
     '两种可能：① 这个 thread_id 从没被用过；' +
