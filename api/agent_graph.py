@@ -8,12 +8,12 @@ import operator
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 from llm_factory import make_llm   # ①b Task 5：model / api_key / base_url / max_tokens 的唯一落点
-from langchain_core.tools import tool
 from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig   # B1：节点要靠它把回调接进模型调用
-from datetime import datetime
-from safe_math import calculate  # DEC-049：`calculator` 的求值实现 —— ⛔ 别改回 `eval`
-from search_tools import web_search  # DEC-051：搜索工具换成 Bing 版（旧的 DuckDuckGo 本机不可达）
+# 🔴 2026-10-08（批① Task 4）：`datetime` / `calculate` / `web_search` / `langchain` 的 `tool`
+#    四个 import **删了** —— 它们**只**服务于本文件原先自带的那两个 `@tool`。
+#    那份已改成从 `mcp_server.TOOLS` 派生 ⇒ 留着就是 `F401`（第 ⑥ 道门会红）。
+#    📌 顺带消掉一处 `F811`：`:221` 有个循环/局部变量也叫 `tool`，原先与这个 import 撞名。
 # 🔴 2026-10-04（`DEC-072`）：本图**原先既不拦也不记** —— 一个 LLM 调用点免费跑。
 #    `record_from_response` 是三张图共用的**唯一记账实现**，⛔ 别在本文件里另抄一份取用量。
 from token_tracker import check_token_budget, record_from_response, BUDGET_EXCEEDED_MSG
@@ -29,30 +29,25 @@ from token_tracker import check_token_budget, record_from_response, BUDGET_EXCEE
 llm = make_llm("fast", "agent")
 
 # ==================== 定义工具 ====================
-@tool
-def calculator(expression: str) -> str:
-    """计算数学表达式，例如 3*4-5/6。"""
-    # 🔴 DEC-049：**不许改回 `eval(expression)`**。
-    #    `expression` 是 LLM 生成的，而 LLM 的输入包含用户提问 / RAG 文档 / 搜索结果
-    #    ⇒ `eval` 等于把任意代码执行开在服务进程里。实测（改前）：喂
-    #    `__import__('os').system('touch /tmp/x')` **命令真的跑了**，返回 `'0'`
-    #    —— 模型收到的是一条正常的"答案是 0"，没有任何异常信号。
-    #    ⇒ 实现与三道闸见 `api/safe_math.py`；接线由 `api/test_safe_math_wiring.py` 守。
-    return calculate(expression)
+# 🔴 2026-10-08 收口（批① Task 4）：本地那份 `calculator` / `date_today` 与
+#    `search_tools.web_search` 的**重复定义删了** —— 它们和 `simple_tools` 那份**逐字等价**，
+#    而重复定义的代价是**漂移**：`DEC-051` 那个「按 `"search"` 分派、真名却是别的」的 bug
+#    就是这么长出来的。⇒ 工具清单改为从 `mcp_server.TOOLS` **派生**
+#    （与 `agent_graph_advanced_learning.py` 同款，那边 2026-09-20 就是这么改的）。
+#
+#    ⚠️ **这是一次【工具 schema 变更】，须在 PR 里显式声明**：LLM 现在看到的
+#       `calculator` / `date_today` 是 `simple_tools` 那份 —— **实现逐字等价**，
+#       但 **docstring 更详细**（多出「输入的必须是纯数学表达式」/「忽略查询参数」两句）。
+#
+#    📌 `eval` 那条（`DEC-049`）没丢：`calculator` 的实现仍在 `api/safe_math.py`，
+#       三道闸与守卫在 `api/test_safe_math_wiring.py`（本文件不再是一个受守的站点）。
+from mcp_server import TOOLS as _MCP_TOOLS
 
-@tool
-def date_today(query: str = "") -> str:
-    """查询今天的日期、星期几。"""
-    now = datetime.now()
-    weekdays = ["一", "二", "三", "四", "五", "六", "日"]
-    return f"今天是{now.year}年{now.month}月{now.day}日，星期{weekdays[now.weekday()]}"
-
-# 🔴 DEC-051：搜索工具从 `DuckDuckGoSearchRun` 换成 `search_tools.web_search`。
-#    理由**不是"图新"**：`api/search_tools.py:47` 记着 2026-09-21 的实测 ——
-#    `duckduckgo.com` 本机**完全不通**（`cn.bing.com` 是当时唯一可达的）。
-#    ⇒ 旧那份在**本机部署下必定失败**，换掉它是修 bug 的一部分，⛔ 不是顺手升级。
-# ⚠️ 两者都返回 `str`、都是**同步**工具 ⇒ `tool_execute` **不必**变 async。
-tools = [web_search, calculator, date_today]
+# ⚠️ `execute_python` 暂**排除** —— 这张图里它**既不在** `SENSITIVE_TOOLS` 审批名单、
+#    **又没有**容器隔离 ⇒ 放进去等于开一条**无审批 + 无隔离**的任意代码执行。
+#    等批②（容器）落地再放开。守卫 ⇒ `test_tool_registry_single_source.py`。
+_EXCLUDED_TOOLS = {"execute_python"}
+tools = [t["func"] for t in _MCP_TOOLS if t["func"].name not in _EXCLUDED_TOOLS]
 
 # 🔴 DEC-051：工具名的**唯一来源** —— 分派必须查这张表，⛔ 不许再在 `tool_execute` 里抄一遍名字。
 #    病根就是"名字写在两处"：抄的那份一旦对不上，落的是 `else` 分支（**如实报错、不崩溃**）

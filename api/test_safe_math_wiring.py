@@ -8,19 +8,41 @@
 
 | 闸 | 覆盖 | 挡什么 |
 |---|---|---|
-| **行为验证** | 4 处（能离线调起来的） | 🔴 最强的一道：**喂真实恶意表达式，验副作用没发生** —— 断言"返回了错误字符串"**不够**，旧代码也返回错误字符串 |
-| **AST 静态** | 5 处（含 `tools_with_cache`） | "还留着 `eval` 调用" / "没把入口指向 `calculate`" |
+| **行为验证** | 1 处（能离线调起来的） | 🔴 最强的一道：**喂真实恶意表达式，验副作用没发生** —— 断言"返回了错误字符串"**不够**，旧代码也返回错误字符串 |
+| **AST 静态** | 2 处（含 `tools_with_cache`） | "还留着 `eval` 调用" / "没把入口指向 `calculate`" |
 
-⚠️ **`tools_with_cache` 只进静态那道**：它被 `@cached_tool` 包着 ⇒ 调一次就要连 Redis，
-   放进离线套件会让 CI 依赖外部服务。而它在生产里**本就不可达** ——
-   ⚠️ **2026-10-07 更新**：原先这里写的是「`api_v1.py:36` 导入了但全文件只用这一次」。
-   那天清 `T6` 存量（段 A · `2bae0bb`）把 `api_v1.py` 里那行 `from tools_with_cache import calculator`
-   **删了** ⇒ **`api_v1.py` 那个行号现在指向一段注释，⛔ 不再成立**。
-   现状更强：**全仓没有任何文件导入它**（判据 ⇒ `grep -rn --include='*.py' "tools_with_cache" api/`
-   ⇒ 只剩它自己那行 `from tool_cache import cached_tool`）。
-   ⚠️ **但【静态那道仍必须留着】** —— 模块本身还在仓里（`T6`「先挂起」），
-   哪天有人把它重新接回某个路由 ⇒ 这一条要能当场红。
-⇒ 它的安全性由静态那条 + 代码本身（`return calculate(...)`）共同保证，**这里如实写明，不假装它也验了行为**。
+## 🔴 2026-10-08：站点面**从 5 处收到 1 处**（批① Task 4 / Task 5）
+
+改前 `calculator` 被**抄了 5 份**；Task 4 删掉 `agent_graph` / `agent_checkpointer` /
+`agent_graph_advanced_learning` 三份，Task 5 再删 `tools_with_cache` 那份
+⇒ **只剩 `simple_tools_impl.calculator_impl` 一处**。
+
+⚠️ **删站点 = 守卫覆盖面缩小**，所以每删一处都得能回答「**它原来守的能力现在由谁守**」：
+
+| 删掉的站点 | 现在由谁守 |
+|---|---|
+| `agent_graph.calculator` | ⭐ **不再是"另一份实现"** —— 该图的 `calculator` **就是** `simple_tools` 那个对象（`simple_tools_impl.calculator_impl`）。⇒ 守 `simple_tools_impl` **= 守它**。<br>📌 **这句话有判据，⛔ 不是嘴上说说**：`test_tool_registry_single_source.py::test_all_graphs_share_the_same_calculator_object` 断言**对象同一**（`is`），不是"名字一样"。 |
+| `agent_checkpointer.calculator` | 同上（同一张对象表） |
+| `agent_graph_advanced_learning.calculator` | 同上 |
+
+⇒ 所以 `OFFLINE_SITES` 收缩成一条**不是"放宽断言"**，是**实现真的只剩一份**了。
+
+🔴 **2026-10-08 · 批① Task 5：`api/tools_with_cache.py` 整个模块删掉了。**
+
+它此前是【第 6 份 `calculator` 拷贝】，靠本文件那条**静态**闸守着
+（它被 `@cached_tool` 包着 ⇒ 调一次就要连 Redis，故一向只进静态那道、不进行为那道）。
+
+**业务方 2026-10-08 原话：「`tools_with_cache.py`，删除，这是定好的事了，这个是重复的，没用了」**
+—— ⇒ 它**不再是**"挂起"（原先的 ⏸ 理由是「缓存机制不是废物，是没接上」；
+现在批① 已经把缓存接在**工具函数体**上，它就成了纯重复）。
+
+📌 **删它之前的两条判据**（都跑过）：
+· `grep -rn --include='*.py' 'tools_with_cache' api/` ⇒ **只剩注释**，没有任何 import
+· `grep -rn 'get_weather' api/` ⇒ 只剩 `api_v1.py` 的两处**注释**（那是个 mock 天气工具）
+
+⚠️ **删掉一个站点 = 守卫面缩小**，所以本文件**同时**收窄了 `ALL_SITES`
+（`tools_with_cache` 那条一并删）—— 两件事**必须同一个 commit**，
+否则"删文件"会悄悄把守卫的面缩了、而没人记得说过。
 """
 
 import ast
@@ -68,10 +90,13 @@ def eval_name_offenders(tree: ast.AST) -> list[int]:
 # 一、行为验证：喂恶意表达式，验"没被执行"
 # ===========================================================================
 #: (模块名, 入口名) —— 入口名不同是因为 `simple_tools_impl` 那份叫 `calculator_impl`。
+#:
+#: 🔴 2026-10-08（批① Task 4）：原先这里有 **4** 条（三张图各自那份 + 本处）。
+#:    那三份**已被删除** —— 它们与 `simple_tools` 那份逐字等价，属"重复定义"。
+#:    ⇒ 现在**只剩一处实现**，见文件头那张「删掉谁、现在由谁守」的表。
+#:    ⚠️ **别再往这里加回模块名** —— 那意味着又有人抄了第 N 份，
+#:       `test_tool_registry_single_source.py` 会先红。
 OFFLINE_SITES = [
-    ("agent_graph", "calculator"),
-    ("agent_checkpointer", "calculator"),
-    ("agent_graph_advanced_learning", "calculator"),
     ("simple_tools_impl", "calculator_impl"),
 ]
 
@@ -140,11 +165,14 @@ def test_site_cannot_read_a_file(module_name, attr, tmp_path):
 
 
 # ===========================================================================
-# 二、AST 静态：5 处都不许再出现 `eval(...)`，且都要指向 `calculate`
+# 二、AST 静态：这些站点都不许再出现 `eval(...)`，且都要指向 `calculate`
 # ===========================================================================
-#: 全部 5 处 —— ⚠️ **这份名单是"收口的定义"**：将来再复制一份 `calculator`，
-#:    要把它加进来（⛔ 别让它成为第 6 个漏网的）。
-ALL_SITES = OFFLINE_SITES + [("tools_with_cache", "calculator")]
+#: 全部站点 —— ⚠️ **这份名单是"收口的定义"**：将来再复制一份 `calculator`，
+#:    要把它加进来（⛔ 别让它成为漏网的）。
+#: 🔴 2026-10-08：**5 → 1**。三张图那三份由 Task 4 删、`tools_with_cache` 那份由 Task 5 删
+#:    ⇒ 现在**只剩 `simple_tools_impl` 一处实现**，故 `ALL_SITES == OFFLINE_SITES`。
+#:    ⚠️ 别把这一行删掉、也别改回字面量列表 —— 留着是为了"加站点时只有一个地方要改"。
+ALL_SITES = list(OFFLINE_SITES)
 
 
 def _site_files():

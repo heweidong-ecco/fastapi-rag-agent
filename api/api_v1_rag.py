@@ -908,7 +908,8 @@ from fastapi import WebSocket, WebSocketDisconnect
 #    在本文件**已被导入过两次**（文件头 + SSE 段）⇒ 删这两行。
 from websocket_callback import WebSocketAgentCallback
 
-from datetime import datetime
+# 🔴 2026-10-08（批① Task 4）：`from datetime import datetime` **删了** ——
+#    它**只**服务于 `get_agent_executor()` 里那个自带的 `date_today`（已删，改为共享工具）。
 
 # ⚠️ 2026-09-17 重构 ⑥ 切开点 5：惰性单例。
 #    原先下面这一整段（初始化 LLM / 定义三个工具 / 建 prompt / create_tool_calling_agent /
@@ -928,47 +929,51 @@ def get_agent_executor():
         # ⚠️ 全部放在函数内：导入期不拉 langchain
         from langchain.agents import create_tool_calling_agent, AgentExecutor
         from langchain_core.prompts import ChatPromptTemplate
-        from langchain_core.tools import tool
-        from safe_math import calculate       # DEC-066：⛔ 别改回 `eval`
-        from search_tools import web_search   # DEC-066 · DEC-051：⛔ 别改回 DuckDuckGo
-
+        # 🔴 2026-10-08 收口（批① Task 4）：**实现**改为调**共享工具**，**外壳保持 async**。
+        #
+        #    🔴 **为什么不能直接把这三个换成 `mcp_server` 那份**：原文是 `async def`，且
+        #       `return await asyncio.to_thread(...)` —— **有意把阻塞丢出事件循环**。
+        #       `mcp_server` 那份是**同步**的 ⇒ 直接替换会**在事件循环里同步跑 20 秒的网络调用**。
+        #       ⇒ 保留 async 外壳，只把**实现**与**工具描述**指向共享工具（那才是本 task 的目的）。
+        #    ⚠️ **【工具 schema 变更】**：工具名由 `search` 改为 `web_search`
+        #       （= 注册表里的真名，与 `SENSITIVE_TOOLS` 默认值一致）；`calculator` /
+        #       `date_today` 的 **docstring 也换成共享那份**（更详细）。
+        #
         #一 初始化模型
         # ⚠️ 角色 = 「模型轴 chat」+「长度轴 answer(2000)」—— 见 `api/llm_factory.py` 的模块 docstring。
         llm = make_llm("chat", "answer")
         _agent_llm = llm
         #二 定义工具
-        @tool
-        async def search(query: str) -> str:
-            """搜索互联网获取实时信息。输入搜索关键词。"""
-            # 🔴 DEC-066：⛔ 别改回 `DuckDuckGoSearchRun`。`api/search_tools.py:47` 记着 2026-09-21 的实测：
-            #    `duckduckgo.com` 本机**完全不通**（`cn.bing.com` 是当时唯一可达的）⇒ 旧写法在本机**必定失败**，
-            #    `/ws/agent` 的搜索**每次都返回失败**。
-            return await asyncio.to_thread(web_search.invoke, query)
+        from langchain_core.tools import StructuredTool
+        from mcp_server import TOOLS as _MCP_TOOLS
 
-        @tool
-        async def calculator(expression: str) -> str:
-            """计算一个数学表达式。例如3*4-5/6。输入的必须是纯数学表达式"""
-            # 🔴 DEC-066：**不许改回 `eval`**。
-            #    这条是**本仓第 6 份 `calculator` 拷贝**，2026-10-04 才被挖出来 ——
-            #    旧判据只认「`ast.Call` 的 `func` 是裸名 `eval`」，而本行写的是
-            #    `asyncio.to_thread(eval, expression)`（`eval` 是**实参**）⇒ **两道守卫都看不见它**，
-            #    但**命令真的跑了**（实测：返回值 `'0'`，`touch` 的文件真被创建）。
-            #    ⚠️ 本行**曾经**匿名可达（`/api/v1/ws/agent` 整条没有鉴权，`DEC-041` 遗留·1）——
-            #    ✅ **2026-10-05（`DEC-075`）已修**：整条链现在要过首帧认证（`require_ws_user`）。
-            #    ⛔ 但**别因此放松这道闸**：`expression` 仍是 **LLM 生成**的，
-            #    而 LLM 的上下文含用户提问 / 搜索结果 ⇒ **间接提示注入面依旧存在**
-            #    （攻击者是自己有合法凭据的用户，不是路人）。
-            #    实现与三道闸见 `api/safe_math.py`；接线由 `api/test_safe_math_wiring.py` 守。
-            return await asyncio.to_thread(calculate, expression)
+        _src = {t["func"].name: t["func"] for t in _MCP_TOOLS}
 
-        @tool
-        async def date_today(query: str = "") -> str:
-            """查询今天的日期、星期几。忽略查询参数。"""
-            now = datetime.now()
-            weekdays = ["一", "二", "三", "四", "五", "六", "日"]
-            weekday_str = weekdays[now.weekday()]
-            # 直接在协程中返回字符串即可，这个操作不阻塞
-            return f"今天是{now.year}年{now.month}月{now.day}日，星期{weekday_str}"
+        def _async_shell(src):
+            """把**同步**工具包成 async 壳：`to_thread` 把它丢出事件循环。
+
+            ⚠️ `name` / `description` / `args_schema` **全部取自共享工具** ——
+               这样"给 LLM 的工具描述"也只有一处事实源（本 task 的目的）。
+            """
+            async def _call(**kwargs):
+                return await asyncio.to_thread(src.invoke, kwargs)
+
+            return StructuredTool.from_function(
+                coroutine=_call,
+                name=src.name,
+                description=src.description,
+                args_schema=src.args_schema,
+            )
+
+        # 🔴 `eval` 那条没丢（`DEC-049` / `DEC-066`）：`calculator` 的实现仍在
+        #    `api/safe_math.py`，三道闸与守卫在 `api/test_safe_math_wiring.py`。
+        #    📌 这里**曾经是本仓第 6 份 `calculator` 拷贝**，且写的是
+        #       `asyncio.to_thread(eval, expression)`（`eval` 是**实参**）⇒ 旧判据
+        #       （只认「`ast.Call` 的 func 是裸名 `eval`」）**两道守卫都看不见它**，
+        #       而**命令真的跑了**（实测返回值 `'0'`）。⇒ `DEC-066` 已修那两条判据。
+        search = _async_shell(_src["web_search"])
+        calculator = _async_shell(_src["calculator"])
+        date_today = _async_shell(_src["date_today"])
 
         tools = [calculator, date_today, search]
 

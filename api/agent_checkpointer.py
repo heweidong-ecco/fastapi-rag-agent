@@ -10,12 +10,10 @@ from langgraph.checkpoint.memory import MemorySaver
 # 新增,RedisSaver 版本不兼容问题还没解决，现在暂时不用
 # from langgraph.checkpoint.redis import RedisSaver  
 from llm_factory import make_llm   # ①b Task 5：model / api_key / base_url / max_tokens 的唯一落点
-from langchain_core.tools import tool
 from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig   # B1：节点要靠它把回调接进模型调用
-from datetime import datetime
-from safe_math import calculate  # DEC-049：`calculator` 的求值实现 —— ⛔ 别改回 `eval`
-from search_tools import web_search  # DEC-051：换掉本机不可达的 DuckDuckGo（见 `agent_graph.py` 同名处）
+# 🔴 2026-10-08（批① Task 4）：`datetime` / `calculate` / `web_search` / `tool` 四个 import 删了 ——
+#    与 `agent_graph.py` 同款、同理由（只服务于已删掉的自带 `@tool`；留着就是 F401）。
 
 # 🔴 2026-10-03（`DEC-056` 丙段）：本图**接上审批门**，语义**从 `agent_graph` 引入**。
 #    ⛔ **不在这里抄一份** —— 抄一份正是 `DEC-051` 记的病根（同一个判断两处实现，
@@ -44,20 +42,17 @@ from agent_graph import SENSITIVE_TOOLS, should_continue, human_approval  # noqa
 llm = make_llm("fast", "agent")
 
 # ==================== 定义工具 ====================
-@tool
-def calculator(expression: str) -> str:
-    """计算数学表达式，例如 3*4-5/6。"""
-    # 🔴 DEC-049：⛔ 不许改回 `eval` —— 理由与实测见 `api/agent_graph.py` 同名处 / `api/safe_math.py`。
-    return calculate(expression)
+# 🔴 2026-10-08 收口（批① Task 4）：本地那份 `calculator` / `date_today` **删了** ——
+#    与 `agent_graph.py` 同款、同理由（重复定义 ⇒ 漂移；`DEC-051` 那个 bug 就是这么长出来的）。
+#    工具清单改为从 `mcp_server.TOOLS` **派生**。
+#    ⚠️ **【工具 schema 变更】**：LLM 现在看到的是 `simple_tools` 那份
+#       （实现逐字等价，但 docstring 更详细）。
+#    📌 `eval` 那条（`DEC-049`）没丢：实现仍在 `api/safe_math.py`，守卫在 `test_safe_math_wiring.py`。
+from mcp_server import TOOLS as _MCP_TOOLS
 
-@tool
-def date_today(query: str = "") -> str:
-    """查询今天的日期、星期几。"""
-    now = datetime.now()
-    weekdays = ["一", "二", "三", "四", "五", "六", "日"]
-    return f"今天是{now.year}年{now.month}月{now.day}日，星期{weekdays[now.weekday()]}"
-
-tools = [web_search, calculator, date_today]
+# ⚠️ `execute_python` 暂**排除** —— 同 `agent_graph.py`：这张图里它**无审批、无隔离**。
+_EXCLUDED_TOOLS = {"execute_python"}
+tools = [t["func"] for t in _MCP_TOOLS if t["func"].name not in _EXCLUDED_TOOLS]
 # 🔴 DEC-051：工具名的**唯一来源** —— 分派查这张表，⛔ 别在 `tool_execute` 里再抄一遍名字。
 #    ⚠️ 本文件是那次「按 `"search"` 分派、而真名是 `duckduckgo_search`」bug 的**第二处**现场
 #       （活路径 = `POST /agent/memory_chat`）。守卫 ⇒ `api/test_tool_dispatch.py`

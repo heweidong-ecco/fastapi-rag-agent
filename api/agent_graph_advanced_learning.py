@@ -7,12 +7,11 @@ import operator
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 from llm_factory import make_llm   # ①b Task 5：model / api_key / base_url / max_tokens 的唯一落点
-from search_tools import web_search
-from langchain_core.tools import tool
+from search_tools import web_search   # ⚠️ **留** —— `:149` 的搜索子图节点直接 `.invoke()` 它
+# 🔴 2026-10-08（批① Task 4）：`tool` / `datetime` / `calculate` 三个 import **删了** ——
+#    它们只服务于本文件原先自带的那两个 `@tool`（已删、改为取共享对象）⇒ 留着就是 F401。
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage,SystemMessage
 from langchain_core.runnables import RunnableConfig   # B1：节点要靠它把回调接进模型调用
-from datetime import datetime
-from safe_math import calculate  # DEC-049：`calculator` 的求值实现 —— ⛔ 别改回 `eval`
 # 🔴 2026-10-04（`DEC-072`）：本图**6 个节点调 LLM，全都既不拦也不记** —— 是三条链里最大的
 #    那个口子（`/agent/advanced_chat` 与它的 `/stream` 都走这张图）。
 #    `record_from_response` 是三张图共用的**唯一记账实现**，⛔ 别在本文件里另抄 6 份取用量。
@@ -26,18 +25,11 @@ from token_tracker import check_token_budget, record_from_response, BUDGET_EXCEE
 llm = make_llm("chat", "agent")
 
 # ==================== 定义工具 ====================
-@tool
-def calculator(expression: str) -> str:
-    """计算数学表达式，例如 3*4-5/6。"""
-    # 🔴 DEC-049：⛔ 不许改回 `eval` —— 理由与实测见 `api/agent_graph.py` 同名处 / `api/safe_math.py`。
-    return calculate(expression)
-
-@tool
-def date_today(query: str = "") -> str:
-    """查询今天的日期、星期几。"""
-    now = datetime.now()
-    weekdays = ["一", "二", "三", "四", "五", "六", "日"]
-    return f"今天是{now.year}年{now.month}月{now.day}日，星期{weekdays[now.weekday()]}"
+# 🔴 2026-10-08 收口（批① Task 4）：本文件自带的 `calculator` / `date_today` **删了** ——
+#    它们与 `mcp_server.TOOLS` 里那两个**同名不同对象**（实现逐字等价 ⇒ 当前无害，
+#    但属"重复定义" —— 本文件下面那句注释自己就登记过它）。
+#    ⛔ **未改子图的形状** —— 只把子图节点 `.invoke()` 的目标换成**共享对象**（见 `TOOLS_BY_NAME`）。
+#    📌 `eval` 那条（`DEC-049`）没丢：实现仍在 `api/safe_math.py`，守卫在 `test_safe_math_wiring.py`。
 
 
 # 🔴 2026-09-20（业务方裁「乙」）：**LLM 工具表改为从 MCP 注册表【派生】—— 单一事实源。**
@@ -63,6 +55,11 @@ from mcp_server import TOOLS as _MCP_TOOLS
 
 tools = [t["func"] for t in _MCP_TOOLS]
 
+# 🔴 2026-10-08（批① Task 4）：子图节点（`:227` / `:242`）要**按名字**取工具对象，
+#    取的是**共享对象**（原先拿的是本文件自带的同名副本）。与 `agent_graph.py` 同款。
+#    ⚠️ 它**不是**分派表 —— 分派那两条在 `agent_graph` / `agent_checkpointer`（守卫 `test_tool_dispatch.py`）。
+TOOLS_BY_NAME = {t["func"].name: t["func"] for t in _MCP_TOOLS}
+
 # 🔴 2026-09-20 另删掉了一行 `tools.extend([fetch_webpage, fetch_webpage_html])` ——
 #    上面那个列表**已经包含**这两个工具 ⇒ 加了之后**各出现两次** ⇒
 #    `llm_react.bind_tools(tools)` 发给 LLM 时被拒：
@@ -71,9 +68,9 @@ tools = [t["func"] for t in _MCP_TOOLS]
 #    ⚠️ 它此前**测不出来** —— `/agent/advanced_chat` 会先在 mem0 那一步 500（bug 1），
 #       根本走不到 REACT 分支;**修好 bug 1 才把它暴露出来**。
 #    回归测试:api/test_agent_repairs.py::test_react_tool_list_has_no_duplicate_names
-#    📌 **本文件下面仍保留自带的 `calculator` / `date_today`** —— 它们被**子图节点**
-#       直接 `.invoke()`（`:145` / `:160`）。⇒ 与 `mcp_server.TOOLS` 里那两个**同名不同对象**。
-#       实现逐字等价，**当前无害**；但属"重复定义"，已登记为清理项（`docs/待办登记…` §三）。
+#    📌 **本文件自带的 `calculator` / `date_today` 已于 2026-10-08 删除**（批① Task 4）——
+#       原先子图节点直接 `.invoke()` 那对**同名不同对象的副本**。现在改为取
+#       `TOOLS_BY_NAME[...]`（**共享对象**，即 `mcp_server.TOOLS` 里那两个）⇒ 同名同对象。
 
 # 重新绑定工具到模型
 llm_with_tools = llm.bind_tools(tools)
@@ -224,7 +221,7 @@ def create_calculator_subgraph():
             llm_calc, expression, "query_rewrite",
             user_name=user_name, thread_id=thread_id,
         )
-        result = calculator.invoke(expression.content)
+        result = TOOLS_BY_NAME["calculator"].invoke(expression.content)
         return {"final_output": result}
 
     subgraph.add_node("calc_execute", calc_execute)
@@ -239,7 +236,7 @@ def create_date_subgraph():
     subgraph = StateGraph(AgentState)
 
     def date_execute(state: AgentState):
-        result = date_today.invoke("")
+        result = TOOLS_BY_NAME["date_today"].invoke("")
         return {"final_output": result}
 
     subgraph.add_node("date_execute", date_execute)

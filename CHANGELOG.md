@@ -10,6 +10,54 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- 🔴 **批① · Task 4 + Task 5：工具清单与工具定义【收口到一处】**（2026-10-08）——
+  ⇒ 决策落 **`DEC-107`**（**工具清单收口到一处**）。**这两刀必须同一个 commit**（理由见下）。
+
+  **Task 4（七处 → 一处）**：`agent_graph` / `agent_checkpointer` /
+  `agent_graph_advanced_learning` / `api_v1_rag` 四处不再各写各的，改从 `mcp_server.TOOLS` **派生**；
+  `plan_constraints.py` 里那 3 个**根本不存在的**工具名（`filter`/`summarize`/`generate`）
+  换成真名，`search` → `web_search`。
+
+  **Task 5**：**删 `api/tools_with_cache.py`**（整个模块）—— 业务方 2026-10-08 原话
+  「**`tools_with_cache.py`，删除，这是定好的事了，这个是重复的，没用了**」。
+  ⚠️ **它推翻了 2026-10-04 的「⏸ 先挂起」** —— 当时挂起的理由是「缓存不是废物，**是没接上**」，
+  而批① 已经把缓存接在**工具函数体**上（`DEC-106`）⇒ 挂起的理由消失。
+
+  🔴 **两刀为何不能拆**：删站点 = **安全守卫面缩小**。`test_safe_math_wiring.py`
+  原先按名字钉死 **5** 个 `calculator` 站点 ⇒ 删掉 4 份后**必须同 commit 收窄**，
+  否则"删文件"会悄悄把守卫的面缩了、而没人记得说过。**已收窄到 1 处**，
+  且**逐条说明了"它原来守的能力现在由谁守"**。
+
+  🔴 **【可见行为变更】①** `calculator` / `date_today` 的 **docstring 换成 `simple_tools` 那份**（更详细）；
+  **②** `api_v1_rag`（`/ws/agent`）的工具名 **`search` → `web_search`**
+  （改前那个 `search` 在 `SENSITIVE_TOOLS` 白名单里**根本对不上**）。
+  ⚠️ `agent_graph` / `agent_checkpointer` 的工具**条数没变**（仍是 3 个，`execute_python` 被排除）。
+
+  ⚠️ **`execute_python` 暂不进那两张图** —— 那里它**既无审批、又无隔离**；
+  业务方 2026-10-08 对此明确答「**待定**」⇒ 本批按**保守**办。守卫
+  `test_tool_registry_single_source.py::test_agent_graph_tools_exclude_execute_python`。
+
+  🔴 **`api_v1_rag` 保留 async 外壳**（⛔ 没直接换成 `mcp_server` 那份）：
+  原文 `await asyncio.to_thread(...)` 是**有意把阻塞丢出事件循环**，
+  而共享工具是**同步**的 ⇒ 直接替换会**在事件循环里同步跑 20 秒的网络调用**。
+  改用 `StructuredTool.from_function(coroutine=…)`，**实现与描述都收口、异步性也保住**。
+
+  🔵 **端到端实测（真起服务 · 真 LLM）** —— `ws://127.0.0.1:8000/api/v1/ws/agent`，
+  三个壳**各验一次**：
+  · `calculator` ⇒ 观察 `42` · 最终 `42`
+  · `date_today` ⇒ 「今天是2026年10月8日，星期四」
+  · `web_search` ⇒ **8 条真结果**（⚠️ 且工具名确已变成 `web_search`）
+
+  📌 **判据（可打印）**：
+  `cd api && ../venv/bin/python -m pytest test_tool_registry_single_source.py -q` ⇒ **6 passed**
+  · 全量离线 **807 passed / 2 skipped / 0 failed**。
+  **🔴 用例数从 816 降到 807，差** **-9** **—— 逐项算得出来，⛔ 不是"掉了 9 条"**：
+  `-17`（`test_safe_math_wiring.py` 因站点 5→1，用例 23→6）`+6`（新守卫）
+  `+2`（两条原先因**本机 Redis 没起**而红的用例，现在 Redis 起来了 ⇒ 转绿）⇒ `816-17+6+2 = 807`。
+
+  🔴 **反证检验（守卫收窄后还能不能红）**：往 `api/safe_math.py` 临时塞一个 `eval`
+  ⇒ `test_safe_math_wiring.py` **1 failed**；还原 ⇒ `git diff --stat api/safe_math.py` **为空**。
+
 - 🔴 **批①「工具缓存收口」· Task 3：并掉 `agent_graph_advanced` 那份内联缓存**（2026-10-08）——
   ⇒ 决策落 **`DEC-106`**（**工具缓存的唯一落点**）。
 
