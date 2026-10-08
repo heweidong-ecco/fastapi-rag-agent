@@ -3,6 +3,7 @@ Agent 图（集成 MCP Client）
 LangGraph 进阶示例：多分支路由与子图协作
 """
 from typing import TypedDict, List, Annotated, Optional
+import asyncio
 import operator
 
 from langgraph.graph import StateGraph, END
@@ -121,6 +122,10 @@ MCP Client 连接管理（**单 task 自开自关**版）
 # 🔴 2026-09-20:此处原先**重复 import 了一遍** `asyncio` / `mcp` / `stdio_client`
 #    （本文件 :8 与 :27-28 已经有了）—— 已删除。`sys` / `asynccontextmanager` /
 #    `Path` 是本段新增、别处没有，故只补这三个。
+# ⚠️ **2026-10-08 更正（批④-B）**：那句「**本文件 :8 已经有 `asyncio`**」🔴 **是假的** ——
+#    去重时把**唯一**那一处也删掉了，而当时**没有任何代码用它**，所以一直没暴露。
+#    批④-B 的 actor 一用 `asyncio.*` 就 `NameError` ⇒ **现已补在文件顶部**。
+#    📌 教训：**「这段注释说别处有」⛔ 不等于「别处真有」** —— 去重时得核，不能只信注释。
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -154,24 +159,152 @@ async def mcp_session():
             yield session
 
 
+# ==================== 长驻会话 · actor 模式（2026-10-08 · 批④-B）====================
+# 🔴 **为什么是 actor，⛔ 不是会话池**（2026-09-20 栽过的那次记在上面那段 docstring 里）：
+#    `stdio_client` 基于 anyio，其 cancel scope 要求「**进入与退出在同一个 task**」。
+#    · 池化 = 「启动 task 建 · 请求 task 用 · 归还 task 关」⇒ **横跨 3 个 task** ⇒ 炸
+#      （实测 `RuntimeError: Attempted to exit cancel scope in a different task…`，
+#       而且它让**应用启动直接失败**）
+#    · actor = 「**一个 holder task 独占整个 `async with`**」⇒ **横跨 1 个 task** ⇒ 不炸
+#    📌 **可复用的判据**：anyio 只管「进入与退出在**不在**同一个 task」，⛔ **不管中间被谁 await 过**。
+#    📄 实测（含三轮计数）⇒ `docs/说明/mcp长驻会话-调研-20261008.md` §四
+class _McpSessionActor:
+    """持有唯一一个长驻 MCP 会话；调用方**投请求、等 future**，⛔ 一个字节都不碰 session。"""
+
+    def __init__(self):
+        self._loop = asyncio.get_running_loop()
+        self._tx: "asyncio.Queue" = asyncio.Queue()
+        self._ready: "asyncio.Future" = self._loop.create_future()
+        self._task: "asyncio.Task | None" = None
+        self._dead_reason: str | None = None
+        self._restarts = 0
+
+    @property
+    def loop(self):
+        return self._loop
+
+    def is_alive(self) -> bool:
+        return self._task is not None and not self._task.done()
+
+    async def start(self) -> None:
+        if self._task is not None:
+            return
+        self._task = asyncio.create_task(self._hold(), name="mcp-session-holder")
+        await self._ready      # 等 initialize 完成 —— ⛔ 别让第一个请求自己去撞握手
+
+    async def _hold(self) -> None:
+        """🔴 **整个会话生命周期都在这个 task 里** —— 这是那道坎的解法，⛔ 别把 session 漏出去。"""
+        try:
+            async with mcp_session() as session:
+                if not self._ready.done():
+                    self._ready.set_result(True)
+                while True:
+                    item = await self._tx.get()
+                    if item is None:
+                        break
+                    name, args, fut = item
+                    if fut.done():
+                        continue        # 调用方已经不要了（超时/取消）⇒ ⛔ 别白跑
+                    try:
+                        if name == "__list_tools__":
+                            fut.set_result(await session.list_tools())
+                        else:
+                            fut.set_result(await session.call_tool(name, args))
+                    except Exception as exc:        # noqa: BLE001
+                        # ⚠️ **一个请求失败⛔ 不该弄死整个会话** —— 那是"每次自开自关"都没有的
+                        #    脆弱性：长驻之后，一次工具异常会波及**之后所有**调用。
+                        fut.set_exception(exc)
+        except Exception as exc:                    # noqa: BLE001
+            self._dead_reason = f"{type(exc).__name__}: {exc}"
+        finally:
+            if not self._ready.done():
+                self._ready.set_exception(
+                    RuntimeError(f"MCP 会话起不来：{self._dead_reason}")
+                )
+
+    async def _request(self, name, args=None):
+        if not self.is_alive():
+            # 🔴 会话没了（崩了 / 被关了）⇒ **重建**，⛔ 别让调用方拿到一个死队列
+            self._restarts += 1
+            if self._restarts > 5:
+                raise RuntimeError(
+                    f"MCP 会话反复起不来（已试 {self._restarts} 次）：{self._dead_reason}"
+                )
+            self._tx = asyncio.Queue()
+            self._ready = self._loop.create_future()
+            self._task = None
+            await self.start()
+        fut = self._loop.create_future()
+        await self._tx.put((name, args, fut))
+        return await fut
+
+    async def call_tool(self, tool_name: str, arguments: dict) -> str:
+        result = await self._request(tool_name, arguments)
+        # 结果是一个 Content 列表，提取文本内容
+        if result.content:
+            return result.content[0].text
+        return "工具返回了空结果"
+
+    async def list_tools(self):
+        return await self._request("__list_tools__")
+
+    async def stop(self) -> None:
+        if self._task is None:
+            return
+        await self._tx.put(None)
+        try:
+            await asyncio.wait_for(self._task, timeout=5)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            self._task.cancel()
+        self._task = None
+
+
+#: 🔴 **按 loop 认领**：`asyncio.run` 每次都开一个新 loop，而 actor 的 `Queue` / `Future`
+#: **绑在创建它的那个 loop 上** ⇒ ⛔ 不能跨 loop 复用（本仓大量调用点就是 `asyncio.run`）。
+_ACTOR: "_McpSessionActor | None" = None
+
+
+async def _get_actor() -> "_McpSessionActor":
+    """拿（必要时建）**当前 loop** 的那个 actor。"""
+    global _ACTOR
+    loop = asyncio.get_running_loop()
+    if _ACTOR is None or _ACTOR.loop is not loop:
+        _ACTOR = _McpSessionActor()
+    if not _ACTOR.is_alive():
+        await _ACTOR.start()
+    return _ACTOR
+
+
+async def aclose_mcp_session() -> None:
+    """显式关掉长驻会话（`main.py` 的 `graceful_shutdown` 会调它）。
+
+    ⚠️ **⛔ 不调它也不会漏子进程**（loop 关时 holder task 会走到 `finally`），
+       但**显式关**能让"什么时候释放那个 84 MB"是可预期的。
+    """
+    global _ACTOR
+    if _ACTOR is not None:
+        await _ACTOR.stop()
+        _ACTOR = None
+
+
 async def get_mcp_tools():
-    """通过 MCP Client 获取所有可用工具"""
-    async with mcp_session() as session:
-        return await session.list_tools()
+    """通过 MCP Client 获取所有可用工具（🔴 与 `call_mcp_tool` **共用同一个长驻会话**）"""
+    actor = await _get_actor()
+    return await actor.list_tools()
 
 
 async def call_mcp_tool(tool_name: str, arguments: dict) -> str:
     """通过 MCP Client 调用工具。
 
-    ⚠️ 会话在本函数**自己的 task 内**开、用、关（见 `mcp_session` 的说明）——
-    不要改回从池里取，那会跨 task 并让应用起不来。
+    🔴 **2026-10-08（批④-B）：改走【长驻会话】** —— 改前每次调用自开自关，
+    实测 **~2 秒/次**（2.42 / 2.09 / 1.93），成本几乎全在**起子进程 + 重新 import langchain**。
+    现在由 `_McpSessionActor` 的 **holder task 独占**那个 `async with`，本函数只投请求、等结果
+    ⇒ 实测 **4–7 毫秒**（首次 ~22ms，含握手）。📄 `docs/说明/mcp长驻会话-调研-20261008.md`
+
+    ⚠️ **⛔ 别改回"从池里取"** —— 见 `_McpSessionActor` 上面那段（anyio cancel scope）。
     """
-    async with mcp_session() as session:
-        result = await session.call_tool(tool_name, arguments)
-    # 结果是一个 Content 列表，提取文本内容
-    if result.content:
-        return result.content[0].text
-    return "工具返回了空结果"
+    actor = await _get_actor()
+    return await actor.call_tool(tool_name, arguments)
 
 # ==================== 工具执行节点（通过 MCP Client） ====================
 # ==================== tools 节点（保持原有逻辑） ====================
