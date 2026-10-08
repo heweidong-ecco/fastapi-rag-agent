@@ -364,9 +364,17 @@ def test_mcp_server_call_tool_offloads_sync_handler(monkeypatch):
 
     monkeypatch.setitem(ms.TOOL_HANDLERS, "probe", _sync_handler)
 
-    out = asyncio.run(ms.call_tool("probe", {}))
+    from mcp.types import CallToolRequestParams
 
-    assert out[0].text == "OFFLOADED_OK"
+    out = asyncio.run(
+        ms.call_tool(None, CallToolRequestParams(name="probe", arguments={}))
+    )
+
+    # 🔴 2026-10-08（批④）：**只改了"怎么调"** —— `call_tool` 从 `(name, arguments)`
+    #    变成 `(ctx, params)`（2.x 的构造器回调），返回值从裸 `list` 变成 `CallToolResult`
+    #    （文本在 `.content[0].text`）。
+    #    ⛔ **下面两条断言一个字没动** —— 它们守的是"同步工具不能在事件循环里跑"，与签名无关。
+    assert out.content[0].text == "OFFLOADED_OK"
     assert seen["on_loop"] is False, (
         "同步工具不能在事件循环所在线程里执行 —— 必须在 async 边界处丢到线程里"
     )

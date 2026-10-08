@@ -3,6 +3,7 @@ MCP Server：使用工厂函数自动注册所有工具
 """
 import asyncio
 import os
+from mcp import types
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
@@ -23,8 +24,9 @@ from code_executor import execute_python
 # 导入工厂函数
 from mcp_tool_factory import create_mcp_tool_definition, create_mcp_tool_handler
 
-# 创建 MCP Server 实例
-server = Server("agent-tools")
+# 🔴 2026-10-08（批④）：`Server(...)` 的**创建挪到了文件末尾**（两个处理器定义之后）——
+#    2.x 的处理器是**构造参数**（`on_list_tools=` / `on_call_tool=`），⛔ 不再是装饰器
+#    ⇒ 建 server 那一刻必须已经拿得到那两个函数对象。详见文末那段。
 
 # 将所有工具放入一个列表（新增工具只需在这里加一行！）
 # 新增 工具列表（为每个工具可指定版本号）
@@ -83,33 +85,45 @@ TOOL_HANDLERS = {
 
 # 增加健康检查过滤。
 from tool_health import get_tool_health, UNHEALTHY
-# 注册工具列表接口
-@server.list_tools()
-async def list_tools() -> list[Tool]:
+
+
+# 工具列表接口
+# 🔴 2026-10-08（批④）**签名变了** —— 1.x 是 `@server.list_tools()` 装饰的**空参**函数，
+#    2.x 是**构造器回调** `(ctx, params) -> ListToolsResult`。
+#    ⚠️ **返回值也从裸 `list[Tool]` 变成 `ListToolsResult(tools=[...])`**。
+async def list_tools(ctx, params) -> types.ListToolsResult:
     """返回所有可用工具的清单（自动过滤不健康的工具）"""
     tools = []
     for tool_def in TOOLS_DEFINITION.values():
         tool_name = tool_def["name"]
-        
+
         # 检查工具健康状态
         health = get_tool_health(tool_name)
-        
+
         if health == UNHEALTHY:
             print(f"工具 {tool_name} 不健康，已从工具列表中移除")
             continue  # 跳过不健康的工具
-        
+
         tools.append(Tool(
             name=tool_def["name"],
             description=tool_def["description"],
             inputSchema=tool_def["inputSchema"]
         ))
-    return tools
+    return types.ListToolsResult(tools=tools)
 
-# 注册工具调用接口
-@server.call_tool()
-async def call_tool(name: str, arguments: dict) -> list[TextContent]:
+
+# 工具调用接口
+# 🔴 2026-10-08（批④）**签名变了** —— 1.x 是 `(name, arguments)`，2.x 从 `params` 上取。
+#    🔴 **`params.arguments` 缺省是 `None`，⛔ 不是 `{}`**（实测
+#    `CallToolRequestParams(name="x").arguments is None`）⇒ 必须 `or {}`。
+async def call_tool(ctx, params: types.CallToolRequestParams) -> types.CallToolResult:
     """接收工具调用请求，转发给实际工具并返回结果"""
+    name = params.name
+    arguments = params.arguments or {}
     if name not in TOOL_HANDLERS:
+        # ⚠️ 「找不到工具」按**协议级错误**抛 —— 与 `CallToolResult` 的 docstring 一致：
+        #    "Errors in finding the tool, or any other exceptional condition,
+        #     should be reported as an MCP error response."
         raise ValueError(f"未知工具: {name}")
 
     handler = TOOL_HANDLERS[name]
@@ -122,7 +136,12 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     #       处理器还有**同步**调用方（`agent_graph_advanced_learning.py:230`），
     #       改成 async 会让那边拿到 coroutine ⇒ 工具静默失效（实测）。见 mcp_tool_factory 的注释。
     result = await asyncio.to_thread(handler, arguments)
-    return [TextContent(type="text", text=str(result))]
+    return types.CallToolResult(content=[TextContent(type="text", text=str(result))])
+
+
+# 🔴 2026-10-08（批④）：2.x 的处理器是**构造参数**，⛔ 不再是装饰器
+#    ⇒ `Server(...)` 必须建在两个处理器**定义之后**（1.x 那行原先在文件顶部，已挪到这里）。
+server = Server("agent-tools", on_list_tools=list_tools, on_call_tool=call_tool)
 
 # MCP Server 启动入口
 async def run_mcp_server():

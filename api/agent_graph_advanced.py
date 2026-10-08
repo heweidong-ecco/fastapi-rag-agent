@@ -265,7 +265,13 @@ async def get_llm_with_mcp_tools():
         langchain_tools.append({
             "name": mcp_tool.name,
             "description": mcp_tool.description,
-            "parameters": mcp_tool.inputSchema
+            # 🔴 2026-10-08（批④）：**`inputSchema` → `input_schema`**（mcp 2.x）。
+            #    ⚠️ 这是个**只读属性名变了**的坑，别读成"整个类型换了"：
+            #      · **构造**仍然两种都能写（`Tool(inputSchema=…)` 也行 —— `populate_by_name`）
+            #      · **读属性**只认**字段名** `input_schema` ⇒ 写 `.inputSchema` 会
+            #        `AttributeError: 'Tool' object has no attribute 'inputSchema'. Did you mean: 'input_schema'?`
+            #      · 要**线上拼法**就 `model_dump(by_alias=True)["inputSchema"]`
+            "parameters": mcp_tool.input_schema
         })
     return llm.bind_tools(langchain_tools)
 
