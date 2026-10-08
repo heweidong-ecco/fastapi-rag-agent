@@ -16,8 +16,10 @@
   ⚠️ **语义从 `agent_graph` 引入，⛔ 不是复制** —— 见「看代码会误判」第 2 行
 - 工具：🔴 **2026-10-08 起与 `agent_graph.py` 同款 —— 全部【从 `mcp_server.TOOLS` 派生】**（批① Task 4 · `DEC-107`），
   本地那份 `web_search` / 计算器 / 日期**三个定义全删了**。
-  ⚠️ **本图同样显式排除 `execute_python`**（`_EXCLUDED_TOOLS`）—— 同理由：无审批、无隔离。
-  🔴 **这是有期限的** —— 批②（容器）落地后删掉它（守卫同名于 `agent_graph.py` 那条）。
+  ✅ **2026-10-08：原先的 `execute_python` 排除【已放开】**（业务方同意「甲」）——
+  理由与逐条处置**同 `agent_graph.md` 同一处**（⛔ 别在这儿再抄一遍）。本图工具表现在也与
+  `mcp_server.TOOLS` 逐名一致（4 个）。
+  🔴 **真正该管的是 `SENSITIVE_TOOLS`**（全局审批名单）⇒ **已立为待裁项**（`docs/待办总表.md`）。
   · ⭐ **工具名只有 `tools` 一个来源** —— `TOOLS_BY_NAME`，`tool_execute` 查它
   · ⚠️ **删了 import 后⛔ 别误删 `from agent_graph import SENSITIVE_TOOLS, should_continue, human_approval # noqa: F401`**
     —— 那一行是**结构性守卫**要的（`test_memory_chat_approval.py` 断言两模块的白名单**是同一个对象**）

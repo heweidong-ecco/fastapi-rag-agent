@@ -128,6 +128,29 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- 🔴 **放开 `execute_python`：那两张图的工具表不再排除它**（2026-10-08 · 业务方同意「甲」）——
+
+  `agent_graph.py` / `agent_checkpointer.py` 删掉 `_EXCLUDED_TOOLS` ⇒ **两图工具表现在与
+  `mcp_server.TOOLS` 逐名一致**（4 个）。
+
+  **背景**：批① Task 6 立过一条"有期限"的排除，理由是**两条** —— ① 无容器隔离 ② 不在 `SENSITIVE_TOOLS`。
+  批② 当天落地 ⇒ **期限到了**，逐条处置：
+  · ✅ **① 已由批② 解决** —— 现在是硬化容器（只读根 · 无网 · 非 root · 无 cap · 5s/256MB/pids）
+  · 🔴 **② 核出来【守错了地方】** —— `execute_python` 从 `plan_execute` ·
+    `agent_graph_advanced_learning` · `agent_graph_advanced`（经 MCP 动态取表）·
+    `/agent/execute_code` **都拿得到**，**同样不在审批名单**
+    ⇒ **在两张图上抠掉它并没挡住什么**，只买到"工具表在各图之间不一致"
+    —— 而那正是批① 花一整批力气消除的东西（**一处事实源**）
+
+  🔴 **⚠️ 别把本笔读成"这个安全话题结了"** —— **真正该管的地方是 `SENSITIVE_TOOLS`**（全局审批名单），
+  那件事**已单独立为待裁项**（`docs/待办总表.md` §二 **11**）。⇒ 本笔是**把它挪回该守的地方**，
+  ⛔ **不是宣布不用守**。⚠️ **容器那层无论如何都不能撤**。
+
+  📌 **判据**：`cd api && ../venv/bin/python -m pytest test_tool_registry_single_source.py -q` ⇒ **8 passed**
+  · 那条守卫**翻了面**：`..._not_yet_in_unisolated_graphs` ⇒ **`..._is_in_every_graph_tool_table`**
+  （并顺手钉住"**没有任何别的排除**" —— 别再悄悄抠掉一个工具）
+  · 三张表逐名一致（实测）：`mcp_server.TOOLS` = `agent_graph.tools` = `agent_checkpointer.tools`
+
 - 🔴 **批② · Task 6：demo 模式下**不注册** `execute_python`**（2026-10-08）——
 
   `mcp_server.py` 在 `TOOLS` 建好后加一道：`DEMO_MODE` 有值 ⇒ 滤掉 `execute_python`。

@@ -11,10 +11,13 @@
 - 基础 LangGraph Agent：`agent` 决策节点 → `tools` 执行循环
 - 工具：🔴 **2026-10-08 起全部【从 `mcp_server.TOOLS` 派生】**（批① Task 4 · `DEC-107`）——
   本地那份 `web_search` / 计算器 / 日期**三个定义全删了**。
-  ⚠️ **本图显式排除 `execute_python`**（`_EXCLUDED_TOOLS`）：它在这张图里**既不在
-  `SENSITIVE_TOOLS` 审批名单、又没有容器隔离** ⇒ 放进去等于开一条无审批无隔离的任意代码执行。
-  🔴 **这是有期限的** —— 批②（容器）落地后删掉 `_EXCLUDED_TOOLS`，
-  守卫 `test_tool_registry_single_source.py::test_execute_python_not_yet_in_unisolated_graphs` 同时删。
+  ✅ **2026-10-08：原先的 `execute_python` 排除【已放开】**（业务方同意「甲」· `DEC-107` 附录）——
+  本图工具表现在**与 `mcp_server.TOOLS` 逐名一致**（4 个）。
+  ⚠️ 放开的两条理由：①「无容器隔离」**已由批② 解决**（硬化容器）；
+  ②「无审批」**不是这两张图特有的** —— 别处（`plan_execute` / `..._learning` / 经 MCP 的
+  `agent_graph_advanced` / `/agent/execute_code`）**同样拿得到且同样不在审批名单**
+  ⇒ 抠掉它**并没挡住什么**，只制造不一致。
+  🔴 **真正该管的是 `SENSITIVE_TOOLS`**（全局审批名单）⇒ **已立为待裁项**（`docs/待办总表.md`）。
   · ⭐ **工具名只有 `tools` 一个来源** —— `TOOLS_BY_NAME = {t.name: t for t in tools}`，`tool_execute` 查它，⛔ 不许再抄名字
   · ⚠️ **连带删掉的 import**：`datetime` / `safe_math.calculate` / `search_tools.web_search` / `langchain` 的 `tool`
     （它们只服务于那三个已删的定义 ⇒ 留着就是 `F401`，第 ⑥ 道门会红）

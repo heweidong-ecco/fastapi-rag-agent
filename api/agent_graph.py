@@ -43,11 +43,19 @@ llm = make_llm("fast", "agent")
 #       三道闸与守卫在 `api/test_safe_math_wiring.py`（本文件不再是一个受守的站点）。
 from mcp_server import TOOLS as _MCP_TOOLS
 
-# ⚠️ `execute_python` 暂**排除** —— 这张图里它**既不在** `SENSITIVE_TOOLS` 审批名单、
-#    **又没有**容器隔离 ⇒ 放进去等于开一条**无审批 + 无隔离**的任意代码执行。
-#    等批②（容器）落地再放开。守卫 ⇒ `test_tool_registry_single_source.py`。
-_EXCLUDED_TOOLS = {"execute_python"}
-tools = [t["func"] for t in _MCP_TOOLS if t["func"].name not in _EXCLUDED_TOOLS]
+# ✅ 2026-10-08：**原先在这里排除 `execute_python`（批① Task 6），现在放开了**（`DEC-107` 附录）。
+#    当初的理由**两条**，逐条处置：
+#      ① 这张图里它**没有容器隔离** ⇒ 🔴 **已由批② 解决** —— 现在是**硬化容器**
+#         （只读根 · 无网 · 非 root · 无 cap · 5s/256MB/pids 限制）
+#      ② 它**不在 `SENSITIVE_TOOLS`** ⇒ 🔴 **这一条根本不是这两张图特有的**：
+#         它从 `plan_execute` / `agent_graph_advanced_learning` /
+#         `agent_graph_advanced`（经 MCP 动态取表）/ `/agent/execute_code` **都拿得到**，
+#         而且**同样不在审批名单**。
+#      ⇒ **在两张图上抠掉它，并没有真的挡住什么** —— 只买到"工具表在各图之间不一致"，
+#        而那正是批① 花一整批力气消除的东西（**一处事实源**）。
+#    🔴 **真正该管的地方是 `SENSITIVE_TOOLS`**（全局审批名单）——
+#       「要不要把 `execute_python` 加进去」**已单独立为待裁项**（`docs/待办总表.md`），⛔ 不在本处解决。
+tools = [t["func"] for t in _MCP_TOOLS]
 
 # 🔴 DEC-051：工具名的**唯一来源** —— 分派必须查这张表，⛔ 不许再在 `tool_execute` 里抄一遍名字。
 #    病根就是"名字写在两处"：抄的那份一旦对不上，落的是 `else` 分支（**如实报错、不崩溃**）

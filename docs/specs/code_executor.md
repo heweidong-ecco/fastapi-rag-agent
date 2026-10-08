@@ -29,10 +29,11 @@
 
 ## 🟡 做到哪 / 缺什么
 
-- 🟡 **`execute_python` 暂不进 `agent_graph` / `agent_checkpointer`** —— 那两张图里它**无审批**（不在 `SENSITIVE_TOOLS`）。
-  🔴 **本条的"有效期"到了**：批① 立的理由有**两条** —— ①无隔离 ②**无审批**。
-  **批② 解决了 ①，⛔ 没解决 ②。** ⇒ 业务方 2026-10-08 对此答「**待定**」，**保持现状**。
-  📌 判据：`grep -n '_EXCLUDED_TOOLS' api/agent_graph.py api/agent_checkpointer.py`
+- ✅ ~~**`execute_python` 暂不进 `agent_graph` / `agent_checkpointer`**~~ ⇒ **2026-10-08 已放开**（业务方同意「甲」）：
+  批① 立的两条理由里，① 无隔离**已由批② 解决**，② 无审批**不是那两张图特有的**
+  ⇒ 抠掉它没挡住什么，只制造不一致。**工具表现在各图一致**（判据：`test_execute_python_is_in_every_graph_tool_table`）。
+- 🔴 **仍待裁：`execute_python` 要不要进 `SENSITIVE_TOOLS`（全局审批名单）** —— 那才是它该在的地方。
+  已登记在 `docs/待办总表.md`。⚠️ **无论裁不裁，容器那层都不能撤**。
 - ⬜ **`calculator` 的间接提示注入面**（与执行器同族的"LLM 生成输入"问题）—— 记在 `docs/待办总表.md` §二 8
 - ⚠️ **容器方案下 `EXECUTOR_TIMEOUT = MAX_EXEC_TIME + 10`** —— ⛔ 别设成与 `MAX_EXEC_TIME` 相同
   （那会把"执行器还没跑完"误判成"远端超时"，**正常的慢代码变成报错**）

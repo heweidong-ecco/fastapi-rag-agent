@@ -116,21 +116,46 @@ def test_module_tools_are_derived_from_registry(modname):
     assert names <= registered, f"🔴 {modname}.tools 里有**未注册**的工具：{names - registered}"
 
 
-def test_execute_python_not_yet_in_unisolated_graphs():
-    """🔴 `execute_python` **暂不进那两张无隔离的图**（`Task 6` · 业务方 2026-10-08「待定」）。
+def test_execute_python_is_in_every_graph_tool_table():
+    """🔴 `execute_python` **要**在那两张图的工具表里。
 
-    为什么：`agent_graph` / `agent_checkpointer` 里它**不在** `SENSITIVE_TOOLS` 审批名单、
-    **又没有容器隔离** ⇒ 放进去等于开一条**无审批 + 无隔离**的任意代码执行。
-    ✅ 等批② 容器落地后再放开 —— 那时把这条用例**改写**成要求它**在**表里。
+    ⚠️ **本用例 2026-10-08 翻过面**（原名 `..._not_yet_in_unisolated_graphs`，断言的是「**不在**」）。
 
-    ⚠️ 反证：把这行的断言取反（改成 `in`）在**当前**实现下会红 ⇒ 这条尺子在量东西。
+    ## 为什么当初排除（批① `Task 6`）
+
+    理由**两条**：
+      ① 那两张图里它**没有容器隔离**（跑在宿主同进程树里，只有白名单 + 5 秒硬杀）
+      ② 它**不在 `SENSITIVE_TOOLS`** 审批名单（默认只有 `web_search`）
+
+    ## 为什么现在放开（业务方 2026-10-08 同意「甲」）
+
+    · 🔴 **① 批② 解决了** —— 现在是**硬化容器**（只读根 · 无网 · 非 root · 无 cap · 5s/256MB/pids 限制）
+    · 🔴 **② 根本不是那两张图特有的** —— `execute_python` 从 `plan_execute` ·
+      `agent_graph_advanced_learning` · `agent_graph_advanced`（经 MCP 动态取表）·
+      `/agent/execute_code` **都拿得到**，而且**同样不在审批名单**。
+      ⇒ **在两张图上抠掉它，并没有真的挡住什么**；它只买到"工具表在各图之间不一致"
+      —— 而那正是批① 花一整批力气消除的东西（**一处事实源** · `DEC-107`）。
+
+    🔴 **真正该管的地方是 `SENSITIVE_TOOLS`**（全局审批名单），⛔ 不是"从两张图的派生表里抠掉"。
+    ⚠️ 「`execute_python` 要不要进审批名单」**已单独立为待裁项** —— 它是**独立裁定**，
+       ⛔ **不在本用例范围内**（本用例只管"工具表一致"）。
+
+    ⚠️ **反证**：把 `_EXCLUDED_TOOLS` 加回任一模块 ⇒ 本用例红。
     """
     import agent_graph
     import agent_checkpointer
+    import mcp_server
+
+    registered = {t["func"].name for t in mcp_server.TOOLS}
 
     for mod in (agent_graph, agent_checkpointer):
-        assert "execute_python" not in {t.name for t in mod.tools}, (
-            f"🔴 {mod.__name__}.tools 里有 execute_python —— 它在那张图里无审批、无隔离"
+        got = {t.name for t in mod.tools}
+        assert "execute_python" in got, (
+            f"🔴 {mod.__name__}.tools 里没有 execute_python —— 又把它排除回去了？"
+        )
+        # ⚠️ 顺手钉住「**没有任何别的排除**」 —— 别哪天又悄悄抠掉一个工具
+        assert got == registered, (
+            f"🔴 {mod.__name__}.tools 与 `mcp_server.TOOLS` **不一致**：差集={registered ^ got}"
         )
 
 
