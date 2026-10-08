@@ -10,6 +10,29 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- 🆕 **裁决历史分页了 —— 并修掉本仓第一处【静默截断】**（2026-10-08 · `frontend/README.md` §六）——
+  **改前**：`approvals.html` **硬写 `limit=50`**，**界面不说明被截了**；而全仓**没有一个列表端点有 `offset`**。
+  **三层一起做**：① 后端 `GET /agent/approvals/history` 加 `offset` + 响应补 `has_more`/`limit`/`offset`，
+  `approval_audit.list_decisions(..., offset=0)` 加 `OFFSET`；② 纯逻辑 `RagApprovals.pagerState()`（⛔ 页面不自己推页码）；
+  ③ `.pagination` 组件 + `#pager`（⚠️ **新增**元素，⛔ 没改任何既有 class/id）。
+  🔴 **两条红线**：**⛔ 前端假分页**（不切数组、不缓存全量）· **⛔ 不许猜 `has_more`**
+  —— 只认服务端字段，严格 `=== true`；**⛔ 尤其不许拿 `count == limit` 推**
+  （那在"正好一整页、后面没有了"时会显示一个**点不动的下一页**，且不报错）。
+  `has_more` 的判法是「**多取一条**」：向 `list_decisions` 要 `limit+1`，多要的那条**只当探针**。
+  **验证**：Chrome headless 截图看过分页控件（首屏「上一页」禁用 · 有更多时「下一页」可点 · 右侧写"后面还有"）。
+  📌 门：`node --test api/static/js/approvals.test.js` ⇒ **23 pass**（+9 条 pagerState）·
+  `pytest api/test_approval_events.py` ⇒ **14 passed**（+2 条 `has_more`）·
+  `POSTGRES_DB=rag_test pytest api/test_approval_events_db.py -m needs_db` ⇒ **8 passed** ·
+  全量离线 **875 passed**。
+  🔴🔴 **顺带修掉一个真缺陷（我自己的）**：`api/test_approval_events_db.py` **只能跑一次** ——
+  加分页用例时**原本绿的 4 条转红**，报「读到 **3** 条」（＝我第 3 次跑它）。
+  根因：我照抄了 `test_cost_visibility_db.py` 的「**无 cleanup**」模式，注释里写"便于事后精确清理"，
+  **但那个"事后"从没发生过**。⇒ 补了 `_PREFIX` 范围的 `autouse` 清理（⛔ 不 TRUNCATE、⛔ 不碰别人的行）。
+  ⚠️ **这意味着 `N12` 那批我看到的"绿"只是【首次运行】的绿。**
+  ⇒ 📌 **教训：「只能跑一次的用例」不是用例** —— 它第 2 次红时，你分不清"坏了"还是"脏了"（本次就白查一轮）。
+  ⚠️ **本份没解决**：其余列表端点仍无分页（它们的"最近 N 条"**仍然不说自己被截了**）·
+  `offset` 分页在**有新行插入时会漂移**（页面每 5 秒轮询 ⇒ 这个窗口真实存在），⛔ 没做游标分页。
+
 - 🆕 **前端开始有【设计系统】了：新增共享样式表 `api/static/app.css` ＋ `chat.html` 第一个接上**（2026-10-08）——
   🔴 **在那之前本仓前端【没有设计系统】**（实测）：**5 个页面各带一份内联 `<style>`**（11–62 行），
   `link rel="stylesheet"` **一处都没有**；后果是**同名 class 不同义** —— `.card` 在 `chat.html`

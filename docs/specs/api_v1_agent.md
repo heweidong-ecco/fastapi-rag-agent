@@ -79,6 +79,11 @@
     · 🔴 **越权与"真不存在"答同一个 `error`**（有意的，否则那句错误本身是"该 thread 存在"的 oracle —— 与 `/agent/trace/{id}` 同口径）；
     · ⚠️ **四类拒绝全是 HTTP 200 + `{"status": "error"}`** —— 前端必须**读 body**，⛔ 别只看 `r.ok`。
   · **`GET /agent/approvals/history`（`:2021`）** —— 裁决历史（读 `api/approval_audit.py` 的 `list_decisions`）。
+🔴 **2026-10-08：这条端点【分页了】（`limit` + `offset` + 响应回 `has_more`）** ——
+分页前它**硬写 `limit=50` 且界面不说明被截了**（静默截断）。
+⚠️ **`has_more` 的判法是「多取一条」**：向 `list_decisions` 要 `limit+1`，多要的那条**只当探针、不返回**。
+🔴 **⛔ 不许让前端拿 `count == limit` 猜** —— 那在"正好一整页、后面没有了"时
+会显示一个**点不动的下一页**，而且不报错。`frontend/README.md` §六 红线②。
     ⚠️ **`owner` 是【必填关键字参数】**（`DEC-055` 那条口径：⛔ 不给默认值 ⇒ "我忘了传"当场 `TypeError`，
     而不是静默退化成"查全量"）。端点按角色决定传谁：**本人传自己 · admin 传 `None`（= 全量）**。
 - 🆕 **Trace 页的成本轴端点（`DEC-093` · `F2` · 2026-10-06）**：**`GET /agent/trace/{thread_id}/cost`** ——

@@ -265,3 +265,40 @@ venv/bin/python -m pytest api/test_web_pages.py -q               # ⇒ 7 passed�
   **页面守卫改扫全站** · **`ci.yml` 的 `node --test` 改 glob + 防空跑** —— 含"裸 glob 更弱"的反证实测）
 - 🔴 `docs/decisions/DEC-097-Eval页降级为占位页.md`（**`F3`**：**把"跑分 + 对比箭头"改成占位页**的裁定 ·
   `/eval` 入口 · ⚠️ **它明写"这不是把功能做完了，是换了交付口径"**）
+
+---
+
+## 🔴 2026-10-08 · 分页（`frontend/README.md` §六）
+
+**改前的现状**：本仓**没有一个列表有 `offset`** —— 全是"取最近 N 条"，
+而 `approvals.html` **硬写 `limit=50`、界面不说明被截了**（**静默截断**）。
+
+**做了什么**（先做一条路，⛔ 不是一次铺开）：
+
+| 层 | 落点 |
+|---|---|
+| **后端** | `GET /agent/approvals/history` 加 **`offset`** · 响应补 **`has_more` / `limit` / `offset`**；`approval_audit.list_decisions(..., offset=0)` 加 `OFFSET` |
+| **纯逻辑** | `api/static/js/approvals.js` 的 **`pagerState()`** —— 页码/上下页/偏移量**全在这里算**，⛔ 页面不自己推 |
+| **CSS** | `api/static/app.css` 的 **`.pagination`** |
+| **页面** | `approvals.html` 的 `#pager`（⚠️ **新增**元素，⛔ 没改任何既有 class/id） |
+
+**两条红线**（规范里的）：
+
+1. **⛔ 不许前端假分页** —— 组件⛔ 不切数组、⛔ 不缓存全量；翻页 = **带新 `offset` 再发一次请求**。
+2. **⛔ 被截断必须说出来** —— `has_more` **只认服务端给的字段**；
+   ⛔ **尤其不许拿 `count == limit` 猜** —— 那在"正好一整页、后面没有了"时会显示一个
+   **点不动的下一页**，而且不报错。`pagerState` 用 **`hasMore === true`**（严格），缺失一律 `false`。
+
+📌 **判据（可打印）**：
+
+```bash
+node --test api/static/js/approvals.test.js                       # ⇒ 23 pass（含 pagerState 9 条）
+venv/bin/python -m pytest api/test_approval_events.py -q          # ⇒ 14 passed（含 has_more 两条）
+POSTGRES_DB=rag_test venv/bin/python -m pytest api/test_approval_events_db.py -q -m needs_db
+                                                                  # ⇒ 8 passed（含翻页不重不漏）
+```
+
+⚠️ **本份没解决**：**其余列表端点仍无分页**（`/agent/token/usage` · `/agent/cost/*` 等）——
+它们的"取最近 N 条"**仍然不说自己被截了**。⇒ 要铺开时照这一条的走法。
+⚠️ **已知局限**：`offset` 分页在**有新行插入时会漂移**（第 2 页可能重复上一页的某条）
+—— 页面每 5 秒轮询，所以这个窗口是真实存在的。⛔ 没做游标分页（那是另一件事）。

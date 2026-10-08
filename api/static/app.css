@@ -257,3 +257,18 @@ input:disabled, textarea:disabled, select:disabled { opacity: .55; cursor: not-a
 /* 无据拒答（`DEC-091`）—— 资料里没有：该做的是【换问法 / 补文档】。
    🔴 与上面出路【相反】⇒ 中性灰，⛔ 不用警示黄（**拒答不是故障**）*/
 .refusal-note { border-left: 3px solid var(--fg-dim); background: color-mix(in srgb, var(--fg-dim) 7%, transparent); }
+
+/* ── 4.7 列表与分页（`frontend/README.md` §六）── */
+
+/* 🔴 两条红线写在规范里，组件只是它的实现：
+   ① **⛔ 不许前端假分页** —— 本组件⛔ 不切数组、⛔ 不缓存全量；
+      翻页 = 带着新的 `offset` **再发一次请求**。
+   ② **⛔ 被截断必须说出来** —— 分页生效时没有截断；`has_more` 由**服务端**给，
+      ⛔ 不许前端拿 `count == limit` 猜（那会在"正好一整页"时显示一个点不动的下一页）。
+   ⚠️ **只有一页时整个控件不显示**（`hidden`）—— 一个永远点不动的翻页条比没有更糟。 */
+.pagination {
+  display: flex; align-items: center; gap: var(--sp-3);
+  padding: var(--sp-3) 0; color: var(--fg-dim); font-size: var(--fs-cap);
+}
+.pagination .page-label { font-variant-numeric: tabular-nums; }
+.pagination .page-hint { margin-left: auto; }

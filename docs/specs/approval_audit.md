@@ -35,7 +35,11 @@
   ⇒ **表里少一条 ≠ 那次裁决没发生**。查历史时⛔ 别把"查不到"读成"没批过"。
 - **`owner` 与 `actor` 是两个身份**：admin 接管 alice 的会话时 `owner="alice"`、`actor="admin"`。
   合成一个字段 ⇒ 留痕当场变假话，**而且不报错**。
-- **`list_decisions(owner=...)` 是必填关键字参数**：`None` = 全量。
+- **`list_decisions(owner=..., limit=50, offset=0)` 是必填关键字参数**：`None` = 全量。
+- 🔴 **`offset` 是 2026-10-08 加的**（分页 · `frontend/README.md` §六）——
+  ⚠️ **翻页要正确，`ORDER BY` 必须是【全序】**：本表是 `created_at DESC, id DESC`，
+  第二条排序键 `id` 是**承重的**（连写的几条 `created_at` 极可能同毫秒）。
+  ⇒ **不是全序就会漏行/重行，而且不报错**。真库用例 ⇒ `api/test_approval_events_db.py::test_offset_paging_neither_skips_nor_repeats`。
   ⛔ **别给它加默认值** —— 那会让「我忘了传」与「我要查所有人」再也分不出来（`DEC-055` 口径）。
 - **`_COLUMNS` 的顺序必须与 `list_decisions` 的 `SELECT` 列顺序一致** ——
   靠 `zip` 配名，**错位不报错**，只会把 `decision` 显示成 `actor`。

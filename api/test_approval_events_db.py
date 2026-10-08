@@ -41,6 +41,33 @@ pytestmark = pytest.mark.needs_db
 _PREFIX = "n12-approval-"
 
 
+#: 🔴 **2026-10-08 补的清理** —— 补之前这个文件**只能跑一次**。
+#:
+#: **怎么发现的**：加分页用例时，**原本绿的 4 条转红了**，报「读到 **3** 条」——
+#: 那不是被改坏的，是**同一批行被写了 3 次**（我第 3 次跑这个文件）。
+#: ⚠️ 根因是我照抄了 `api/test_cost_visibility_db.py` 的「**无 cleanup**」模式，
+#:    在注释里写了「便于事后精确清理」—— **但那个"事后"从来没发生过**。
+#: ⇒ 🔴 **教训：「只能跑一次的用例」不是用例** —— 它第 2 次红，
+#:    而那时你分不清"是坏了"还是"是脏了"（本次就白查了一轮）。
+#:
+#: ⚠️ 清理范围**只限本文件自己的行**（`owner LIKE 'n12-approval-%'`），
+#:    ⛔ 不 `TRUNCATE`、⛔ 不碰别人的数据（同 `scripts/seed_isolation_docs.sh` 的纪律）。
+@pytest.fixture(autouse=True)
+def _clean_own_rows():
+    from db import get_db
+
+    def _purge():
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM approval_events WHERE owner LIKE %s",
+                            (_PREFIX + "%",))
+            conn.commit()
+
+    _purge()          # 进用例前先清（跑第 2 次也不受上一次影响）
+    yield
+    _purge()          # 出用例后再清（别把垃圾留给下一个）
+
+
 def _row(**kw):
     """把 `list_decisions` 返回的一条记录补齐默认值，方便逐格断言。"""
     base = {"owner": None, "actor": None, "decision": None,
@@ -212,3 +239,64 @@ def test_nullable_columns_accept_none_and_ddl_is_idempotent():
     r = _row(**rows[0])
     assert r["rounds"] is None, f"`rounds` 没传却读回 {r['rounds']!r}（该是 NULL）"
     assert r["reason"] is None, f"`reason` 没传却读回 {r['reason']!r}（该是 NULL）"
+
+
+def test_offset_paging_neither_skips_nor_repeats():
+    """🔴 **分页最容易出的错是【漏行 / 重行】，而且它不报错**（`frontend/README.md` §六）。
+
+    ⚠️ 只有 `ORDER BY` 是**全序**时才不会漏 —— 本表用 `created_at DESC, id DESC`，
+       而**连写的几条 `created_at` 极可能完全相同**（同毫秒）⇒ 第二条排序键 `id` 是承重的。
+
+    判据：把同一批数据按 `offset` 翻完，**合起来必须恰好等于不分页读到的集合**（不重不漏）。
+    """
+    from approval_audit import record_decision, list_decisions
+
+    owner = _PREFIX + "page-o"
+    n = 7
+    for i in range(n):
+        record_decision(owner=owner, actor=owner, decision="approve", edited=False,
+                        reason=f"{_PREFIX}page-{i}")
+
+    # 不分页（足够大）⇒ 基准集合
+    all_rows = list_decisions(owner=owner, limit=1000)
+    baseline = [(r["reason"],) for r in all_rows]
+    assert len(baseline) == n, f"应写入 {n} 条，实得 {len(baseline)}"
+
+    # 每页 3 条翻完
+    page, seen, offset = 3, [], 0
+    while True:
+        got = list_decisions(owner=owner, limit=page, offset=offset)
+        if not got:
+            break
+        seen += [(r["reason"],) for r in got]
+        offset += page
+        if offset > 100:                      # 护栏：别把用例挂死
+            raise AssertionError("翻页没有终点 —— `offset` 没起作用，在原地打转")
+
+    assert seen == baseline, (
+        "翻页合起来与不分页读到的不是同一个集合 ⇒ 漏行或重行。\n"
+        f"  分页得 {len(seen)} 条 / 基准 {len(baseline)} 条\n"
+        "  ⚠️ 检查 `ORDER BY` 是不是【全序】（同 created_at 由 id 打平）—— 不是全序就会这样，且不报错。"
+    )
+
+
+def test_has_more_contract_is_the_plus_one_trick():
+    """🔴 端点的 `has_more` 判法是「**多取一条**」（`api_v1_agent.agent_approval_history`）。
+
+    这条钉住那个**前提**：拿 `limit+1` 去读，**恰好**在"还有"时能多拿到一条。
+    ⇒ 若有人把 `LIMIT %s OFFSET %s` 改成不带 offset、或把 `+1` 漏掉，这里会先红。
+    """
+    from approval_audit import record_decision, list_decisions
+
+    owner = _PREFIX + "hm-o"
+    for i in range(4):
+        record_decision(owner=owner, actor=owner, decision="reject", edited=False,
+                        reason=f"{_PREFIX}hm-{i}")
+
+    # 要 3 条、给 4 条 ⇒ 说明"还有"
+    assert len(list_decisions(owner=owner, limit=3 + 1, offset=0)) == 4
+    # 要 4 条、给 5 条 ⇒ 拿不到 5 条 ⇒ 说明"到底了"
+    assert len(list_decisions(owner=owner, limit=4 + 1, offset=0)) == 4
+    # 第二页：offset 真起作用
+    assert len(list_decisions(owner=owner, limit=10, offset=4)) == 0
+    assert len(list_decisions(owner=owner, limit=10, offset=3)) == 1

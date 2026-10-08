@@ -75,6 +75,16 @@
   <tbody></tbody>
 </table>
 
+<!-- 🔴 分页控件（2026-10-08 加 · `frontend/README.md` §六）——
+     它补的是本页原来那个**静默截断**：原先硬写 `limit=50`，**界面不说明被截了**。
+     ⚠️ 这是**新增**元素，⛔ 没有改任何既有 class / id。 -->
+<div id="pager" class="pagination" hidden>
+  <button id="prevpage" class="btn">上一页</button>
+  <span id="pagelabel" class="page-label"></span>
+  <button id="nextpage" class="btn">下一页</button>
+  <span id="pagehint" class="page-hint"></span>
+</div>
+
 <script src="/static/js/approvals.js"></script>
 <script>
 'use strict';
@@ -202,8 +212,15 @@ async function decide(decision) {
 
 /* ==================== 下 · 裁决历史 ==================== */
 
-async function loadHistory() {
-  const data = await getJSON('/api/v1/agent/approvals/history?limit=50');
+/* 🔴 分页（`frontend/README.md` §六）—— 当前页码状态，由 `pagerState` 算，⛔ 本页不自己推。
+   ⚠️ 原来这里硬写 `limit=50` —— 那是**静默截断**：界面不说明被截了。 */
+let histOffset = 0;
+const HIST_PAGE = 50;
+
+async function loadHistory(offset) {
+  if (offset === undefined) offset = histOffset;
+  const data = await getJSON(
+    '/api/v1/agent/approvals/history?limit=' + HIST_PAGE + '&offset=' + offset);
   const body = $('history').querySelector('tbody');
   body.innerHTML = '';
   for (const ev of data.events) {
@@ -216,7 +233,36 @@ async function loadHistory() {
     }
     body.appendChild(tr);
   }
+  histOffset = offset;
+  renderPager(data, offset);
 }
+
+/* 🔴 分页控件的渲染（`frontend/README.md` §六）。
+   ⚠️ **页码与"还有没有下一页"一律由 `RagApprovals.pagerState` 算** —— ⛔ 本页不自己推。
+      ⛔ 尤其**不拿 `count == limit` 猜 `has_more`**：那在"正好一整页、后面没有了"时
+      会显示一个**点不动的下一页**，而且不报错。`has_more` 只认服务端给的那个字段。
+   ⚠️ **只有一页时整个控件不显示** —— 一个永远点不动的翻页条比没有更糟。 */
+function renderPager(data, offset) {
+  const st = RagApprovals.pagerState({
+    offset: offset, limit: data.limit, hasMore: data.has_more,
+  });
+  const box = $('pager');
+  box.hidden = !st.hasPrev && !st.hasNext;
+  $('pagelabel').textContent = st.label + ' · 本页 ' + data.count + ' 条';
+  $('prevpage').disabled = !st.hasPrev;
+  $('nextpage').disabled = !st.hasNext;
+  // 🔴 两个偏移量存在 dataset 上，⛔ 不在闭包里另算一份（两处算 = 迟早不一致）
+  box.dataset.prev = String(st.prevOffset);
+  box.dataset.next = String(st.nextOffset);
+  $('pagehint').textContent = st.hasNext ? '后面还有' : '已经到底了';
+}
+
+$('prevpage').addEventListener('click', () => {
+  loadHistory(Number($('pager').dataset.prev)).catch((e) => notice(e.message, true));
+});
+$('nextpage').addEventListener('click', () => {
+  loadHistory(Number($('pager').dataset.next)).catch((e) => notice(e.message, true));
+});
 
 /* ==================== 刷新：轮询 5s，仅页面可见（裁定 5） ==================== */
 
