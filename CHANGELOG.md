@@ -10,6 +10,22 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- 🔴 **按风格稿把 `chat` 页重排成同一个 dashboard 骨架**（2026-10-09）——
+  与上一版 `trace` 同一套：**sidebar（品牌渐变块 + 4 条导航 + 会话列表 + 新会话）· page-head · 内容区**；
+  消息**卡片化 + 淡入**（`.turn` 的 `msgRise` 动画）。
+  🔴 **动效只做【一个有意义的】**（新消息淡入上浮 —— 表达"这条是刚来的"），
+  且**必带 `prefers-reduced-motion`** —— 那是我按 `ui-ux-pro-max` skill 的 7 号规则补的
+  （它把「No reduced-motion」列为反模式）。
+  ⚠️ **⛔ 没有改任何 class 名 / id / JS** ⇒ 判据：`id` 逐个核过，一个没丢。
+  🔴 **两处是【截图时看出来的】**：① 登录页原先只有一行行的裸元素 ⇒ 给它**渐变 hero + 卡片**；
+  ② 消息区 `margin: 0 auto` **居中了** ⇒ 左边缘与上面的 `page-head` **不在一条线上**，
+  看起来像两块东西拼的 ⇒ 改成 `margin: 0`（已修并复截确认）。
+  🔧 **顺带**：`frontend/README.md` 新增 **§十一「前端怎么验」** —— 把
+  「headless 截图怎么跑」·「**要验有数据的页面只能喂假数据，⛔ 但不许把假数留在代码里**」·
+  「**Playwright MCP**（`-s user` · `--browser chrome` · 🔴 **要新开会话才生效**）」三件写下来 ——
+  ⛔ 否则下次会话又要重新摸一遍。
+  📌 门：6 份页面用例 **41 passed** · node **81** · 全量 **878 passed** · 断链 0 · 静态检查 0 组。
+
 - 🔴 **按风格稿把 `trace` 页**从「一条线的表格」**重排成 dashboard** —— ⚠️ **这一版补的是前一版的漏**
   （2026-10-09 · `frontend/README.md` §一 那 4 条方向）——
   **业务方原话**：「**我看了前端这个网页在浏览器中打开了，什么都没有，只有文字，没有任何的其他东西，

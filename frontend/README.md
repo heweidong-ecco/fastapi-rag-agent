@@ -305,3 +305,54 @@ grep -n 'COPY . \.' api/Dockerfile           # ⇒ :96
 | 其他 | `ROADMAP.md` 多处 |
 
 ⚠️ **`CHANGELOG` / `复盘` / `DEC-*` 里的旧路径⛔ 不改**（历史事实 —— 进断链门的 🟡/⚫ 豁免）。
+
+---
+
+## 十一 · 🔧 **前端怎么验**（⛔ 别靠"跑过用例了"）
+
+> **为什么单开一节**：本仓前端**没有自动化视觉回归**（无构建、无 npm）。
+> ⛔ 所以「用例全绿」**证不了"页面好看 / 没坏"** —— 它只证"路由在、纯函数对"。
+
+| 手段 | 能验什么 | ⛔ 验不了什么 |
+|---|---|---|
+| `pytest api/test_*page*.py` | 路由在 · 跳转目标在盘上 · 页面里的 URL 带 `/api/v1` | **长什么样** |
+| `node --test api/static/js/*.test.js` | 纯逻辑（含 `pagerState` 那 9 条） | 同上 |
+| **headless 截图**（本机 Chrome，见 11.1） | **静态渲染**：亮/暗两套 · 布局 · 颜色 | **交互**（登录 / 点 / 翻页 / 真实数据） |
+| **Playwright MCP**（✅ 2026-10-09 已装，见 11.3） | 🔴 **交互**：真登录 · 点 · 填表 · 翻页 · 看 console/network | ⚠️ 不是 CI 门（观察是本机、某一刻的） |
+
+### 11.1 headless 截图怎么跑（⛔ 零依赖，只借本机 Chrome）
+
+仓库根起一个**一次性静态服务**（把 `/static/*` 映到 `api/static/*`，与 `api/main.py` 的 mount 同口径）：
+
+```bash
+venv/bin/python tmp/serve.py &          # 见本仓 tmp/serve.py（一次性的，⛔ 不进库）
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+  --headless=new --disable-gpu --hide-scrollbars \
+  --window-size=1400,760 --screenshot=/tmp/shot.png \
+  "http://127.0.0.1:8899/static/web/trace.html"
+```
+
+⚠️ **要验亮 / 暗两套** ⇒ 先 `sed` 出一个临时副本（在 `<html …>` 里插 `data-theme="light"` 或 `"dark"`）再截。
+🔴 **用完立刻删那个副本** —— `api/static/` 下的**任何 `.html`** 都会被 `api/test_web_pages.py`
+**当成一个页面**扫（它是"扫目录"型的门，⛔ 不认"这是临时的"）。
+
+### 11.2 🔴 **要验"有数据的页面"，只能喂假数据** —— ⚠️ 但⛔ 不许把假数留在代码里
+
+页面要登录（`X-API-Key`）才渲染主界面 ⇒ headless 截图**只看得见登录态**。
+⇒ 想看主界面 ⇒ **临时注入一段 mock**（照 2026-10-09 那次的做法），**截完把临时文件删掉**。
+
+🔴 **⛔ 别把 mock 写进真页面** —— 本仓有前科：`trace.html` 曾印两格「总 Token / 总花费」，
+而它们**没有数据源、恒为 `--`**。守卫在 `api/test_trace_page.py`
+（`test_page_does_not_print_the_two_dead_overview_cards`）。
+
+### 11.3 Playwright MCP（🔴 **要新开会话才生效** —— MCP 在**会话启动时**加载）
+
+```
+claude mcp add playwright -s user -- npx @playwright/mcp@latest --browser chrome
+```
+
+* **`-s user`** ⇒ 落在 `~/.claude.json`，⛔ **不写进本仓**（它是**本机工具**，不是项目依赖）
+* **`--browser chrome`** ⇒ 用本机已装的 Chrome，⛔ 不用再下 playwright 的浏览器二进制
+* ⚠️ 它**不走视觉模型**，走 **accessibility tree**（返回带 `ref` 的元素快照）⇒ 更便宜、更确定
+* ⚠️ 代价：默认 **headed**（会弹窗）· token 成本比 CLI 高 · `@playwright/mcp` 还是 0.x
+* 📌 验证装没装：`claude mcp list` ⇒ 应见 `playwright: … ✔ Connected`
