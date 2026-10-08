@@ -128,6 +128,30 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- 🔵 **批② · Task 3：`docker-compose.yml` 加执行器服务 + 硬化配置**（2026-10-08）——
+
+  **新增 `executor` 服务**（`rag-executor`），硬化逐条落地：
+  `read_only: true` · `tmpfs: /tmp:size=64m,noexec,nosuid` · `cap_drop: [ALL]` ·
+  `security_opt: no-new-privileges` · `user: 65534:65534`（nobody）· `mem_limit: 256m` ·
+  `pids_limit: 64` · `cpus: 0.5` · ⛔ **不写 `ports:`**（只在内部网络里被 api 调）。
+  `api` 服务加 `EXECUTOR_URL=http://executor:8000` + `depends_on: executor(service_healthy)`。
+
+  🔴 **一处【偏离施工单原稿】，已实测后改定**：施工单 Step 1 写的是 `network_mode: "none"`。
+  ⚠️ 实测发现 **`none` 的含义是"连内部网都没有"** ⇒ **api 也连不上它** ⇒ 两者不可兼得。
+  ⇒ 改用**新建的 `exec-net`（`internal: true`）**：**对"出网"的隔离效果相同**，
+  同时保住"api 能调它"。⇒ **偏离已记，正式裁定随 Task 7 的 DEC。**
+
+  🔵 **实测（逐条）**：
+  · `docker exec rag-executor id` ⇒ `uid=65534(nobody)` —— 非 root ✅
+  · 往 `/pwned` 写 ⇒ `OSError [Errno 30] Read-only file system` —— 只读根 ✅
+  · 往 `/tmp/ok` 写 ⇒ 成功 —— tmpfs 生效 ✅
+  · **出网** ⇒ `URLError` —— **internal 网络真的挡住了** ✅
+  · `docker inspect` ⇒ `CapDrop=[ALL] Readonly=true Memory=268435456 PidsLimit=64` ✅
+  · 🔴 **api → 执行器** ⇒ `{"ok":true,"out":"42\n"}` —— 内部网络 DNS + 调用链通了 ✅
+
+  ⚠️ **本 Task 仍未接线**：`api` 拿到了 `EXECUTOR_URL`，但 `code_executor_impl` **还没读它**（Task 4）。
+  现在调执行器的是人（我在容器里手打的），⛔ 不是应用。
+
 - 🔵 **批② · Task 2：代码执行器服务本体**（2026-10-08）——
   新增 `api/executor_server.py` + `api/executor.Dockerfile` + `api/test_executor_server.py`（**6 条**）。
 
