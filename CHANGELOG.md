@@ -10,6 +10,45 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- 🔴 **批①「工具缓存收口」· Task 1 + Task 2：TTL 表收口 + 四个工具真的接上缓存**（2026-10-08）——
+  ⚠️ 这是那份批① 施工单的前两步；**施工单本身在另一个分支上**（`docs/ledger-reconcile`）。
+
+  **Task 1（`api/tool_cache.py`）**：
+  ① `TTL_BY_TOOL` 从 `agent_graph_advanced.CACHE_TTL_MAP` **搬过来并收口**（原先那份只盖住 `/agent/mcp_chat` 一条路）
+  ② `get_ttl()` ⛔ **查不到就抛 `KeyError`** —— **不给默认值**。
+  为什么：`.get(name, 60)` 会把「新加了工具、但忘了登记 TTL」变成「它被缓存 60 秒」——**不报错、没人会知道**
+  ③ `cached_tool` 加 `name=`（显式工具名）与 `should_cache=`（结果谓词）
+
+  **Task 2（四个工具接上缓存）**：`calculator` · `date_today` · `web_search` · `execute_python`
+  （缓存包在 `@tool` 那一层；⛔ 没往 `simple_tools_impl` / `code_executor_impl` 里 import 任何东西 ——
+  那两个文件的**不变量**是「只 import 标准库」）。
+
+  - `date_today` / `execute_python` 的 TTL 是 **0** ⇒ 包装**照样包**，但**一律直通** ——
+    让「哪些工具带缓存」只有 `TTL_BY_TOOL` **一处**回答（⛔ 不是"有的没包、有的 TTL=0"两种形状混着）
+  - 🔴 `date_today` 那个 `0` **是有缘故的**：它返回「今天是X月X日」，而**缓存键只含空入参** ⇒
+    **23:30 缓存、00:10 命中 ⇒ 跨天那一小时返回昨天**。
+    ⚠️ 这条**不是假设** —— `agent_graph_advanced` 那份内联缓存**已经在跑**（TTL 3600）
+  - 🔴 `web_search` 的失败**是返回值、⛔ 不是异常** ⇒ 只能靠 `should_cache` 挡。
+    ⛔ 不挡的后果：一次网络抖动被缓存 **300 秒** ⇒ 那 5 分钟里**谁都搜不到东西**
+
+  🔴 **动手前抓到一个施工单【没预见】的连带后果**（⇒ `DEC-105`）：
+  接上缓存会把 `web_search` / `calculator` **从「不需要 Redis」变成「需要 Redis」** ⇒
+  Redis 一挂这两个工具就 500（🔵 实测：`test_search_tools.py` 现状 **6 passed**，此时本机 Redis 没起）。
+  业务方 2026-10-08 裁 **fail-open** —— 照 `api/rate_limiter.py` 的 `S8` 形状：
+  **只捕 `redis.RedisError`**（⛔ 不是 `except Exception`）、直通执行、打一条 ERROR。
+  ⇒ 现在本机 **Redis 没起**，那组用例**照样全绿**（这是 fail-open 真的接上了的**唯一端到端凭证**；
+    判据见下方 ④，⛔ 别记这个数）。
+
+  📌 **判据（跑得出来）**：`cd api && ../venv/bin/python -m pytest test_tool_cache.py test_tool_cache_wiring.py -q`
+  ⇒ **13 passed** · `... test_search_tools.py test_impl_modules.py test_safe_math_wiring.py -q` ⇒ **41 passed**
+  · 反证三条（fail-open / `should_cache` / 不许双跑）**逐条确认尺子有效**（笔录见 `DEC-105` §五）。
+
+  ⚠️ **两处与施工单的出入（按实际改测试，⛔ 没改实现）**：
+  ① 施工单让 patch `search_tools._search_bing` —— **本仓没有这个函数**，实际是 `httpx.get`
+  ② 施工单猜 `web_search` 的实现体「可能不是独立函数」—— **确实不是**，
+  已按它的要求抽成 `_web_search_impl`（**搬家，逻辑一行未改**），再在外面包缓存。
+
+
 - ⭐ **新增一层「外部参考层」`docs/reference/` + 首篇文档（MCP 官方原文摘录）**（2026-10-08）——
   业务方原话：「关于 MCP 无状态的官方内容**记录成一个单独技术文档**放在 `docs/` 子文件夹 ——
   **英文名：使用行业放技术文档的英文名**，方便以后看。」外加同日一并发话：
@@ -45,8 +84,11 @@ All notable changes to this project will be documented in this file.
   📌 **判据**：`ls docs/reference/` · `bash scripts/check_doc_links.sh`（**🔴 真断链 0**）·
   `bash scripts/check_doc_orphans.sh`（**无孤儿**）· 喂 hook JSON ⇒ **六道门全绿 rc 0**。
 
-  ⚠️ **同期【欠】的一笔**：`8dc9cba`（批① Task 1 · `api/tool_cache.py` 收口）**没写 CHANGELOG** ——
-  按施工单，批① 的文档与留痕**统一落在 Task 7**（见 `docs/文档地图.md` §🅗 的施工单）。
+  ⚠️ **同期那笔「欠 CHANGELOG」【已还】**：`8dc9cba`（批① Task 1）当时没写 ——
+  本文件的 **`### Added` 顶部那条「批① Task 1 + Task 2」**已把它一并补上。
+  🔴 **教训**：施工单把"文档与留痕"统一排到 **Task 7**，但本仓的「**提交前两问**」是
+  **每次 commit** 都要答的 ⇒ **两者会打架**。⇒ 处置：**CHANGELOG 跟着 commit 走**，
+  Task 7 只负责 **spec** 与 **DEC 交叉引用**。
 
 - 🟢 **补上本仓的【第 ⑥ 道门】：静态检查（`ruff` · **基线棘轮**）**（2026-10-07）——
   新增 `scripts/check_lint_baseline.sh`＋`scripts/ruff-baseline.txt`＋仓根 `ruff.toml`，

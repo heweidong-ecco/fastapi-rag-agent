@@ -1,12 +1,15 @@
 # 工具调用缓存，升级版了，包含三大风险的防护
 import hashlib
 import json
+import logging
 import time
 import random
 import redis
 from functools import wraps
 from typing import Callable, Dict, Optional
 from config import REDIS_HOST, REDIS_PORT
+
+logger = logging.getLogger(__name__)
 
 redis_client = redis.Redis(
     host=REDIS_HOST,
@@ -90,6 +93,20 @@ def set_cached_tool_result(tool_name: str, result, expire_seconds: int = 300, *a
 #       直接执行工具函数 —— 结果照常返回，只是这次不写缓存。
 _LOCK_WAIT_SECONDS = 2.0
 
+# 🔴 2026-10-08（业务方裁 · `DEC-105`）：**Redis 不可用 ⇒ fail-open**。
+#    ⛔ **只捕 `redis.RedisError`**，⛔ **不是 `except Exception`** ——
+#    后者会把**代码 bug** 伪装成"Redis 不通"，真 bug 就永远查不出来。
+#    📌 同形先例：`api/rate_limiter.py` 的 `S8` 兜底
+#      （守卫：`api/test_rate_limiter_resilience.py::test_只捕获redis错误_别的异常要照样冒泡`）。
+#    为什么缓存要 fail-open：**缓存是优化，不该因为它拿不到就拒服务**（本文件 §文件头那句）。
+#    ⚠️ 代价（知道再选）：Redis 挂掉时**静默降级** —— 机器痕迹上「缓存从不命中」与
+#      「根本没在缓存」长得一样 ⇒ 只能靠这条 ERROR 日志与健康检查发现。
+def _warn_redis_down(tool_name: str, exc: Exception) -> None:
+    logger.error(
+        f"🔴 工具缓存 Redis 不可用 ⇒ `{tool_name}` 本次【直通执行】、缓存【已失效】："
+        f"{type(exc).__name__}: {exc}"
+    )
+
 
 def cached_tool(
     expire_seconds: Optional[int] = None,
@@ -109,7 +126,13 @@ def cached_tool(
                         ⚠️ 用它而不是"猜哪些结果算失败" —— 每条工具失败的形状不同，
                         猜出来的规则是**静默**的（本仓为此栽过多次）。
 
-    ⚠️ 抢锁**有上限**（`_LOCK_WAIT_SECONDS`）：超时后**降级为直接执行** —— 不再等、**不递归**。
+    ⚠️ **两种降级，别混**：
+      ① **抢锁超时**（`_LOCK_WAIT_SECONDS`）⇒ 直接执行、**不写缓存**；
+      ② **Redis 不通**（`redis.RedisError`）⇒ 直接执行、**不写缓存**、**打一条 ERROR**（fail-open）。
+
+    🔴 **本函数的第一条不变量**：**`func` 绝不出现在任何 `except redis.RedisError` 的 `try` 里** ——
+       否则**工具自己抛 `RedisError`** 会被当成"缓存挂了"，于是**再执行一遍**（双跑）。
+       守卫用例：`test_tool_raising_redis_error_is_not_retried`。
     """
     def decorator(func):
         @wraps(func)
@@ -121,8 +144,12 @@ def cached_tool(
             if ttl == 0:
                 return func(*args, **kwargs)
 
-            # 1. 查缓存
-            cached = get_cached_tool_result(tool_name, *args, **kwargs)
+            # 1. 查缓存（Redis 不通 ⇒ fail-open）
+            try:
+                cached = get_cached_tool_result(tool_name, *args, **kwargs)
+            except redis.RedisError as exc:
+                _warn_redis_down(tool_name, exc)
+                return func(*args, **kwargs)
             if cached is not None:
                 return cached
 
@@ -130,22 +157,41 @@ def cached_tool(
             lock_key = f"lock:{tool_name}"
             deadline = time.monotonic() + _LOCK_WAIT_SECONDS
             while True:
-                if redis_client.set(lock_key, "1", nx=True, ex=10):
+                try:
+                    got_lock = redis_client.set(lock_key, "1", nx=True, ex=10)
+                except redis.RedisError as exc:
+                    _warn_redis_down(tool_name, exc)
+                    return func(*args, **kwargs)
+
+                if got_lock:
                     try:
                         # 3. 执行工具函数
+                        #    🔴 这一行**故意**留在一个没有 `except redis.RedisError` 的 try 里
+                        #       （只有 `finally`）—— 见 docstring 的不变量。
                         result = func(*args, **kwargs)
                         # 4. 回写缓存（带防穿透和防雪崩）
-                        if should_cache is None or should_cache(result):
-                            set_cached_tool_result(tool_name, result, ttl, *args, **kwargs)
+                        #    写不进去**只记日志**，本次结果照常返回（结果已经算出来了）
+                        try:
+                            if should_cache is None or should_cache(result):
+                                set_cached_tool_result(tool_name, result, ttl, *args, **kwargs)
+                        except redis.RedisError as exc:
+                            _warn_redis_down(tool_name, exc)
                         return result
                     finally:
-                        redis_client.delete(lock_key)
+                        try:
+                            redis_client.delete(lock_key)
+                        except redis.RedisError:
+                            pass          # 删不掉 ⇒ 锁 10 秒后自己过期，不因此失败
 
                 # 5. 没拿到锁：到点就**降级**；否则等一小会儿，再看别人有没有把缓存填好
                 if time.monotonic() >= deadline:
                     return func(*args, **kwargs)      # 降级：直接执行，这次不写缓存
                 time.sleep(0.05)
-                cached = get_cached_tool_result(tool_name, *args, **kwargs)
+                try:
+                    cached = get_cached_tool_result(tool_name, *args, **kwargs)
+                except redis.RedisError as exc:
+                    _warn_redis_down(tool_name, exc)
+                    return func(*args, **kwargs)
                 if cached is not None:
                     return cached
         return wrapper

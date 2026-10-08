@@ -14,6 +14,7 @@
 """
 from langchain_core.tools import tool
 
+from tool_cache import cached_tool
 from code_executor_impl import (
     ALLOWED_BUILTINS,
     ALLOWED_MODULES,
@@ -31,6 +32,13 @@ __all__ = [
     "MAX_EXEC_TIME",
     "MAX_OUTPUT_LENGTH",
 ]
+
+# 🔴 2026-10-08（批① 工具缓存收口 · `DEC-105`）：TTL = **0** ⇒ 这层包装**一律直通**。
+# ⚠️ **仍然包**：这样「哪些工具带缓存」只有**一个地方**回答（`TTL_BY_TOOL`），
+#    ⛔ 不是"有的工具没包、有的是 TTL=0"两种形状混着 —— 后者下一个人要读两处才知道。
+# 🔴 ⛔ **`tool_cache` 绝不许 import 进 `code_executor_impl`** ——
+#    那个文件的不变量是「**只 import 标准库**」（写在它文件头）。
+_cached_execute = cached_tool(name="execute_python")(execute_python_impl)
 
 
 @tool
@@ -67,4 +75,4 @@ def execute_python(code: str) -> str:
     """
     # ⚠️ 上面这段 docstring 是**给 LLM 读的工具描述**，故留在本层；
     #    真正的逻辑在 code_executor_impl.execute_python_impl（纯 stdlib）。
-    return execute_python_impl(code)
+    return _cached_execute(code)
