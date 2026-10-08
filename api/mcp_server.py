@@ -3,6 +3,7 @@ MCP Server：使用工厂函数自动注册所有工具
 """
 import asyncio
 import os
+import sys
 from mcp import types
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
@@ -101,7 +102,10 @@ async def list_tools(ctx, params) -> types.ListToolsResult:
         health = get_tool_health(tool_name)
 
         if health == UNHEALTHY:
-            print(f"工具 {tool_name} 不健康，已从工具列表中移除")
+            # 🔴 2026-10-08（批④-B）：**必须是 stderr** —— 见文件末尾那段「⛔ 谁都不许往
+            #    stdout 写」。这一处**尤其**危险：它跑在 `tools/list` **请求当中**，
+            #    正是客户端在等响应的时候。
+            print(f"工具 {tool_name} 不健康，已从工具列表中移除", file=sys.stderr)
             continue  # 跳过不健康的工具
 
         tools.append(Tool(
@@ -146,7 +150,12 @@ server = Server("agent-tools", on_list_tools=list_tools, on_call_tool=call_tool)
 # MCP Server 启动入口
 async def run_mcp_server():
     """启动 MCP Server"""
-    print(f"MCP Server 启动中... 已注册 {len(TOOLS)} 个工具")
+    # 🔴 2026-10-08（批④-B）：**stderr**，⛔ 不是 stdout。
+    #    改前这里是 `print(...)` ⇒ **每次调用**都会让客户端报一条
+    #      `ValidationError: Invalid JSON … input_value='MCP Server 启动中... 已注册 7 个工具'`
+    #    （实测 3/3 稳定复现）—— 因为 **stdout 就是 MCP 的 stdio 传输通道**。
+    #    📄 现场与数据 ⇒ `docs/说明/mcp长驻会话-调研-20261008.md` §五
+    print(f"MCP Server 启动中... 已注册 {len(TOOLS)} 个工具", file=sys.stderr)
     async with stdio_server() as (read_stream, write_stream):
         await server.run(read_stream, write_stream, server.create_initialization_options())
 
