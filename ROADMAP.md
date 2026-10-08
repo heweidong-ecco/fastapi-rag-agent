@@ -399,6 +399,41 @@ bash scripts/list_endpoints.sh          # 默认 http://127.0.0.1:8000
 
 ### ⑤ 下一步 + 阻塞项
 
+> ## 🔴🔴 **2026-10-09 · 本格的「进行中 / 下一步」已更新**（⛔ 下面更早的块原文保留，勿照旧读）
+>
+> ### 这一夜做完了什么（**按类型 · 不写条数**）
+>
+> | 类 | 做了什么 | 判据 |
+> |---|---|---|
+> | **收口** | ✅ **`N12` 结清**（重导 `api/schema.sql` + 补真库用例 6 条）· `N19` 结清（`doc_type` 形参 + `technical` 600/60 + 新增 `faq` 档） | `pytest api/test_approval_events_db.py -q -m needs_db` · `pytest api/test_rag_upload_doc_type.py -q` |
+> | **语料** | ✅ **契约定稿**（`DEC-117`）· **去重器** · **开工页** · **语料库 30 篇**（`testdata/demo-corpus/`） | `ls testdata/demo-corpus/[A-E]-*.md` · `scripts/check_corpus_dedup.py` |
+> | **前端** | ✅ **设计系统**（`app.css` + `frontend/README.md`）· **5 页全接上、零硬编码色** · **分页** · **两条新门** · **`建索引-index` skill** | `pytest api/test_truncation_declared.py -q` · `bash scripts/check_index_sync.sh` · `node --test api/static/js/*.test.js` |
+> | **编排** | ✅ ⭐ **`frontend/页面与接口规格.md`** —— **初稿的唯一输入**（七条裁定 + 60 条接口归位 + 页面编排 + **反向清点 89 条**） | `ls frontend/` |
+> | **记录** | ✅ `DEC-113`–`DEC-120`（8 份）· `frontend/索引.md`（**前端唯一查找入口**）· `self-prompt/`（业务方的提示词，已 gitignore） | `ls docs/decisions/DEC-1[12]*` |
+>
+> ### 🔴 下一步（**业务方点的**）：出【初稿】
+>
+> **序列**：`①b` → **乙（语料重建）** → **重烤** → `⑤`（`DEC-098` §二·0）
+> ⇒ ⭐ **编排已走完（第 ① 步 done）** ⇒ **下一步 = 第 ② 步【出初稿】**（⛔ **不引 skill**）；
+> 第 ③ 步才是**新开会话用 `ui-ux-pro-max` 优化**（提示词见 `self-prompt/ui-ux-prompt.txt`）。
+> ⚠️ **业务方定的顺序⛔ 不许跳**：编排 → 初稿 → skill 优化（他原话：「**不是一边做一边补一边改，反复试错毫无意义**」）。
+>
+> ### 🔴 未开 PR（⚠️ 这是本格最要紧的一条）
+>
+> 本支**在飞的 commit 数** ⇒ 跑：`git rev-list --count origin/main..HEAD`（⛔ 别抄数）
+> 🔴 **业务方 2026-10-08 裁的 PR 口径是「按【类型】攒 · ⛔ 别一笔一 PR · ⛔ 别频繁调 API」**
+> ⇒ **该收 PR 了**，但**落点要他点**（⛔ 本 Agent 不自拟）。
+>
+> ### ⚠️ 卡在业务方的（**逐条**）
+>
+> | # | 等什么 | 现在 |
+> |---|---|---|
+> | 1 | **`§二 10` 前端风格稿** | ✅ **已到**（`frontend/Knowledge Base Dashboards (Community).fig`） |
+> | 2 | **`technical` 那一档 500 → 600** | ⬜ **未裁**（`docs/说明/语料要求.md` §5.4 · 我的建议：**改**） |
+> | 3 | **§3.6.2 那五条「边界标注」的文案草案** | ⬜ **待他过目**（`frontend/页面与接口规格.md` §3.6.2） |
+> | 4 | **PR 怎么收** | ⬜ 待他点 |
+
+
 > ## 🔴🔴 **2026-10-08 夜 · 本格的「进行中 / 下一步」已更新**（⛔ 下面更早的两段原文保留在下方，勿照旧读）
 
 > **当前**：`#113`–`#120` **八个 PR 全部 MERGED**（批① 缓存收口 · `#114` docs · 批② 执行器进容器 ·
