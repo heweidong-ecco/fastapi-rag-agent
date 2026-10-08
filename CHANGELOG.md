@@ -27,8 +27,14 @@ All notable changes to this project will be documented in this file.
   按钮**四态**（含**加载中**转圈）；三张专有卡**颜色分明**；空态**带"为什么空"**；hero 渐变只出现一处。
   📌 门：`pytest api/test_chat_page.py api/test_web_pages.py api/test_frontend_contract.py` ⇒ **27 passed** ·
   `node --test api/static/js/*.test.js` ⇒ **72 pass / 0 fail**。
-  ⬜ **还没做的**：另外 4 个页面（`trace` / `approvals` / `eval` / `eval_gate`）**仍是各带内联 `<style>`**；
-  **搬迁到 `frontend/`** 也还没动（牵连 15+ 处 · `frontend/README.md §九`）。
+  ✅ **同日把另外 4 页也接上了**（`trace` / `approvals` / `eval` / `eval_gate`）——
+  🔴 **病根同款**：每页各带一套 `:root`（**与全局 token 同名却是另一套值** ⇒
+  一个页面里看到的 `--line` 和另一页的 `--line` **不是同一个颜色**）+ 满地硬编码色
+  （`#fff` / `#f3f4f6` / `#fffbeb` / `#1d4ed8` / `#1a73e8` / `#e8f0fe` …）。
+  ⇒ **5 页全部**改成「`link` 共享样式表 + 只写页面专属规则」；**`trace.html` 那个硬编码 `#fff` 的 `.card` 已修**。
+  ⚠️ **同样零结构改动**（⛔ 没改 class 名 / id / JS），**所有裁定注释逐条保留**（`DEC-089/090/091/093/097`）。
+  📌 门：6 份页面用例 **41 passed** · node **72 pass / 0 fail** · **全量离线 873 passed**（与改前同）。
+  ⬜ **还没做的**：**分页**（`frontend/README.md §六` —— 要**接口 + 组件两头**，未排进施工）。
 
 - 🆕 **demo 语料库入库：30 篇 · 30 084 字**（2026-10-08 · `乙 · 语料重建`）——
   `testdata/demo-corpus/` —— **A/B/C/D 每类 7 篇 ＋ 负样本块 2 篇**；
