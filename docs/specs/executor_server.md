@@ -2,10 +2,10 @@
 
 | 项 | 内容 |
 |---|---|
-| **状态** | 🔵 **新建（2026-10-08 · 批② Task 2）** —— ⚠️ **服务本体在，但【应用侧还没接线】**（那是 Task 4） |
-| **对外提供** | `POST /execute` —— 入 `{"code": str}`，出 `{"ok": bool, "out": str}`<br>`GET /health` —— 容器的 `healthcheck` 用<br>⚠️ **⛔ 不提供 `/docs`**（`docs_url=None`）：内部机制，少一个面就少一个面 |
-| **谁在用** | ⚠️ **暂时没有人** —— `docker-compose.yml` 的 `executor` 服务会起它（Task 3），<br>应用侧（`code_executor_impl` 的**远端路径**）到 **Task 4** 才接 |
-| **测试** | `api/test_executor_server.py`（**6**）· ⚠️ 数字会变，判据：`cd api && ../venv/bin/python -m pytest test_executor_server.py --collect-only -q \| tail -1` |
+| **状态** | ✅ **上线（2026-10-08 · 批②）** —— 服务本体 + compose 硬化 + 应用接线 + 并发上限，**全部已实测** |
+| **对外提供** | `POST /execute` —— 入 `{"code": str}`，出 `{"ok": bool, "out": str}`；<br>⚠️ **排队超时 ⇒ `503`**（形状**故意不同**：`{ok,out}` 表示"代码跑完了"，`503` 表示"忙不过来"）<br>`GET /health` —— 容器的 `healthcheck` 用<br>⚠️ **⛔ 不提供 `/docs`**（`docs_url=None`）：内部机制，少一个面就少一个面 |
+| **谁在用** | 🔴 **应用侧**（`code_executor_impl` 的远端路径，走 `EXECUTOR_URL`）—— 2026-10-08 Task 4 接上<br>· `docker-compose.yml` 的 `executor` 服务起它 |
+| **测试** | `api/test_executor_server.py`（**7**）· ⚠️ 数字会变，判据：`cd api && ../venv/bin/python -m pytest test_executor_server.py --collect-only -q \| tail -1` |
 
 ## ✅ 做了什么
 
@@ -17,10 +17,10 @@
 
 ## 🟡 做到哪 / 缺什么
 
-- ⬜ **应用侧还没接线**（Task 4）· **compose 还没加这个服务**（Task 3）
+- ✅ 应用接线（Task 4）· ✅ compose 硬化（Task 3）· ✅ 并发上限（Task 5）
 - ⬜ **没有鉴权**（⚠️ 前提是"只在内部网络里" —— 见下）
-- ⬜ **没有并发信号量**（Task 5）
-- ⬜ **容器硬化配置还没落地**（Task 3：只读根 / 无网 / `cap_drop` / 非 root / mem·pids 限制）
+- 🔴 **`MAX_CONCURRENT_EXECUTIONS` 与 compose 的 `cpus:` 是【一对】** —— 见下 ⚠️ 表最后一条。
+  ⛔ 别单独调其中一个
 
 ## ⚠️ 看代码会误判的地方 ⭐
 
@@ -33,6 +33,9 @@
 | 「它没有鉴权 ⇒ 是个洞」 | ⚠️ **前提是"只在 compose 的内部网络里"**：⛔ 不映射端口到宿主。**改这个前提（给它开 `ports:`）⇒ 先加鉴权** |
 | 「`/execute` 抛异常会 500 吧」 | ⛔ **不会** —— 被执行的代码抛异常是**业务结果**（"你给的代码错了"），走 `ok=False` + **HTTP 200**。**服务真的坏了**（子进程起不来）也走 `ok=False`，因为对调用方**处置一样** |
 | 「用 `globals()` 就能测出有没有串状态」 | ⚠️ **沙箱白名单里没有 `globals`**（实测 `NameError`）。能用的是 **`dir`** —— `exec(code, g)` 里 `dir()` 列的就是 `g` 的键 |
+| 「并发上限调大点，吞吐就上去了」 | 🔴 **⛔ 不能单独调** —— 它与 compose 的 `cpus:` 是**一对**。实测（宿主 4 核 · `cpus: 0.5`）：`range(20000000)` 单体 **1.38s**；**cap=4 ⇒ 4 并发各拿 0.125 核 ⇒ ≈5.5s ⇒ 撞上 5 秒硬杀**（4 个"超时"**全是假的**）；cap=2 ⇒ ≈2.8s ⇒ 全 `ok`。⇒ **要抬就两个一起抬，抬完必须重跑实测**（`DEC-108` §3.6） |
+| 「排队超时也是 200，形状一样」 | ⛔ **不一样** —— 忙不过来是 **`503`**，⛔ 不是 `{ok:false}`。**理由**：应用侧要看得出「是执行器忙」还是「是我的代码错了」，**处置不同** |
+| 「排队就让它等着呗」 | 🔴 **⛔ 不能无限等** —— `/execute` 是**同步端点**，占 Starlette 线程池（默认 40）；无限等 ⇒ 线程池填满 ⇒ **连 `/health` 都拿不到线程** ⇒ 容器被判不健康并重启 |
 
 ## 关联
 

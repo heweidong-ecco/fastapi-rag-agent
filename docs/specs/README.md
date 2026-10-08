@@ -43,8 +43,8 @@
 | `api/browser_tools.py` | 84 | 🔴 **缺** | ❓ 未知 |
 | `api/cache.py` | 138 | 🔴 **缺** | ❓ 未知 |
 | `api/chunker.py` | 66 | 🔴 **缺** | ❓ 未知 |
-| `api/code_executor.py` | 150 | 🔴 **缺** | ❓ 未知 |
-| `api/code_executor_impl.py` | 237 | 🔴 **缺** | ❓ 未知 |
+| `api/code_executor.py` | 150 | ✅ [`specs/code_executor.md`](./code_executor.md) | ✅ **可用 · 已进容器（2026-10-08 · 批②）** —— 改前是「宿主同权限的子进程 + 白名单」 |
+| `api/code_executor_impl.py` | 292 | 🔴 **缺** | ❓ 未知 |
 | `api/config.py` | 90 | 🔴 **缺** | ❓ 未知 |
 | `api/cost_dashboard.py` | 294 | 🔴 **缺** | ❓ 未知 |
 | `api/db.py` | 309 | ✅ [`specs/db.md`](./db.md) | 🟡 **可用** —— 连接池 + 建表 + 向量检索；**2026-10-03 起它同时是「多用户隔离」的两个承重层之一**（`DEC-056` 决策 5） |
@@ -55,13 +55,13 @@
 | `api/embedding_client.py` | 78 | ✅ [`specs/embedding_client.md`](./embedding_client.md) | ✅ **客户端已惰性构造**（2026-10-05 · 批 6 · `T1` · `DEC-082`） |
 | `api/evaluate_with_ragas.py` | 312 | 🔴 **缺** | ❓ 未知 |
 | `api/exceptions.py` | 82 | 🔴 **缺** | ❓ 未知 |
-| `api/executor_server.py` | 73 | ✅ [`specs/executor_server.md`](./executor_server.md) | 🔵 **新建（2026-10-08 · 批② Task 2）** —— ⚠️ **服务本体在，但【应用侧还没接线】**（那是 Task 4） |
+| `api/executor_server.py` | 120 | ✅ [`specs/executor_server.md`](./executor_server.md) | ✅ **上线（2026-10-08 · 批②）** —— 服务本体 + compose 硬化 + 应用接线 + 并发上限，**全部已实测** |
 | `api/hybrid_search.py` | 149 | ✅ [`specs/hybrid_search.md`](./hybrid_search.md) | 🟡 **可用，但它在全仓是【第二份 RRF 实现】** |
 | `api/jwt_handler.py` | 74 | 🔴 **缺** | ❓ 未知 |
 | `api/llm_factory.py` | 156 | ✅ [`specs/llm_factory.md`](./llm_factory.md) | 🟢 **新建（2026-10-02 · `①b` Task 5）** —— LLM 客户端的**唯一构造落点**<br>✅ 15 个调用点**已全部改走它**（`api/test_max_tokens_wiring.py` 钉着）<br>⬜ **自动兜底没做**（评估后**故意推迟**，见下）—— ⛔ 别以为它能"兜底" |
 | `api/logger_config.py` | 53 | 🔴 **缺** | ❓ 未知 |
 | `api/main.py` | 787 | ✅ [`specs/main.md`](./main.md) | 🟡 **可用** —— 应用装配 + **3 条中间件** + 全局异常处理 + 看板挂载 + **3 条页面路由**<br>✅ 2026-09-30 起**限流分桶会验签了**（修 `B9-b`）· ✅ **4 处错误文案已修 + 加了 `retry_after`**（修 `B12`）<br>🔴 **2026-10-03（`①b` Task 6 · `DEC-046`）：`QuotaMiddleware` 的额度口径从「每日请求【次数】」换成「按用户按天 **token**」**（= `R1.3`）。<br>🔴 **2026-10-05（批 3 · `N9`）：两条中间件在【依赖不可用】时都改为 fail-open** —— 限流侧身份 `None` ⇒ 跳过用户级限流；额度侧身份 `None` ⇒ 跳过额度检查（`DEC-079`）。<br>🆕 **2026-10-06（`DEC-088` · `F1`）：新增第二条页面路由 `GET /approvals`** —— 与 `/chat` **逐条同构**（302 · `include_in_schema=False` · 显式进无鉴权基线 · 各 3 条页面用例）。<br>🔵 **2026-10-06（`DEC-090` · `F4` 第三条）：异常处理器多写一个【可选】`scope`**（与 `retry_after` 同套路，见「做到哪」）。<br>🆕 **2026-10-06（`DEC-093` · `F2`）：新增第三条页面路由 `GET /trace`** → 302 `/static/web/trace.html` —— 同样与 `/chat` 同构，但**它的页面用例是 6 条不是 3 条**（多出 3 条页面坏法的守卫，见「做到哪」）。<br>🔧 **2026-10-06（`DEC-094`）：页面路由【代码本身没动】** —— 本份记的是 `approvals.html` 的 4 条 URL 前缀与 `ci.yml` 的 `node --test`，**两条都不在这个模块里**；⚠️ 唯一相关的是「页面守卫从"盯一个页面"改成"盯全站"」⇒ 见「看代码会误判」。 |
-| `api/mcp_server.py` | 111 | 🔴 **缺** | ❓ 未知 |
+| `api/mcp_server.py` | 130 | 🔴 **缺** | ❓ 未知 |
 | `api/mcp_tool_factory.py` | 106 | 🔴 **缺** | ❓ 未知 |
 | `api/memory_store.py` | 72 | 🔴 **缺** | ❓ 未知 |
 | `api/metrics.py` | 54 | ✅ [`specs/metrics.md`](./metrics.md) | ✅ **可用** —— 4 个指标，全部走 `prometheus_client` 默认 REGISTRY<br>✅ **2026-10-03（`③` Task 5 · `B2`）**：新增 **`stream_cancelled_total`** —— 它是判据③**唯一可执行的观测对象**（`DEC-052`） |
