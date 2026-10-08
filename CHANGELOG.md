@@ -8,6 +8,38 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- 🔴 **MCP 长驻会话【不会自愈】—— 子进程被杀之后永远起不来**（2026-10-08 · 批④-B **验证**阶段抓出）——
+  **业务方点名要验的一条**（「真杀子进程的恢复」）。
+
+  **现象**（实测）：调一次（✅）⇒ `kill -9` 子进程 ⇒ 再调 ⇒ `MCPError: Connection closed`
+  ⇒ **之后每一次都是它，⛔ 永远不自愈**。⇒ `DEC-111` §2.1 当初写的「崩了自动重建」**是假的**。
+
+  **根因**：`_hold` 把「**连接断了**」和「**工具自己报错**」混在**同一个 `except Exception`**，
+  只 `set_exception` 就继续循环 ⇒ holder task **照样活着**（阻塞在 `tx.get()`）⇒
+  `is_alive()` 恒 True ⇒ **永远不重建**。
+
+  **修了四处**：
+  ① **分开两类异常**（`_is_transport_gone()`）：传输没了 ⇒ **作废会话**；工具报错 ⇒ 只失败这一次。
+     ⚠️ 凭据 = `anyio` 的 `ClosedResourceError`/`BrokenResourceError`/`EndOfStream` +
+     `MCPError(code==CONNECTION_CLOSED)`；⛔ 不能一律按 `Exception` 作废（`INVALID_PARAMS` 不该付重建成本）。
+  ② **旧 holder 会打死新会话**：它原先在体内读 `self._tx`/`self._ready`，而那两个**已被新一代换掉**
+     ⇒ 旧 task 的 `finally` 把**新会话的启动**打成 `RuntimeError: MCP 会话起不来`。
+     ✅ 改成**在 `start()` 里建好就捕获成局部量**交给 holder。
+  ③ **退出时把自己那条队列里压着的请求失败掉** —— ⛔ 否则并发的调用方**永远挂着**（比报错糟得多）。
+  ④ `_restarts` **成功启动后清零** —— 限流管的是「**连续**起不来」。
+
+  📌 **判据（可打印）**：`bash scripts/ci-local.sh` ⇒ **860 passed, 2 skipped, 40 deselected**（exit 0）
+  · ⚠️ **改前 = 858** ⇒ **+2**
+  · `venv/bin/python -m pytest api/test_mcp_long_session.py::test_transport_loss_rebuilds_the_session -q`（**反证 3/3 稳定红**）
+  · `venv/bin/python -m pytest api/test_mcp_protocol_e2e.py::test_killed_subprocess_is_recovered_on_the_next_call -q`（真杀兜底）
+  · ⚠️ **诚实边界**：真杀那条用例的判据**只能是"最终能回来"** —— 原本还想钉「发现的那一次必须失败」，
+    实测它是**时序相关**的（有时 `async with` 自己退出、第一次调用就重建成功）⇒ **不稳定 ⇒ 已去掉**。
+  · 🔴 **不会自动重试**：工具调用可能已有副作用（`execute_python`），重试 = at-least-once ⇒ 由调用方决定。
+
+  📄 全文 ⇒ `docs/decisions/DEC-111-MCP长驻会话改为actor模式.md` **§八**
+
 ### Performance
 
 - ⚡ **批④-B · MCP 会话改【长驻】：每次工具调用 ~2s → ~5ms**（2026-10-08）——

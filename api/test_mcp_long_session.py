@@ -163,6 +163,53 @@ def test_a_failing_call_does_not_kill_the_session(monkeypatch):
     assert events.count("initialize") == 1, "会话被重启了 —— 本该活着"
 
 
+def test_transport_loss_rebuilds_the_session(monkeypatch):
+    """🔴 **传输断了 ⇒ 下一次调用必须重建会话**。
+
+    ⚠️ **这一条是【真杀子进程】才照出来的**（2026-10-08 批④-B 验证阶段）：
+       改前 `_hold` 把「**连接断了**」和「**工具自己报错**」混在一个 `except Exception` 里，
+       于是子进程被杀之后 **holder task 照样活着** ⇒ `is_alive()` 恒 True ⇒ **永远不重建**
+       ⇒ 之后每一次调用都拿同一条死会话，**一直** `MCPError: Connection closed`。
+       📌 实测复现：调一次（✅）⇒ `kill -9` 子进程 ⇒ 再调 ⇒ ❌ **一直不恢复**。
+
+    ⚠️ 反证：把 `_is_transport_gone` 那支去掉（回到"只 set_exception 就继续"）
+       ⇒ `initialize` 只会是 1 次 ⇒ **本用例红**。
+    """
+    from mcp import MCPError
+    from mcp.types import CONNECTION_CLOSED
+
+    import agent_graph_advanced as m
+
+    events = []
+    _install_fakes(monkeypatch, m, events)
+
+    armed = {"on": True}
+    orig = m.ClientSession.call_tool
+
+    async def _die(self, name, arguments):
+        if armed["on"]:
+            armed["on"] = False
+            raise MCPError(code=CONNECTION_CLOSED, message="Connection closed")
+        return await orig(self, name, arguments)
+
+    monkeypatch.setattr(m.ClientSession, "call_tool", _die)
+
+    async def _run():
+        try:
+            await m.call_mcp_tool("calculator", {"expression": "1"})
+        except MCPError:
+            pass
+        # 🔴 **紧接着**再调（⛔ 不等待）—— 这是真实场景，也是当年会报
+        #    `RuntimeError: MCP 会话起不来：None` 的那个窗口
+        second = await m.call_mcp_tool("calculator", {"expression": "2"})
+        await m.aclose_mcp_session()
+        return second
+
+    assert asyncio.run(_run()) == "got:2"
+    assert events.count("initialize") == 2, f"传输断了却没重建会话：{events}"
+    assert events.count("stdio:enter") == 2, f"没起新的子进程：{events}"
+
+
 def test_get_mcp_tools_goes_through_the_same_session(monkeypatch):
     """`get_mcp_tools` 与 `call_mcp_tool` **共用同一个会话**（⛔ 别各开一个）。"""
     import agent_graph_advanced as m
