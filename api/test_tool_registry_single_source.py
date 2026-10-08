@@ -161,3 +161,56 @@ def test_all_graphs_share_the_same_tool_objects():
                 f"🔴 {mod.__name__}.{name} **不是**共享对象（又抄了一份？）"
                 f"\n   got ={got[name]!r}\n   want={shared[name]!r}"
             )
+
+
+# ===========================================================================
+# demo 模式下不注册 execute_python（批② Task 6）
+# ===========================================================================
+def _registered_tools_in_subprocess(extra_env: dict):
+    """在**子进程**里 import `mcp_server`，报回它注册的工具名。
+
+    ⚠️ **必须走子进程**：`TOOLS` 是**模块级**建好的 ⇒ 同进程里改 env
+       对已经 import 过的模块**无效**（本仓 `test_tool_dispatch.py` 踩过同一个坑，
+       那里也是用子进程解决的）。⛔ 别改成 `monkeypatch.setenv` —— 那会**静默无效**。
+    """
+    import json
+    import os
+    import subprocess
+    import sys
+
+    env = {**os.environ, **extra_env}
+    proc = subprocess.run(
+        [sys.executable, "-c",
+         "import json, mcp_server; print(json.dumps([t['func'].name for t in mcp_server.TOOLS]))"],
+        capture_output=True, text=True, env=env, cwd=str(API),
+    )
+    assert proc.returncode == 0, f"子进程 import 失败：{proc.stderr[-400:]}"
+    return json.loads(proc.stdout.strip().splitlines()[-1])
+
+
+def test_execute_python_is_registered_by_default():
+    """✅ **正向对照**：不设开关时它**在**。
+
+    ⚠️ **没有这一条，一个"把 TOOLS 清空"的实现也能让下面那条绿** ——
+       那正是本仓反复栽的「**尺子量不到它该量的事**」。
+    """
+    tools = _registered_tools_in_subprocess({"DEMO_MODE": ""})
+
+    assert "execute_python" in tools, f"默认该注册它，实际：{tools}"
+
+
+def test_execute_python_is_not_registered_in_demo_mode():
+    """🔴 **demo 模式下 `execute_python` 不进 `mcp_server.TOOLS`。**
+
+    **为什么**：demo 跑在**魔搭创空间**上，而**一个 Studio = 一个容器**（实测）——
+    **没有第二个容器**能跑执行器。⇒ 若不注册它，`execute_python` 会**回落本地子进程**
+    （`EXECUTOR_URL` 为空），也就是**又回到宿主同权限的沙箱**里跑。
+    业务方原话：「不要暴露在系统中执行，**是安全事故**」。
+
+    ⚠️ 判据是**子进程里重新 import 后的真值**，⛔ 不是"源码里有这个 if"。
+    """
+    tools = _registered_tools_in_subprocess({"DEMO_MODE": "1"})
+
+    assert "execute_python" not in tools, f"🔴 demo 模式下它还注册着：{tools}"
+    # ⚠️ 反向对照：别的工具**不许被顺手删掉**
+    assert {"calculator", "date_today", "web_search"} <= set(tools), f"别的工具被误删了：{tools}"

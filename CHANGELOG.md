@@ -128,6 +128,35 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- 🔴 **批② · Task 6：demo 模式下**不注册** `execute_python`**（2026-10-08）——
+
+  `mcp_server.py` 在 `TOOLS` 建好后加一道：`DEMO_MODE` 有值 ⇒ 滤掉 `execute_python`。
+
+  **为什么**：demo 跑在**魔搭创空间**上，而 **一个 Studio = 一个容器**（实测）
+  ⇒ **没有第二个容器**能跑执行器 ⇒ `EXECUTOR_URL` 为空 ⇒ `execute_python`
+  **回落本地子进程**，也就是**又回到宿主同权限的沙箱**里跑。
+  业务方原话：「不要暴露在系统中执行，**是安全事故**」。
+
+  ⚠️ **两条口径别搞混**：
+  · **非 demo**（本机 / CI / 完整部署）⇒ `execute_python` **在**，走**执行器容器**
+  · **demo** ⇒ ⛔ **不注册它** —— 「没有容器」和「跑在宿主上」之间，⛔ **不选后者**
+
+  📌 **判据（可打印，两条）**：
+  ```bash
+  cd api
+  ../venv/bin/python -c "import mcp_server,json;print(json.dumps([t['func'].name for t in mcp_server.TOOLS]))"
+  #   ⇒ ["calculator","date_today","web_search","execute_python"]
+  DEMO_MODE=1 ../venv/bin/python -c "import mcp_server,json;print(json.dumps([t['func'].name for t in mcp_server.TOOLS]))"
+  #   ⇒ ["calculator","date_today","web_search"]
+  ```
+  · `pytest test_tool_registry_single_source.py -q` ⇒ **8 passed**（+2 条）
+  · 全量离线 ⇒ **820 passed / 2 skipped / 0 failed**（818 + 2）
+
+  ⚠️ **那两条守卫走【子进程】** —— `TOOLS` 是**模块级**建的，同进程里改 env
+  **静默无效**（本仓 `test_tool_dispatch.py` 踩过同一个坑）。⛔ 别改成 `monkeypatch.setenv`。
+  ⚠️ 其中一条是**正向对照**（不设开关时它**在**）—— 没有它，一个"把 TOOLS 清空"的实现
+  也能让另一条绿。
+
 - 🔴 **批② · Task 5：执行器并发上限 —— 且**上限与 CPU 配额必须配套**（2026-10-08）——**
 
   `executor_server.py` 加 `threading.Semaphore` + 排队超时；`docker-compose.yml` 显式写
