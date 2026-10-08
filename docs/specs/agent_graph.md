@@ -9,8 +9,15 @@
 ## ✅ 做了什么
 
 - 基础 LangGraph Agent：`agent` 决策节点 → `tools` 执行循环
-- 工具：**`web_search`（Bing 版，`search_tools`，`:18`）** · 计算器（**求值走 `safe_math`，`:29`**）· 日期（`:40`）
-  · ⭐ **工具名只有 `tools` 一个来源** —— `TOOLS_BY_NAME = {t.name: t for t in tools}`（`:57`），`tool_execute`（`:181`）查它，⛔ 不许再抄名字
+- 工具：🔴 **2026-10-08 起全部【从 `mcp_server.TOOLS` 派生】**（批① Task 4 · `DEC-107`）——
+  本地那份 `web_search` / 计算器 / 日期**三个定义全删了**。
+  ⚠️ **本图显式排除 `execute_python`**（`_EXCLUDED_TOOLS`）：它在这张图里**既不在
+  `SENSITIVE_TOOLS` 审批名单、又没有容器隔离** ⇒ 放进去等于开一条无审批无隔离的任意代码执行。
+  🔴 **这是有期限的** —— 批②（容器）落地后删掉 `_EXCLUDED_TOOLS`，
+  守卫 `test_tool_registry_single_source.py::test_execute_python_not_yet_in_unisolated_graphs` 同时删。
+  · ⭐ **工具名只有 `tools` 一个来源** —— `TOOLS_BY_NAME = {t.name: t for t in tools}`，`tool_execute` 查它，⛔ 不许再抄名字
+  · ⚠️ **连带删掉的 import**：`datetime` / `safe_math.calculate` / `search_tools.web_search` / `langchain` 的 `tool`
+    （它们只服务于那三个已删的定义 ⇒ 留着就是 `F401`，第 ⑥ 道门会红）
 - **人工审批**：`interrupt_before=["approval"]`（`:302`，审批节点本身 `human_approval` 在 `:241`）+ `/agent/approve` 端点
 - 🔵 **流式（`③` Task 4 · `B1` · 2026-10-03）**：`agent_decide`（`:120`）声明 `config: RunnableConfig`，
   并用 `.stream(…, config=config)` 逐块聚合 ⇒ `/agent/langgraph_chat/stream` 的

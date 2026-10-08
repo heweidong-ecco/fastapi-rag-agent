@@ -69,13 +69,13 @@ def _state(*ids, **extra):
 def _drive_tool_execute(monkeypatch, state, blocked=True):
     """直接调**模块级**的 `tool_execute`（它是模块级的，⛔ 不像 `agent_decide` 嵌在图里）。
 
-    ⚠️ `call_mcp_tool_with_cache` 打成 `fail`：**被拦的那次绝不许真去调工具**
+    ⚠️ `call_mcp_tool` 打成 `fail`：**被拦的那次绝不许真去调工具**
        —— 这是"预算拦截"这个词的全部意义。
     """
     monkeypatch.setattr(aga, "record_tool_start", lambda *a, **k: None)
     monkeypatch.setattr(aga, "record_tool_end", lambda *a, **k: None)
     monkeypatch.setattr(aga, "check_multilevel_budget", lambda **k: (not blocked, REASON))
-    monkeypatch.setattr(aga, "call_mcp_tool_with_cache",
+    monkeypatch.setattr(aga, "call_mcp_tool",
                         lambda *a, **k: pytest.fail("被预算拦下的那次不许真去调工具"))
     return asyncio.run(aga.tool_execute(state))
 
@@ -123,7 +123,7 @@ def test_没被拦时不置标志(monkeypatch):
     monkeypatch.setattr(aga, "record_tool_start", lambda *a, **k: None)
     monkeypatch.setattr(aga, "record_tool_end", lambda *a, **k: None)
     monkeypatch.setattr(aga, "check_multilevel_budget", lambda **k: (True, ""))
-    monkeypatch.setattr(aga, "call_mcp_tool_with_cache", _fake_call)
+    monkeypatch.setattr(aga, "call_mcp_tool", _fake_call)
     out = asyncio.run(aga.tool_execute(_state("c1")))
     # ⚠️ 断言的是**键根本不在**（⛔ 不是"它等于 None"）：写到这个键的地方**只许有一处**
     #    （`tool_execute` 的被拦分支），讲得清"什么时候它是可信的"。
@@ -179,7 +179,7 @@ def _patch_graph_leaves(monkeypatch, reason=REASON, require_tool=True):
     monkeypatch.setattr(aga, "record_tool_end", lambda *a, **k: None)
     monkeypatch.setattr(aga, "record_agent_decision", lambda *a, **k: None)
     monkeypatch.setattr(aga, "inject_memories_to_prompt", lambda p, s: p)
-    monkeypatch.setattr(aga, "call_mcp_tool_with_cache", lambda *a, **k: "不该被调用")
+    monkeypatch.setattr(aga, "call_mcp_tool", lambda *a, **k: "不该被调用")
     return llm
 
 

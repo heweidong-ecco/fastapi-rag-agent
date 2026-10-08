@@ -24,7 +24,7 @@ def run_plan(prompt_version: str, extra_constraints: str):
 2. 步骤之间必须有清晰的逻辑顺序，不能跳跃。
 3. 如果某个步骤依赖前面的结果，必须在描述中明确说明。
 4. 每个步骤需要指定使用的工具（tool）和输入（input）。
-5. 可用的工具包括：search（搜索）、calculator（计算）、filter（筛选）、summarize（总结）、generate（生成文本）。
+5. 可用的工具包括：web_search（搜索）、calculator（计算）、date_today（日期）、execute_python（代码执行）。
 
 **输出格式（严格JSON数组）：**
 [
@@ -58,8 +58,8 @@ if __name__ == "__main__":
     run_plan("V2-限制步骤数", "6. 步骤总数不超过5个。")
     
     # 测试3：优先使用搜索工具
-    run_plan("V3-优先搜索", "6. 优先使用 search 工具获取信息，其他工具只在必要时使用。")
+    run_plan("V3-优先搜索", "6. 优先使用 web_search 工具获取信息，其他工具只在必要时使用。")
     
     # 测试4：组合约束
-    run_plan("V4-组合约束", "6. 步骤总数不超过5个。\n7. 优先使用 search 工具获取信息。")
+    run_plan("V4-组合约束", "6. 步骤总数不超过5个。\n7. 优先使用 web_search 工具获取信息。")
 # ==========预期结果 分析和对比：=============

@@ -10,6 +10,174 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- 🟡 **把被删的「Docker 容器隔离」方案记录加回 `api/code_executor.py`**（2026-10-08）——
+  ⛔ **纯注释，不影响任何行为**（判据：`execute_python.invoke({'code':'print(6*7)'})` ⇒ 仍 `42`）。
+
+  🔴 **为什么加回来**：业务方 2026-10-07 原话 ——「我之前有注释和 `'''……'''` 注释了这个方案，
+  **如果不在，现在要加**」。
+  🔵 **核实结果**：`2c1a922:api/code_executor.py` 的 `:129-178` **确实有**（是文件末尾一整块），
+  而**工作树里没有**；更糟的是本文件开头那句「更多高级沙箱方案：本代码最下方，
+  只备注了 Docker 容器隔离 的方法」**仍留着** ⇒ 🔴 **那句话一度是假的**（下方什么都没有）。
+
+  📌 **本笔一并写明两件事**，否则下一个人会误读：
+  · 那段是**方案记录，⛔ 不是正在生效的实现** —— 现状仍是「本地子进程 + 白名单 + 5 秒硬杀」，
+    即**与宿主同权限、没有 OS 级隔离**
+  · 段里那个 `docker.from_env()` 的写法**正是批② 要避开的** —— 它要求应用挂
+    `/var/run/docker.sock`，**那等于把宿主 root 交给应用**。批② 改走**独立执行器容器**。
+
+  ⛔ **删本段前先问业务方**（他明确要求保留）。
+
+- 🔴 **批① · Task 4 + Task 5：工具清单与工具定义【收口到一处】**（2026-10-08）——
+  ⇒ 决策落 **`DEC-107`**（**工具清单收口到一处**）。**这两刀必须同一个 commit**（理由见下）。
+
+  **Task 4（七处 → 一处）**：`agent_graph` / `agent_checkpointer` /
+  `agent_graph_advanced_learning` / `api_v1_rag` 四处不再各写各的，改从 `mcp_server.TOOLS` **派生**；
+  `plan_constraints.py` 里那 3 个**根本不存在的**工具名（`filter`/`summarize`/`generate`）
+  换成真名，`search` → `web_search`。
+
+  **Task 5**：**删 `api/tools_with_cache.py`**（整个模块）—— 业务方 2026-10-08 原话
+  「**`tools_with_cache.py`，删除，这是定好的事了，这个是重复的，没用了**」。
+  ⚠️ **它推翻了 2026-10-04 的「⏸ 先挂起」** —— 当时挂起的理由是「缓存不是废物，**是没接上**」，
+  而批① 已经把缓存接在**工具函数体**上（`DEC-106`）⇒ 挂起的理由消失。
+
+  🔴 **两刀为何不能拆**：删站点 = **安全守卫面缩小**。`test_safe_math_wiring.py`
+  原先按名字钉死 **5** 个 `calculator` 站点 ⇒ 删掉 4 份后**必须同 commit 收窄**，
+  否则"删文件"会悄悄把守卫的面缩了、而没人记得说过。**已收窄到 1 处**，
+  且**逐条说明了"它原来守的能力现在由谁守"**。
+
+  🔴 **【可见行为变更】①** `calculator` / `date_today` 的 **docstring 换成 `simple_tools` 那份**（更详细）；
+  **②** `api_v1_rag`（`/ws/agent`）的工具名 **`search` → `web_search`**
+  （改前那个 `search` 在 `SENSITIVE_TOOLS` 白名单里**根本对不上**）。
+  ⚠️ `agent_graph` / `agent_checkpointer` 的工具**条数没变**（仍是 3 个，`execute_python` 被排除）。
+
+  ⚠️ **`execute_python` 暂不进那两张图** —— 那里它**既无审批、又无隔离**；
+  业务方 2026-10-08 对此明确答「**待定**」⇒ 本批按**保守**办。守卫
+  `test_tool_registry_single_source.py::test_execute_python_not_yet_in_unisolated_graphs`。
+
+  🔴 **`api_v1_rag` 保留 async 外壳**（⛔ 没直接换成 `mcp_server` 那份）：
+  原文 `await asyncio.to_thread(...)` 是**有意把阻塞丢出事件循环**，
+  而共享工具是**同步**的 ⇒ 直接替换会**在事件循环里同步跑 20 秒的网络调用**。
+  改用 `StructuredTool.from_function(coroutine=…)`，**实现与描述都收口、异步性也保住**。
+
+  🔵 **端到端实测（真起服务 · 真 LLM）** —— `ws://127.0.0.1:8000/api/v1/ws/agent`，
+  三个壳**各验一次**：
+  · `calculator` ⇒ 观察 `42` · 最终 `42`
+  · `date_today` ⇒ 「今天是2026年10月8日，星期四」
+  · `web_search` ⇒ **8 条真结果**（⚠️ 且工具名确已变成 `web_search`）
+
+  📌 **判据（可打印）**：
+  `cd api && ../venv/bin/python -m pytest test_tool_registry_single_source.py -q` ⇒ **6 passed**
+  · 全量离线 **807 passed / 2 skipped / 0 failed**。
+  **🔴 用例数从 816 降到 807，差** **-9** **—— 逐项算得出来，⛔ 不是"掉了 9 条"**：
+  `-17`（`test_safe_math_wiring.py` 因站点 5→1，用例 23→6）`+6`（新守卫）
+  `+2`（两条原先因**本机 Redis 没起**而红的用例，现在 Redis 起来了 ⇒ 转绿）⇒ `816-17+6+2 = 807`。
+
+  🔴 **反证检验（守卫收窄后还能不能红）**：往 `api/safe_math.py` 临时塞一个 `eval`
+  ⇒ `test_safe_math_wiring.py` **1 failed**；还原 ⇒ `git diff --stat api/safe_math.py` **为空**。
+
+- 🔴 **批①「工具缓存收口」· Task 3：并掉 `agent_graph_advanced` 那份内联缓存**（2026-10-08）——
+  ⇒ 决策落 **`DEC-106`**（**工具缓存的唯一落点**）。
+
+  - **删** `api/agent_graph_advanced.py` 的 `CACHE_TTL_MAP` / `get_cache_key` / `call_mcp_tool_with_cache`
+    三个名字（`result = await call_mcp_tool_with_cache(...)` 改调 `call_mcp_tool`）；
+    连带**扫掉随之变孤儿的 import**：`hashlib` · `redis` · `from config import REDIS_HOST, REDIS_PORT` ·
+    `redis_client` 定义 · 以及文件头那个 `import json`（它唯一的用处就在被删段里）。
+    ⛔ 没删 `call_mcp_tool` —— `api/tool_health.py:47` 还在用它。
+  - ⚠️ **这是一处【可见行为变更】**：以前 `/agent/mcp_chat` 命中缓存时返回
+    `"{结果}\n[缓存命中]"`，现在**没有这个后缀**。刻意**不**把它搬进 `tool_cache` ——
+    那是给**人**看的调试痕迹，而缓存搬进了 MCP server 进程，**LLM 读到它只会干扰判断**。
+  - 🔴 **施工单 Step 6 的那条判据是错的，已换**：它写
+    `grep -rn '缓存命中' api/ | grep -v 'token_config\|embedding_client'` **⇒ 改后应为空**，
+    但 `api/api_v1.py:230/233`（讲 `/rag/benchmark-embedding` 的 **embedding** 缓存）**也是无辜命中**
+    ⇒ **这条命令永远不可能为空**。⇒ 换成量**代码形式**的 `grep -rn 'f"{cached}' api/ --include='*.py'`。
+    📌 **正是「反证检验」要抓的东西**：结论取反（"后缀还在"）时，那条命令**打出来的东西一样**。
+  - **判据**：三个名字全仓消失（只剩 `tool_cache.py:22` 的**搬运留痕注释**与 `cache.py` 的
+    **无关同名函数**）；`test_budget_hard_intercept.py` **11 passed** ·
+    `test_agent_stream_chains.py` **60 passed**（**与改前逐条同数**）；
+    合跑 = **71 passed**。逐条见 `DEC-106` §五。
+  - **同批顺带**：改掉两处因本次删除而**变陈旧的注释引用**（`test_budget_hard_intercept.py:72`
+    · `test_agent_stream_chains.py:1173` 里的 `call_mcp_tool_with_cache`）。
+
+- 🔴 **批①「工具缓存收口」· Task 1 + Task 2：TTL 表收口 + 四个工具真的接上缓存**（2026-10-08）——
+  ⚠️ 这是那份批① 施工单的前两步；**施工单本身在另一个分支上**（`docs/ledger-reconcile`）。
+
+  **Task 1（`api/tool_cache.py`）**：
+  ① `TTL_BY_TOOL` 从 `agent_graph_advanced.CACHE_TTL_MAP` **搬过来并收口**（原先那份只盖住 `/agent/mcp_chat` 一条路）
+  ② `get_ttl()` ⛔ **查不到就抛 `KeyError`** —— **不给默认值**。
+  为什么：`.get(name, 60)` 会把「新加了工具、但忘了登记 TTL」变成「它被缓存 60 秒」——**不报错、没人会知道**
+  ③ `cached_tool` 加 `name=`（显式工具名）与 `should_cache=`（结果谓词）
+
+  **Task 2（四个工具接上缓存）**：`calculator` · `date_today` · `web_search` · `execute_python`
+  （缓存包在 `@tool` 那一层；⛔ 没往 `simple_tools_impl` / `code_executor_impl` 里 import 任何东西 ——
+  那两个文件的**不变量**是「只 import 标准库」）。
+
+  - `date_today` / `execute_python` 的 TTL 是 **0** ⇒ 包装**照样包**，但**一律直通** ——
+    让「哪些工具带缓存」只有 `TTL_BY_TOOL` **一处**回答（⛔ 不是"有的没包、有的 TTL=0"两种形状混着）
+  - 🔴 `date_today` 那个 `0` **是有缘故的**：它返回「今天是X月X日」，而**缓存键只含空入参** ⇒
+    **23:30 缓存、00:10 命中 ⇒ 跨天那一小时返回昨天**。
+    ⚠️ 这条**不是假设** —— `agent_graph_advanced` 那份内联缓存**已经在跑**（TTL 3600）
+  - 🔴 `web_search` 的失败**是返回值、⛔ 不是异常** ⇒ 只能靠 `should_cache` 挡。
+    ⛔ 不挡的后果：一次网络抖动被缓存 **300 秒** ⇒ 那 5 分钟里**谁都搜不到东西**
+
+  🔴 **动手前抓到一个施工单【没预见】的连带后果**（⇒ `DEC-105`）：
+  接上缓存会把 `web_search` / `calculator` **从「不需要 Redis」变成「需要 Redis」** ⇒
+  Redis 一挂这两个工具就 500（🔵 实测：`test_search_tools.py` 现状 **6 passed**，此时本机 Redis 没起）。
+  业务方 2026-10-08 裁 **fail-open** —— 照 `api/rate_limiter.py` 的 `S8` 形状：
+  **只捕 `redis.RedisError`**（⛔ 不是 `except Exception`）、直通执行、打一条 ERROR。
+  ⇒ 现在本机 **Redis 没起**，那组用例**照样全绿**（这是 fail-open 真的接上了的**唯一端到端凭证**；
+    判据见下方 ④，⛔ 别记这个数）。
+
+  📌 **判据（跑得出来）**：`cd api && ../venv/bin/python -m pytest test_tool_cache.py test_tool_cache_wiring.py -q`
+  ⇒ **13 passed** · `... test_search_tools.py test_impl_modules.py test_safe_math_wiring.py -q` ⇒ **41 passed**
+  · 反证三条（fail-open / `should_cache` / 不许双跑）**逐条确认尺子有效**（笔录见 `DEC-105` §五）。
+
+  ⚠️ **两处与施工单的出入（按实际改测试，⛔ 没改实现）**：
+  ① 施工单让 patch `search_tools._search_bing` —— **本仓没有这个函数**，实际是 `httpx.get`
+  ② 施工单猜 `web_search` 的实现体「可能不是独立函数」—— **确实不是**，
+  已按它的要求抽成 `_web_search_impl`（**搬家，逻辑一行未改**），再在外面包缓存。
+
+
+- ⭐ **新增一层「外部参考层」`docs/reference/` + 首篇文档（MCP 官方原文摘录）**（2026-10-08）——
+  业务方原话：「关于 MCP 无状态的官方内容**记录成一个单独技术文档**放在 `docs/` 子文件夹 ——
+  **英文名：使用行业放技术文档的英文名**，方便以后看。」外加同日一并发话：
+  「**关于本项目 MCP 写一份新的 DEC 文档**。」
+
+  **加了什么**：
+
+  | # | 文件 | 是什么 |
+  |---|---|---|
+  | ① | `docs/reference/mcp-stateless-and-transport.md` | **MCP「无状态」与传输层的官方原文摘录** —— 🟢官方 / 🔵实测 / ⚪本项目判断 **逐条标注**，**附可重跑的抓取命令**｜⚠️ **自足**，可整份复制到别的仓 |
+  | ② | `docs/decisions/DEC-104-MCP客户端统一路线-解SDK锁与长驻会话.md` | **本项目自己的 MCP 路线裁定**（批④ 选 B · 顺序 · 备选与反悔成本） |
+  | ③ | `docs/decisions/DEC-036-文档体系分四层.md` **附录二** | 记「**第五层**」这件事（⚠️ **正文四层表按规矩不改写**） |
+  | ④ | `docs/文档地图.md` | 新增 **🅒b 外部参考层** + 索引行 + **修正 Diátaxis 映射** |
+
+  🔴 **为什么值得单开一层**：本仓**一直**有这类内容 ——
+  `docs/说明/魔搭创空间-部署与平台约束.md` 就是**外部平台的硬约束**，
+  它当时被塞进「说明层」，**是层与内容不匹配**。本批只是给这个既有的区分**补上一层名字**。
+  ⇒ **新判据**：「**这是【我们对外承诺什么】，还是【别人规定了什么】？**」
+  前者 ⇒ `docs/契约/`（本仓自己的）· 后者 ⇒ `docs/reference/`（外部权威源）。
+
+  🔴 **写这份文档时抓到的【自身错误】**：我原先"记得"官方那句是
+  「Clients should never make tool use decisions based on ToolAnnotations received from untrusted servers」——
+  **重抓原文后是**：「For trust & safety and security, clients **MUST** consider tool annotations to be
+  **untrusted** unless they come from trusted servers.」
+  ⇒ 该文档顶部据此立了一条硬约束：**只放官方原文，⛔ 不放"我记得是这样"**，
+  **项目自己的判断必须标 `⚪ 本项目判断`**。
+
+  ⚠️ **两处"故意不这么做"**（都写进了文件里，⛔ 不是漏了）：
+  ① 新层的**只对新文档生效** —— 存量那份魔搭文档**留在说明层不动**（挪它改动面大、收益小）；
+  ② `DEC-104` 里指向批① 施工单的那处**故意不加反引号** ——
+  那份施工单目前**只在另一个分支**（`docs/ledger-reconcile`，`c5442e0`）上，本分支取不到。
+
+  📌 **判据**：`ls docs/reference/` · `bash scripts/check_doc_links.sh`（**🔴 真断链 0**）·
+  `bash scripts/check_doc_orphans.sh`（**无孤儿**）· 喂 hook JSON ⇒ **六道门全绿 rc 0**。
+
+  ⚠️ **同期那笔「欠 CHANGELOG」【已还】**：`8dc9cba`（批① Task 1）当时没写 ——
+  本文件的 **`### Added` 顶部那条「批① Task 1 + Task 2」**已把它一并补上。
+  🔴 **教训**：施工单把"文档与留痕"统一排到 **Task 7**，但本仓的「**提交前两问**」是
+  **每次 commit** 都要答的 ⇒ **两者会打架**。⇒ 处置：**CHANGELOG 跟着 commit 走**，
+  Task 7 只负责 **spec** 与 **DEC 交叉引用**。
+
 - 🟢 **补上本仓的【第 ⑥ 道门】：静态检查（`ruff` · **基线棘轮**）**（2026-10-07）——
   新增 `scripts/check_lint_baseline.sh`＋`scripts/ruff-baseline.txt`＋仓根 `ruff.toml`，
   本地挂在 `.claude/hooks/pre-commit-gates.py`，CI 挂在 `ci.yml` 的 **`syntax`** job。

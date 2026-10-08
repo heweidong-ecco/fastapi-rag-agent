@@ -1170,7 +1170,7 @@ def test_real_chain_c_aggregates_fragmented_tool_calls(monkeypatch):
         return _bind(agent_model)
 
     async def _fake_tool_execute(state):
-        # ⛔ 挡掉**真的**工具执行：真 `tool_execute` 会经 `call_mcp_tool_with_cache` 起 MCP client
+        # ⛔ 挡掉**真的**工具执行：真 `tool_execute` 会经 `call_mcp_tool` 起 MCP client
         #    子进程、真联网。本用例的判据是「**有没有路由到 `tools`**」，
         #    ⛔ 不是"工具抓没抓到网页"。
         return {"messages": [
