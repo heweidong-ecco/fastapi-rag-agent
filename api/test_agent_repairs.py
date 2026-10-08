@@ -115,18 +115,28 @@ def _install_mcp_fakes(monkeypatch, m, events):
 
 
 def test_call_mcp_tool_keeps_session_lifecycle_inside_one_task(monkeypatch):
-    """B2：会话必须在**当前 task 内**开 → 用 → 关，`call_mcp_tool` 返回时已关闭。
+    """一次 `call_mcp_tool` 里，会话是**开 → 用 → 关**（三层嵌套顺序正确）。
 
-    🔴 为什么不池化（这是 2026-09-20 实测撞出来的）:
+    🔴 **为什么不许池化**（这是 2026-09-20 实测撞出来的）:
       `stdio_client` 基于 **anyio**，其 cancel scope 要求「**进入与退出在同一个 task**」。
       池化的生命周期天然跨 task（启动 task 建 · 请求 task 用 · 归还 task 关）⇒
       实测报 `RuntimeError: Attempted to exit cancel scope in a different task
       than it was entered in` —— 而且它会让**应用启动直接失败**
       （`Application startup failed. Exiting.`）。
-      ⚠️ 这比原来的 bug 更糟：原来是"应用能跑、只是 MCP 健康检查挂"。
 
-    反向保护：这条断言同时钉住"**不许把会话漏出去**"——一旦有人改回池化/全局单例，
-    事件序列里就会出现"返回时 session 还没 exit"，用例立刻红。
+    ## 🔴 2026-10-08（批④-B）：**本用例比它自称的弱，已订正**
+
+    它**原**写的是「`call_mcp_tool` **返回时**已关闭」，并声称是"不许改回池化"的反向保护。
+    🔵 **实测：那句是虚的** —— 断言只检查 `asyncio.run` **结束之后**的事件序列，
+    ⛔ **不检查"返回那一刻"的状态**。
+    ⇒ 批④-B 把会话改成**长驻**（正是它声称要拦的事），它**照样绿**
+      （长驻会话的 `finally` 恰好在 loop 关闭那一刻跑，退出事件照样落在末尾）。
+
+    ⇒ **"进入与退出在同一个 task"这条不变量的守卫，已经搬到**
+      `api/test_mcp_long_session.py`（它钉 actor 的形状：`initialize` 只一次 · 按 loop 认领 ·
+      一次失败不弄死会话）。
+    ⚠️ **本用例仍然有用**：它钉住**三层嵌套的顺序**（stdio ⊃ session ⊃ initialize ⊃ call_tool），
+      以及**跑完确实关了**（⛔ 不是把会话漏出去当孤儿）。
     """
     import agent_graph_advanced as m
 
@@ -204,7 +214,12 @@ def test_mcp_server_path_does_not_depend_on_cwd(monkeypatch, tmp_path):
 
 
 def test_get_mcp_tools_also_keeps_lifecycle_inside_one_task(monkeypatch):
-    """同上，`get_mcp_tools`（`/agent/mcp_tools_dynamic` 走它）也必须自开自关。"""
+    """同上（`/agent/mcp_tools_dynamic` 走 `get_mcp_tools`）：三层嵌套顺序正确 + 跑完确实关了。
+
+    🔴 **2026-10-08（批④-B）口径订正**：本条与上一条同因 —— 原写「必须**自开自关**」，
+    而批④-B 之后会话是**长驻**的。⚠️ **不再是"自开自关"，是"整个生命周期落在
+    一个 holder task 里、且跑完会关"**。📄 那两条不变量的新守卫 ⇒ `api/test_mcp_long_session.py`
+    """
     import agent_graph_advanced as m
 
     events = []
