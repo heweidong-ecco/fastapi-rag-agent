@@ -8,6 +8,45 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Removed
+
+- 🔴 **撤 `未进demo/` · 删 `pre-demo/` —— 仓根只留一个 `demo/`**（2026-10-08）——
+  **取代 `DEC-102` §二**（「两个目录用途相反」那条约定）⇒ 新立
+  `docs/decisions/DEC-103-撤未进demo与pre-demo只留demo目录.md`。
+
+  **业务方原话**：「**1.`未进demo/`：撤。2. demo清单.md：可以。然后 `pre-demo/` 是否还要，不要就删。**」
+
+  | # | 做了什么 | 依据 |
+  |---|---|---|
+  | 1 | **删 `未进demo/`**（连同它那份入库的 `README`） | 业务方「**撤**」。⚠️ **该目录的索引表自 2026-10-07 建起一直是空的** ⇒ **一条"为了让人看见"的纪律，配一个空表 ⇒ 看见的是"什么都没有"**（先有内容再有格子） |
+  | 2 | **`demo清单.md` 保留原名原做法** | 业务方「**可以**」 |
+  | 3 | **删 `pre-demo/`，内容全部搬回 `demo/`** | 业务方「**不要就删**」 |
+  | 4 | `.gitignore:63` **`pre-demo/` 改回 `demo/`** | ⚠️ **这其实是一次【改名回退】** —— `git diff -- .gitignore` 显示改前那行**本来就是 `demo/`**，业务方的编辑是 `-demo/` `+pre-demo/` `+tmp/` |
+  | 5 | 🔴 **补上 `.gitignore` 缺失的末尾换行**（改前 `\ No newline at end of file`） | 真缺陷，顺带修 |
+
+  **三处活指针同步**（⛔ 历史记录一处没动，见下）：
+  · `README.md` ⇒ **删**「`未进demo/` = 做完可用但没进 Demo」那整行
+  · `ROADMAP.md` ⇒ 改线段加「**2026-10-08 订正**」+ 指向 `DEC-103`
+  · `docs/文档地图.md` ⇒ **删**`未进demo/` 那一行（它本来登记的是这个目录）
+
+  ⚠️ **断链门连带**：`DEC-102` 正文里的 `未进demo/README` 路径随目录一并失效 ——
+  按仓规「**DEC 正文不改写历史**」⇒ 走豁免清单，在 `scripts/doc-links-ignore.txt` **新增 §④b**
+  （与 §④「已删的 `Agent/`」**同一条理由**：引用一个已经不存在的目录）。
+  ⚠️ **另有一类"看着像断链"的写法**：`demo/` 在 gitignore 里 ⇒ 凡是**带 `.md` 的反引号路径**都会被判红
+  （含业务方原话里那几处）⇒ 本条目一律**不写反引号**或**去掉 `.md`**（仓规沿用 `ROADMAP.md` 改线段那条）。
+
+  🔴 **⛔ 没有改写的三处历史**：`CHANGELOG.md` 2026-10-07 那三条（建 `未进demo/` 的当日记录）·
+  `ROADMAP.md` 里 PR `#111` 那行 · `DEC-102` §二 正文本身 —— **它们记的是当时真实发生过的事**。
+
+  ⚠️ **顺带一件不可逆操作的兜底**：探针那份**嵌套 `.git/`** 随 `pre-demo/` 搬动前，
+  **先整目录归档到仓外受管地**（`~/Desktop/Product-external/fastapi-rag-agent-探针git归档/`，
+  `probe-git-20261008.tar.gz` / 21 232 B），**再**删原目录。
+  归档后凭据扫描（`grep -raoE 'oauth2:[^@[:space:]]+@'` 与 `modelscope` 两条）**均为空**
+  ⇒ 其 `.git/config` **无 remote、无 token**。
+
+  **判据**：`test ! -e 未进demo && test ! -e pre-demo && echo ok` ⇒ `ok` ·
+  `git check-ignore -v demo` ⇒ 命中 `.gitignore:63` · `bash scripts/check_doc_links.sh` ⇒ **✅ 没有真断链**
+
 ### Added
 
 - 🧩 **乙单 · 第 2 步（乙-1）：补 9 份模块 spec**（2026-10-07）—— `docs/specs/`
