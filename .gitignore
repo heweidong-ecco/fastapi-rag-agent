@@ -61,6 +61,7 @@ fastapi-rag-agent-TODO待办/*.png
 
 # 新增
 tmp/
+self-prompt/
 
 # demo/ 里【不能提交】的那一半 —— 设置文件 + 命令行文件（里面写着 token 怎么传）
 # 业务方 2026-10-08：「demo/ 中有些内容不能提交，有一些设置文件和命令行文件，
