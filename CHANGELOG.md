@@ -10,6 +10,26 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- 🆕 **前端开始有【设计系统】了：新增共享样式表 `api/static/app.css` ＋ `chat.html` 第一个接上**（2026-10-08）——
+  🔴 **在那之前本仓前端【没有设计系统】**（实测）：**5 个页面各带一份内联 `<style>`**（11–62 行），
+  `link rel="stylesheet"` **一处都没有**；后果是**同名 class 不同义** —— `.card` 在 `chat.html`
+  是 `r=6px/p=10px`，在 `trace.html` 是 `r=8px` **且硬编码 `#fff`** ⇒ **暗色主题下它就是一块白斑**。
+  **建的什么**：`app.css` = **token**（色/圆角/间距/字号/亮暗两套）＋ **排版规则** ＋ **组件**
+  （表格·按钮四态·徽标·指标·键值行·卡片·空态·alert ＋ 本仓专有的引用卡/熔断卡/拒答条）。
+  ⚠️ 规范正文在 **`frontend/README.md`**（§三 token · §四 排版 · §五 组件状态矩阵 · §六 分页 · §七 红线）；
+  **`app.css` 是它的实现**，两份冲突以那份为准。
+  **`chat.html` 接上后**：🔴 **⛔ 一个字的结构都没动**（⛔ 没改 class 名·⛔ 没改 id·⛔ 没动 JS ——
+  页面脚本按这些名字建元素，改名 = 改行为），只把**硬编码颜色全换成 token**（原 `#222`/`#fff`/`#e8f0fe`/`#fde8e8`…）。
+  🔴 **`[hidden] { display:none !important }` 那条⛔ 不能删** —— 它是 2026-10-06 实测加的：
+  `#app` 的内联 `display:flex` 会压过 UA 的 `[hidden]` ⇒ 登录页与主界面**同时显示**。
+  **验证（这次是【真的看了】）**：本机 Chrome headless 起一次性静态服务截图 ——
+  **亮色 + 暗色两套主题都渲染正常**；表格数字**右对齐 + 等宽**（§四 第 4 条，原来做不到）；
+  按钮**四态**（含**加载中**转圈）；三张专有卡**颜色分明**；空态**带"为什么空"**；hero 渐变只出现一处。
+  📌 门：`pytest api/test_chat_page.py api/test_web_pages.py api/test_frontend_contract.py` ⇒ **27 passed** ·
+  `node --test api/static/js/*.test.js` ⇒ **72 pass / 0 fail**。
+  ⬜ **还没做的**：另外 4 个页面（`trace` / `approvals` / `eval` / `eval_gate`）**仍是各带内联 `<style>`**；
+  **搬迁到 `frontend/`** 也还没动（牵连 15+ 处 · `frontend/README.md §九`）。
+
 - 🆕 **demo 语料库入库：30 篇 · 30 084 字**（2026-10-08 · `乙 · 语料重建`）——
   `testdata/demo-corpus/` —— **A/B/C/D 每类 7 篇 ＋ 负样本块 2 篇**；
   主体是虚构企业 **「青云精工」**（⚠️ 与 `testdata/isolation-seed/`

@@ -4,67 +4,86 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>RAG 对话</title>
+<link rel="stylesheet" href="/static/app.css">
 <style>
-  :root { --line:#d8d8d8; --muted:#777; --bg:#fafafa; }
-  * { box-sizing: border-box; }
-  /* 🔴 2026-10-06 加（施工实测·订正⑧）—— **不是可有可无的一行**：
-     `#app` 身上写着内联 `style="display:flex"`，而作者样式的 `display` **压过**
-     UA 样式表里的 `[hidden] { display:none }` ⇒ `hidden` 属性**完全失效**，
-     登录页和主界面会**同时显示**（实测见施工单 Task 8）。
-     ⚠️ 只要页面上还有第二个「带 display 的 hidden 元素」，同一条就再犯一次 ⇒ 写成全局规则。 */
-  [hidden] { display: none !important; }
-  body { margin:0; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
-         display:flex; height:100vh; color:#222; }
-  #side { width:220px; border-right:1px solid var(--line); background:var(--bg);
-          display:flex; flex-direction:column; }
-  #side h2 { font-size:14px; margin:12px; color:var(--muted); }
-  #threads { flex:1; overflow-y:auto; }
-  .thread { padding:8px 12px; cursor:pointer; font-size:13px; border-bottom:1px solid #eee;
-            white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .thread.active { background:#e8f0fe; font-weight:600; }
-  #main { flex:1; display:flex; flex-direction:column; }
-  #log { flex:1; overflow-y:auto; padding:16px; }
-  .turn { margin-bottom:18px; }
-  .q { font-weight:600; }
-  .a { white-space:pre-wrap; line-height:1.7; }
-  .meta { color:var(--muted); font-size:12px; margin-top:6px; }
-  .badge { display:inline-block; padding:1px 6px; border-radius:3px; font-size:11px;
-           background:#fde8e8; color:#a33; margin-left:6px; }
-  .cite { color:#1a73e8; cursor:pointer; text-decoration:underline; }
-  .cite.open { font-weight:600; }
+  /* ══════════════════════════════════════════════════════════════════════════
+   * 本页只写【页面专属】的规则。
+   * 通用组件（按钮 · 卡片 · 徽标 · 表格 · 空态 · 键值行…）一律在 `/static/app.css`
+   *   —— 那是 `frontend/README.md` §五 那份【组件清单】的实现；token 见 §三，排版见 §四。
+   *
+   * 🔴 **2026-10-08 这一版改了什么**：把本页原来【硬编码的颜色】全部换成 token
+   *    （原 `color:#222` / `background:#fff` / `#e8f0fe` / `#fde8e8` …）。
+   *    起因：本仓前端【没有设计系统】—— 5 页各带一份内联 CSS，同名 class 不同义，
+   *    而 `trace.html` 的 `.card` 写死 `#fff` ⇒ **暗色主题下它就是一块白斑**。
+   *
+   * ⚠️ **本轮【一个字的结构都没动】** —— ⛔ 没有改 class 名、⛔ 没有改 id、⛔ 没有动 JS。
+   *    页面脚本按这些名字建元素，改名 = 改行为（那是另一件事，要单独做）。
+   * ⛔ 文案口径也没动：熔断卡的「这不是故障」、拒答的「资料里没有」都是裁过的
+   *    （`DEC-090` / `DEC-091`）—— **改样式 ⛔ 不等于可以改字**。
+   * ══════════════════════════════════════════════════════════════════════════ */
+
+  body { display: flex; height: 100vh; }
+
+  /* ── 登录 ── */
+  #login { max-width: 520px; margin: 10vh auto var(--sp-6); padding: 0 var(--sp-4); }
+  #login input { width: 100%; }
+
+  /* ── 侧栏 ── */
+  #side { width: var(--sidebar-w); flex: 0 0 var(--sidebar-w);
+          border-right: 1px solid var(--line); background: var(--surface);
+          display: flex; flex-direction: column; min-height: 0; }
+  #side h2 { font-size: var(--fs-cap); margin: var(--sp-3); color: var(--fg-dim); }
+  #threads { flex: 1; overflow-y: auto; min-height: 0; }
+  .thread { padding: var(--sp-2) var(--sp-3); cursor: pointer; font-size: var(--fs-body);
+            border-bottom: 1px solid var(--line); white-space: nowrap;
+            overflow: hidden; text-overflow: ellipsis; }
+  .thread.active { background: color-mix(in srgb, var(--info) 12%, transparent); font-weight: 600; }
+
+  /* ── 对话区 ── */
+  #main { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  #log { flex: 1; overflow-y: auto; padding: var(--sp-4); }
+  .turn { margin-bottom: var(--sp-5); }
+  .q { font-weight: 600; }
+  .a { white-space: pre-wrap; max-width: 62ch; }     /* §四 第 2 条：气泡更窄 */
+  .meta { color: var(--fg-dim); font-size: var(--fs-cap); margin-top: var(--sp-2); }
+  .badge { margin-left: var(--sp-2); }               /* 外观走 app.css 的 .badge */
+
+  .cite { color: var(--info); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+  .cite.open { font-weight: 600; }
+
   /* 🔴 `DEC-089`：「甲 · 就地展开/收起」⇒ 卡片挂在该条回答【下面】，⛔ 不再是全局一个 #card。
-     每条回答自带一个（`addTurn` 里建，默认 `hidden`）。 */
-  .card { border:1px solid var(--line); border-radius:6px; padding:10px; margin-top:8px;
-          background:#fffbe6; font-size:13px; }
-  .card[hidden] { display:none; }
-  .card .src { font-weight:600; }
-  .card .src-meta { color:var(--muted); font-size:12px; margin:2px 0 6px; }
+     每条回答自带一个（`addTurn` 里建，默认 `hidden`）。⛔ 类名不改（JS 按它建）。 */
+  .card { border: 1px solid var(--line); border-left: 3px solid var(--info);
+          border-radius: var(--r-card); padding: var(--sp-3); margin-top: var(--sp-2);
+          background: color-mix(in srgb, var(--info) 6%, transparent); font-size: var(--fs-body); }
+  .card .src { font-weight: 600; }
+  .card .src-meta { color: var(--fg-dim); font-size: var(--fs-cap); margin: var(--sp-1) 0 var(--sp-2); }
+
   /* 🔴 `DEC-090` · `R3.2`：熔断卡片。**与 `.card` 分开一个元素** ——
      引用卡片由 `_openIndex` 驱动、每次重画都被清空，两者抢一个容器会互相抹掉。 */
-  .breaker { border:1px solid #e6b800; border-left:4px solid #e6b800; border-radius:6px;
-             padding:12px; margin-top:8px; background:#fffbe6; font-size:13px; }
-  .breaker[hidden] { display:none; }
-  .breaker .bk-title { font-weight:600; font-size:14px; margin-bottom:6px; }
-  .breaker .bk-row { display:flex; gap:8px; margin:3px 0; }
-  .breaker .bk-k { flex:0 0 5.5em; color:var(--muted); }
+  .breaker { border: 1px solid var(--line); border-left: 3px solid var(--warn);
+             border-radius: var(--r-card); padding: var(--sp-3); margin-top: var(--sp-2);
+             background: color-mix(in srgb, var(--warn) 10%, transparent); font-size: var(--fs-body); }
+  .breaker .bk-title { font-weight: 600; font-size: var(--fs-h3); margin-bottom: var(--sp-2); }
+  .breaker .bk-row { display: flex; gap: var(--sp-2); margin: var(--sp-1) 0; }
+  .breaker .bk-k { flex: 0 0 5.5em; color: var(--fg-dim); }
+
   /* 🔴 `DEC-091` · `F4` ①：无据拒答的提示条。**与 `.breaker` 分开一个类** ——
      那是"额度用完了"（该做的是等跨天 / 开新会话），这是"资料里没有"（该做的是换问法 / 补文档）：
      两者出路相反，合成一张卡会把用户引到**做不到的处置**上。
      ⚠️ 中性灰，⛔ 不用熔断那个警示黄 —— 拒答**不是故障**，不该看着像出事。 */
-  .noinfo { border:1px solid var(--line); border-left:4px solid var(--muted); border-radius:6px;
-            padding:10px 12px; margin-top:8px; background:#fafafa; font-size:13px; }
-  .noinfo[hidden] { display:none; }
-  .noinfo .ni-title { font-weight:600; font-size:14px; margin-bottom:4px; }
-  .noinfo .ni-body { color:var(--muted); }
-  #composer { border-top:1px solid var(--line); padding:12px; display:flex; gap:8px; }
-  #q { flex:1; padding:10px; font-size:15px; border:1px solid var(--line); border-radius:6px; }
-  button { padding:10px 18px; font-size:15px; cursor:pointer; border-radius:6px;
-           border:1px solid var(--line); background:#fff; }
-  button:disabled { opacity:.5; cursor:not-allowed; }
-  #stop { background:#fff0f0; }
-  #login { max-width:520px; margin:80px auto; }
-  #login input { width:100%; padding:10px; font-size:15px; }
-  .hint { color:var(--muted); font-size:13px; }
+  .noinfo { border: 1px solid var(--line); border-left: 3px solid var(--fg-dim);
+            border-radius: var(--r-card); padding: var(--sp-3); margin-top: var(--sp-2);
+            background: color-mix(in srgb, var(--fg-dim) 7%, transparent); font-size: var(--fs-body); }
+  .noinfo .ni-title { font-weight: 600; font-size: var(--fs-h3); margin-bottom: var(--sp-1); }
+  .noinfo .ni-body { color: var(--fg-dim); }
+
+  /* ── 输入区 ── */
+  #composer { border-top: 1px solid var(--line); padding: var(--sp-3); display: flex; gap: var(--sp-2); }
+  #q { flex: 1; }
+  #stop { background: color-mix(in srgb, var(--bad) 12%, transparent); }
+
+  .hint { color: var(--fg-dim); font-size: var(--fs-body); }
 </style>
 </head>
 <body>
