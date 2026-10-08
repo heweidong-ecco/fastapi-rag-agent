@@ -10,6 +10,37 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- 🔴 **`api/schema.sql` 重新生成 —— `approval_events` 终于进了那份生成的快照**（2026-10-08 · `N12` 结清）——
+  **主判据（⛔ 不会把自己数进去 —— 靠【行首锚】）**：
+  `grep -c '^CREATE TABLE public\.approval_events' api/schema.sql` ⇒ **1**（**改前 0**）。
+  🔴 **这条尺子被写歪过【两次】，两次都是同一个病：说明文字把自己数了进去** ——
+  无锚版 `grep -c 'approval_events'` ⇒ **13**（只算 dump 正文是 11）；
+  第二版 `grep -c 'CREATE TABLE public.approval_events'`（无 `^`）⇒ **2**（我**又**把那串原样写进了说明）。
+  ✅ **加行首锚 `^` 后恒为 1** —— dump 是行首输出的，说明里那串在行中。过程留在 `api/schema.sql` 文件头。
+  ⚠️ 🔴 **`N12` 原写「应为 1」—— 那个数是猜的**（写它的人没见过真 dump）
+  ⇒ **真实判据是「0 → 非 0」，且要选一个不被自己的说明撼动的串**。
+  ⚠️ **且「先真跑一次 approve」这一步【不需要再做】** —— 本机真库 `approval_events` **已有 456 行**，
+  表**早就被惰性建出来过**（`CREATE TABLE IF NOT EXISTS` 在写入路径里）；实测**列与类型逐格等于** `_DDL`。
+  🔴 **⛔ 没有为了"跑一次"往真库补写** —— `approval_events` 是**审计留痕**表，补写一条假裁决 = **假留痕**。
+  ⚠️ **重生成抹掉了一处【手改】**：旧文件 `api_keys.is_active` 行尾挂着
+  `-- DEC-086：auth.py 按 COALESCE(is_active,1)=1 过滤；写侧是整数 0/1` ——
+  这正是 `api/schema.sql` 文件头第 1 条警告说的那件事（手改生成物 ⇒ 一跑生成命令就静默抹掉）。
+  ⇒ **没有加回来**（加回来 = 留给下一次同一个坑）；那条说明的家在 `api/db.py:80-90` ·
+  `docs/契约/数据模型.md`（`api_keys` 节）· `docs/decisions/DEC-086-*.md`。
+  📄 **执行时撞上的三个岔路（含备选与反悔成本）⇒ `docs/decisions/DEC-115-N12执行时的三个岔路.md`**
+
+- 🔴 **补上 `approval_events` 的【真库】用例**：`api/test_approval_events_db.py`（**6 条** · `-m needs_db` · `rag_test`）——
+  🔴 **它补的是真缺口**：`api/approval_audit.py::record_decision` 是 **fail-open**
+  （`except Exception: print(...)`）⇒ **表名/列名/列类型写错，只往服务端日志打一行，谁都不会收到红**；
+  而离线那 12 条（`test_approval_events.py`）走**假 pg**，证的是「SQL 被发出去了」，⛔ 不是「PG 认它」。
+  ⇒ 本文件**真写 → 真读回来 → 逐格断言**（「调用没抛异常」在这里**不是证据**）。
+  覆盖：DDL 被 PG 接受 · `owner`/`actor` 两个身份不合并 · `edited` 真库类型是 `boolean`
+  （查 `information_schema`，⛔ 不是看返回值）· 最新在前（含 `id DESC` 的并列打平）·
+  `owner=None` 是全量 · 可空列收 `None` + `IF NOT EXISTS` 幂等。
+  🔴 **反证跑过**：把 `_DDL` 的 `reason` 改名为 `reasons` ⇒ **6 failed**；还原 ⇒ **6 passed**
+  ⇒ **它不是"恰好绿"**。
+  ⚠️ **⛔ 不进 CI**（CI 无 postgres service）；本机跑**必须**带 `POSTGRES_DB=rag_test`。
+
 - 🔴 **「禁子串」守卫盯的是【字节】、不是【行为】**（2026-10-08 · `N14`）——
   `api/static/js/sse.test.js` 那条结构型守卫要求那句拒答语在前端**一个字都不许出现**，
   而它落地成了 `readFileSync(f).includes(REFUSE)` ⇒ **整份文件扫，注释也算**。

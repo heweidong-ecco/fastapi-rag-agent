@@ -10,8 +10,32 @@
 --       pg_dump -U postgres -d rag_db --schema-only --no-owner --no-privileges \
 --       > api/schema.sql
 --
--- 生成时间：2026-09-29
+-- 生成时间：2026-09-29 → **2026-10-08 重新生成**（`N12`）
 -- 来源数据库：本机开发库（Docker 容器 `postgres-rag`，镜像 `pgvector/pgvector:pg17`）
+--
+-- ## 🔴 2026-10-08 这次重新生成，改了什么（`N12`）
+--
+-- * ✅ **补上了 `approval_events`**（表 + 序列 + PK + 默认值）——
+--   它是**惰性建的**（`api/approval_audit.py` 的 `_DDL` 在写入路径里），
+--   所以要它进快照，**前提是那个库上真的发生过一次 approve**。
+--   📌 **主判据（⛔ 不会把自己数进去 —— 靠【行首锚】）**：
+--      `grep -c '^CREATE TABLE public\.approval_events' api/schema.sql` ⇒ **1**（**改前 0**）。
+--   🔴 **这条判据被【同一个人】写歪了两次，两次都是"尺子自我指涉"，所以留下过程：**
+--      · 第一版 = `grep -c 'approval_events'` ⇒ 只算 dump 正文是 **11**，
+--        但我把这段说明写进去之后，**它连说明一起数** ⇒ 全文件变 **13**。
+--      · 第二版 = `grep -c 'CREATE TABLE public.approval_events'` ⇒ 我**又**把这串原样写进说明
+--        ⇒ 实测 **2**（1 真 + 1 是这句说明自己）。
+--      · ✅ **第三版（现在这条）加 `^` 行首锚** —— dump 是**行首**输出的，而说明里那串在**行中**
+--        ⇒ 量到 **1**，且**再怎么写说明都不会动这个数**。
+--   ⚠️ **本仓同族**：`docs/复盘/2026-10-05-拿代理量当判据.md` · `docs/复盘/2026-10-02-判据写歪了不报错.md`。
+--   ⚠️ **`N12` 原写「应为 1」—— 那个数是猜的**（写它的人没见过真 dump）⇒ **真实判据是「0 → 非 0」**，
+--      且**要选一个不会被自己的说明撼动的串**。
+-- * ⚠️ **抹掉了一处【手改】**：旧文件 `api_keys.is_active` 那行尾上挂着一条
+--   `-- DEC-086：auth.py 按 COALESCE(is_active,1)=1 过滤；写侧是整数 0/1`。
+--   🔴 **这正是本文件头第 1 条警告说的那件事**（手改生成物 ⇒ 下次一跑生成命令就静默抹掉）。
+--   ⇒ **没有把它加回来**（加回来 = 留给下一次同一个坑）；那条说明的家在
+--   `api/db.py:80-90` · `docs/契约/数据模型.md` §`api_keys` · `docs/decisions/DEC-086-*.md`。
+-- * ℹ️ `\restrict` / `\unrestrict` 后面那串是 pg_dump 每次随机生成的 → **每次导都会变**，非缺陷。
 --
 -- ## 为什么要有它
 --
@@ -51,7 +75,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict TUIKOl6jbVxuvXS6rc3Oe4fWWRif74BZcCGcMoePLwQUUq1WfbvSOfGiiNhX5yf
+\restrict js8ttVu9PGzU6g4jJcP0DWDZiK9MTLvwVAXAa3gOz1eBUSNuOihk0kQiyz2KxeF
 
 -- Dumped from database version 17.10 (Debian 17.10-1.pgdg12+1)
 -- Dumped by pg_dump version 17.10 (Debian 17.10-1.pgdg12+1)
@@ -96,7 +120,7 @@ CREATE TABLE public.api_keys (
     key_hash text NOT NULL,
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     expires_at timestamp without time zone NOT NULL,
-    is_active integer DEFAULT 1   -- DEC-086：auth.py 按 COALESCE(is_active,1)=1 过滤；写侧是整数 0/1
+    is_active integer DEFAULT 1
 );
 
 
@@ -118,6 +142,44 @@ CREATE SEQUENCE public.api_keys_id_seq
 --
 
 ALTER SEQUENCE public.api_keys_id_seq OWNED BY public.api_keys.id;
+
+
+--
+-- Name: approval_events; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.approval_events (
+    id integer NOT NULL,
+    owner text NOT NULL,
+    actor text NOT NULL,
+    raw_thread_id text,
+    graph text,
+    decision text NOT NULL,
+    edited boolean NOT NULL,
+    rounds integer,
+    reason text,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+
+--
+-- Name: approval_events_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.approval_events_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: approval_events_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.approval_events_id_seq OWNED BY public.approval_events.id;
 
 
 --
@@ -316,6 +378,13 @@ ALTER TABLE ONLY public.api_keys ALTER COLUMN id SET DEFAULT nextval('public.api
 
 
 --
+-- Name: approval_events id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.approval_events ALTER COLUMN id SET DEFAULT nextval('public.approval_events_id_seq'::regclass);
+
+
+--
 -- Name: budget_intercepts id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -364,6 +433,14 @@ ALTER TABLE ONLY public.api_keys
 
 ALTER TABLE ONLY public.api_keys
     ADD CONSTRAINT api_keys_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: approval_events approval_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.approval_events
+    ADD CONSTRAINT approval_events_pkey PRIMARY KEY (id);
 
 
 --
@@ -473,5 +550,5 @@ CREATE INDEX idx_token_usage_user ON public.token_usage_logs USING btree (user_n
 -- PostgreSQL database dump complete
 --
 
-\unrestrict TUIKOl6jbVxuvXS6rc3Oe4fWWRif74BZcCGcMoePLwQUUq1WfbvSOfGiiNhX5yf
+\unrestrict js8ttVu9PGzU6g4jJcP0DWDZiK9MTLvwVAXAa3gOz1eBUSNuOihk0kQiyz2KxeF
 
