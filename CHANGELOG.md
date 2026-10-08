@@ -10,6 +10,23 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- 🔴 **语料契约【形式层】定稿 —— 并实测抓到一个静默失效**（2026-10-08 · `DEC-117` · 纯文档）——
+  `DEC-098` §五 **占位 1**（「`①b` **第一个要定的**」）从 2026-10-07 挂到现在。
+  **三件定死**（正文 ⇒ `docs/说明/语料要求.md` **§八**）：
+  ① **放哪** —— 🔴 **不是一件事，是三件事**（源→本仓 `testdata/demo-corpus/` ·
+  产物→**Studio 仓** · 运行时→容器 `/mnt/workspace`）⇒ 这就是解开那个占位的钥匙；
+  ② **什么格式** —— **文件名即契约**（`<类别>-<序号>-<标题>.md`，A/B/C/D + 负样本块），
+  ⛔ 不引 front-matter（要 `PyYAML` = 加依赖）；
+  ③ **怎么进镜像** —— 本仓出源 → 本机重烤 → `.db` 进 Studio 仓，⛔ **绝不在容器构建时烤**（key 红线 / 烧额度 / 构建时间不可控）。
+  🔴🔴 **实测发现（本机那半）**：Studio 仓**自带** `.gitattributes` 把 `*.db*` 映射到 LFS，
+  而**本机没装 git-lfs** ⇒ `git add x.db` **退出码 0 —— 成功！** 但存进去的是
+  **`SQLite format 3` 原始字节**（⛔ 不是 LFS 指针）。
+  ⇒ **「`.gitattributes` 里写了 `filter=lfs`」≠「LFS 生效」**，而且**它不报错**。
+  ✅ 动手前必须先 `brew install git-lfs && git lfs install`（在 Studio 工作目录里）。
+  ⬜ **平台那半仍未验**（LFS 配额 / 推完镜像里在不在）—— 要 `MODELSCOPE_API_KEY` ⇒ 业务方跑。
+  📄 `docs/decisions/DEC-117-语料契约形式层定稿.md` · 并更新 `DEC-098 §五` 占位 #1/#2 状态 +
+  **新增 #11**（惰性建的表不会进 `pg_dump` ⇒ 上云首次部署要显式建）。
+
 - 🔴 **分档落地：上传端点加可选 `doc_type` ＋ `technical` 600/60 ＋ 新增 `faq` 档**（2026-10-08 · `N19` 结清 · `DEC-116`）——
   **起因**：`api/api_v1_rag.py` 只有一句**按扩展名猜**（`"legal" if ext == "pdf" else "technical"`）
   ⇒ **除 PDF 外的一切全吃 `technical`** ⇒ `report`/`article` **从来用不上**；
