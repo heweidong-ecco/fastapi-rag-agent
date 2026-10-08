@@ -18,8 +18,10 @@ from token_tracker import check_token_budget
 from token_tracker import check_multilevel_budget
 
 # ==================== 导入 MCP Client ====================
-from mcp import ClientSession, StdioServerParameters
+import anyio
+from mcp import ClientSession, MCPError, StdioServerParameters
 from mcp.client.stdio import stdio_client
+from mcp.types import CONNECTION_CLOSED
 
 # ==================== 定义全局 State ====================
 class AgentState(TypedDict):
@@ -189,17 +191,32 @@ class _McpSessionActor:
     async def start(self) -> None:
         if self._task is not None:
             return
-        self._task = asyncio.create_task(self._hold(), name="mcp-session-holder")
-        await self._ready      # 等 initialize 完成 —— ⛔ 别让第一个请求自己去撞握手
+        # 🔴 **把队列/ready 【捕获】成局部量，交给 holder task** —— ⛔ 别让它在自己体内读 `self.*`。
+        #    ⚠️ 这一条是【实测撞出来的】：旧 holder 退出时若去读 `self._tx` / `self._ready`，
+        #    读到的**已经是被新一代换掉的那两个** ⇒ 它的 `finally` 会把**新会话的启动**
+        #    打成 `RuntimeError: MCP 会话起不来`。
+        #    📌 现象：`kill -9` 子进程后**紧接着**再调 ⇒ 报 `MCP 会话起不来：None`（再下一次才好）。
+        tx = asyncio.Queue()
+        ready = self._loop.create_future()
+        self._tx, self._ready = tx, ready
+        self._task = asyncio.create_task(self._hold(tx, ready), name="mcp-session-holder")
+        await ready            # 等 initialize 完成 —— ⛔ 别让第一个请求自己去撞握手
+        # ✅ 起来了就把计数清零 —— 限流管的是「**连续**起不来」，⛔ 不是"这一辈子只能崩 5 次"
+        self._restarts = 0
 
-    async def _hold(self) -> None:
-        """🔴 **整个会话生命周期都在这个 task 里** —— 这是那道坎的解法，⛔ 别把 session 漏出去。"""
+    async def _hold(self, tx, ready) -> None:
+        """🔴 **整个会话生命周期都在这个 task 里** —— 这是那道坎的解法，⛔ 别把 session 漏出去。
+
+        ⚠️ **`tx` / `ready` 是【构造那一刻捕获进来的局部量】，⛔ 不许在体内读 `self._tx` / `self._ready`**：
+           旧 holder 退出时那两个**可能已经被新一代换掉** ⇒ 它的 `finally` 会把**新会话的启动**打死。
+           （实测现象：`kill -9` 子进程后**紧接着**再调 ⇒ `RuntimeError: MCP 会话起不来：None`。）
+        """
         try:
             async with mcp_session() as session:
-                if not self._ready.done():
-                    self._ready.set_result(True)
+                if not ready.done():
+                    ready.set_result(True)
                 while True:
-                    item = await self._tx.get()
+                    item = await tx.get()
                     if item is None:
                         break
                     name, args, fut = item
@@ -211,29 +228,51 @@ class _McpSessionActor:
                         else:
                             fut.set_result(await session.call_tool(name, args))
                     except Exception as exc:        # noqa: BLE001
-                        # ⚠️ **一个请求失败⛔ 不该弄死整个会话** —— 那是"每次自开自关"都没有的
-                        #    脆弱性：长驻之后，一次工具异常会波及**之后所有**调用。
                         fut.set_exception(exc)
+                        if _is_transport_gone(exc):
+                            # 🔴 **传输断了 ⇒ 会话作废，出循环**（`async with` 退出 ⇒
+                            #    `is_alive()` 变 False ⇒ 下次调用重建）。
+                            #    ⚠️ **⛔ 不能只是 set_exception 就继续** —— 那样 holder task
+                            #    会带着一条死会话一直活着（实测踩过，见 `_is_transport_gone`）。
+                            self._dead_reason = f"{type(exc).__name__}: {exc}"
+                            break
+                        # ⚠️ **工具自己的错⛔ 不该弄死整个会话** —— 那是"每次自开自关"都没有的
+                        #    脆弱性：长驻之后，一次工具异常会波及**之后所有**调用。
         except Exception as exc:                    # noqa: BLE001
             self._dead_reason = f"{type(exc).__name__}: {exc}"
         finally:
-            if not self._ready.done():
-                self._ready.set_exception(
-                    RuntimeError(f"MCP 会话起不来：{self._dead_reason}")
+            if not ready.done():
+                ready.set_exception(
+                    RuntimeError(f"MCP 会话起不来（{type(self).__name__}）：{self._dead_reason}")
                 )
+            # 🔴 **退出时把【自己这条】队列里还压着的请求失败掉** —— ⛔ 别让它们悬着。
+            #    ⚠️ 并发的调用会排在队列里；holder task 一旦走人，那些 future
+            #    **再也不会有人 set** ⇒ 调用方**永远挂着**（比报个错糟得多）。
+            #    ⚠️ **只清 `tx`（我这条），⛔ 不碰 `self._tx`**（那可能已经是下一代的了）。
+            while True:
+                try:
+                    _, _, pending = tx.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+                if pending is not None and not pending.done():
+                    pending.set_exception(
+                        RuntimeError(f"MCP 会话已结束：{self._dead_reason}")
+                    )
 
     async def _request(self, name, args=None):
-        if not self.is_alive():
-            # 🔴 会话没了（崩了 / 被关了）⇒ **重建**，⛔ 别让调用方拿到一个死队列
+        # 🔴 会话没了（崩了 / 被关了）⇒ **重建**，⛔ 别让调用方拿到一个死队列。
+        # ⚠️ **判据要带 `_dead_reason`**：holder task 从"发现传输断了"到"真的结束"之间
+        #    有一小段窗口 —— 那时 `is_alive()` 还是 True，但**已经没人读队列了**。
+        #    只看 `is_alive()` 会把请求投进一个死队列 ⇒ **永远挂着**。
+        if self._dead_reason is not None or not self.is_alive():
             self._restarts += 1
             if self._restarts > 5:
                 raise RuntimeError(
                     f"MCP 会话反复起不来（已试 {self._restarts} 次）：{self._dead_reason}"
                 )
-            self._tx = asyncio.Queue()
-            self._ready = self._loop.create_future()
             self._task = None
-            await self.start()
+            self._dead_reason = None
+            await self.start()      # ⚠️ 队列/ready 由 `start()` **新建并捕获** —— ⛔ 别在这里也建一份
         fut = self._loop.create_future()
         await self._tx.put((name, args, fut))
         return await fut
@@ -261,6 +300,32 @@ class _McpSessionActor:
 
 #: 🔴 **按 loop 认领**：`asyncio.run` 每次都开一个新 loop，而 actor 的 `Queue` / `Future`
 #: **绑在创建它的那个 loop 上** ⇒ ⛔ 不能跨 loop 复用（本仓大量调用点就是 `asyncio.run`）。
+#: 🔴 **「传输没了」这一类异常** —— ⛔ **别与"工具自己报错"混为一谈**。
+#:
+#: ⚠️ **这一条是【验证时才发现的】补丁**（2026-10-08 批④-B）。改前 `_hold` 把两者混在一个
+#:    `except Exception` 里 ⇒ **子进程被杀之后 holder task 照样活着** ⇒ `is_alive()` 恒 True
+#:    ⇒ **永远不重建** ⇒ 之后每一次调用都拿同一条死会话，**一直** `MCPError: Connection closed`。
+#:    📌 实测复现：先调一次（✅ 返回 2）⇒ `kill -9` 子进程 ⇒ 再调 ⇒ ❌ 不恢复。
+#:
+#: 🔵 **为什么要分开**：`CallToolResult` 的官方 docstring 写着 —— 工具自身的错误**应当**
+#:    包在结果里（`is_error=true`）返回，⛔ **不是**抛协议级错误。⇒ 从 `session.call_tool`
+#:    **抛出来**的，基本都意味着**这条会话本身有问题**；但其中只有**连接级**的那几个才该作废会话，
+#:    `INVALID_PARAMS` 之类的协议错不该让整个会话重启（那要付 ~2s 重建成本）。
+def _is_transport_gone(exc: BaseException) -> bool:
+    """这条异常是不是在说「**传输断了**」（区别于「工具自己报错」）。"""
+    if isinstance(exc, (
+        anyio.ClosedResourceError,
+        anyio.BrokenResourceError,
+        anyio.EndOfStream,
+        BrokenPipeError,
+        ConnectionError,
+    )):
+        return True
+    if isinstance(exc, MCPError):
+        return exc.code == CONNECTION_CLOSED
+    return False
+
+
 _ACTOR: "_McpSessionActor | None" = None
 
 
