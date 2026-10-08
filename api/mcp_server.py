@@ -8,7 +8,7 @@ from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 
 # 导入所有工具（从各自独立的模块）
-from simple_tools import calculator, date_today  # 新增导入
+from simple_tools import calculator, date_today, date_calc, json_extract, stats  # 新增导入
 from search_tools import web_search
 # ⛔ 2026-09-21 注释（N13 · 业务方裁「挂起 + 注释掉 + 标『# 可扩展能力』」）：
 #    `browser_tools` 的三个工具依赖 Playwright 的 chromium，而**本仓任何部署方式都没装它**
@@ -31,6 +31,11 @@ server = Server("agent-tools")
 TOOLS = [
     {"func": calculator, "version": "1.0.0"},
     {"func": date_today, "version": "1.0.0"},
+    # 🔴 2026-10-08（批③）：三个本地纯函数工具。四条执行路径**自动**拿到它们
+    #    （全部派生自本列表 —— `DEC-107` 的「一处事实源」），⛔ 别处一行都不用改。
+    {"func": date_calc, "version": "1.0.0"},
+    {"func": json_extract, "version": "1.0.0"},
+    {"func": stats, "version": "1.0.0"},
     {"func": web_search, "version": "2.0.0"},  # 已升级到 v2
     # ⛔ 2026-09-21 注释（N13）：**# 可扩展能力** —— 依赖未安装的 chromium，调用必失败。
     #    两个原因缺一不可（都实测过）：

@@ -70,6 +70,68 @@ def test_date_today_impl_returns_a_readable_date():
 
 
 # ===========================================================================
+# 批③（2026-10-08）：date_calc / json_extract / stats 三个纯函数内核
+# ===========================================================================
+def test_date_calc_impl_adds_and_subtracts_days():
+    from simple_tools_impl import date_calc_impl
+
+    assert date_calc_impl("2026-10-08", 7) == "2026-10-15（星期四）"
+    assert date_calc_impl("2026-10-08", -8) == "2026-09-30（星期三）"
+    assert date_calc_impl("2026-10-08", 0) == "2026-10-08（星期四）"
+    # 跨月 / 跨年 / 闰年 —— 走的是 `datetime`，⛔ 不是手算
+    assert date_calc_impl("2026-01-31", 1) == "2026-02-01（星期日）"
+    assert date_calc_impl("2024-02-28", 1) == "2024-02-29（星期四）"
+
+
+def test_date_calc_impl_rejects_bad_input_without_raising():
+    from simple_tools_impl import date_calc_impl
+
+    # ⚠️ 失败必须是【返回值】，⛔ 不是异常 —— 与 `calculator_impl` 同款约定
+    assert date_calc_impl("2026/10/08", 1).startswith("日期计算错误:")
+    assert date_calc_impl("", 1).startswith("日期计算错误:")
+    assert date_calc_impl("2026-10-08", "七天").startswith("日期计算错误:")
+
+
+def test_json_extract_impl_walks_dot_and_bracket_paths():
+    from simple_tools_impl import json_extract_impl
+
+    doc = '{"user": {"name": "阿伟", "tags": ["a", "b"]}, "n": 3}'
+    assert json_extract_impl(doc, "user.name") == "阿伟"
+    assert json_extract_impl(doc, "user.tags[1]") == "b"
+    assert json_extract_impl(doc, "n") == "3"
+
+
+def test_json_extract_impl_reports_errors_as_strings():
+    from simple_tools_impl import json_extract_impl
+
+    assert json_extract_impl("这不是 json", "a").startswith("JSON 提取错误:")
+    assert json_extract_impl('{"a": 1}', "b").startswith("JSON 提取错误:")
+    assert json_extract_impl('{"a": [1]}', "a[5]").startswith("JSON 提取错误:")
+    # 🔴 坏路径必须【说出来】，⛔ 不许被悄悄当成 `a.b`
+    assert json_extract_impl('{"a": {"b": 1}}', "a..b").startswith("JSON 提取错误:")
+    assert json_extract_impl('{"a": 1}', "a[x]").startswith("JSON 提取错误:")
+
+
+def test_stats_impl_reports_basic_descriptives():
+    from simple_tools_impl import stats_impl
+
+    out = stats_impl("1,2,3,4")
+    assert "个数=4" in out and "均值=2.5" in out
+    assert "最小=1" in out and "最大=4" in out and "中位数=2.5" in out
+    # 空格 / 中文逗号 / 换行都认（LLM 三种写法都会出现）
+    assert "个数=3" in stats_impl("1 2 3")
+    assert "个数=3" in stats_impl("1，2，3")
+    assert "个数=3" in stats_impl("1\n2\n3")
+
+
+def test_stats_impl_rejects_bad_input_without_raising():
+    from simple_tools_impl import stats_impl
+
+    assert stats_impl("1,abc,3").startswith("统计错误:")
+    assert stats_impl("   ").startswith("统计错误:")
+
+
+# ===========================================================================
 # code_executor_impl —— 沙箱
 # ===========================================================================
 # 沙箱里**不该有**的东西（`ALLOWED_BUILTINS` 里确实没有它们）

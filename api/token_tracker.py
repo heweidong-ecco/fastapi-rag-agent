@@ -681,6 +681,9 @@ TOOL_ESTIMATED_COST = {
     "web_search": 0.005,         # 搜索工具：通常需要一次 LLM 辅助总结
     "calculator": 0.0,           # 计算器：本地执行，无 API 调用
     "date_today": 0.0,           # 日期查询：本地执行
+    "date_calc": 0.0,            # 批③：本地纯函数，无 API 调用
+    "json_extract": 0.0,         # 批③：本地纯函数
+    "stats": 0.0,                # 批③：本地纯函数
     "fetch_webpage": 0.003,      # 网页抓取：可能触发 LLM 总结
     "screenshot_webpage": 0.003, # 截图：类似网页抓取
     "execute_python": 0.0,       # 代码执行：本地执行，无 API 调用
@@ -716,6 +719,9 @@ TOOL_ESTIMATED_TOKENS = {
     "web_search": 800,           # 搜索工具：通常需要一次 LLM 辅助总结
     "calculator": 0,             # 计算器：本地执行，无 API 调用
     "date_today": 0,             # 日期查询：本地执行
+    "date_calc": 0,              # 批③：本地纯函数，无 API 调用
+    "json_extract": 0,           # 批③：本地纯函数
+    "stats": 0,                  # 批③：本地纯函数
     "fetch_webpage": 600,        # 网页抓取：可能触发 LLM 总结
     "screenshot_webpage": 600,   # 截图：类似网页抓取
     "execute_python": 0,         # 代码执行：本地执行，无 API 调用

@@ -32,14 +32,22 @@ import pytest
 
 API = Path(__file__).resolve().parent
 
-#: 交给 LLM 的四个工具名（= `mcp_server.TOOLS` 里那四个）
-TOOL_NAMES = {"calculator", "date_today", "web_search", "execute_python"}
+#: 交给 LLM 的工具名（= `mcp_server.TOOLS` 里那些）。
+#: 🔴 2026-10-08（批③）：4 → **7**。
+#: ⚠️ **新增工具时必须同时改这里** —— 本集合是 `_tool_definitions()` 的**过滤条件**，
+#:    名字不在里面 ⇒ 那条守卫对这个工具**是瞎的**（⛔ 不是"少登记一条测试"，是"尺子量不到"）。
+TOOL_NAMES = {
+    "calculator", "date_today", "web_search", "execute_python",
+    "date_calc", "json_extract", "stats",
+}
 
 #: ✅ **允许**【定义】这些工具的模块 —— 正本，每个工具**只有一处**。
 #:    ⚠️ 新增一个工具 ⇒ 在 `mcp_server.TOOLS` 加一行 + 在这里登记它的**定义处**
 #:       （⛔ 不是"到处都能定义"）。
+#:    🔴 **「加工具要加几处」的【完整】清单** ⇒ `DEC-107` §六·1（**五处** + 两处此前零守卫的
+#:       元数据，已由 `api/test_tool_registration_completeness.py` 补上）。⛔ 别再传"两处"那个旧数。
 DEFINITION_HOMES = {
-    "simple_tools.py": {"calculator", "date_today"},
+    "simple_tools.py": {"calculator", "date_today", "date_calc", "json_extract", "stats"},
     "search_tools.py": {"web_search"},
     "code_executor.py": {"execute_python"},
 }

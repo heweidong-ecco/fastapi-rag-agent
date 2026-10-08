@@ -40,6 +40,14 @@
   · 同批加**私有**辅助 **`_iso_utc(dt)`** —— 把库里的**无时区**时间戳标成 `+00:00`（见下方「看代码会误判」）。
   📌 判据：`api/test_trace_cost.py`（**15 例** · 假 pg · **进 CI**）·
   `api/test_trace_cost_db.py`（**9 例** · `needs_db` · **不进 CI**）
+- 🔴 **工具级的两张预估表** —— `TOOL_ESTIMATED_COST`（**元** · 供**对外展示**）与
+  `TOOL_ESTIMATED_TOKENS`（**token** · 供**预算判定**）· 取用函数
+  `estimate_tool_cost()` / `estimate_tool_tokens()`。
+  ⚠️ **两套必须并存、⛔ 不可互相替代**（历史事故：判定逻辑误用「元」表去和 Token 预算相减
+  ⇒ 三处闸门恒放行 —— 见文件下方「两套表」那段）。
+  🔴 **2026-10-08（批③）：各 6 → 9 条**（+`date_calc` / `json_extract` / `stats`，**全是 0**）。
+  🔴 **它是「加一个工具要登记在五处」的其中一处**，且**改前零守卫** ⇒ 已由
+  `api/test_tool_registration_completeness.py` 补成**会红的断言**（见下方 ⚠️ 表）。
 
 ## 🟡 做到哪 / 缺什么
 
@@ -67,6 +75,7 @@
 | 🔴 **「这个文件管所有配额」** | ⚠️ **2026-10-03 起：是的**（原先"不是"）。<br>**原先**另有 `permission.ROLE_QUOTA` + `quota_limiter.py` 那套「每日**请求次数**」，**与 token 互不知情**（`DEC-029` 实测**差 35 倍**）。<br>⇒ `DEC-046` 把那套**整张删掉**，配额**只剩 token 一套**（金额那套是同一物不同单位，经 `PRICING` 换算）。<br>⚠️ **但它仍不是"所有路径"** —— 挂多级预算的只有 `/agent/mcp_chat` 一条；<br>**全路径那层在 `main.QuotaMiddleware`**（消费本文件的 `get_token_budget_info`）。 |
 | 🔴🔴 **「那三个 `get_*_summary` 是通用查询，哪儿都能用」** | ⛔ **不能当对外展示的数据源** —— `get_user_summary` / `get_purpose_summary` / `get_thread_summary`（`:252/:259/:264`）读的是**进程内存**（`_user_summary` 等三个 `defaultdict`，只在 `record_usage` 里累加、**从不回读 DB**）⇒ **重启归零**。<br>⚠️ 它们**不是坏的** —— 语义本来就是"**本进程**这段时间花了多少"，`:148` 的即时花费告警**正需要**这个。<br>🔴 **坏的是拿它们当展示口径**：`/agent/cost/overview` 原来就这么干，实测 admin 在库里有 **4216 tokens**、它答 **`0`** —— **不报错、界面照常出数**（`DEC-047` · `①b` Task 7 核出来）。<br>✅ 展示走 **`get_user_overview`**（读库）；⚠️ **另一个坑**：`get_purpose_summary()` 还**不收 `user_name`** ⇒ 它一直是**全站**口径。<br>📌 判据（可打印）：`api/test_cost_visibility.py` |
 | ⚠️ **「两个单位混着 ⇒ 是 bug」** | 🟢 **不是** —— 第一二级（元）与第三级（token）**量纲本来就不同**，代码注释 `:665` 明说「**别统一掉**」 |
+| 🔴 **「工具估算表漏登记一个也没人会发现」** | ⚠️ **改前确实如此** —— `estimate_tool_tokens` 的兜底是 **`DEFAULT_ESTIMATED_TOKENS = 500`**，所以**漏登记不报错**，只会让一个**本地免费**工具被当**花 500 token** 算（可能误触预算门）。<br>🔴 **2026-10-08（批③）起有守卫**：`api/test_tool_registration_completeness.py` 逐个已注册工具查**两张**表（本仓立场：**「从不命中」与「没人违规」在机器痕迹上完全一样**）。 |
 | ⚠️ **「`ROLE_TOKEN_BUDGET` 就是最终日限额」** | ⚠️ **只对 `_invoke_llm` 那条链**。**挂多级预算的只有 `/agent/mcp_chat` 一条**（`check_multilevel_budget` 全仓唯一调用点在 `agent_graph_advanced.py:239`）⇒ **其他链全无预算** |
 | ⚠️ **「本文件定义着 `PRICING` / `ROLE_TOKEN_BUDGET` / `MAX_*_COST`」** | 🔴 **2026-10-01 起【只是别名】** —— 真值在 `api/token_config.py`，本文件**顶部 import 进来**（`PRICING is token_config.MODEL_PRICING` → `True`）。⇒ **改价改额度请去 `token_config.py`**，改这里没用（会被 import 覆盖） |
 | ✅ ~~🔴 **「`check_global_daily_budget` 存在 ⇒ 全站额度在管着」**~~ | ✅ **2026-10-02 起【是的】—— 这句话已经翻面，⛔ 别照旧理解。**<br>**2026-10-01 当天**确实如原文所说「**没有任何调用点**」（Task 3 只出函数）；**Task 4（`B11`）把它接进了 `breaker.py:75`** ⇒ 现在**真的在管着**。<br>**判据（可打印）**：`grep -rn "check_global_daily_budget" api/ --include="*.py"` ⇒ 应命中 `breaker.py` 的 `:74/:75`（接线）**与** `token_tracker.py:907`（定义）。<br>📌 **保留这一行的理由**：它是「**常量/函数建好没接上**」（本仓第三次：`B7` 前、`B8` 前）的标本 —— 但**标本的意思是"当时没接"，不是"现在没接"**。⚠️ **这类行的有效期很短，读到请先跑判据。** |

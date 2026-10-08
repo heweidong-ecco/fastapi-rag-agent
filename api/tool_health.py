@@ -25,13 +25,22 @@ _tool_health: Dict[str, Dict] = {}
 
 # 为每种工具类型定义安全的测试参数
 # 如果某个工具不在这个映射中，会跳过健康检查（标记为 UNKNOWN）
+# 🔴 2026-10-08（批③）：**「跳过」= 这个工具【永远不体检】**，而且**静默** ——
+#    加工具忘了登记这里不会有任何报错。守卫 ⇒ `api/test_tool_registration_completeness.py`。
 TEST_ARGS_MAP = {
     "calculator": {"expression": "1+1"},
     "date_today": {},
+    # 🔴 2026-10-08（批③）：三个新工具
+    "date_calc": {"start_date": "2026-01-01", "days": 1},
+    "json_extract": {"json_text": '{"a": 1}', "path": "a"},
+    "stats": {"numbers": "1,2,3"},
     "web_search": {"query": "test"},
     # ⛔ 2026-09-21 注释（N13）：**# 可扩展能力** —— 这两个工具已从 `mcp_server.TOOLS` 摘掉
-    #    （依赖未安装的 chromium，调用必失败）。**留着它们没用**：`run_health_check` 是
-    #    **按 `mcp_server.TOOLS` 遍历**的，表里多两项不会被查到。
+    #    （依赖未安装的 chromium，调用必失败）。**留着它们没用**。
+    #    ⚠️ **2026-10-08 订正**：原注释写「`run_health_check` 是**按 `mcp_server.TOOLS` 遍历**的」
+    #       —— 🔴 **那句是假的**：它遍历的是**本表**（`run_health_check()` 里的
+    #          `for tool_name in TEST_ARGS_MAP`）。⚠️ **不写行号** —— 本仓 `N8`：行号锚点系统性漂移。
+    #       **结论没变**（多两项查不到），**理由是另一个** —— 注释也得是真的，否则下一个人按它做错事。
     #    装好 chromium 后，取消注释并**同时**取消 `mcp_server.py` 里对应的两行。
     # "fetch_webpage": {"url": "https://example.com"},
     # "screenshot_webpage": {"url": "https://example.com"},
