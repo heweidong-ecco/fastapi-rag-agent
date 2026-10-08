@@ -37,23 +37,25 @@
 | `api/api_v1_agent.py` | 2149 | ✅ [`specs/api_v1_agent.md`](./api_v1_agent.md) | 🟢 **可用；流式【5 条 · 对话链全齐】**（`③` Task 4 · `B1` · 2026-10-03 第一条 ⇒ **2026-10-04 补足剩余 4 条**）—— 5 条"会逐字生成答案"的链**全部**有 SSE 版本<br>⚠️ **其余 29 条（查询 / 管理 / 记账类）仍全非流式** —— 它们产出的**不是逐字生成的文本**（token 用量 / 工具健康 / 预算 / 轨迹 / 记忆增删），**流式对它们没有意义**。⛔ **这一条是【本批的判断】，没走业务裁定**（硬门 A 要的是"**该流的流**"）<br>✅ **改造收口**：本文件下方有 **实施计划 ②**（人工接管 · **已完成**）与 **③**（流式与取消 · **已完成** —— `B1`/`B2`/`B3` 全部落地，`B1` 的最后 4 条链于 **2026-10-04** 补齐）<br>✅ **2026-10-03（`②` Task 2 · `B5`）**：新增 **`GET /agent/pending`** ⇒ 路由 **28 → 29**<br>✅ **2026-10-03（`②` Task 3 · `B6`）**：`POST /agent/approve` 增加可选参数 **`edited_answer`** ⇒ **硬门 D 三段齐了**<br>🔵 **2026-10-03（`③` Task 4 · `B1`）**：新增 **`POST /agent/langgraph_chat/stream`**（SSE）⇒ 路由 **29 → 30**。📄 `DEC-050`<br>✅ **2026-10-03（`③` Task 5 · `B2`）**：新加的这条流式路由**补上了 cancel 传播**（关图的流 + 记数）—— `DEC-050` §遗留·3 自己点的那个洞**已堵**。📄 `DEC-052`<br>🔴 **2026-10-03（`DEC-056` 丙段）· 三条口径变了**：<br>① **进图的 checkpoint 键**由裸 `thread_id` 改成 **`session_key(user_name, thread_id)`**（4 张图 · 7 处）；⚠️ **响应仍回显原值**<br>② **`/agent/approve` 加了归属校验**（**本人或 admin**）+ **按登记表里的 `graph` 字段路由**；⛔ 它**不再**直接吃 `agent_graph` 写死<br>③ **`/agent/memory_chat` 接上审批门**（`interrupt_before=["approval"]`）⇒ **`DEC-051` §遗留·2 关闭**<br>🔵 **2026-10-04（`B1` 剩余 4 条链）· 一次加 4 条流式路由** ⇒ 路由 **30 → 34**：`advanced_chat/stream`（`:889`）· `plan_execute/stream`（`:1128`）· `memory_chat/stream`（`:1311`）· `mcp_chat/stream`（`:1711`）。<br>· 同时**把原有的 `langgraph_chat/stream`（`:282`）一起改成走新共享层 `api/sse.py`** ⇒ 本文件里**不再有自己的 SSE 生成器**（逐帧等价，`test_agent_sse.py` + `test_cancel_propagation.py` 全绿且未改）。<br>· ⚠️ **每条都必须保留那两道前置闸**（`check_session_token_budget` `B8` + `circuit(global_key())` `B11`）—— 有两个 AST 守卫挖的是**端点函数体内部**（`api/test_session_budget_wiring.py:72` · `api/test_breaker_wiring.py:88`）⇒ **闸必须在函数体里，⛔ 不能挪进共享层**。<br>· 🔴 **链 D（`plan_execute/stream`）与 A/B/C **形态不同**：`plan_task` 是**同步函数**（跑在 `asyncio.to_thread` 里）⇒ 靠 **`_ThreadTokenBridge`**（`:1003`）把 token 从线程送回事件循环；且**它只流"规划段"**，之后是**一长段静默**（`execute_plan` 不流）—— ⛔ 别当成 bug。<br>🔵 **2026-10-04（`DEC-055`）· 5 条对话链全部接上 `chat_history` 留痕** —— 三条出口各写一个 `status`：`done` / `cancelled` / `error`。<br>· 🔴 **改前 5 条链【一条历史都不写】**（`grep -rn "append_chat_history" api/api_v1_agent.py` ⇒ **0**）—— 它们的"半路状态"由 **checkpointer** 持有，而 `chat_history` 是**另一套存储**（`DEC-055` §一 就查的这件事）。<br>· 🔴 **`done` 的答案取自【图的最终状态】（`aget_state` / `summary`），⛔ 不是 `on_complete` 收到的 `collected`**（`DEC-050` 真服务撞过的同一个坑：`calc_execute` 那种分支**一个字都不流**）。<br>· 🔴 **停在审批点（`status == "pending_approval"`）⇒ 本轮【不写】**（链 A 与链 B 各带这个 gate）—— 那时 `answer` 里是**模型已写的那半句（非空）**，不 gate 就会被写成 `status="done"`，正是本 DEC 要防的假信号。<br>📌 守卫 `api/test_agent_stream_chains.py`（**60 条** · 较评审收口时 **+13**，全是留痕那几条）· 骨架 ⇒ `docs/specs/sse.md`<br>🔴 **2026-10-04（`DEC-072`）· 6 个端点的初始 state 补上【身份】**：`user_name` / `thread_id` **必须进 state**（图里的记账节点靠它们才知道"这笔钱记给谁、记到哪个会话"）。<br>· 改动点：`langgraph_chat`（`:248`）· `langgraph_chat/stream`（`:414`）· `memory_chat`（`:1280`）· `memory_chat/stream`（`:1391`）—— 各加 `{"user_name": user_name, "thread_id": thread_id}`；<br>· 🔴 **`advanced_chat`（`:863`）/ `advanced_chat/stream`（`:973`）原先【只传了 `user_name`】，没有 `thread_id`** ⇒ 那两张图的账**只记得到人、记不到会话**。本批补齐。<br>· ⚠️ **传的是【原值】，⛔ 不是 `sess`（`session_key(...)` 那个）** —— `session_key` 是 **checkpoint 键**，与账目无关；写混了账会记到拼接后的键上。<br>· ⚠️ **缺身份不报错**：一律 `.get(…, "unknown")` 读 ⇒ 静默记成 `"unknown"`（⛔ 不是 500）。<br>📄 `DEC-072`；📌 判据 ⇒ `api/test_billing_wiring.py`（`ENDPOINTS` 6 条逐个查初始 state 有没有那两个键）<br>🔴 **2026-10-05（批 7 · `N11`）：9 条端点接上【图内拦截的出口形状】**（`DEC-083`）—— 4 条非流式 ⇒ **429**（判在 `summarize_agent_result()` 之前，⛔ 不许 `register`）· 4 条流式 ⇒ **error 帧 + `[DONE]` + `persist_turn(status="error")`**（⛔ 不发汇总帧）· `/agent/approve` ⇒ **补 `B8`+`B11` 两道门**（用调用方过门）+ **两个 `invoke` 都认标志**（命中先 `resolve` 再 429）。<br>⚠️ **改前这 8 条非-approve 端点会回 HTTP 200 + 一句"今日Token预算已用完"当答案** —— 调用方**看不出被拒了**。<br>⚠️ **`/agent/mcp_chat` 那条 429 的文案变了**（「本次**工具调用**未执行」→「**本轮**未继续执行」）—— 因为新增的软返回**根本没有工具调用**。📄 `DEC-083` §三<br>🔵 **2026-10-06（`DEC-088` · `F1` 接管页）· 一次加 2 条端点 ⇒ 路由 34 → 36**：<br>· 🆕 **`GET /agent/pending/context`（`:763`）** —— 待接管会话的**完整上下文**（`messages` 序列原样 + `owner`/`graph`/`rounds`/`next`）。可带**可选 `owner`**（裁定 6）收窄撞车的 `thread_id`；**多条候选 ⇒ 如实拒绝**，⛔ 不"挑第一条"。<br>· 🆕 **`GET /agent/approvals/history`（`:2021`）** —— 裁决历史（读 `api/approval_audit.py` 的 `approval_events` 表）。⚠️ **与 `/agent/pending` 同一条可见性口径**：本人默认、admin 全量。<br>· 🔴 **`GET /agent/pending`（`:702`）的可见性变了** —— 此前**跨用户全量**，现在**本人默认 · admin 全量**（`DEC-088` 缺口③）。⚠️ **收窄发生在【端点里】（两行过滤），`list_pending()` 一行没动** —— 见 `docs/specs/pending_approvals.md`。<br>· 🔴 **`POST /agent/approve`（`:439`）加了两样**：① 可选 **`owner`**（用来收窄撞车的 `thread_id`，**收窄 ≠ 授权**）② 每次**真裁决**写一条留痕（`record_decision`，fail-open）。⚠️ **留痕写在那道"队列登记陈了"的守卫【之后】** ⇒ 它是**第四条不记的出口**（见「看代码会误判」表）。<br>· 📄 设计 ⇒ `docs/decisions/DEC-088-接管页与硬门D的三个缺口.md` · 施工 ⇒ `fastapi-rag-agent-TODO待办/施工单-20261006-接管页.md` · ⚠️ **本批 ⛔ 不等于硬门 D 翻 ✅**（要照四硬门原文逐栏对）<br>🆕 **2026-10-06（`DEC-093` · `F2` Trace 页）· 加 1 条只读端点 ⇒ 路由 36 → 37**：<br>· 🆕 **`GET /agent/trace/{thread_id}/cost`** —— 成本轴（`token_usage_logs`）的逐笔明细 + 整条线程合计。⚠️ **它与 `/agent/trace/{thread_id}`（追踪轴 · 进程内存）是【两条轴】**，页面上并排画、**⛔ 不合并**（没有共同的步 id）。<br>· 🔴 **0 条回 200，⛔ 不是 404**（`thread_id` 是用户自己填的）；**取数⛔ 不复用 `get_thread_cost`**（它没有归属条件）。📄 `DEC-093` §三·A/§三·A' |
 | `api/api_v1_rag.py` | 1148 | ✅ [`specs/api_v1_rag.md`](./api_v1_rag.md) | 🔵 **2026-10-06（`DEC-091` · `F4` 第一条）：`/rag/stream_search` 的帧集【再多一帧 `no_answer`】** —— 答案**以那句拒答语开头**时，在 `[DONE]` 之后、`sources` 之前多发一帧 `{"no_answer": true}`（`:840` 判 · `:841` 发）。<br>🔴 **判据在开头，⛔ 不是"含"**（`startswith`）；**prompt 与判据共用同一个模块级常量 `REFUSAL_SENTENCE`**（`:697`）—— 两处必须一致，而它们分家的表现是**静默的**（prompt 换了措辞 ⇒ 帧永远不发 ⇒ 页面上只是一句普通回答）。<br>⚠️ **⛔ 不提高拒答率**：prompt / 模型 / 检索**一行没动**，补的是**可观测性**。⛔ 也**不是**"加相似度阈值" —— 那条路已由三轮真栈 spike **结构性判死**（同文档邻居问题上量不出来，见 `DEC-091` §二/§三）。<br>⚠️ **对老前端天然兼容**：`sse.js` 认不出的帧落到 `'unknown'`，而页面**什么都不做**。<br>⚠️ **非流式那条链（`answer_with_citations.py`）一行没动** —— 它用的是**逐字同一句**，但**没有这个帧**，也**没有界面**；⇒ 🔴 **那句拒答语现在全仓有两份**，将来那边要加同样信号时**必须先收成一份**（`DEC-091` §八·2）。<br>🔴 **2026-10-05（`DEC-073`）：`/rag/search` 与 `/rag/rewrite_search` 补上 B8 + B11 两道闸**（`unified_search` `:534`/`:538` · `rewrite_search_api` `:480`/`:484`，各加 `thread_id: str = "default"`）—— **改前这两条链零闸**，而它们默认就真调 LLM。⚠️ **记账点不本文件**，在其下游（`rag_pipeline` / `answer_with_citations` / `query_rewriter`）。<br>✅ **2026-10-06（`DEC-084`）：`/rag/stream_search` 的流式答案【补上记账】** —— 端点里新增 `_StreamUsageTap`，用骨架本来就逐块调用的 `extract` 钩子累积所有块，收尾出口一次 `record_from_response(purpose="answer_generation")`。⚠️ **改前那句"流式 usage 拿不到"是错的**（见下方「看代码会误判」）—— 真根因是**没人读带 usage 的那一帧**（它 `content=''`，被 `llm_chunk_text` 判空丢掉）。⛔ **取消 / 异常仍不记**（那帧根本不到 · `DEC-053` §遗留·2）。<br>✅ **2026-10-04（`DEC-065`）：`tags=["模拟类测试"]` 整组【归零】** —— 另 **2 条**（`/rag/async_ask` · `/rag/parallel_ask`）**已删**（纯 mock · 零消费者）。本文件因此 **`@router.` 14 → 12**、**HTTP 12 → 10**。<br>⚠️ ⛔ **本文件现在没有任何"假端点"了** —— 剩下的 10 条 HTTP 条条都动真东西（库里/embedding/共享层）。<br>🔴 **2026-10-04（`DEC-064`）：`POST /rag/jwt_ask` 已【删除】** —— 三条理由与做法见 `docs/decisions/DEC-064-删除-rag-jwt-ask.md`。本文件因此 **`@router.` 15 → 14**、**HTTP 13 → 12**。<br>🟡 ~~部分可用 —— 有 2 条是"模拟类测试"（原 3 条；`/rag/ask` 2026-10-03 已删，`DEC-057`）~~ ⇒ **已归零**。<br>🔵 **2026-10-04（`B1` 剩余 4 条链 · 批 3）：`/rag/stream_search` 的 SSE 生成器【改成走共享层】** —— 内联的 `try/except/finally` 整段换成 `sse_response(sse_stream(...))`（`:731`）。<br>· 🔴 **行为必须【逐帧等价】，⛔ 不是"顺手统一"** ⇒ 三处**显式覆盖**骨架默认值：`ensure_ascii=True`（中文仍 `\uXXXX`）· `on_error`（**只有 error 帧、⛔ 不加 `[DONE]`**）· `chunk_delay=0.01`（限速照旧）。<br>· ⭐ **判据 = 既有两份用例"全绿且文件 diff 为空"**（`api/test_agent_sse.py` + `api/test_cancel_propagation.py`）—— ⛔ 没有新加断言 = 重构真的等价。<br>· ⚠️ **上游从同步 `.stream()` 改 `astream(messages)`（`:735`）不是本批的改动**（那是 `③` Task 5 · `B2`）；本批只是把它搬进 `lambda: …` 工厂。<br>📄 骨架见 `docs/specs/sse.md`<br>✅ **2026-10-03（`③` Task 5 · `B2`）**：`/rag/stream_search` 的**取消传播做完了** —— 上游改 `astream`、`finally` 里 `aclose()` 关流、取消时记 `stream_cancelled_total`（`DEC-052`）。⚠️ **"上游真停"仍只有代码内证据**（本机无出账）<br>✅ **2026-10-03（`③` Task 6 · `B3`）**：中断后**那半截答案存进历史**（提问 + 半截 + `INTERRUPTED_SUFFIX` 标记，落 `finally` —— `DEC-053`）<br>✅ **2026-10-04（`DEC-055`）**：**三条出口都留痕，且各带一个 `status`** —— `done`（= 完整答案、⛔ 无标记）/ `cancelled` / `error`。🔴 改前 **`except Exception` 那条一个字都不留**（连提问一起丢）⇒ 现在也写了。留痕例程已收进 **`cache.persist_turn`**，本文件只剩**两个调用点**（`_complete` `:715` · `on_incomplete` `:745`）<br>🔴 ~~**未修**：**本文件的 LLM 调用一处都不记账**（`grep -c record_usage api/api_v1_rag.py` ⇒ **0**）⇒ 见下方「做到哪」与 `DEC-053` §遗留·2~~ ⇒ **2026-10-05（`DEC-073`）部分修复**：`/rag/search` 与 `/rag/rewrite_search` 两条链**记账点在下游模块**、闸在本文件；⛔ **`/rag/stream_search` 与两条 Agent 路径仍未修** ⇒ 见下方「做到哪」<br>✅ 2026-10-01：两处 `ChatOpenAI`（**当时** `:578` 流式答案 · `:751` WS agent）接上 `MAX_TOKENS_ANSWER`（`B7`）—— ⚠️ **两处都已不存在**：2026-10-02 起改走 `llm_factory.make_llm("chat","answer")`（见下一条），`ChatOpenAI` 早已不是本文件的调用形状<br>✅ 2026-10-02（`①b` Task 5）：那两处**改走 `llm_factory.make_llm("chat", "answer")`** ⇒ **本文件已不再 import `ChatOpenAI` / `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL_CHAT`**。<br>⚠️ **`get_llm_stream()` 的惰性没变**（`make_llm` 自己把 langchain 的 import 关在函数内）· ⚠️ `temperature=0.3` + `streaming=True` 是**本处特有的逐点调参**，仍写在调用点上 |
 | `api/approval_audit.py` | 110 | ✅ [`specs/approval_audit.md`](./approval_audit.md) | （未写） |
-| `api/auth.py` | 216 | ✅ [`specs/auth.md`](./auth.md) | ✅ **可用（生产）** —— 两条并行的认证：**API Key**（查库）与**登录口令**（比环境变量） |
+| `api/auth.py` | 216 | 🔴 **缺** | ❓ 未知 |
 | `api/bm25_index.py` | 142 | ✅ [`specs/bm25_index.md`](./bm25_index.md) | 🟡 **可用** —— 且 **2026-10-03 起它是「多用户隔离」的两个承重层之一**（`DEC-056` 决策 5：过滤写在共享层） |
 | `api/breaker.py` | 78 | ✅ [`specs/breaker.md`](./breaker.md) | 🟡 **部分** —— `global:` 这一条 key **已生效**（2026-10-02 · `①b` Task 4）；`model:` 那类**还没做**（留给 `L2`） |
 | `api/browser_tools.py` | 84 | 🔴 **缺** | ❓ 未知 |
-| `api/cache.py` | 138 | ✅ [`specs/cache.md`](./cache.md) | ✅ **可用（生产）** —— 🔴 **两类完全不同的东西住在同一份文件里**（embedding 缓存 + 对话历史） |
-| `api/chunker.py` | 66 | ✅ [`specs/chunker.md`](./chunker.md) | 🟡 **可用** —— 但**五档配置里只有两档真被用到**，且**零测试** |
+| `api/cache.py` | 138 | 🔴 **缺** | ❓ 未知 |
+| `api/chunker.py` | 66 | 🔴 **缺** | ❓ 未知 |
 | `api/code_executor.py` | 150 | 🔴 **缺** | ❓ 未知 |
-| `api/code_executor_impl.py` | 218 | 🔴 **缺** | ❓ 未知 |
-| `api/config.py` | 90 | ✅ [`specs/config.md`](./config.md) | ✅ **可用** —— **全仓环境变量的唯一入口**（规范要求⛔ 不许别处 `os.getenv`）。⚠️ 但它有**两处 import 期副作用** |
+| `api/code_executor_impl.py` | 237 | 🔴 **缺** | ❓ 未知 |
+| `api/config.py` | 90 | 🔴 **缺** | ❓ 未知 |
 | `api/cost_dashboard.py` | 294 | 🔴 **缺** | ❓ 未知 |
 | `api/db.py` | 309 | ✅ [`specs/db.md`](./db.md) | 🟡 **可用** —— 连接池 + 建表 + 向量检索；**2026-10-03 起它同时是「多用户隔离」的两个承重层之一**（`DEC-056` 决策 5） |
-| `api/db_metadata.py` | 87 | ✅ [`specs/db_metadata.md`](./db_metadata.md) | ⚰️ **不是运行时模块** —— 它是 **Alembic autogenerate 用的声明式镜像**，**⛔ 不是表结构的真值** |
+| `api/db_metadata.py` | 87 | 🔴 **缺** | ❓ 未知 |
 | `api/deps.py` | 201 | ✅ [`specs/deps.md`](./deps.md) | 🟡 部分可用 —— **HTTP 侧完整**；**WebSocket 侧 2026-10-05 才补上**（此前 WS 整条裸奔） |
 | `api/document_parser.py` | 242 | 🔴 **缺** | ❓ 未知 |
 | `api/document_preprocessor.py` | 221 | 🔴 **缺** | ❓ 未知 |
 | `api/embedding_client.py` | 78 | ✅ [`specs/embedding_client.md`](./embedding_client.md) | ✅ **客户端已惰性构造**（2026-10-05 · 批 6 · `T1` · `DEC-082`） |
+| `api/evaluate_with_ragas.py` | 312 | 🔴 **缺** | ❓ 未知 |
 | `api/exceptions.py` | 82 | 🔴 **缺** | ❓ 未知 |
+| `api/executor_server.py` | 73 | ✅ [`specs/executor_server.md`](./executor_server.md) | 🔵 **新建（2026-10-08 · 批② Task 2）** —— ⚠️ **服务本体在，但【应用侧还没接线】**（那是 Task 4） |
 | `api/hybrid_search.py` | 149 | ✅ [`specs/hybrid_search.md`](./hybrid_search.md) | 🟡 **可用，但它在全仓是【第二份 RRF 实现】** |
 | `api/jwt_handler.py` | 74 | 🔴 **缺** | ❓ 未知 |
 | `api/llm_factory.py` | 156 | ✅ [`specs/llm_factory.md`](./llm_factory.md) | 🟢 **新建（2026-10-02 · `①b` Task 5）** —— LLM 客户端的**唯一构造落点**<br>✅ 15 个调用点**已全部改走它**（`api/test_max_tokens_wiring.py` 钉着）<br>⬜ **自动兜底没做**（评估后**故意推迟**，见下）—— ⛔ 别以为它能"兜底" |
@@ -64,15 +66,17 @@
 | `api/memory_store.py` | 72 | 🔴 **缺** | ❓ 未知 |
 | `api/metrics.py` | 54 | ✅ [`specs/metrics.md`](./metrics.md) | ✅ **可用** —— 4 个指标，全部走 `prometheus_client` 默认 REGISTRY<br>✅ **2026-10-03（`③` Task 5 · `B2`）**：新增 **`stream_cancelled_total`** —— 它是判据③**唯一可执行的观测对象**（`DEC-052`） |
 | `api/pending_approvals.py` | 143 | ✅ [`specs/pending_approvals.md`](./pending_approvals.md) | 🆕 **新建（2026-10-03 · `②` Task 2 · `B5`）** —— 待接管队列（硬门 D 的"数据"那一半）<br>🔴 **2026-10-03 丙段改键**：登记键由**裸 `thread_id`** 改成 **`session_key(user_name, thread_id)`**，并新增 `raw_thread_id` / `graph` 两个字段<br>🔴 **2026-10-05 加轮次上限**（`DEC-062 §六·2`）：新增 `rounds` 字段 + `approval_round_cap()`，让"放行后又停"**有界** |
-| `api/permission.py` | 57 | ✅ [`specs/permission.md`](./permission.md) | 🟡 **可用 —— 但它是【硬编码】的**：`admin` 特判 + 探针身份特判，其余一律 `FREE`。⛔ **接 DB 这件事仍挂起** |
+| `api/permission.py` | 57 | 🔴 **缺** | ❓ 未知 |
+| `api/plan_constraints.py` | 65 | 🔴 **缺** | ❓ 未知 |
 | `api/plan_execute.py` | 695 | ✅ [`specs/plan_execute.md`](./plan_execute.md) | 🟡 **可用** —— 规划 + 逐步**真调用工具**；有超时、有总预算、有重规划、有降级<br>✅ **2026-10-05（批 1 · `S9`/`S10`）**：`⚠️①`（重规划漏传 `user_name`）与 `⚠️②`（成败判定读中文文案）**均已修** ⇒ **`⚠️` 表 6 行里还剩 ③④⑤⑥ 共 4 行**（⚠️ 都是**说明**不是缺陷）<br>⛔ **原「1 处真缺陷 + 5 处会误判」的账已销**（`S11` 见 `🟡 做到哪`）<br>🔵 **2026-10-04（`B1` 剩余 4 条链）：`_invoke_llm` / `plan_task` 各加一个 `on_token` 形参** —— 给 `/agent/plan_execute/stream` 用。<br>· ⚠️ **默认 `None` ⇒ 行为一字符不变**（`on_token is None` 时仍走 `llm.invoke`，`:155`）。<br>· ⚠️ **⛔ 它只让「规划段」能流** —— `execute_plan` / `generate_dynamic_input` / 质量检查**都还是非流式**（业务方 2026-10-04 裁「只流规划段」）⇒ **规划段之后是一长段静默**。<br>· 🔴 **流出的是【正在生成的 JSON 片段】**（提示词要求严格 JSON）⇒ ⛔ 前端别把流到的文本直接渲染成计划，只当"规划中"指示器。<br>· ⭐ **一条实现约束**：聚合循环**必须遍历【所有】块**（含 `content` 为空的）—— provider 把 `usage_metadata` 挂在**最后一块**上，跳过它**账就没了**（实测，探针 `探针-流式与记账.py`）。<br>· 📄 端点在 `docs/specs/api_v1_agent.md` Task 7 · 桥在 `_ThreadTokenBridge`<br>✅ 2026-10-01：三个 `_llm` 接上 `MAX_TOKENS_AGENT`（`B7`）<br>✅ 2026-10-02（`①b` Task 5）：三个 `_llm` **改走 `llm_factory.make_llm("chat", "agent")`**（现于 `:92` / `:279` / `:486`）—— `model`/`api_key`/`base_url`/`max_tokens` 不再写在本地。<br>⚠️ **超时/重试没丢**：`timeout` / `max_retries` 走 `make_llm` 的 `**extra` **逐点透传**，**值一字符未变**（30/20/15 + `LLM_MAX_RETRIES`）。<br>⚠️ `executor_llm` 的 `temperature=0.1` 是**本文件特有的**逐点调参，仍写在调用点上<br>⚠️ **行号口径**：本 spec 的行号为 **2026-10-04 之后**的实测值（`grep -n` 复核）；批 4 之后**执行段整体下移 ~28 行**，⛔ 别拿旧行号去找 |
+| `api/preprocess.py` | 25 | 🔴 **缺** | ❓ 未知 |
 | `api/query_rewriter.py` | 193 | ✅ [`specs/query_rewriter.md`](./query_rewriter.md) | 🟢 **可用；2026-10-05 起它真记账了**（此前 `record_usage` **import 在、调用 0 次**） |
-| `api/rag_pipeline.py` | 263 | ✅ [`specs/rag_pipeline.md`](./rag_pipeline.md) | ✅ **可用（生产）** —— `/rag/search` 的**唯一**检索管线。⚠️ 但里面有**一段死代码**和**一条没有过滤的档位** |
+| `api/rag_pipeline.py` | 263 | 🔴 **缺** | ❓ 未知 |
 | `api/rate_limiter.py` | 211 | ✅ [`specs/rate_limiter.md`](./rate_limiter.md) | 🟡 **可用** —— 基于 Redis 的令牌桶，**全局 + 用户两层**<br>🔴 它曾有 **3 个"看代码看不出来"的性质** ⇒ **2026-10-05（批 3 · `S7`/`S8`）起 ②③ 已修、① 早于 2026-09-30 已修**（`B9-b`）<br>⚠️ **但 ⚠️ 节还在** —— ①④⑤ 仍然是"看代码会误判"的（其中 ④ 是**已知未修**），⛔ 别因为"②③修了"就当整节过时了 |
 | `api/reranker.py` | 59 | ✅ [`specs/reranker.md`](./reranker.md) | 🟡 **仅开发机可用** |
 | `api/safe_math.py` | 235 | ✅ [`specs/safe_math.md`](./safe_math.md) | 🟢 **新建（2026-10-03 · `DEC-049`）** —— `calculator` 工具的**求值实现**，替代 `eval(expression)` |
 | `api/schemas.py` | 104 | 🔴 **缺** | ❓ 未知 |
-| `api/search_tools.py` | 153 | ✅ [`specs/search_tools.md`](./search_tools.md) | ✅ **可用** —— 但它是**抓网页**的做法：**必应一改版就坏**，⚠️ **坏得响**（如实报失败，⛔ 不退回"让模型编"） |
+| `api/search_tools.py` | 153 | 🔴 **缺** | ❓ 未知 |
 | `api/session_key.py` | 60 | ✅ [`specs/session_key.md`](./session_key.md) | 🆕 **新建（2026-10-03 · `DEC-056` 丙段）** —— 会话键：**把身份拼进 checkpoint / 会话 id** |
 | `api/simple_tools.py` | 49 | 🔴 **缺** | ❓ 未知 |
 | `api/simple_tools_impl.py` | 35 | 🔴 **缺** | ❓ 未知 |
@@ -80,7 +84,7 @@
 | `api/token_config.py` | 116 | ✅ [`specs/token_config.md`](./token_config.md) | 🟢 **新建（2026-10-01 · B7）** —— 额度类常量的**唯一落点**<br>✅ **`MAX_TOKENS_*` 已接线**（2026-10-01 · `①b` Task 1，15 处构造点；**2026-10-02 · Task 5 起收进 `api/llm_factory.py`**）<br>✅ **`SESSION_TOKEN_LIMIT` 已有判定函数 + 7 个调用点**（`①b` Task 2 · `B8`）<br>✅ **`GLOBAL_DAILY_TOKEN_LIMIT` 已接线**（2026-10-02 · `①b` Task 4 · `B11`，经 `api/breaker.py` **8 处**）<br>⚠️ **2026-10-01 当天它曾是"有函数、无调用点"—— 那句已作废** |
 | `api/token_tracker.py` | 1223 | ✅ [`specs/token_tracker.md`](./token_tracker.md) | 🟡 **可用** —— ⚠️ **2026-10-03 起它不再是"三套口径"之一**（次数那套已删，`DEC-046`）<br>🟢 **①a 已落地（2026-10-01）**：额度常量已收口到 `api/token_config.py`（本文件**只剩同名别名**）· 本文件下方 **实施计划 ①a** 已执行完<br>🔵 **①b（2026-10-02）**：Task 0 ✅ / Task 1 ✅（B7 接线）/ **Task 2 ✅（B8 会话级 · 已接 7 条链）** / **Task 3 ✅（B10 全局日级 · 判定函数）** / **Task 4 ✅（B11 熔断 · 已接 8 处，`B10` 由此生效）** / **Task 5 🟡 部分（`L2`）**（改写后只做构造收口，⛔ 自动兜底【推迟】—— 见该 Task 的修订块） / **Task 6 ✅（`决策一` 落地 · `DEC-046` —— 撤次数配额、原位换 token 口径 = `R1.3`）** / **Task 7 ✅（`B13` 实跑核成本可见 · `DEC-047` —— `①b` 收尾）**<br>⚠️ **`B10` 曾一度"有函数没接线"（2026-10-01 当天）—— 那句话已作废**，2026-10-02 Task 4 接上了<br>🔴 **2026-10-04（`DEC-072`）：新增 `record_from_response()` —— 【取用量的唯一实现】** —— 962 → **1027 行**。改前"从响应取 usage"这件小事**在每条链里各写一遍**，于是三条链里有的**写错了属性名**（`.usage` 恒假）⇒ **静默不记账**。现在**三张图 9 个调用点**统一调它，⛔ 不许再各写各的。<br>⚠️ **它只做「取+记」，⛔ 不做「拦」** —— 拦是 `check_token_budget` 的事，由**调用方在 `.stream()` 之前**自己调 |
 | `api/tool_cache.py` | 198 | ✅ [`specs/tool_cache.md`](./tool_cache.md) | ✅ **已接进产品路径（2026-10-08 · 批①）** —— 🔴 **此前它是"没接上的模块"**（整块死代码，见下） |
-| `api/tool_health.py` | 104 | ✅ [`specs/tool_health.md`](./tool_health.md) | 🟡 **可用 —— 但它只【记录】健康状态，⛔ 不做降级** |
+| `api/tool_health.py` | 104 | 🔴 **缺** | ❓ 未知 |
 | `api/tool_visualizer.py` | 174 | ✅ [`specs/tool_visualizer.md`](./tool_visualizer.md) | 🟡 **部分可用** —— 记录与查询都在，但① 存储是**进程内存**（重启即空）② **只有一个端点**（`/agent/mcp_chat`）往里写 |
 | `api/websocket_callback.py` | 90 | 🔴 **缺** | ❓ 未知 |
 <!-- MODULE-TABLE-END -->
@@ -152,41 +156,13 @@
 | 4 | 想起来的时候 | 跑 `bash scripts/spec_status.sh` 看**还缺哪些 / 有没有残留** |
 
 ```bash
-bash scripts/spec_status.sh                # 对账：谁有 spec、谁没有、谁的模块没了
-bash scripts/spec_status.sh --write        # 顺带重写上面那张模块表
-bash scripts/spec_status.sh --missing      # 只列缺的
-bash scripts/spec_status.sh --non-modules  # 只列【不是模块】的（第 ④ 道门用它，见下）
+bash scripts/spec_status.sh            # 对账：谁有 spec、谁没有、谁的模块没了
+bash scripts/spec_status.sh --write    # 顺带重写上面那张模块表
+bash scripts/spec_status.sh --missing  # 只列缺的
 ```
 
 📌 **也可以打 `/specs`**（斜杠命令，见 `.claude/commands/`）。
 📌 **第 3 条的判据（可打印）**：`bash scripts/spec_status.sh` 的 **`🗑 spec 有、代码没了`** 一行 —— **应为 0**。
-
----
-
-### 🧩 「不是模块的 `.py`」—— 为什么不给它们建 spec（**2026-10-07 加**）
-
-`api/*.py` 里有 **3 个** 是**手动 / 离线脚本**，**⛔ 不是产品模块**：
-
-| 文件 | 是什么 |
-|---|---|
-| `api/preprocess.py` | 手动脚本：跑一遍 `DocumentPreprocessor`，**肉眼比对**输入输出 |
-| `api/plan_constraints.py` | 手动实验脚本：对比不同约束下的任务规划（**会真调 LLM**） |
-| `api/evaluate_with_ragas.py` | RAGAS **离线**评测脚本（有 `__main__`，不在服务路径上） |
-
-**判据**：`bash scripts/spec_status.sh` 的 **`🧩 非模块脚本`** 一行 —— **应为 3**（名单在脚本的 `NON_MODULE_FILES`）。
-
-**为什么不给它们建 spec**：它们**不参与服务路径**、**没有调用方**、**跑法就是 `python xxx.py`**（docstring 自己写着）。
-给它们建 spec **= 为了让计数器归零而造文档** —— 把代码转录一遍，之后还得跟着改（**转录即负债**），
-与本页那句「**那条本身就是信息**」**正好相反**。
-
-> 🔴 **⛔ 别把这理解成"可以自动判"** —— 2026-10-07 试过「**没人 import ⇒ 不是模块**」，**被证伪**：
-> 全仓**零 import 的是 5 个**，多出来的两个恰恰**是模块**：
-> · `browser_tools.py` —— 两个导入点都被**注释掉**了（等 chromium）⇒ **停放的能力**，不是脚本
-> · `tools_with_cache.py` —— 业务方 2026-10-07 裁：**⛔ 不删，要接回 LangGraph 调用链**
->
-> ⇒ 机械规则**把「脚本」与「模块，只是没接上」混成一类** ⇒ 只能用**逐条给理由的白名单**。
-> 白名单**自带两条自检**（脚本 §3b，命中即 🔴）：**名字必须还在 `api/` 下** · **不许有 spec**。
-> 📄 裁定 ⇒ `docs/decisions/DEC-101-乙单spec口径-非模块白名单.md`
 （脚本只扫 `docs/specs/*.md`、**不递归子目录** ⇒ 移进 `归档/` 就等于解掉这条告警。）
 **2026-10-03 首次用到**：`quota_limiter.md`（`DEC-046` 删了那个模块）。
 
@@ -207,7 +183,7 @@ bash scripts/spec_status.sh --non-modules  # 只列【不是模块】的（第 �
 
 | 机制 | 在哪 | 拦不拦 |
 |---|---|---|
-| **提交前第 ④ 道门** | `.claude/hooks/pre-commit-gates.py` | ✅ **硬拦**：**新增了 `api/X.py` 但 `docs/specs/` 下与模块同名的那个文件 不存在**<br>⚠️ **⛔ 别为脚本造 spec 去骗过它** —— 那道门**会去问** `scripts/spec_status.sh --non-modules`（**同一个来源**，⛔ 不是自己另存一份名单，见上节）；是脚本 ⇒ 加进 `NON_MODULE_FILES` 即可<br>🔴 2026-10-07（`DEC-101`）**之前它看不见那张白名单** ⇒ 照上节走的人会被**卡死**，只能绕门（⛔ 禁止） |
+| **提交前第 ④ 道门** | `.claude/hooks/pre-commit-gates.py` | ✅ **硬拦**：**新增了 `api/X.py` 但 `docs/specs/` 下与模块同名的那个文件 不存在** |
 | **写完 `api/*.py` 后提醒** | `.claude/hooks/spec-remind.py` | ⛔ 不拦（写代码过程中太频繁） |
 | **`/specs` 命令** | `.claude/commands/specs.md` | 手动跑对账 |
 

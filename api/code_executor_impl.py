@@ -188,6 +188,25 @@ def execute_python_impl(code: str) -> str:
             )
 
     # 🔴 2026-09-21（③-a）：执行搬进**子进程**，超时**硬杀**（详见上面 `_SANDBOX_CHILD` 的注释）。
+    ok, out = run_in_sandbox_subprocess(code)
+    return out
+
+
+def run_in_sandbox_subprocess(code: str) -> tuple:
+    """把 `code` 丢进一个**新的**子进程里跑。返回 `(ok, out)`。
+
+    🔴 **每次调用起一个【新】子进程** —— ⛔ **不是**常驻解释器。
+       常驻解释器会让 `exec` 的 `globals` **跨调用活着** ⇒ 访客之间互相污染，
+       且下一次的行为**取决于别人跑过什么**。那是**安全缺陷**，不是性能取舍。
+
+    ⚠️ **本函数是「执行沙箱」的【唯一】落点**：
+       `execute_python_impl`（**本地**路径）与 `executor_server`（**远端容器**路径）
+       **都调它**，⛔ **不许各自抄一份超时 / 报错文案** ——
+       批① 刚把"同一个东西抄 5 份"收口掉（`DEC-107`），这里不能再长第二份。
+
+    `ok` 的含义：**代码自己抛异常 / 超时 / 子进程没正常返回** ⇒ `False`；
+    正常跑完（哪怕没有输出）⇒ `True`。
+    """
     here = os.path.dirname(os.path.abspath(__file__))
     try:
         proc = subprocess.run(
@@ -199,20 +218,20 @@ def execute_python_impl(code: str) -> str:
         )
     except subprocess.TimeoutExpired:
         # ⚠️ `subprocess.run` 在超时时会**先杀子进程再抛异常** ⇒ 这里返回即代表"已经停下来了"
-        return (
+        return False, (
             f"代码执行出错: 超过最长执行时间（{MAX_EXEC_TIME} 秒）—— 已【强制终止】。\n"
             f"提示：检查是否有死循环；或把计算量拆小、分多次执行。"
         )
     except Exception as e:
-        return f"代码执行出错: {type(e).__name__}: {str(e)}"
+        return False, f"代码执行出错: {type(e).__name__}: {str(e)}"
 
     # 子进程没能给出可解析的结果（崩溃 / 被 OOM 杀 / 段错误）—— 如实报，不假装成功
     try:
         payload = json.loads(proc.stdout)
     except Exception:
-        return (
+        return False, (
             f"代码执行出错: 沙箱子进程没有正常返回（returncode={proc.returncode}）。"
             f"\nstderr 前 300 字：{(proc.stderr or '').strip()[:300]}"
         )
 
-    return payload["out"]
+    return bool(payload["ok"]), payload["out"]

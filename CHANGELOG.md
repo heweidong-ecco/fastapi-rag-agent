@@ -128,6 +128,33 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- 🔵 **批② · Task 2：代码执行器服务本体**（2026-10-08）——
+  新增 `api/executor_server.py` + `api/executor.Dockerfile` + `api/test_executor_server.py`（**6 条**）。
+
+  **它是什么**：跑在**独立执行器容器**里的极小 HTTP 服务（**热启动常驻**）。
+  应用侧通过 `EXECUTOR_URL` 调它 —— 🔴 **应用⛔ 永不碰 `docker.sock`**。
+  为什么不让应用自己 `docker run`：那要挂 `/var/run/docker.sock`，
+  而 **sock = 宿主 root 等价**，且**本应用自己就在容器里**
+  ⇒ **等于把"代码执行逃逸"的洞换成更大的"容器逃逸"洞**。
+
+  🔴 **顺带一处去重重构**（`code_executor_impl.py`）：把"丢进子进程 + 超时硬杀 + 解析 payload"
+  抽成 **`run_in_sandbox_subprocess(code) -> (ok, out)`** —— **本地路径与新服务都调它**。
+  ⛔ 刻意**不**在新服务里抄第二份白名单 / 超时文案（批① 刚把"同一个东西抄 5 份"收口掉 · `DEC-107`）。
+
+  🔴 **两条不变量**（都有守卫）：
+  · **每次请求起一个【新】子进程**，⛔ 不是常驻解释器 ——
+    后者会让 `exec` 的 `globals` **跨请求活着** ⇒ 访客互相污染。那是**安全缺陷**，不是性能取舍。
+  · **超时是硬杀**（线程超时杀不掉 → 死循环会把进程拖垮）—— 且**杀完服务仍可用**。
+
+  📌 **判据（可打印）**：`cd api && ../venv/bin/python -m pytest test_executor_server.py -q`
+  ⇒ **6 passed**（⚠️ 其中超时那条**会真等满 5 秒** —— 有意为之：调小再测就不是真实配置了）。
+  · 全量离线 ⇒ **813 passed / 2 skipped / 0 failed**（807 + 6）
+  · **反证已做**：写一个"常驻 globals"的漏实现 ⇒ 泄漏判据输出 **`True`** ⇒ 那条用例**会红**。
+    ⚠️ 判据用的是 **`dir()`** —— 沙箱白名单里**没有** `globals`（实测 `NameError`）。
+
+  ⚠️ **本 Task ⛔ 不接线**：应用侧还没走远端（那是 Task 4）、compose 还没加这个服务（Task 3）。
+  本笔只是**服务本身**。
+
 - 🟡 **把被删的「Docker 容器隔离」方案记录加回 `api/code_executor.py`**（2026-10-08）——
   ⛔ **纯注释，不影响任何行为**（判据：`execute_python.invoke({'code':'print(6*7)'})` ⇒ 仍 `42`）。
 
