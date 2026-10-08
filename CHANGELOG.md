@@ -10,6 +10,29 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- 🔴 **批①「工具缓存收口」· Task 3：并掉 `agent_graph_advanced` 那份内联缓存**（2026-10-08）——
+  ⇒ 决策落 **`DEC-106`**（**工具缓存的唯一落点**）。
+
+  - **删** `api/agent_graph_advanced.py` 的 `CACHE_TTL_MAP` / `get_cache_key` / `call_mcp_tool_with_cache`
+    三个名字（`result = await call_mcp_tool_with_cache(...)` 改调 `call_mcp_tool`）；
+    连带**扫掉随之变孤儿的 import**：`hashlib` · `redis` · `from config import REDIS_HOST, REDIS_PORT` ·
+    `redis_client` 定义 · 以及文件头那个 `import json`（它唯一的用处就在被删段里）。
+    ⛔ 没删 `call_mcp_tool` —— `api/tool_health.py:47` 还在用它。
+  - ⚠️ **这是一处【可见行为变更】**：以前 `/agent/mcp_chat` 命中缓存时返回
+    `"{结果}\n[缓存命中]"`，现在**没有这个后缀**。刻意**不**把它搬进 `tool_cache` ——
+    那是给**人**看的调试痕迹，而缓存搬进了 MCP server 进程，**LLM 读到它只会干扰判断**。
+  - 🔴 **施工单 Step 6 的那条判据是错的，已换**：它写
+    `grep -rn '缓存命中' api/ | grep -v 'token_config\|embedding_client'` **⇒ 改后应为空**，
+    但 `api/api_v1.py:230/233`（讲 `/rag/benchmark-embedding` 的 **embedding** 缓存）**也是无辜命中**
+    ⇒ **这条命令永远不可能为空**。⇒ 换成量**代码形式**的 `grep -rn 'f"{cached}' api/ --include='*.py'`。
+    📌 **正是「反证检验」要抓的东西**：结论取反（"后缀还在"）时，那条命令**打出来的东西一样**。
+  - **判据**：三个名字全仓消失（只剩 `tool_cache.py:22` 的**搬运留痕注释**与 `cache.py` 的
+    **无关同名函数**）；`test_budget_hard_intercept.py` **11 passed** ·
+    `test_agent_stream_chains.py` **60 passed**（**与改前逐条同数**）；
+    合跑 = **71 passed**。逐条见 `DEC-106` §五。
+  - **同批顺带**：改掉两处因本次删除而**变陈旧的注释引用**（`test_budget_hard_intercept.py:72`
+    · `test_agent_stream_chains.py:1173` 里的 `call_mcp_tool_with_cache`）。
+
 - 🔴 **批①「工具缓存收口」· Task 1 + Task 2：TTL 表收口 + 四个工具真的接上缓存**（2026-10-08）——
   ⚠️ 这是那份批① 施工单的前两步；**施工单本身在另一个分支上**（`docs/ledger-reconcile`）。
 

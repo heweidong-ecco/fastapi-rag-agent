@@ -2,7 +2,6 @@
 Agent 图（集成 MCP Client）
 LangGraph 进阶示例：多分支路由与子图协作
 """
-import json
 from typing import TypedDict, List, Annotated, Optional
 import operator
 
@@ -160,67 +159,6 @@ async def get_mcp_tools():
     async with mcp_session() as session:
         return await session.list_tools()
 
-# 新增工具调用缓存
-"""
-MCP Client 工具调用缓存
-"""
-import hashlib
-# ⚠️ 2026-09-20 删（D1/pyflakes 报 redefinition）：此处的 `import json` / `import os`
-#    与文件头（`:5`/`:6`）**重复** ⇒ 删这两行。⚠️ 同段的 `hashlib`/`redis`/`functools`
-#    **不是重复**（文件头没有），**必须留**。
-# ⚠️ 2026-10-07 补一笔：上面那句「`functools` 必须留」**只针对"重复"这一条**，⛔ 不是说它有用 ——
-#    同批清存量时 `from functools import wraps` 被删了，因为 `wraps` 在本文件**零引用**
-#    （判据：`grep -n "wraps" api/agent_graph_advanced.py` ⇒ 空）。`hashlib` / `redis` **仍在**。
-import redis
-
-# 复用现有的 Redis 客户端（与 cache.py 相同配置）
-# 从 config 导入 host/port，以正确应用本地开发时 localhost 的覆盖
-from config import REDIS_HOST, REDIS_PORT
-redis_client = redis.Redis(
-    host=REDIS_HOST,
-    port=REDIS_PORT,
-    db=0,
-    decode_responses=True
-)
-
-# 缓存过期时间（不同类型工具有不同时效性）
-CACHE_TTL_MAP = {
-    "date_today": 3600,        # 日期缓存 1 小时
-    "web_search": 300,          # 搜索结果缓存 5 分钟
-    "calculator": 86400,        # 数学计算结果缓存 24 小时
-    "fetch_webpage": 600,       # 网页内容缓存 10 分钟
-    "screenshot_webpage": 3600, # 截图缓存 1 小时
-    "execute_python": 0,        # 代码执行不缓存（每次都可能不同）
-}
-
-def get_cache_key(tool_name: str, arguments: dict) -> str:
-    """生成缓存键"""
-    # 对参数排序，保证相同参数生成相同键
-    sorted_args = json.dumps(arguments, sort_keys=True, ensure_ascii=False)
-    raw = f"mcp_tool:{tool_name}:{sorted_args}"
-    return hashlib.md5(raw.encode()).hexdigest()
-
-async def call_mcp_tool_with_cache(tool_name: str, arguments: dict) -> str:
-    """带缓存的 MCP 工具调用"""
-    ttl = CACHE_TTL_MAP.get(tool_name, 60)  # 默认缓存 60 秒
-    
-    # 如果 TTL 为 0，跳过缓存（如代码执行器）
-    if ttl == 0:
-        return await call_mcp_tool(tool_name, arguments)
-    
-    # 检查缓存
-    cache_key = get_cache_key(tool_name, arguments)
-    cached = redis_client.get(cache_key)
-    if cached:
-        return f"{cached}\n[缓存命中]"
-    
-    # 调用工具
-    result = await call_mcp_tool(tool_name, arguments)
-    
-    # 存入缓存
-    redis_client.set(cache_key, result, ex=ttl)
-    
-    return result
 
 async def call_mcp_tool(tool_name: str, arguments: dict) -> str:
     """通过 MCP Client 调用工具。
@@ -290,9 +228,11 @@ async def tool_execute(state: AgentState):
             budget_intercept = reason
             continue
 
-        # 通过 MCP Client 调用工具
-        # 新增 带缓存的调用。
-        result = await call_mcp_tool_with_cache(tool_name, tool_args)
+        # 通过 MCP Client 调用工具。
+        # 🔴 2026-10-08（批① Task 3）：**缓存不在这里做了** —— 已收到工具函数体
+        #    （`api/tool_cache.py`），在 **MCP server 进程里**生效 ⇒ 四条执行路径共享同一份。
+        #    ⚠️ **可见行为变了**：以前命中会返回 `"{结果}\n[缓存命中]"`，现在**没有这个后缀**。
+        result = await call_mcp_tool(tool_name, tool_args)
 
         # 记录工具调用结束（成功状态；原代码在此误记录为“未找到工具”错误）
         record_tool_end(tool_name, result, user_name, thread_id, "success")
