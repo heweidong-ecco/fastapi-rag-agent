@@ -116,7 +116,7 @@ def test_module_tools_are_derived_from_registry(modname):
     assert names <= registered, f"🔴 {modname}.tools 里有**未注册**的工具：{names - registered}"
 
 
-def test_agent_graph_tools_exclude_execute_python():
+def test_execute_python_not_yet_in_unisolated_graphs():
     """🔴 `execute_python` **暂不进那两张无隔离的图**（`Task 6` · 业务方 2026-10-08「待定」）。
 
     为什么：`agent_graph` / `agent_checkpointer` 里它**不在** `SENSITIVE_TOOLS` 审批名单、

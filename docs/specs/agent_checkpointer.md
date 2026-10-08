@@ -14,8 +14,13 @@
   新增 `approval` 节点 + `interrupt_before=["approval"]`，路由改成**三路**
   （`should_continue`：含敏感工具 ⇒ `"approval"` / 只有本地工具 ⇒ `"tools"` / 无调用 ⇒ `END`）。
   ⚠️ **语义从 `agent_graph` 引入，⛔ 不是复制** —— 见「看代码会误判」第 2 行
-- 工具与 `agent_graph.py` 同款：**`web_search`**（`tools` 在 `:45`）· 计算器（`:33`，**求值走 `safe_math`**）· 日期（`:39`）
-  · ⭐ **工具名只有 `tools` 一个来源** —— `TOOLS_BY_NAME`（`:49`），`tool_execute`（`:116`）查它
+- 工具：🔴 **2026-10-08 起与 `agent_graph.py` 同款 —— 全部【从 `mcp_server.TOOLS` 派生】**（批① Task 4 · `DEC-107`），
+  本地那份 `web_search` / 计算器 / 日期**三个定义全删了**。
+  ⚠️ **本图同样显式排除 `execute_python`**（`_EXCLUDED_TOOLS`）—— 同理由：无审批、无隔离。
+  🔴 **这是有期限的** —— 批②（容器）落地后删掉它（守卫同名于 `agent_graph.py` 那条）。
+  · ⭐ **工具名只有 `tools` 一个来源** —— `TOOLS_BY_NAME`，`tool_execute` 查它
+  · ⚠️ **删了 import 后⛔ 别误删 `from agent_graph import SENSITIVE_TOOLS, should_continue, human_approval # noqa: F401`**
+    —— 那一行是**结构性守卫**要的（`test_memory_chat_approval.py` 断言两模块的白名单**是同一个对象**）
 - 🔴 **预算拦 + 记账（`DEC-072` · 2026-10-04）**：`agent_decide` 里 **`.stream()` 之前** 查
   `check_token_budget(user_name, estimated_tokens=500)`，**之后** 用
   `record_from_response(llm_with_tools, response, "agent_decision", …)` 记一笔。

@@ -7,7 +7,7 @@
 | 项 | 内容 |
 |---|---|
 | **状态** | 🟡 **可用，且是生产链** —— ✅ **记账于 2026-10-04 补齐**（见下 `DEC-072`），⚠️ **两个分支本来就无字可流**（见下）<br>🔴 **2026-10-04（`DEC-072`）：6 个 LLM 调用点全部接上【预算拦 + 记账】** —— 改前本文件 `record_usage` / `check_token_budget` **0 命中** ⇒ 走 `/agent/advanced_chat` 的花销在 `token_usage_logs` 里**完全看不见**。450 → **540 行**。每个节点都是 **`.stream()`/`.invoke()` 之前**查 `check_token_budget(user_name, estimated_tokens=500)`、**之后**调 `record_from_response(…)`；`AgentState` 新增 `thread_id`（`user_name` 已有）—— **由端点注入**，子图与父图共用 `AgentState` ⇒ 身份自动流入子图。<br>⚠️ **`purpose` 五处取值**（`answer_generation` ×3 · `query_rewrite` ×1 · `agent_decision` ×2 —— 见「看代码会误判」表末行）<br>⚠️ **超预算的返回形状【按节点出口不同】** —— 见下方 ⚠️⑦：`supervisor` 那处**必须给 `intent`**，⛔ 否则 `route_by_intent` 读 `state["intent"]` 当场 `KeyError`。<br>📄 裁定 ⇒ `DEC-072`；📌 判据 ⇒ `api/test_billing_wiring.py`（AST 精确点名**本文件 6 条** + `-k behavior` 那条断言恰好 **2 笔**）<br>🔵 **2026-10-04（`B1` 剩余 4 条链）：4 个该流的节点改成【真流式】** —— `search_summarize`（`:143`）· `translate_execute`（`:237`）· `agent_decide`（`:279`）· `chat_node`（`:463`）都声明 `config: RunnableConfig` + 换 `.stream(…, config=config)` 逐块 `+` 聚合 ⇒ **本图 388 → 450 行**（多出的行是"为什么这 4 个流、那 2 个不流"的注释 + 白名单常量 + 每个节点的改法说明）。<br>⚠️ **本图 4 个节点【全是同步的】** ⇒ 走**同步** `.stream(config=config)`；⛔ **别照抄链 C**（`agent_graph_advanced.py` 那两个是 `async` ⇒ 用 `astream`），⛔ **也别把本图节点改成 `async def`** —— 同步的 `graph.invoke()` 会当场 `TypeError: No synchronous function provided to "agent"`（`DEC-050` 实测）。<br>新增模块级 `STREAMABLE_NODES`（`:399`）；**为什么必须放模块级**（放进 `build_advanced_agent()` 就是局部名 ⇒ 端点 `AttributeError`）写在 `:376-398` 的注释里。<br>🔴 **链 A 走 `astream` 时必须开 `subgraphs=True`** —— 本图 5 个子图，**不开它一个字都流不出来**（⚠️ 且 `meta["langgraph_node"]` 报的是**子图内层**名，见 ⚠️④）。⚠️ **`+` 聚合在本图同样【必须】**：`tool_calls` 碎片化到达，只拼 `content` ⇒ react 子图拿不到 `tool_calls` ⇒ **工具永远不执行**，而接口一切正常。<br>📌 守卫 `api/test_agent_stream_chains.py`（含 `test_real_chain_a_node_streams_one_chunk_per_token` · `test_chain_a_filters_out_supervisor_and_calc_execute`）<br>🔴 **2026-10-05（批 7 · `N11`）：6 处预算软返回全部收口**（`DEC-083`）—— 540 → **599 行**：每处**同时写 `budget_intercept`**；`supervisor` 的**软返回出口**由 `**cleared` 翻转成"写本轮原因"、**正常出口**（`:512`）写 `None`。<br>⚠️ **顺带堵掉"钱花在闸之前"**：`supervisor` 的记忆检索（`search_user_memory`）**下移到预算门之后**——改前被拒的那一轮照样花一次 embedding。📄 `DEC-083` §四·`🅕` |
-| **对外提供** | `build_advanced_agent()`（`:409`，返回**编译好的图**，带 `MemorySaver`）<br>· 5 个 `create_*_subgraph()`（`:130` / `:181` / `:214` / `:230` / `:267`）<br>· 模块级 `llm`（`:26`）· `llm_search`（`:85`）· `llm_calc`（`:86`）· `llm_date`（`:87`）· `llm_with_tools`（`:79`）<br>· 工具 `calculator`（`:30`）· `date_today`（`:36`）· `tools`（`:64`，**从 `mcp_server.TOOLS` 派生**）<br>· `inject_memories_to_prompt()`（`:107`）· `AgentState`（`:90`）· 🆕 `STREAMABLE_NODES`（`:399`） |
+| **对外提供** | `build_advanced_agent()`（`:409`，返回**编译好的图**，带 `MemorySaver`）<br>· 5 个 `create_*_subgraph()`（`:130` / `:181` / `:214` / `:230` / `:267`）<br>· 模块级 `llm`（`:26`）· `llm_search`（`:85`）· `llm_calc`（`:86`）· `llm_date`（`:87`）· `llm_with_tools`（`:79`）<br>· 工具 `tools`（**从 `mcp_server.TOOLS` 派生**）· `TOOLS_BY_NAME`（按名字取**共享对象**，🔴 2026-10-08 加）<br>⚠️ **本文件自带的 `calculator` / `date_today` 已于 2026-10-08 删除**（`DEC-107`）<br>· `inject_memories_to_prompt()`（`:107`）· `AgentState`（`:90`）· 🆕 `STREAMABLE_NODES`（`:399`） |
 | **谁在用** | `api_v1_agent.py:34` import → `:538` **模块级建图**（`advanced_agent = build_advanced_agent()`）→ `POST /agent/advanced_chat`（`:540` 定义 · `:563` `advanced_agent.invoke(...)`）<br>🆕 **`POST /agent/advanced_chat/stream`**（`:585`，`B1` · 2026-10-04）—— 同一张图，走 `astream(..., subgraphs=True)`（`:653`/`:669`），汇总取自 `aget_state`（`:636`） |
 | **规模** | **540 行**（`bash scripts/spec_status.sh` 的口径 = 真实行数；⚠️ 本文件用 `wc -l` 会得 539 —— **末行没有换行符**，⛔ 差 1 不是笔误） |
 
@@ -54,9 +54,13 @@
   ⚠️ **端点上那两道闸**（`check_session_token_budget` / `circuit(global_key())`，`api_v1_agent.py` 的 `advanced_agent_chat`）
   **只是"拦"，不是"记"** —— 别把两者读成一回事。**这次补的是"记"**（以及每个节点自己的"拦"）。
 - ⚠️ **`MemorySaver()`**（`:450`）是**进程内存** ⇒ 重启即丢（与 `/agent/langgraph_chat`·`/agent/mcp_chat` 同）。
-- ⚠️ **`calculator` / `date_today` 在本文件里是【第二份定义】**（`:26` / `:32`）——
-  与 `mcp_server.TOOLS` 里那两个**同名、不同对象**（被**子图节点直接 `.invoke()`**：`:170` / `:185`）。
-  实现逐字等价、**当前无害**，但属"重复定义"（`:70-72` 自己记了这笔账，登记为清理项）。
+- ✅ ~~**`calculator` / `date_today` 在本文件里是【第二份定义】**~~ ⇒ 🔴 **2026-10-08 已删**（批① Task 4 · `DEC-107`）
+  —— 那两份「同名不同对象」的副本**整个删掉了**。子图节点现在改为
+  **`TOOLS_BY_NAME["calculator"]` / `["date_today"]`**（`TOOLS_BY_NAME` 在 `:67` 附近，
+  取的是 `mcp_server.TOOLS` 里那**同一批对象**）。
+  ⭐ **判据（对象同一，⛔ 不是"名字一样"）**：
+  `api/test_tool_registry_single_source.py::test_all_graphs_share_the_same_tool_objects`（用 `is` 断言）。
+  ⚠️ **子图形状没动** —— 只换了 `.invoke()` 的目标。
 - ⚠️ **`supervisor` 直接改 `state` 再整个返回**（`:381-382`）——
   与本仓别处的 `return {...}` 风格不同，读的时候容易看漏它**确实**写了 `intent`。
 

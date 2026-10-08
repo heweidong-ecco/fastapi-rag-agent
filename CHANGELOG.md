@@ -35,7 +35,7 @@ All notable changes to this project will be documented in this file.
 
   ⚠️ **`execute_python` 暂不进那两张图** —— 那里它**既无审批、又无隔离**；
   业务方 2026-10-08 对此明确答「**待定**」⇒ 本批按**保守**办。守卫
-  `test_tool_registry_single_source.py::test_agent_graph_tools_exclude_execute_python`。
+  `test_tool_registry_single_source.py::test_execute_python_not_yet_in_unisolated_graphs`。
 
   🔴 **`api_v1_rag` 保留 async 外壳**（⛔ 没直接换成 `mcp_server` 那份）：
   原文 `await asyncio.to_thread(...)` 是**有意把阻塞丢出事件循环**，
