@@ -8,6 +8,42 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Performance
+
+- ⚡ **批④-B · MCP 会话改【长驻】：每次工具调用 ~2s → ~5ms**（2026-10-08）——
+  `/agent/mcp_chat` 那条链本来**每次工具调用都起一次 MCP 子进程**（实测 **2.42 / 2.09 / 1.93 秒**），
+  成本几乎全在**起子进程 + 重新 import langchain**。
+
+  **做法 = actor 模式**：一个 **holder task 独占整个 `async with`**，调用方只投队列 + 等 future。
+  🔵 实测（连跑三轮）：首次 ~0.022 s（含握手），之后稳定 **4–7 ms**；并发 5 个 ~0.022 s。
+
+  🔴 **⛔ 不是"会话池"** —— 本仓 2026-09-20 试过池化，`stdio_client` 基于 anyio、其 cancel scope
+  要求「进入与退出在同一个 task」，而池化**横跨 3 个 task** ⇒ `RuntimeError: Attempted to exit
+  cancel scope in a different task…` ⇒ **应用启动直接失败**。
+  📌 **可复用的判据**：**anyio 只管「进/出在不在同一个 task」，⛔ 不管中间被谁 await 过。**
+
+  三个设计点：**按 loop 认领**（`asyncio.run` 每次新 loop）· **一次请求失败⛔ 不弄死整个会话**
+  （长驻之后一次异常会波及之后所有调用 —— 那是"自开自关"都没有的脆弱性）· **崩了自动重建但限流 5 次**。
+  `main.py` 的 `startup` 起、`shutdown` 关；⚠️ **起不来只记 warning，⛔ 不阻塞启动**（2026-09-20 那次的教训反面）。
+
+  🔴 **顺带修掉两个真 bug**（都与长驻会话独立、现状就在发生）：
+  · **服务端 `print` 写到 stdout**（= MCP 的传输通道）⇒ **每次调用** 1 条 `ValidationError`
+    （实测 3/3）。`list_tools` 那处更危险 —— 它跑在 `tools/list` **请求当中**。
+    ✅ 两处改 `sys.stderr` + 🆕 守卫 `api/test_mcp_stdout_is_clean.py`（AST 扫 + 真起子进程断言 stdout 为空）。
+  · **`agent_graph_advanced.py` 里 `asyncio` 根本没被 import** —— 而 2026-09-20 那句去重注释
+    还写着「本文件 `:8` 已经有」。去重时把唯一那处也删了，当时没代码用它所以没暴露。
+    ⚠️ **教训：注释说「别处有」⛔ 不等于「别处真有」。**
+
+  📌 **判据（可打印）**：`bash scripts/ci-local.sh` ⇒ **858 passed, 2 skipped, 40 deselected**（exit 0）
+  · ⚠️ **【改前】= 850**（`16acb9c`）⇒ **+8** = 5(长驻) + 3(stdout 守卫)
+  · `venv/bin/python -m pytest api/test_mcp_long_session.py -q` ⇒ **5 passed**
+  · 🔴 **不漏子进程**：全量跑完后每 3 秒查一次连查 6 次 ⇒ 残留 **0 0 0 0 0 0**
+  （⚠️ **只查一次会看到"正在退出中"的进程而误报** —— 实测踩过）
+  · ⚠️ **仍未验证**：真杀子进程的恢复 · 高并发 · **创空间那台机器上没量过** · 长跑内存漂移
+
+  📄 决策全文 ⇒ `docs/decisions/DEC-111-MCP长驻会话改为actor模式.md`
+  · 实测数据 ⇒ `docs/说明/mcp长驻会话-调研-20261008.md`
+
 ### Changed
 
 - 🔌 **批④-A · 解 `mcp` SDK 上界到 2.x + 服务端 API 迁移**（2026-10-08）——

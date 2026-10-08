@@ -22,7 +22,7 @@
 |---|---|
 | 🔴 **`TOOLS` 过滤在【模块级】** | `DEMO_MODE` 过滤**在 import 时执行一次** ⇒ 同一进程里改 env **静默无效**。⚠️ 要验它**必须走子进程**（`test_tool_registry_single_source.py` 正是这么做的） |
 | ⚠️ **两个浏览器工具仍注释着** | `fetch_webpage` / `screenshot_webpage` —— 依赖未安装的 chromium（`N13`，业务方裁「挂起 + 注释掉 + 标『可扩展能力』」） |
-| ⚠️ **没有 MCP 会话复用** | 每次工具调用起一次子进程（**实测 ≈ 2s/次**）⇒ 这是 **批④-B** 要动的（`DEC-104` §2.1） |
+| ⚠️ ~~**没有 MCP 会话复用**~~ | ✅ **2026-10-08（批④-B · `DEC-111`）已解决** —— 客户端侧改成**长驻会话**（actor），**实测 2s → 4–7ms**。<br>⚠️ **但那是 `agent_graph_advanced.py` 的事，本文件一行没动** —— 本文件仍是"被起一次就服务一个连接"的服务端 |
 | ⚠️ **服务端启动形态仍是"握手"** | 用了 `create_initialization_options()`（协议 `2026-07-28`「Make MCP stateless」**没删它**，见 `docs/reference/mcp-stateless-and-transport.md`） |
 
 ## ⚠️ 看代码会误判的地方 ⭐
@@ -81,7 +81,28 @@ server = Server("agent-tools", on_list_tools=list_tools, on_call_tool=call_tool)
 ⚠️ 副作用：**它 import 时会连带拉起 langchain**（经 `simple_tools` / `search_tools` / `code_executor`）
 ⇒ 这就是「每次工具调用 ≈ 2s」里的主要成本（子进程要重新 import 一遍）。
 
-### 7. ⚠️ 那两个"遍历范围"的说法**曾经互相矛盾**，现已订正
+### 7. ⛔ **谁都不许往 stdout 写** —— 那是 MCP 的 **stdio 传输通道**
+
+🔴 **2026-10-08（批④-B · `DEC-111`）立**。改前本文件有两处 `print(...)`（**stdout**），
+后果是客户端**每次工具调用**都报一条：
+
+```
+ValidationError: Invalid JSON … input_value='MCP Server 启动中... 已注册 7 个工具'
+```
+（实测 **3/3 稳定复现**）。⚠️ 其中 `list_tools` 那处**更危险** ——
+它跑在 `tools/list` **请求当中**，正是客户端在等响应的时候。
+
+⚠️ **它不致命**（客户端记一条错就过去了，调用照常返回结果）—— **但那正是它危险的地方**：
+本仓立场：**一个每次都报的错，⛔ 不该因为它不影响结果就当没事**。
+
+✅ **两处已改 `sys.stderr`**。📌 守卫 ⇒ `api/test_mcp_stdout_is_clean.py`（3 条）：
+· **AST 扫**裸 `print` —— ⛔ **不能用 grep**：注释里也写着 `print(`（**就在本文件里**），
+  grep 会把**说明文字**当成违规
+· **反向对照**（防「AST 出错 ⇒ 返空 ⇒ 永远绿」的空壳）
+· **行为面**：真起子进程，断言**它的 stdout 为空**、且启动日志**仍在 stderr**
+  （⛔ 别用「删掉那行日志」让上面那条绿）
+
+### 8. ⚠️ 那两个"遍历范围"的说法**曾经互相矛盾**，现已订正
 
 `tool_health.py` 里曾有一句注释称「`run_health_check` 是**按 `mcp_server.TOOLS` 遍历**的」
 —— 🔴 **那句是假的**（它遍历的是 `TEST_ARGS_MAP`）。**那个坑不在本文件**，但**从本文件读不出来的**是：
