@@ -4,14 +4,15 @@
 |---|---|
 | **状态** | ✅ **已接进产品路径（2026-10-08 · 批①）** —— 🔴 **此前它是"没接上的模块"**（整块死代码，见下） |
 | **对外提供** | `cached_tool()`（装饰器）· `get_ttl()` · `TTL_BY_TOOL`（**唯一**的 TTL 事实源）<br>底层：`get_tool_cache_key()` · `get_cached_tool_result()` · `set_cached_tool_result()` |
-| **谁在用** | `simple_tools.py:11`（`calculator` / `date_today`）· `search_tools.py:42`（`web_search`）· `code_executor.py:17`（`execute_python`）<br>⇒ ⭐ **缓存包在 `@tool` 那一层**，不是调用点、不是 handler |
+| **谁在用** | `simple_tools.py`（`calculator` / `date_today` / **`date_calc`** / **`json_extract`** / **`stats`** —— 🔴 后三个 2026-10-08 批③ 新增）· `search_tools.py`（`web_search`）· `code_executor.py`（`execute_python`）<br>⇒ ⭐ **缓存包在 `@tool` 那一层**，不是调用点、不是 handler<br>⚠️ **本行原带 `:11` / `:42` / `:17` 三个行号，已删** —— 本仓 `N8`：行号锚点**系统性漂移**（批③ 一加行就全错）⇒ 一律改用**模块名 / 函数名** |
 | **测试** | `api/test_tool_cache.py`（**8**）· `api/test_tool_cache_wiring.py`（**5**）<br>⚠️ 数字会变，判据：`cd api && ../venv/bin/python -m pytest test_tool_cache.py test_tool_cache_wiring.py --collect-only -q \| tail -1` |
 
 ## ✅ 做了什么
 
 - **三大防护**：防穿透（空值也缓存，60 秒）· 防击穿（Redis `nx` 互斥锁）· 防雪崩（TTL 加随机抖动）
-- ⭐ **TTL 表只有一份**：`TTL_BY_TOOL`（`:26`）—— 2026-10-08 从
+- ⭐ **TTL 表只有一份**：`TTL_BY_TOOL` —— 2026-10-08 从
   `agent_graph_advanced.CACHE_TTL_MAP` **搬过来并收口**（那份只盖住 `/agent/mcp_chat` 一条路）
+  · 🔴 **2026-10-08 批③：4 条 → 7 条**（+`date_calc` / `json_extract` / `stats`，**全是 86400**）
 - ⭐ **缓存接在工具函数体上** ⇒ 四条执行路径**天然全覆盖**，将来加第 5 条路径也不用动
   （改动的点是 3 个**工具定义文件**，⛔ 不是 4 条路径）
 - **抢锁有上限**（`_LOCK_WAIT_SECONDS = 2.0`，`:94`）：等超了就**降级直通**。
@@ -30,6 +31,7 @@
 |---|---|
 | 「TTL 表里没写的工具 ⇒ 用默认 60 秒」 | 🔴 **抛 `KeyError`**（`get_ttl`，`:44`）—— **故意不给默认值**。`.get(name, 60)` 会把「新加了工具但忘了登记」变成「它被缓存 60 秒」：**不报错、没人会知道** |
 | 「`date_today` 没包缓存」 | 🔴 **包了**，只是 **TTL=0 ⇒ 直通**。让「哪些工具带缓存」**只有 `TTL_BY_TOOL` 一处**回答（⛔ 不是"有的没包、有的 TTL=0"两种形状混着） |
+| 「`date_calc` 的 TTL 是 86400 ⇒ 那 `date_today` 也该给 86400」 | 🔴 **两回事**。`date_calc` 的 `start_date` **必填**（`simple_tools_impl.date_calc_impl` 的红线）⇒ 它**没有"今天"这种隐藏输入**，同一组入参**永远同一个答案**。`date_today` 的入参是**空** ⇒ 缓存键不含日期 ⇒ 跨天会返回昨天。🔴 **反悔成本**：哪天给 `date_calc` 加了"默认今天" ⇒ **必须同时把它的 TTL 改成 0** |
 | 「命中缓存时会返回 `[缓存命中]` 后缀」 | ⛔ **不会了** —— 那是 `agent_graph_advanced` 那份内联缓存的产物，2026-10-08 已并掉（`DEC-106`）。⚠️ **别把这读成"缓存没了"**：缓存还在，只是**不再往结果里写字** |
 | 「`should_cache` 是个通用的失败判定」 | 🔴 它是**逐工具给的谓词**（现在只有 `web_search` 用）。⛔ **别改成"含『失败』就跳过"那种猜法** —— 每条工具失败的形状不同，猜出来的规则是**静默**的 |
 | 「Redis 挂了 ⇒ 工具会 500」 | ⛔ **不会** —— fail-open（`DEC-105`）。⚠️ 但**降级是静默的**：「缓存从不命中」与「根本没在缓存」在机器痕迹上**长得一样**（本仓原话：**「『从不命中』与『没人违规』在机器痕迹上完全一样」**）⇒ **只能靠那条 ERROR 日志与健康检查发现** |

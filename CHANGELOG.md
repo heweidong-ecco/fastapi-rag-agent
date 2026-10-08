@@ -8,6 +8,56 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- 🧩 **批③ · 三个新工具：`date_calc` / `json_extract` / `stats`**（2026-10-08）——
+  **工具数 4 → 7**。三个都是**本地纯函数**，⛔ 不联网、⛔ 不新建模块。
+
+  | 工具 | 签名 | 干什么 | TTL |
+  |---|---|---|---|
+  | `date_calc` | `(start_date: str, days: int)` | 日期加减 → `YYYY-MM-DD（星期X）` | 86400 |
+  | `json_extract` | `(json_text: str, path: str)` | 按 `a.b[0].c` 取字段 | 86400 |
+  | `stats` | `(numbers: str)` | 个数 / 和 / 均值 / 最小 / 最大 / 中位数 | 86400 |
+
+  **形状**：纯逻辑进 `api/simple_tools_impl.py`（**只 import 标准库**）· `@tool` 外壳 + 缓存进
+  `api/simple_tools.py` · 注册进 `api/mcp_server.py` 的 `TOOLS`。
+  🔴 **四条执行路径一行未改** —— 它们全部**派生**自 `mcp_server.TOOLS`（`DEC-107` 的成果）。
+
+  **三条设计红线**（⛔ 别改）：
+  ① **`date_calc` 的 `start_date` 必填，不默认「今天」** —— 一默认就重演 `date_today` 那个跨天 bug
+  （缓存键只含入参）；② **三个都不挂 `should_cache`** —— 纯函数 ⇒ 失败结果**稳定** ⇒ 缓存无害
+  （对比 `web_search`：它的「搜不到」是**瞬时**的 ⇒ 那边必须挂）；③ **不新建模块**。
+
+  🔴 **同批裁定：`execute_python`【不进】`SENSITIVE_TOOLS`**（`docs/待办总表.md` §🅐·二 第 11 条结清）——
+  依据是本仓既有的语义「**敏感 = 这个工具会把数据发到本机之外**」；三个新工具与 `execute_python`
+  都**不外发数据**（后者跑在批② 的**无网容器**里）⇒ 都不属于那一类。
+  ⚠️ **「不进」⛔ 不等于「不用管」：容器那层（`DEC-108`）无论如何不能撤。**
+
+  🔴 **顺带更正 `DEC-107` §六·1**（业务方 2026-10-08 点名「**`DEC-107`：修复**」）——
+  原文写「新工具要加**两处**」，**实测是五处**，且把**守卫的名单**误当成了功能登记：
+
+  | # | 落点 | 忘了会怎样 | 之前有守卫吗 |
+  |---|---|---|---|
+  | 3 | `tool_cache.TTL_BY_TOOL` | 运行时 `KeyError` | ✅ |
+  | 4 | `tool_health.TEST_ARGS_MAP` | 🔴 **永远不做健康检查**（静默） | ⛔ **无** |
+  | 5 | `token_tracker` 的**两张**成本表 | 🔴 按默认 **500 token** 估一个**免费**工具（静默） | ⛔ **无** |
+
+  ⇒ 第 4 / 5 处补上守卫：🆕 `api/test_tool_registration_completeness.py`（**扫全体已注册工具**，
+  不只批③ 那三个；含一条**反向对照**防「空集合也能过」）。
+  ⚠️ `DEC-106` §六·2 那句「`TTL_BY_TOOL` 是新增工具的**唯一登记处**」是**同类表述** ——
+  🔴 **本批【没改】**（业务方只点了 `DEC-107`），已在 `DEC-109` §3.2 **登记**，要不要修由业务方定。
+
+  📌 **判据（可打印）**：
+  `bash scripts/ci-local.sh` ⇒ **848 passed, 2 skipped, 40 deselected**（exit 0）
+  · ⚠️ **【改前】= 820 passed**（base worktree `fe6d88b` **实测**）⇒ **+28**
+  （6 内核 + 7 外壳 + 15 守卫 = 28）
+  · `venv/bin/python -m pytest api/test_tool_registration_completeness.py -q` ⇒ **15 passed**
+  · 🔴 **两条反证都实做过**：临时删 `TTL_BY_TOOL["stats"]` ⇒ 红并点名；临时删
+  `TEST_ARGS_MAP["date_calc"]` ⇒ 红并点名；两次还原后 `git diff --stat` **为空**。
+
+  📄 决策全文 ⇒ `docs/decisions/DEC-109-三个新工具与工具登记面.md`
+  · 施工单 ⇒ `fastapi-rag-agent-TODO待办/施工单-20261008-三新工具.md`
+
 ### Removed
 
 - 🔴 **撤 `未进demo/` · 删 `pre-demo/` —— 仓根只留一个 `demo/`**（2026-10-08）——
