@@ -20,12 +20,19 @@ services:
       - .env
     environment:
       - DOCKER_ENV=true           # ← 新增这一行，实现环境切换完全自动化，不再需要手动改任何配置文件
+      # 🔴 2026-10-08（批② Task 3）：代码执行器的地址。
+      #    ⚠️ 服务名 `executor` 由 compose 的**内部网络** DNS 解析 —— 端口不对外映射。
+      #    有值时 `code_executor_impl` 走**远端**；⛔ 没值则回落本地子进程（本机开发/CI 不受影响）。
+      - EXECUTOR_URL=http://executor:8000
     volumes:
       - ./logs:/app/logs  # ← 新增这一行 本地日志存放地方设置了30天一更新
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      # 🔴 等执行器**健康**再起 —— 否则 api 启动瞬间就可能打到一个还没起来的执行器
+      executor:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
@@ -36,6 +43,59 @@ services:
     networks:
       - app-net
       - monitor-net
+      - exec-net          # 🔴 批②：只为能解析到 `executor`
+    restart: unless-stopped
+
+  # ==================== 代码执行器（批②）====================
+  # 🔴 **为什么单开一个容器**：`execute_python` 跑的是**任意代码**。
+  #    业务方 2026-10-07：「不要暴露在系统中执行，**是安全事故**」。
+  #    ⛔ **不是**让应用自己 `docker run` —— 那要挂 `/var/run/docker.sock`，
+  #       而 sock = **宿主 root 等价**，且本应用**自己就在容器里**
+  #       ⇒ 那是把"代码执行逃逸"的洞换成**更大**的"容器逃逸"洞。
+  #    ⇒ 应用**只发 HTTP**（`EXECUTOR_URL`），⛔ 永远不认识 Docker。
+  #
+  # ⚠️ **硬化配置逐条都有理由，⛔ 别"简化"掉任何一条** —— 见每行注释。
+  executor:
+    build:
+      context: ./api
+      dockerfile: executor.Dockerfile
+    container_name: rag-executor
+    # ⛔ **不写 `ports:`** —— 它**只在内部网络里**被 api 调，⛔ 不对宿主暴露。
+    #    ⚠️ 改这个前提（给它开端口）⇒ **先加鉴权**（本服务没有鉴权）。
+    environment:
+      - PYTHONDONTWRITEBYTECODE=1
+      # 🔴 2026-10-08（批② Task 5）：同时在跑的上限 —— **必须与 `cpus:` 配套看**。
+      #    显式写出来是因为**它是个运维旋钮** —— 调它要动这里，⛔ 不是去翻代码找默认值。
+      #
+      # 🔵 **为什么是 2 而不是 4（实测定的，⛔ 不是拍的）**：
+      #    本容器限死 `cpus: 0.5`（宿主 4 核）。实测 `range(20000000)` 的单体耗时 **1.38s**。
+      #    · cap=**4** ⇒ 4 个并发各拿 0.125 核 ⇒ 1.38×4 ≈ **5.5s** ⇒ 🔴 **撞上 5 秒硬杀**
+      #      ⇒ **本该 1.5 秒就完的活儿，一并发就被判成"超时"** —— 用户看到的错是假的
+      #    · cap=**2** ⇒ 各拿 0.25 核 ⇒ ≈ **2.8s** ⇒ **仍在 5 秒承诺内** ✅
+      #    ⇒ **上限与 CPU 配额是一对，⛔ 别单独调其中一个。**
+      #    ⚠️ 想要更高吞吐 ⇒ **两个一起抬**（如 cap=4 + `cpus: 1.0`），
+      #       抬完**必须重跑**那次实测，确认最坏情况仍在 5 秒内。
+      - EXECUTOR_MAX_CONCURRENCY=2
+    read_only: true                 # 只读根文件系统 —— 被执行的代码写不了任何地方
+    tmpfs:
+      # ⚠️ `noexec`：⛔ 不许在 /tmp 里执行东西；`nosuid`：⛔ 不许带 suid 位
+      - /tmp:size=64m,noexec,nosuid
+    cap_drop:
+      - ALL                         # ⛔ 丢掉全部 Linux capabilities
+    security_opt:
+      - no-new-privileges:true      # ⛔ 不许通过 setuid 等方式提权
+    user: "65534:65534"             # nobody —— ⛔ 不以 root 跑
+    mem_limit: 256m                 # ⚠️ 本机 Docker 只分到 3.84 GB
+    pids_limit: 64                  # ⛔ 防 fork 炸弹
+    cpus: "0.5"                     # ⛔ 防它把 CPU 吃光（死循环仍在，只是被 5 秒杀掉）
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - exec-net
     restart: unless-stopped
 
   # ==================== PostgreSQL + pgvector ====================
@@ -129,6 +189,18 @@ networks:
     driver: bridge
   monitor-net:
     driver: bridge
+  # 🔴 2026-10-08（批② Task 3）：**执行器专用网络**。
+  #    `internal: true` ⇒ **没有对外的网关**：这张网上的容器**出不了互联网**，
+  #    但**彼此仍能互通**（用户自定义网络自带 DNS ⇒ `api` 能解析到 `executor`）。
+  #
+  # ⚠️ **为什么不按施工单原稿用 `network_mode: "none"`**：
+  #    施工单 Step 1 写的是 `none`，并在 Step 2 要求**实测**。
+  #    `none` 的含义是"**连内部网都没有**" ⇒ api **也连不上它** ⇒ 两者不可兼得。
+  #    ⇒ 改用本网络：**对"出网"的隔离效果相同**（执行器只在这张网上 ⇒ 无法访问互联网），
+  #      同时保住"api 能调它"。⚠️ 这一处**偏离施工单原稿，已在 DEC 里记明**。
+  exec-net:
+    driver: bridge
+    internal: true
 
 volumes:
   # ⚠️ 显式钉住卷名 —— 这是改项目名时最容易踩的坑。

@@ -128,6 +128,157 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- 🔴 **放开 `execute_python`：那两张图的工具表不再排除它**（2026-10-08 · 业务方同意「甲」）——
+
+  `agent_graph.py` / `agent_checkpointer.py` 删掉 `_EXCLUDED_TOOLS` ⇒ **两图工具表现在与
+  `mcp_server.TOOLS` 逐名一致**（4 个）。
+
+  **背景**：批① Task 6 立过一条"有期限"的排除，理由是**两条** —— ① 无容器隔离 ② 不在 `SENSITIVE_TOOLS`。
+  批② 当天落地 ⇒ **期限到了**，逐条处置：
+  · ✅ **① 已由批② 解决** —— 现在是硬化容器（只读根 · 无网 · 非 root · 无 cap · 5s/256MB/pids）
+  · 🔴 **② 核出来【守错了地方】** —— `execute_python` 从 `plan_execute` ·
+    `agent_graph_advanced_learning` · `agent_graph_advanced`（经 MCP 动态取表）·
+    `/agent/execute_code` **都拿得到**，**同样不在审批名单**
+    ⇒ **在两张图上抠掉它并没挡住什么**，只买到"工具表在各图之间不一致"
+    —— 而那正是批① 花一整批力气消除的东西（**一处事实源**）
+
+  🔴 **⚠️ 别把本笔读成"这个安全话题结了"** —— **真正该管的地方是 `SENSITIVE_TOOLS`**（全局审批名单），
+  那件事**已单独立为待裁项**（`docs/待办总表.md` §二 **11**）。⇒ 本笔是**把它挪回该守的地方**，
+  ⛔ **不是宣布不用守**。⚠️ **容器那层无论如何都不能撤**。
+
+  📌 **判据**：`cd api && ../venv/bin/python -m pytest test_tool_registry_single_source.py -q` ⇒ **8 passed**
+  · 那条守卫**翻了面**：`..._not_yet_in_unisolated_graphs` ⇒ **`..._is_in_every_graph_tool_table`**
+  （并顺手钉住"**没有任何别的排除**" —— 别再悄悄抠掉一个工具）
+  · 三张表逐名一致（实测）：`mcp_server.TOOLS` = `agent_graph.tools` = `agent_checkpointer.tools`
+
+- 🔴 **批② · Task 6：demo 模式下**不注册** `execute_python`**（2026-10-08）——
+
+  `mcp_server.py` 在 `TOOLS` 建好后加一道：`DEMO_MODE` 有值 ⇒ 滤掉 `execute_python`。
+
+  **为什么**：demo 跑在**魔搭创空间**上，而 **一个 Studio = 一个容器**（实测）
+  ⇒ **没有第二个容器**能跑执行器 ⇒ `EXECUTOR_URL` 为空 ⇒ `execute_python`
+  **回落本地子进程**，也就是**又回到宿主同权限的沙箱**里跑。
+  业务方原话：「不要暴露在系统中执行，**是安全事故**」。
+
+  ⚠️ **两条口径别搞混**：
+  · **非 demo**（本机 / CI / 完整部署）⇒ `execute_python` **在**，走**执行器容器**
+  · **demo** ⇒ ⛔ **不注册它** —— 「没有容器」和「跑在宿主上」之间，⛔ **不选后者**
+
+  📌 **判据（可打印，两条）**：
+  ```bash
+  cd api
+  ../venv/bin/python -c "import mcp_server,json;print(json.dumps([t['func'].name for t in mcp_server.TOOLS]))"
+  #   ⇒ ["calculator","date_today","web_search","execute_python"]
+  DEMO_MODE=1 ../venv/bin/python -c "import mcp_server,json;print(json.dumps([t['func'].name for t in mcp_server.TOOLS]))"
+  #   ⇒ ["calculator","date_today","web_search"]
+  ```
+  · `pytest test_tool_registry_single_source.py -q` ⇒ **8 passed**（+2 条）
+  · 全量离线 ⇒ **820 passed / 2 skipped / 0 failed**（818 + 2）
+
+  ⚠️ **那两条守卫走【子进程】** —— `TOOLS` 是**模块级**建的，同进程里改 env
+  **静默无效**（本仓 `test_tool_dispatch.py` 踩过同一个坑）。⛔ 别改成 `monkeypatch.setenv`。
+  ⚠️ 其中一条是**正向对照**（不设开关时它**在**）—— 没有它，一个"把 TOOLS 清空"的实现
+  也能让另一条绿。
+
+- 🔴 **批② · Task 5：执行器并发上限 —— 且**上限与 CPU 配额必须配套**（2026-10-08）——**
+
+  `executor_server.py` 加 `threading.Semaphore` + 排队超时；`docker-compose.yml` 显式写
+  `EXECUTOR_MAX_CONCURRENCY=2`。
+
+  🔴 **远端排队超时 ⇒ `503`**（⛔ 不是 200）—— 形状**故意与 `{ok,out}` 不同**：
+  「执行器忙不过来」和「你的代码错了」是**两件事**，调用方该能分开。
+  ⚠️ 排队**不能无限等**：`/execute` 是同步端点，占 Starlette 线程池的线程（默认 40）；
+  无限等 ⇒ 40 个线程全占住 ⇒ **连 `/health` 都拿不到线程** ⇒ 容器被判不健康并重启。
+
+  🔵 **本笔最值钱的是一个【实测发现】：上限不能单独定，它和 `cpus:` 是一对。**
+
+  实测（宿主 4 核 · 本容器 `cpus: 0.5`）：`for i in range(20000000): pass` 单体 **1.38s**。
+
+  | 上限 | 4 个并发时 | 结果 |
+  |---|---|---|
+  | **4**（我第一版拍的） | 各拿 0.125 核 ⇒ ≈**5.5s** | 🔴 **撞上 `MAX_EXEC_TIME` 的 5 秒硬杀** ⇒ 4 个全报「超过最长执行时间」——**而那 4 个错全是假的**（活儿本来 1.5 秒就能完） |
+  | **2**（改后） | 各拿 0.25 核 ⇒ ≈**2.8s** | ✅ **4 个全部 `ok`**（实测两批：~2.7s / ~5.6s） |
+
+  ⇒ 🔴 **`EXECUTOR_MAX_CONCURRENCY` 与 `cpus:` ⛔ 别单独调** —— 想提吞吐就**两个一起抬**
+  （如 cap=4 + `cpus: 1.0`），抬完**必须重跑**那次实测，确认最坏情况仍在 5 秒内。
+
+  📌 **判据（可打印）**：`cd api && ../venv/bin/python -m pytest test_executor_server.py -q` ⇒ **7 passed**
+  （含新增的 `test_concurrent_executions_are_capped` —— 它**两条断言缺一不可**：
+  `peak <= 上限` **且** `peak >= 2`；后者是防"一个完全串行的实现也能过第一条"）
+  · 全量离线 ⇒ **818 passed / 2 skipped / 0 failed**（817 + 1）
+
+- 🔴 **批② · Task 4：应用侧接上执行器 —— `EXECUTOR_URL` 有值走容器，没值回落本地**（2026-10-08）——
+
+  `code_executor_impl.py` 新增 `EXECUTOR_URL`（import 期读 env）+ `_run_remote()`。
+  `execute_python_impl` 在**意图检测之后**分岔：有 URL ⇒ 远端容器；没 URL ⇒ 现有本地子进程。
+  ⚠️ **只 import 标准库**（`urllib.request`），⛔ 没破本模块的不变量。
+
+  🔴 **远端失败【如实报错】，⛔ 绝不静默回落本地** —— 这是本笔最重要的一条。
+  理由：若"远端挂了就悄悄回落"，**运维把执行器停了 / 地址配错了 ⇒ 一切照常工作**，
+  代码**又回到宿主同权限的进程里跑**，而**没有一个人会发现** ⇒ **那层隔离是装饰性的**。
+  （本仓原话：**「『从不命中』与『没人违规』在机器痕迹上完全一样。」**）
+
+  🔴 **「意图检测」留在应用侧**（"只执行代码、不生成代码"是**产品策略**，⛔ 不是执行机制）
+  ⇒ 它**在决定走本地还是远端之前**执行，⛔ 不许被远端路径绕过。
+
+  📌 **判据**：`cd api && ../venv/bin/python -m pytest test_code_executor_remote.py -q` ⇒ **4 passed**
+  · 全量离线 ⇒ **817 passed / 2 skipped / 0 failed**（813 + 4）
+  · 两条路径**真跑过**：无 URL ⇒ `'42\n'`；坏 URL ⇒ `无法访问**执行器容器**（URLError…）`、**没回落**
+
+  ⚠️ **测试用【真的本地 HTTP 服务】当替身**，⛔ 没 mock `urlopen` ——
+  mock 掉的话，测的是"我有没有调用那个名字"，**不是"请求有没有真的发出去"**。
+
+- 🔵 **批② · Task 3：`docker-compose.yml` 加执行器服务 + 硬化配置**（2026-10-08）——
+
+  **新增 `executor` 服务**（`rag-executor`），硬化逐条落地：
+  `read_only: true` · `tmpfs: /tmp:size=64m,noexec,nosuid` · `cap_drop: [ALL]` ·
+  `security_opt: no-new-privileges` · `user: 65534:65534`（nobody）· `mem_limit: 256m` ·
+  `pids_limit: 64` · `cpus: 0.5` · ⛔ **不写 `ports:`**（只在内部网络里被 api 调）。
+  `api` 服务加 `EXECUTOR_URL=http://executor:8000` + `depends_on: executor(service_healthy)`。
+
+  🔴 **一处【偏离施工单原稿】，已实测后改定**：施工单 Step 1 写的是 `network_mode: "none"`。
+  ⚠️ 实测发现 **`none` 的含义是"连内部网都没有"** ⇒ **api 也连不上它** ⇒ 两者不可兼得。
+  ⇒ 改用**新建的 `exec-net`（`internal: true`）**：**对"出网"的隔离效果相同**，
+  同时保住"api 能调它"。⇒ **偏离已记，正式裁定随 Task 7 的 DEC。**
+
+  🔵 **实测（逐条）**：
+  · `docker exec rag-executor id` ⇒ `uid=65534(nobody)` —— 非 root ✅
+  · 往 `/pwned` 写 ⇒ `OSError [Errno 30] Read-only file system` —— 只读根 ✅
+  · 往 `/tmp/ok` 写 ⇒ 成功 —— tmpfs 生效 ✅
+  · **出网** ⇒ `URLError` —— **internal 网络真的挡住了** ✅
+  · `docker inspect` ⇒ `CapDrop=[ALL] Readonly=true Memory=268435456 PidsLimit=64` ✅
+  · 🔴 **api → 执行器** ⇒ `{"ok":true,"out":"42\n"}` —— 内部网络 DNS + 调用链通了 ✅
+
+  ⚠️ **本 Task 仍未接线**：`api` 拿到了 `EXECUTOR_URL`，但 `code_executor_impl` **还没读它**（Task 4）。
+  现在调执行器的是人（我在容器里手打的），⛔ 不是应用。
+
+- 🔵 **批② · Task 2：代码执行器服务本体**（2026-10-08）——
+  新增 `api/executor_server.py` + `api/executor.Dockerfile` + `api/test_executor_server.py`（**6 条**）。
+
+  **它是什么**：跑在**独立执行器容器**里的极小 HTTP 服务（**热启动常驻**）。
+  应用侧通过 `EXECUTOR_URL` 调它 —— 🔴 **应用⛔ 永不碰 `docker.sock`**。
+  为什么不让应用自己 `docker run`：那要挂 `/var/run/docker.sock`，
+  而 **sock = 宿主 root 等价**，且**本应用自己就在容器里**
+  ⇒ **等于把"代码执行逃逸"的洞换成更大的"容器逃逸"洞**。
+
+  🔴 **顺带一处去重重构**（`code_executor_impl.py`）：把"丢进子进程 + 超时硬杀 + 解析 payload"
+  抽成 **`run_in_sandbox_subprocess(code) -> (ok, out)`** —— **本地路径与新服务都调它**。
+  ⛔ 刻意**不**在新服务里抄第二份白名单 / 超时文案（批① 刚把"同一个东西抄 5 份"收口掉 · `DEC-107`）。
+
+  🔴 **两条不变量**（都有守卫）：
+  · **每次请求起一个【新】子进程**，⛔ 不是常驻解释器 ——
+    后者会让 `exec` 的 `globals` **跨请求活着** ⇒ 访客互相污染。那是**安全缺陷**，不是性能取舍。
+  · **超时是硬杀**（线程超时杀不掉 → 死循环会把进程拖垮）—— 且**杀完服务仍可用**。
+
+  📌 **判据（可打印）**：`cd api && ../venv/bin/python -m pytest test_executor_server.py -q`
+  ⇒ **6 passed**（⚠️ 其中超时那条**会真等满 5 秒** —— 有意为之：调小再测就不是真实配置了）。
+  · 全量离线 ⇒ **813 passed / 2 skipped / 0 failed**（807 + 6）
+  · **反证已做**：写一个"常驻 globals"的漏实现 ⇒ 泄漏判据输出 **`True`** ⇒ 那条用例**会红**。
+    ⚠️ 判据用的是 **`dir()`** —— 沙箱白名单里**没有** `globals`（实测 `NameError`）。
+
+  ⚠️ **本 Task ⛔ 不接线**：应用侧还没走远端（那是 Task 4）、compose 还没加这个服务（Task 3）。
+  本笔只是**服务本身**。
+
 - 🟡 **把被删的「Docker 容器隔离」方案记录加回 `api/code_executor.py`**（2026-10-08）——
   ⛔ **纯注释，不影响任何行为**（判据：`execute_python.invoke({'code':'print(6*7)'})` ⇒ 仍 `42`）。
 

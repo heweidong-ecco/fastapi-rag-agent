@@ -50,9 +50,11 @@ llm = make_llm("fast", "agent")
 #    📌 `eval` 那条（`DEC-049`）没丢：实现仍在 `api/safe_math.py`，守卫在 `test_safe_math_wiring.py`。
 from mcp_server import TOOLS as _MCP_TOOLS
 
-# ⚠️ `execute_python` 暂**排除** —— 同 `agent_graph.py`：这张图里它**无审批、无隔离**。
-_EXCLUDED_TOOLS = {"execute_python"}
-tools = [t["func"] for t in _MCP_TOOLS if t["func"].name not in _EXCLUDED_TOOLS]
+# ✅ 2026-10-08：**原先在这里排除 `execute_python`（批① Task 6），现在放开了** ——
+#    理由与逐条处置**同 `agent_graph.py` 同一处**（⛔ 别在这儿再抄一遍，读那份）。
+#    一句话：①无隔离 已由**批② 容器**解决；②无审批**不是这两张图特有的**（别处照样拿得到）
+#    ⇒ 抠掉它**没挡住什么**，只制造不一致。🔴 **该管的地方是 `SENSITIVE_TOOLS`**（已立待裁项）。
+tools = [t["func"] for t in _MCP_TOOLS]
 # 🔴 DEC-051：工具名的**唯一来源** —— 分派查这张表，⛔ 别在 `tool_execute` 里再抄一遍名字。
 #    ⚠️ 本文件是那次「按 `"search"` 分派、而真名是 `duckduckgo_search`」bug 的**第二处**现场
 #       （活路径 = `POST /agent/memory_chat`）。守卫 ⇒ `api/test_tool_dispatch.py`

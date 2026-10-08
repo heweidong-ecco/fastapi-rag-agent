@@ -2,6 +2,7 @@
 MCP Server：使用工厂函数自动注册所有工具
 """
 import asyncio
+import os
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
@@ -43,6 +44,24 @@ TOOLS = [
     # {"func": screenshot_webpage, "version": "1.0.0"},
     {"func": execute_python, "version": "1.5.0"},  # 已迭代多次
 ]
+
+# 🔴 2026-10-08（批② Task 6）：**demo 模式下去掉 `execute_python`**。
+#
+# **为什么**：demo 跑在**魔搭创空间**上，而 **一个 Studio = 一个容器**（实测）
+#   ⇒ **没有第二个容器**能跑执行器 ⇒ `EXECUTOR_URL` 为空 ⇒ `execute_python`
+#   **回落本地子进程**，也就是**又回到宿主同权限的沙箱**里跑。
+#   业务方原话：「不要暴露在系统中执行，**是安全事故**」。
+#
+# ⚠️ **两条口径别搞混**：
+#   · **非 demo**（本机 / CI / 完整部署）⇒ `execute_python` **在**，走**执行器容器**（批②）
+#   · **demo** ⇒ ⛔ **不注册它** —— 「没有容器」和「跑在宿主上」之间，⛔ 不选后者
+#
+# 📌 守卫：`test_tool_registry_single_source.py`
+#   `test_execute_python_is_not_registered_in_demo_mode`（+ 一条**正向对照**，防"清空 TOOLS 也能过"）。
+#   ⚠️ 那两条走**子进程** —— `TOOLS` 是**模块级**建的，同进程改 env **静默无效**。
+if os.getenv("DEMO_MODE", "").strip():
+    _DEMO_EXCLUDED = {"execute_python"}
+    TOOLS = [t for t in TOOLS if t["func"].name not in _DEMO_EXCLUDED]
 
 
 # 工具定义和处理器由工厂函数自动生成（不再需要手动维护映射表）
