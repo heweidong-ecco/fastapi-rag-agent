@@ -33,7 +33,11 @@
   **不是在本文件里** —— 本文件只是那个容器的入口。
 """
 
+import os
+import threading
+
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from code_executor_impl import run_in_sandbox_subprocess
@@ -44,6 +48,31 @@ app = FastAPI(
     redoc_url=None,
     openapi_url=None,
 )
+
+# 🔴 2026-10-08（批② Task 5）：**同时最多跑几段代码**。
+#    为什么必须限：执行器容器只有 **0.5 CPU / 256 MB**，且 **`Swap=0`**。
+#    没有上限 ⇒ 一个访客连打 50 个请求 ⇒ 50 个 Python 子进程同时起来
+#    ⇒ **内存打爆 ⇒ 直接 OOM kill ⇒ 整个执行器没了**，别人的请求跟着一起死。
+#
+# ⚠️ **上限放在【执行器侧】而不是只放应用侧**：应用侧限的是"**自己**发多少"，
+#    而执行器是**收口点** —— 谁来调都从这儿过。两侧都放，**这一侧是硬上限**。
+#
+# 🔵 **默认 2 是【实测定的】，⛔ 不是拍的**（2026-10-08，宿主 4 核 / 本容器 `cpus: 0.5`）：
+#    `range(20000000)` 单体耗时 **1.38s**；
+#    cap=4 ⇒ 4 个并发各拿 0.125 核 ⇒ ≈5.5s ⇒ **撞上 `MAX_EXEC_TIME` 的 5 秒硬杀** ——
+#    用户会看到"超时"，而那**是假的**（活儿本来 1.5 秒就能完）。
+#    cap=2 ⇒ 各拿 0.25 核 ⇒ ≈2.8s ⇒ 仍在承诺内。
+#    ⇒ 🔴 **本常量与 `docker-compose.yml` 的 `cpus:` 是一对，⛔ 别单独调。**
+MAX_CONCURRENT_EXECUTIONS = int(os.getenv("EXECUTOR_MAX_CONCURRENCY", "2"))
+
+_EXEC_SEMAPHORE = threading.Semaphore(MAX_CONCURRENT_EXECUTIONS)
+
+# 🔴 **排队最多等多久**（秒）—— ⛔ 别改成"无限等"。
+#    理由：/execute 是**同步端点**，占的是 Starlette 线程池的线程（默认 40）。
+#    无限等 ⇒ 40 个线程全被占住 ⇒ **连 `/health` 都拿不到线程** ⇒
+#    容器的 healthcheck 超时 ⇒ **Docker 把执行器判成不健康并重启它**。
+#    ⇒ 到点**如实拒掉**（503），⛔ 不是把线程池填满。
+EXEC_QUEUE_TIMEOUT = float(os.getenv("EXECUTOR_QUEUE_TIMEOUT", "10"))
 
 
 class ExecuteRequest(BaseModel):
@@ -62,8 +91,26 @@ def execute(req: ExecuteRequest) -> dict:
     ⚠️ **被执行的代码抛异常 ⇒ `ok=False`，但 HTTP 仍是 200** ——
        那个异常是**业务结果**（"你给的代码错了"），⛔ 不是"服务坏了"。
        服务坏了（比如子进程起不来）也走 `ok=False`，因为对调用方而言**处置一样**。
+
+    🔴 **排队超时 ⇒ `503`**（不是 200）—— ⚠️ 形状**故意不同**：
+       "执行器忙不过来"和"你的代码错了"是**两件事**，调用方该能分开。
+       守卫：`test_executor_server.py::test_concurrent_executions_are_capped`
     """
-    ok, out = run_in_sandbox_subprocess(req.code)
+    if not _EXEC_SEMAPHORE.acquire(timeout=EXEC_QUEUE_TIMEOUT):
+        return JSONResponse(
+            status_code=503,
+            content={
+                "ok": False,
+                "out": (
+                    f"执行器忙：排队超过 {EXEC_QUEUE_TIMEOUT:g} 秒仍未轮到"
+                    f"（同时在跑的上限 = {MAX_CONCURRENT_EXECUTIONS}）。请稍后重试。"
+                ),
+            },
+        )
+    try:
+        ok, out = run_in_sandbox_subprocess(req.code)
+    finally:
+        _EXEC_SEMAPHORE.release()
     return {"ok": ok, "out": out}
 
 

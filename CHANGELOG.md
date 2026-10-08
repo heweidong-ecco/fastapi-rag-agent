@@ -128,6 +128,33 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- 🔴 **批② · Task 5：执行器并发上限 —— 且**上限与 CPU 配额必须配套**（2026-10-08）——**
+
+  `executor_server.py` 加 `threading.Semaphore` + 排队超时；`docker-compose.yml` 显式写
+  `EXECUTOR_MAX_CONCURRENCY=2`。
+
+  🔴 **远端排队超时 ⇒ `503`**（⛔ 不是 200）—— 形状**故意与 `{ok,out}` 不同**：
+  「执行器忙不过来」和「你的代码错了」是**两件事**，调用方该能分开。
+  ⚠️ 排队**不能无限等**：`/execute` 是同步端点，占 Starlette 线程池的线程（默认 40）；
+  无限等 ⇒ 40 个线程全占住 ⇒ **连 `/health` 都拿不到线程** ⇒ 容器被判不健康并重启。
+
+  🔵 **本笔最值钱的是一个【实测发现】：上限不能单独定，它和 `cpus:` 是一对。**
+
+  实测（宿主 4 核 · 本容器 `cpus: 0.5`）：`for i in range(20000000): pass` 单体 **1.38s**。
+
+  | 上限 | 4 个并发时 | 结果 |
+  |---|---|---|
+  | **4**（我第一版拍的） | 各拿 0.125 核 ⇒ ≈**5.5s** | 🔴 **撞上 `MAX_EXEC_TIME` 的 5 秒硬杀** ⇒ 4 个全报「超过最长执行时间」——**而那 4 个错全是假的**（活儿本来 1.5 秒就能完） |
+  | **2**（改后） | 各拿 0.25 核 ⇒ ≈**2.8s** | ✅ **4 个全部 `ok`**（实测两批：~2.7s / ~5.6s） |
+
+  ⇒ 🔴 **`EXECUTOR_MAX_CONCURRENCY` 与 `cpus:` ⛔ 别单独调** —— 想提吞吐就**两个一起抬**
+  （如 cap=4 + `cpus: 1.0`），抬完**必须重跑**那次实测，确认最坏情况仍在 5 秒内。
+
+  📌 **判据（可打印）**：`cd api && ../venv/bin/python -m pytest test_executor_server.py -q` ⇒ **7 passed**
+  （含新增的 `test_concurrent_executions_are_capped` —— 它**两条断言缺一不可**：
+  `peak <= 上限` **且** `peak >= 2`；后者是防"一个完全串行的实现也能过第一条"）
+  · 全量离线 ⇒ **818 passed / 2 skipped / 0 failed**（817 + 1）
+
 - 🔴 **批② · Task 4：应用侧接上执行器 —— `EXECUTOR_URL` 有值走容器，没值回落本地**（2026-10-08）——
 
   `code_executor_impl.py` 新增 `EXECUTOR_URL`（import 期读 env）+ `_run_remote()`。

@@ -115,3 +115,51 @@ def test_timeout_is_hard_killed_and_server_still_works(client):
 def test_health_endpoint(client):
     """`GET /health` ⇒ 200 —— docker-compose 的 `healthcheck` 靠它。"""
     assert client.get("/health").status_code == 200
+
+
+# ===========================================================================
+# ④ 并发上限（Task 5）—— 别让一个客户把执行器打爆
+# ===========================================================================
+def test_concurrent_executions_are_capped(monkeypatch):
+    """🔴 同时**正在跑**的代码数 ≤ `MAX_CONCURRENT_EXECUTIONS`。
+
+    ⚠️ **为什么这条要单独钉**：执行器容器只有 **0.5 CPU / 256 MB**。
+       没有上限的话，一个访客连打 50 个请求 ⇒ 50 个 Python 子进程同时起来
+       ⇒ **内存打爆（`Swap=0` ⇒ 直接 OOM kill）** ⇒ **整个执行器没了**，
+       别人的请求跟着一起死。
+
+    🔴 **本用例有两条断言，⛔ 缺一不可**：
+      · `peak <= 上限` —— 上限**拦住了**
+      · `peak >= 2`     —— **确实发生过并发**（否则一个"完全串行"的实现也能过第一条，
+                            那测的就不是"限流"而是"串行"了）
+    """
+    import threading
+    import time
+
+    live = 0
+    peak = 0
+    lock = threading.Lock()
+
+    def fake_run(code):
+        """替身 = **一个慢活儿**。⚠️ 计数与 semaphore 都是真的，只有"跑代码"这一步是假的。"""
+        nonlocal live, peak
+        with lock:
+            live += 1
+            peak = max(peak, live)
+        time.sleep(0.25)
+        with lock:
+            live -= 1
+        return True, "ok"
+
+    monkeypatch.setattr(E, "run_in_sandbox_subprocess", fake_run)
+    # ⚠️ 上限在 **import 期**就建好了 semaphore ⇒ 改常量没用，得把 semaphore 也换掉
+    monkeypatch.setattr(E, "_EXEC_SEMAPHORE", threading.Semaphore(2))
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(lambda _: E.execute(E.ExecuteRequest(code="x")), range(8)))
+
+    assert all(r == {"ok": True, "out": "ok"} for r in results), "有请求没被正常处理"
+    assert peak <= 2, f"🔴 并发到过 {peak} —— 上限没拦住"
+    assert peak >= 2, f"并发峰值只有 {peak} —— 根本没并发起来，这条测不到限流"
