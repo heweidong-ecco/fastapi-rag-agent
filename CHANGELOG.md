@@ -10,6 +10,26 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- 🆕 **新门：收了 `limit` 的端点【必须说出来自己截断了】**（2026-10-09 · `api/test_truncation_declared.py`）——
+  **起因**：业务方点「其余列表端点的分页」。⇒ 核完发现**不是"再写两遍 offset 分页"**：
+  · 🔴 **核出一处【本仓早就做对的先例】**：`/agent/trace/{thread_id}/cost`
+    —— `items` 有 `LIMIT`，但响应给 `truncated`（`total.count > len(items)`），
+    且**合计由 SQL 算整条线程**（⛔ 不受 LIMIT 影响）。
+    ⚠️ **这意味着我前一天写的 `frontend/README.md §六` 里那句"本仓没有一个列表有分页"【不准确】** ⇒ 已更正。
+    ⇒ 本仓其实有**两种**都成立的做法：**A `offset` 翻页**（用户要一直往下看）·
+    **B 截断 + 说出来**（本来就是看汇总）。⛔ 不是只有一种。
+  · 🔴 而"**其余**"那两个（`/agent/token/recent` · `/agent/cost/records`）**根本没有页面消费者**
+    ⇒ 为它们做分页 = 为一个不存在的界面写功能（YAGNI）。
+  ⇒ **所以做的是：把两条路【共同的那一半——「必须说出来」】从"规矩"变成【门】。**
+  **新门**：任何端点只要签名里收了 `limit`，响应里**必须有 `truncated` 或 `has_more`**；
+  真要豁免 ⇒ 登记进 `scripts/truncation-exempt.txt` 并**写明理由**（那个文件是给人审阅的）。
+  带**防空跑**（扫到的端点数少于下限 ⇒ 红 —— 仓库先例：`test_web_pages.py` 的 glob 空跑）。
+  ✅ **它当场抓到那两个端点** ⇒ **两个都修了**（各用「**多要一条**」判，⛔ 没加额外 `COUNT(*)`）：
+  `/agent/token/recent` 与 `/agent/cost/records` 的响应现在都有 `truncated` + `count`。
+  🔴 **反证跑过**：拿掉一个 `truncated` ⇒ 正身那条红；把 AST 的装饰器规则改歪 ⇒ **防空跑那条红**。
+  📌 门：`pytest api/test_truncation_declared.py -q` ⇒ **3 passed** · 全量离线 **878 passed**。
+  ⚠️ 它是 `api/` 下的 pytest ⇒ **CI 自动就跑**，⛔ 不用另接线。
+
 - 🆕 **裁决历史分页了 —— 并修掉本仓第一处【静默截断】**（2026-10-08 · `frontend/README.md` §六）——
   **改前**：`approvals.html` **硬写 `limit=50`**，**界面不说明被截了**；而全仓**没有一个列表端点有 `offset`**。
   **三层一起做**：① 后端 `GET /agent/approvals/history` 加 `offset` + 响应补 `has_more`/`limit`/`offset`，

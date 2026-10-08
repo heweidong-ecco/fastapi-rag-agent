@@ -282,6 +282,13 @@ venv/bin/python -m pytest api/test_web_pages.py -q               # ⇒ 7 passed�
 | **CSS** | `api/static/app.css` 的 **`.pagination`** |
 | **页面** | `approvals.html` 的 `#pager`（⚠️ **新增**元素，⛔ 没改任何既有 class/id） |
 
+🔴 **更正（同日核出）**：本节初稿写「本仓没有一个列表有分页」——**不准确**。
+`/agent/trace/{thread_id}/cost` **早就做对了**：`items` 有 `LIMIT`，但响应给 `truncated`
+（`total.count > len(items)`）、**合计由 SQL 算整条线程**（⛔ 不受 LIMIT 影响）。
+⇒ 本仓有**两种**做法：**A `offset` 翻页**（用户要一直往下看）· **B 截断 + 说出来**（看汇总）。
+**两条路的共同那一半 —— 「必须说出来」—— 现在是门**：`api/test_truncation_declared.py`
+（凡收了 `limit` 的端点，响应必须有 `truncated` 或 `has_more`）。
+
 **两条红线**（规范里的）：
 
 1. **⛔ 不许前端假分页** —— 组件⛔ 不切数组、⛔ 不缓存全量；翻页 = **带新 `offset` 再发一次请求**。

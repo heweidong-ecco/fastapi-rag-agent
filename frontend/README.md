@@ -187,6 +187,30 @@ PY
 - **组件层**：`pagination` 组件（上一页 / 下一页 / 第 N 页 / 总数），状态：
   **首屏**（上一页禁用）· **末屏**（下一页禁用）· **只有一页**（整个控件不显示）· **加载中**。
 
+### 6.1.5 🔴 **更正：本仓【早就有】一处做对的先例**（2026-10-08 核出）
+
+> ⚠️ **本节的初稿写"本仓没有一个列表有分页"—— 那句不准确。** 实查发现：
+
+✅ **`/agent/trace/{thread_id}/cost` 已经是对的**（`api/token_tracker.thread_cost_breakdown`）：
+`items` 有 `LIMIT`，但响应同时给 **`truncated`**（`total.count > len(items)`），
+且**合计由 SQL 算整条线程**（⛔ 不受 `LIMIT` 影响）⇒ **页面显示 `total`，⛔ 不自己求和**。
+
+⇒ 所以本仓有**两种**都成立的做法，⛔ 不是只有 offset 一种：
+
+| 做法 | 什么时候用 | 先例 |
+|---|---|---|
+| **A · `offset` 翻页**（`has_more`） | 用户要**一直往下看** | `/agent/approvals/history`（2026-10-08 加的） |
+| **B · 截断 + 说出来**（`truncated` + 服务端算合计） | 本来就是**看个汇总**，翻页没意义 | `/agent/trace/{thread_id}/cost` |
+
+🔴 **两条路都行，但【必须说出来】这一半是共同的** —— 而它现在是**门**：
+
+```
+venv/bin/python -m pytest api/test_truncation_declared.py -q
+```
+⇒ **任何收了 `limit` 的端点，响应里必须有 `truncated` 或 `has_more`**；
+真要豁免 ⇒ 登记进 `scripts/truncation-exempt.txt` 并**写明理由**。
+✅ **反证跑过**：拿掉一个 `truncated` ⇒ 正身红；把 AST 的装饰器规则改歪 ⇒ **防空跑那条红**。
+
 ### 6.2 ⛔ 两条红线
 
 1. 🔴 **不许"前端假分页"** —— 一次拉全量、前端切页。数据量一大就是**假的分页**，
