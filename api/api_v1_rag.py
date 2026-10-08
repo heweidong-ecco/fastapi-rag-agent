@@ -56,7 +56,7 @@ from fastapi import File, UploadFile
 import tempfile
 
 from document_preprocessor import DocumentPreprocessor
-from chunker import split_text_with_filter
+from chunker import CHUNK_CONFIGS, split_text_with_filter
 from document_parser import parse_document
 
 # 🔴 `INTERRUPTED_SUFFIX` 看着"没用"，但**必须留** —— 它是不是死导入，`ruff` 判不了：
@@ -287,6 +287,9 @@ preprocessor = DocumentPreprocessor()
 async def upload_document(
     file: UploadFile = File(...),
     domain: str = "default",  # 新增：用户可指定领域，默认为 "default"，法律"legal",医疗"medical"
+    doc_type: str = "",       # 2026-10-08 新增（`N19`/`DEC-116`）：**可选**分块档位。
+                              # ⚠️ 默认空 = **沿用扩展名推断** ⇒ **访客行为一字不变**；
+                              #    灌库脚本（乙的四类语料）走这条显式指定。
     user_name: str = Depends(get_current_user_hybrid),
 ):
     """上传并解析多格式文档（PDF/Word/Markdown/HTML），经过预处理后入库。
@@ -323,7 +326,23 @@ async def upload_document(
     # chunks = preprocessor.deduplicate_chunks(chunks)
     # 分块（根据文件格式选择分块策略）
     # PDF 和 Word 通常为技术文档，Markdown 也按技术文档处理
-    doc_type = "legal" if ext == "pdf" else "technical"
+    #
+    # 🔴 2026-10-08 改（`N19` / `DEC-116`）—— 原来只有下面这一句【按扩展名猜】：
+    #        doc_type = "legal" if ext == "pdf" else "technical"
+    #    ⇒ **除 PDF 外的一切全吃 `technical`** ⇒ `report`/`article`/`faq` 三档**从来用不上**。
+    #    现在：**调用方给了就用**（乙的灌库脚本按类别显式给），**没给才回落到原来的推断**
+    #    ⇒ ✅ **访客走的那条路一字不变**（业务方 2026-10-08 裁的就是这个默认值）。
+    doc_type = doc_type.strip() or ("legal" if ext == "pdf" else "technical")
+
+    # 🔴 未知档位 ⇒ **当场拒绝**，⛔ 不许往下走。
+    #    理由：`chunker.get_text_splitter` 是 `CHUNK_CONFIGS.get(doc_type, default)`
+    #    ⇒ **静默回落** `default` ⇒ 一个拼错的档名会让整批语料按 500/50 切，**不报任何错**。
+    #    ⚠️ 这一步是**本 Agent 补的**（`DEC-116` §二）—— 业务方原话只说"加可选形参"。
+    if doc_type not in CHUNK_CONFIGS:
+        raise AppException(
+            ErrorCode.PARAM_INVALID,
+            f"未知的 doc_type: {doc_type}，可选: {', '.join(sorted(CHUNK_CONFIGS))}",
+        )
     chunks = split_text_with_filter(cleaned_text, doc_type=doc_type, min_length=20)
 
     # 入库

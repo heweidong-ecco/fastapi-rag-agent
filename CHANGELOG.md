@@ -10,6 +10,24 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- 🔴 **分档落地：上传端点加可选 `doc_type` ＋ `technical` 600/60 ＋ 新增 `faq` 档**（2026-10-08 · `N19` 结清 · `DEC-116`）——
+  **起因**：`api/api_v1_rag.py` 只有一句**按扩展名猜**（`"legal" if ext == "pdf" else "technical"`）
+  ⇒ **除 PDF 外的一切全吃 `technical`** ⇒ `report`/`article` **从来用不上**；
+  而 FAQ 的问答对（140–300 字）**会被合并进 500 的块** ⇒ 检索命中的是「四五对问答的混合体」。
+  **三件一起做**（⛔ 只做第一件会留两处半截）：
+  ① ✅ **可选 `doc_type` 形参** —— 不传 = **沿用扩展名推断** ⇒ **访客行为一字不变**（业务方裁的就是这个默认值）；
+  ② 🔴 **未知档位 ⇒ 400**（⛔ 不静默回落 `default`）—— ⚠️ **本 Agent 补的**：
+  `chunker.get_text_splitter` 是 `.get(doc_type, default)` ⇒ 一个拼错的档名会让**整批语料**按 500/50 切而不报错；
+  ③ ✅ **新增 `faq` = 300/50** 且 **`technical` 500/50 → 600/60** ——
+  🔴 **没有 `faq` 档，① 对 FAQ 就是空的**（这处也是本 Agent 补的，业务方只裁了"怎么指定"）；
+  ⚠️ **overlap 一起提到 60** 同理（那份调研按**比例**判，只改 size 会掉到 8.3%）。
+  **测试**：新增 `api/test_rag_upload_doc_type.py`（**10 条**）——
+  钉「不传 / 传了 / 空白 / 未知」四种情形 + 档位表本身 + **其余三档一个数没动**。
+  🔴 **反证跑过**：删掉未知档位校验 ⇒ **1 failed**；退回纯扩展名猜 ⇒ **3 failed**；还原 ⇒ **10 passed**。
+  ⚠️ **本份没解决**：`chunker` 模块内部**仍是静默回落**（闸只在端点层）· 分块边界**仍无用例**（§六）。
+  📄 `docs/decisions/DEC-116-分档落地的三件与两处Agent自补.md` ·
+  spec ⇒ `docs/specs/chunker.md` · `docs/specs/api_v1_rag.md` · `docs/说明/语料要求.md` §5.4
+
 - 🔴 **`api/schema.sql` 重新生成 —— `approval_events` 终于进了那份生成的快照**（2026-10-08 · `N12` 结清）——
   **主判据（⛔ 不会把自己数进去 —— 靠【行首锚】）**：
   `grep -c '^CREATE TABLE public\.approval_events' api/schema.sql` ⇒ **1**（**改前 0**）。
