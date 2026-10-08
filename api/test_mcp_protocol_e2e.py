@@ -54,20 +54,27 @@ def test_real_call_round_trips_through_stdio():
 
 
 def _server_child_pids() -> list:
-    """找出**真的** MCP 服务端子进程。⚠️ 用 `ps` 而不是 `pkill` —— 别误伤别的进程。"""
+    """找出**真的** MCP 服务端子进程。
+
+    🔴 **必须用 `pgrep -f`（匹配【完整】命令行），⛔ 不能用 `ps -eo command=` 做子串匹配** ——
+       `ps` 在 **Linux 上会按终端宽度【截断】命令行**：CI 的路径长
+       （`/home/runner/work/<repo>/<repo>/api/mcp_server.py`），截断后 `mcp_server.py` 被切掉
+       ⇒ **本地（macOS）找得到、CI（Linux）找不到**。
+       📌 **实测**（2026-10-08）：本机 860 全绿，**CI 报 `assert []`**
+       —— 正是本仓记过的那一类「**本地绿当成了不依赖**」
+       （`docs/复盘/2026-09-30-本地绿当成了不依赖.md`）。
+
+    ⚠️ 同时排除**本进程**（`os.getpid()`）—— ⛔ 别把自己当成子进程杀了。
+    """
+    import os
     import subprocess
 
-    out = subprocess.run(["ps", "-eo", "pid=,command="], capture_output=True, text=True).stdout
-    pids = []
-    for line in out.splitlines():
-        parts = line.split(None, 1)
-        if len(parts) != 2:
-            continue
-        pid, cmd = parts
-        # ⚠️ 三个条件缺一不可：是 mcp_server.py、不是本测试进程、不是 grep 自己
-        if "mcp_server.py" in cmd and "pytest" not in cmd and "grep" not in cmd:
-            pids.append(int(pid))
-    return pids
+    out = subprocess.run(
+        ["pgrep", "-f", "mcp_server.py"], capture_output=True, text=True
+    ).stdout
+    pids = {int(tok) for tok in out.split() if tok.isdigit()}
+    pids.discard(os.getpid())
+    return sorted(pids)
 
 
 def test_killed_subprocess_is_recovered_on_the_next_call():
