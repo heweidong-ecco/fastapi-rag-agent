@@ -10,6 +10,44 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- ⭐ **新增一层「外部参考层」`docs/reference/` + 首篇文档（MCP 官方原文摘录）**（2026-10-08）——
+  业务方原话：「关于 MCP 无状态的官方内容**记录成一个单独技术文档**放在 `docs/` 子文件夹 ——
+  **英文名：使用行业放技术文档的英文名**，方便以后看。」外加同日一并发话：
+  「**关于本项目 MCP 写一份新的 DEC 文档**。」
+
+  **加了什么**：
+
+  | # | 文件 | 是什么 |
+  |---|---|---|
+  | ① | `docs/reference/mcp-stateless-and-transport.md` | **MCP「无状态」与传输层的官方原文摘录** —— 🟢官方 / 🔵实测 / ⚪本项目判断 **逐条标注**，**附可重跑的抓取命令**｜⚠️ **自足**，可整份复制到别的仓 |
+  | ② | `docs/decisions/DEC-104-MCP客户端统一路线-解SDK锁与长驻会话.md` | **本项目自己的 MCP 路线裁定**（批④ 选 B · 顺序 · 备选与反悔成本） |
+  | ③ | `docs/decisions/DEC-036-文档体系分四层.md` **附录二** | 记「**第五层**」这件事（⚠️ **正文四层表按规矩不改写**） |
+  | ④ | `docs/文档地图.md` | 新增 **🅒b 外部参考层** + 索引行 + **修正 Diátaxis 映射** |
+
+  🔴 **为什么值得单开一层**：本仓**一直**有这类内容 ——
+  `docs/说明/魔搭创空间-部署与平台约束.md` 就是**外部平台的硬约束**，
+  它当时被塞进「说明层」，**是层与内容不匹配**。本批只是给这个既有的区分**补上一层名字**。
+  ⇒ **新判据**：「**这是【我们对外承诺什么】，还是【别人规定了什么】？**」
+  前者 ⇒ `docs/契约/`（本仓自己的）· 后者 ⇒ `docs/reference/`（外部权威源）。
+
+  🔴 **写这份文档时抓到的【自身错误】**：我原先"记得"官方那句是
+  「Clients should never make tool use decisions based on ToolAnnotations received from untrusted servers」——
+  **重抓原文后是**：「For trust & safety and security, clients **MUST** consider tool annotations to be
+  **untrusted** unless they come from trusted servers.」
+  ⇒ 该文档顶部据此立了一条硬约束：**只放官方原文，⛔ 不放"我记得是这样"**，
+  **项目自己的判断必须标 `⚪ 本项目判断`**。
+
+  ⚠️ **两处"故意不这么做"**（都写进了文件里，⛔ 不是漏了）：
+  ① 新层的**只对新文档生效** —— 存量那份魔搭文档**留在说明层不动**（挪它改动面大、收益小）；
+  ② `DEC-104` 里指向批① 施工单的那处**故意不加反引号** ——
+  那份施工单目前**只在另一个分支**（`docs/ledger-reconcile`，`c5442e0`）上，本分支取不到。
+
+  📌 **判据**：`ls docs/reference/` · `bash scripts/check_doc_links.sh`（**🔴 真断链 0**）·
+  `bash scripts/check_doc_orphans.sh`（**无孤儿**）· 喂 hook JSON ⇒ **六道门全绿 rc 0**。
+
+  ⚠️ **同期【欠】的一笔**：`8dc9cba`（批① Task 1 · `api/tool_cache.py` 收口）**没写 CHANGELOG** ——
+  按施工单，批① 的文档与留痕**统一落在 Task 7**（见 `docs/文档地图.md` §🅗 的施工单）。
+
 - 🟢 **补上本仓的【第 ⑥ 道门】：静态检查（`ruff` · **基线棘轮**）**（2026-10-07）——
   新增 `scripts/check_lint_baseline.sh`＋`scripts/ruff-baseline.txt`＋仓根 `ruff.toml`，
   本地挂在 `.claude/hooks/pre-commit-gates.py`，CI 挂在 `ci.yml` 的 **`syntax`** job。
