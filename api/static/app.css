@@ -272,3 +272,47 @@ input:disabled, textarea:disabled, select:disabled { opacity: .55; cursor: not-a
 }
 .pagination .page-label { font-variant-numeric: tabular-nums; }
 .pagination .page-hint { margin-left: auto; }
+
+/* ── 4.8 侧栏导航 / 网格 / 页头字段（2026-10-09 加 · 按风格稿的 dashboard 布局）── */
+
+/* 🔴 **全站唯一允许用渐变的地方之一**：侧栏顶部的品牌块。
+   ⚠️ **它【不承载任何数据】** —— 本仓有前科：`trace.html` 那两格"总 Token / 总花费"
+   在**没有数据来源**的情况下照样印出来，恒为 `--`（`DEC-093` 具体化 D）。
+   ⇒ 好看的东西⛔ 不许用来掩盖"这里其实没有数"。 */
+.brand {
+  margin: var(--sp-3); padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-ctl); color: #fff; font-weight: 650; letter-spacing: .01em;
+  background: var(--accent-grad);
+}
+
+.nav { display: flex; flex-direction: column; padding: 0 var(--sp-2); gap: 2px; }
+.nav a {
+  display: block; padding: var(--sp-2) var(--sp-3); border-radius: var(--r-ctl);
+  color: var(--fg-dim); text-decoration: none; font-size: var(--fs-body);
+}
+.nav a:hover { background: color-mix(in srgb, var(--info) 8%, transparent); color: var(--fg); }
+.nav a.active {
+  background: color-mix(in srgb, var(--info) 13%, transparent);
+  color: var(--info); font-weight: 600;
+}
+
+/* 卡片网格：宽屏两列、窄屏自动上下（⛔ 不写死列数 —— 写死了换个屏就挤） */
+.grid {
+  display: grid; gap: var(--sp-4); align-items: start;
+  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+}
+
+/* 页头里的输入行（label + 控件贴在一起） */
+.field {
+  display: inline-flex; align-items: center; gap: var(--sp-2);
+  color: var(--fg-dim); font-size: var(--fs-cap); white-space: nowrap;
+}
+.field input { width: auto; min-width: 160px; }
+
+/* 页头/侧栏在窄屏下的退让 */
+@media (max-width: 760px) {
+  .app-shell { flex-direction: column; height: auto; }
+  .sidebar { width: auto; flex: none; border-right: 0; border-bottom: 1px solid var(--line); }
+  .nav { flex-direction: row; flex-wrap: wrap; }
+  .page-head { flex-wrap: wrap; }
+}

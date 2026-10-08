@@ -105,11 +105,16 @@ def test_page_does_not_print_the_two_dead_overview_cards():
     调用点**都没传这两个值** ⇒ 两格**从上线起恒为 `--` / `¥0.0000`**。
     把永远为假的数印在页面上，正是硬门 C「最容易假完成」要防的那件事。
 
-    反证检验：把 `<div class="card"><div class="k">总花费` 加回去 ⇒ 本条红。
-    ⚠️ 查的是**卡片标题**那一处形状（`.k`），⛔ 不是全文禁词 —— 页脚说明里提到"总花费"是允许的。
+    反证检验：把概览卡里的标题换成「总花费」⇒ 本条红。
+    ⚠️ 查的是**卡片标题**那一处形状（`.metric-l`），⛔ 不是全文禁词 ——
+       页脚说明里提到"总花费"、以及页面注释里回顾这段历史，都是允许的。
+    🔴 **2026-10-09 改判据**：卡片标题的 class 从 `.k` 换成了设计系统的 **`.metric-l`**
+       （`frontend/README.md` §五 的 `metric` 组件）⇒ 旧正则解析不到任何卡片，
+       本用例**红在了它自己那句 `assert cards` 上**（"页面结构变了，判据跟着失效"）。
+       ⇒ ✅ **正是那句话在起作用** —— 它没让我静默通过，也没让我直接删用例。
     """
     text = _page_text()
-    cards = re.findall(r'<div class="k">([^<]*)</div>', text)
+    cards = re.findall(r'<div class="metric-l">([^<]*)</div>', text)
     assert cards, "没解析到概览卡片 —— 页面结构变了，本用例的判据跟着失效（⛔ 别直接删了它）"
     for dead in ("总 Token", "总花费", "总Token"):
         assert dead not in cards, (
