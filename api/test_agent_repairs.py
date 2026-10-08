@@ -382,7 +382,7 @@ def test_mcp_server_call_tool_offloads_sync_handler(monkeypatch):
 
 
 # ===========================================================================
-# (e) get_llm_with_mcp_tools：mcp 1.30 的 list_tools() 返回 ListToolsResult
+# (e) get_llm_with_mcp_tools：list_tools() 返回 ListToolsResult（⚠️ 不写版本号 —— 会过期）
 # ===========================================================================
 def test_get_llm_with_mcp_tools_unpacks_list_tools_result(monkeypatch):
     """`list_tools()` 返回的是 **`ListToolsResult`**（列表在 `.tools`），不是列表本身。

@@ -2,7 +2,7 @@
 
 | 项 | 内容 |
 |---|---|
-| **状态** | 🔵 **已裁定（2026-10-08）· ⬜ 未实施** —— 排在 **批① → 批② → 批③ 之后**（§二·顺序） |
+| **状态** | 🔵 **已裁定（2026-10-08）** —— **部分实施**：<br>· ✅ **批④-A（解 SDK 上界 + 服务端 API 迁移）2026-10-08 已落地** ⇒ `DEC-110`<br>· ⬜ **批④-B（长驻会话 / 执行通道统一）未做** —— ⚠️ **§2.1 那道 anyio cancel-scope 的坎还在**，见 §二 |
 | **触发** | 业务方原话（2026-10-08）：「**`mcp client tools`：execute_python 从 agent_graph / agent_checkpointer：为什么只有 web_search 这个 tools，这两个不是使用 mcp tools 吗？只有一个 web_search 可能是当时测试只用一个 tools 测试是否行得通，现在改道走 mcp client，你的建议是什么。execute_python 也在 mcp client 中注册，走 docker 容器，agent prompt 应该可以统一改 tools 在 mcp client 中，或者有注册，全局 agent tools 统一走 mcp client，更新框架，现在 mcp 是无状态的模式，具体你搜索 anthropic mcp 相关内容，并做文档记录和更新，代码也需要注释。**」<br>以及同日的批④ 选择：「**批④：B（MCP client）：解开 SDK 锁 mcp，用最新版，开一个长驻 async with。**」 |
 | **类型** | 架构路线 · SDK 版本口径 · 会话模型 |
 | **落点** | `api/requirements.txt`（:95 的 `mcp>=1.0.0,<2` 上界）· `api/agent_graph_advanced.py`（客户端会话）· `api/mcp_server.py`（服务端启动形态）· `api/agent_graph.py` · `api/agent_checkpointer.py` · `api/agent_graph_advanced_learning.py`（三处工具清单） |
@@ -102,6 +102,16 @@
 ---
 
 ## 四 · 现状（🔵 实测 · ⛔ 别抄，用命令核）
+
+> 🔴 **2026-10-08（批④-A）更正：本表前两行【已过时】。**
+> · SDK 上界：`mcp>=1.0.0,<2` ⇒ **`mcp>=2.3.0,<3`**
+> · 实装版本：`1.30.0` ⇒ **`2.3.0`**
+> · 服务端形态：装饰器（`@server.list_tools()`）⇒ **2.x 的构造器回调**（`Server(on_list_tools=…)`）
+>   —— ⚠️ **但本表"握手形态"那一行的判据（`create_initialization_options()`）仍然成立**，2.x 没删它。
+> · 会话那一行（每次调用起一次）**没变** —— 那是 **批④-B** 的事。
+>
+> ⚠️ **本表是 2026-10-08 上午的快照，按本仓规矩⛔ 不改写**；**现行值一律跑右边那列命令**。
+> 📄 迁移的裁定与实测 ⇒ `DEC-110`。
 
 | 项 | 现状 | 判据 |
 |---|---|---|

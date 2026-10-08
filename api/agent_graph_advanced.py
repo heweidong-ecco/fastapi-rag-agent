@@ -252,10 +252,13 @@ async def get_llm_with_mcp_tools():
     """获取绑定了 MCP 工具的 LLM 实例。
 
     🔴 2026-09-20 修（依赖漂移）:此前写的是 `for mcp_tool in tools:` —— 而
-       `mcp 1.30.0` 的 `list_tools()` 返回的是 **`ListToolsResult`**（列表在 `.tools`），
+       `session.list_tools()` 返回的是 **`ListToolsResult`**（列表在 `.tools`），
        **不是列表本身**。直接遍历它 ⇒ pydantic 模型迭代出的是 **(key, value) 元组**
        ⇒ `AttributeError: 'tuple' object has no attribute 'name'`
        ⇒ `/agent/mcp_chat`（三代）**500**。
+       ⚠️ 2026-10-08（批④）**去掉了这里的版本号**（原写「`mcp 1.30.0` 的」）——
+       结论与 mcp 版本无关（2.x 仍是 `ListToolsResult` / `.tools`），而**版本号会过期**：
+       本仓 `N8` 的教训就是"别把话说死在一个会变的东西上"。
        回归测试:`api/test_agent_repairs.py::test_get_llm_with_mcp_tools_unpacks_list_tools_result`
     """
     tools_result = await get_mcp_tools()
