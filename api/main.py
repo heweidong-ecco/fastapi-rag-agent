@@ -720,6 +720,18 @@ async def startup_event():
     # 新增 Agent 工具 启动后台定时健康检查
     asyncio.create_task(scheduled_health_check())
 
+    # 🔴 2026-10-08（批④-B）：把 MCP **长驻会话**起起来（改前是每次工具调用自开自关，实测 ~2s/次）。
+    # ⚠️ **起不来【不阻塞启动】** —— 拿 try/except 包住。这条是刻意的：
+    #    2026-09-20 那次池化的教训反面 —— 当时它**让应用启动直接失败**
+    #    （`Application startup failed. Exiting.`），比"MCP 挂了"本身更糟。
+    #    ⇒ 这里起不来就**只记一条 warning**，首次真正调用时 actor 会自己重试。
+    try:
+        from agent_graph_advanced import _get_actor
+        await _get_actor()
+        logger.info("MCP 长驻会话已就绪")
+    except Exception as e:                      # noqa: BLE001
+        logger.warning(f"MCP 长驻会话没起来（首次调用时会重试）：{e}")
+
 
 @app.on_event("shutdown")
 async def graceful_shutdown():
@@ -730,6 +742,16 @@ async def graceful_shutdown():
     """
     close_pool()  # 关闭连接池
     logger.info("收到关闭信号，开始优雅关闭...")
+
+    # 🔴 2026-10-08（批④-B）：关掉 MCP 长驻会话。
+    # ⚠️ **⛔ 不调它也不会漏子进程**（loop 关时 holder task 会走到 finally，实测跑完全量无残留），
+    #    但显式关能让"什么时候释放那 ~84 MB"是**可预期**的。
+    try:
+        from agent_graph_advanced import aclose_mcp_session
+        await aclose_mcp_session()
+        logger.info("MCP 长驻会话已关闭")
+    except Exception as e:                      # noqa: BLE001
+        logger.warning(f"关闭 MCP 长驻会话时出错：{e}")
 
     # 1. 停止接收新请求（FastAPI 自动处理）
     # 2. 等待现有请求处理完成（FastAPI 自动处理）
