@@ -5,6 +5,7 @@ import time
 import random
 import redis
 from functools import wraps
+from typing import Callable, Dict, Optional
 from config import REDIS_HOST, REDIS_PORT
 
 redis_client = redis.Redis(
@@ -13,6 +14,40 @@ redis_client = redis.Redis(
     db=0,
     decode_responses=True
 )
+
+# ==================== TTL 表（**唯一一份**）====================
+# 🔴 2026-10-07：本表从 `agent_graph_advanced.CACHE_TTL_MAP` **搬过来并收口** ——
+#    此前那份只盖住 `/agent/mcp_chat` 一条路，落在那个模块里。
+#
+# ⚠️ **`0` = 不缓存**，是有意写的，⛔ 不是漏填。
+TTL_BY_TOOL: Dict[str, int] = {
+    # 纯函数：同一表达式结果永远一样 ⇒ 可长缓存
+    "calculator": 86400,
+
+    # 🔴 不缓存。原因不是"它便宜"，是**它会错**：
+    #    它返回「今天是X月X日」，而缓存键只含入参（空）——
+    #    23:30 缓存、00:10 命中 ⇒ **跨天那一小时返回昨天**。
+    #    这条不是假设：`agent_graph_advanced` 那份内联缓存**已经在跑**（TTL 3600）。
+    "date_today": 0,
+
+    # 搜索结果有时效性；**且失败不入缓存**（由 `should_cache` 保证）
+    "web_search": 300,
+
+    # 代码执行结果**不复用**（同一段代码可能依赖外部状态）
+    "execute_python": 0,
+}
+
+
+def get_ttl(tool_name: str) -> int:
+    """查某工具的 TTL。
+
+    🔴 **查不到就抛 `KeyError`** —— ⛔ 不给默认值。
+    理由：`TTL_BY_TOOL.get(name, 60)` 会把「新加了工具、但忘了登记 TTL」
+    变成「它被缓存 60 秒」—— **不报错、没人会知道**。
+    本仓的立场：**「从不命中」与「没人违规」在机器痕迹上完全一样。**
+    """
+    return TTL_BY_TOOL[tool_name]
+
 
 # ==================== 基础缓存操作 ====================
 def get_tool_cache_key(tool_name: str, *args, **kwargs) -> str:
@@ -56,15 +91,36 @@ def set_cached_tool_result(tool_name: str, result, expire_seconds: int = 300, *a
 _LOCK_WAIT_SECONDS = 2.0
 
 
-def cached_tool(expire_seconds: int = 300):
+def cached_tool(
+    expire_seconds: Optional[int] = None,
+    *,
+    name: Optional[str] = None,
+    should_cache: Optional[Callable[[object], bool]] = None,
+):
     """装饰器：自动为工具函数添加缓存（含穿透、击穿、雪崩防护）
+
+    参数:
+        expire_seconds: 直接指定 TTL。为 `None` 时查 `TTL_BY_TOOL[name]`
+                        （⛔ **查不到会抛 `KeyError`**，见 `get_ttl`）。
+        name:          缓存键里的工具名。缺省用被装饰函数的 `__name__`。
+                        ⚠️ 用 `name=` 是**必须的**当函数名 ≠ 工具名时 ——
+                        键名与 `TTL_BY_TOOL` 的键**必须**是同一个东西。
+        should_cache:  结果谓词。返回 `False` ⇒ **不写缓存**（本次照常返回结果）。
+                        ⚠️ 用它而不是"猜哪些结果算失败" —— 每条工具失败的形状不同，
+                        猜出来的规则是**静默**的（本仓为此栽过多次）。
 
     ⚠️ 抢锁**有上限**（`_LOCK_WAIT_SECONDS`）：超时后**降级为直接执行** —— 不再等、**不递归**。
     """
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            tool_name = func.__name__
+            tool_name = name or func.__name__
+            ttl = expire_seconds if expire_seconds is not None else get_ttl(tool_name)
+
+            # TTL = 0 ⇒ 直通（⛔ 不读、不写、不加锁）
+            if ttl == 0:
+                return func(*args, **kwargs)
+
             # 1. 查缓存
             cached = get_cached_tool_result(tool_name, *args, **kwargs)
             if cached is not None:
@@ -79,7 +135,8 @@ def cached_tool(expire_seconds: int = 300):
                         # 3. 执行工具函数
                         result = func(*args, **kwargs)
                         # 4. 回写缓存（带防穿透和防雪崩）
-                        set_cached_tool_result(tool_name, result, expire_seconds, *args, **kwargs)
+                        if should_cache is None or should_cache(result):
+                            set_cached_tool_result(tool_name, result, ttl, *args, **kwargs)
                         return result
                     finally:
                         redis_client.delete(lock_key)
