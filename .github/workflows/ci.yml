@@ -255,6 +255,15 @@ jobs:
           bash scripts/test_check_doc_links.sh
           bash scripts/test_check_doc_orphans.sh
 
+          # ⭐ 索引覆盖门（2026-10-09 加，`DEC-120`）—— `frontend/索引.md` 里声明的覆盖清单，
+          #   每一份都必须**还在、且已入库**。
+          #   🔴 它钉的是业务方那条纪律：「**其他文档更新了，索引列表同时更新**」——
+          #      「同步没同步」**本身测不出来**，但「**索引声明覆盖的还在不在**」测得出来。
+          #   ⚠️ **与断链门不重复**：那道扫全文反引号里的路径，这道扫**索引自己声明的清单**。
+          #   ⚠️ 自带 `--self-test`（造假索引 ⇒ 必须红 + 点名那条）⇒ 一条命令两件事。
+          bash scripts/check_index_sync.sh
+          bash scripts/check_index_sync.sh --self-test
+
           # ⭐ CI 形状门（2026-10-08 加，`§七·2`）—— **每个 job 必须带 `timeout-minutes`**。
           #   理由：卡住的 job **只烧时间、不烧失败次数**，而「卡住」与「跑得很慢」在
           #   机器痕迹上**完全一样** ⇒ 没有上限时，「卡住」不是一个**显式状态**。

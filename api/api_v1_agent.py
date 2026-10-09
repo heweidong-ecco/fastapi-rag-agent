@@ -1881,9 +1881,21 @@ async def agent_token_recent(
     limit: int = 20,
     user_name: str = Depends(get_current_user_hybrid),
 ):
-    """获取最近的 Token 使用记录"""
+    """获取最近的 Token 使用记录。
+
+    🔴 **2026-10-08：加了 `truncated`**（`frontend/README.md` §六 红线②「被截断必须说出来」）——
+       改前它**取了 N 条就走了**，调用方**分不清"就这么多"与"被截了"**。
+    ⚠️ 判法同 `/agent/approvals/history`：**多要一条** —— 多要的那条**只当探针，不返回**
+       （⛔ 不拿 `len == limit` 猜：那在"正好 N 条、后面没有了"时会误报截断）。
+    """
+    rows = get_recent_usage(limit + 1)
+    truncated = len(rows) > limit
+    if truncated:
+        rows = rows[:limit]
     return {
-        "recent_usage": get_recent_usage(limit),
+        "recent_usage": rows,
+        "count": len(rows),
+        "truncated": truncated,
         "requested_by": user_name,
     }
 
@@ -2022,6 +2034,7 @@ async def agent_budget_intercepts(
 @router.get("/agent/approvals/history")
 async def agent_approval_history(
     limit: int = 50,
+    offset: int = 0,
     user_name: str = Depends(get_current_user_hybrid),
 ):
     """裁决历史 —— **接管页下半栏就读它**，也就是硬门 D「证真」那栏的可视证据（`DEC-088` §3.2）。
@@ -2036,8 +2049,21 @@ async def agent_approval_history(
        "查所有人"（`DEC-055` 口径）。
     """
     owner_filter = None if get_user_role(user_name) == UserRole.ADMIN else user_name
-    events = list_decisions(owner=owner_filter, limit=limit)
-    return {"events": events, "count": len(events), "requested_by": user_name}
+    events = list_decisions(owner=owner_filter, limit=limit + 1, offset=offset)
+
+    # 🔴 **`has_more` 用「多取一条」判**（`frontend/README.md` §六）——
+    #    多要的那一条**不返回**，只用来回答"后面还有没有"。
+    #    ⚠️ **⛔ 不用 `count(*)`**：多一次全表计数，而且它与"这一页满没满"是两件事。
+    #    🔴 **⛔ 更不许让前端拿 `count == limit` 去猜** —— 那在"正好一整页、后面没有了"时
+    #       会显示一个**点不动的下一页**，而且不报错。
+    has_more = len(events) > limit
+    if has_more:
+        events = events[:limit]
+
+    return {
+        "events": events, "count": len(events), "has_more": has_more,
+        "limit": limit, "offset": offset, "requested_by": user_name,
+    }
 
 # ====  Token统计 花费明细查询 接口 ====================
 
@@ -2061,7 +2087,7 @@ async def agent_cost_records(
                          AND created_at >= CURRENT_DATE - %s
                        ORDER BY created_at DESC
                        LIMIT %s""",
-                    (user_name, days, limit)
+                    (user_name, days, limit + 1)      # 🔴 多要一条（判 truncated 的探针）
                 )
                 rows = cur.fetchall()
                 records = [
@@ -2079,7 +2105,14 @@ async def agent_cost_records(
                     }
                     for r in rows
                 ]
-        return {"records": records, "count": len(records), "requested_by": user_name}
+        # 🔴 2026-10-08：`truncated` =「多要的那条真拿到了」——
+        #    判法同 `/agent/approvals/history`，⛔ 不拿 `len == limit` 猜
+        #    （那在"正好 N 条、后面没有了"时会误报）。`frontend/README.md` §六 红线②。
+        truncated = len(records) > limit
+        if truncated:
+            records = records[:limit]
+        return {"records": records, "count": len(records), "truncated": truncated,
+                "requested_by": user_name}
     except Exception as e:
         return {"error": str(e)}
     

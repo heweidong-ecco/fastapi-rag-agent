@@ -181,7 +181,10 @@ class DocumentPreprocessor:
                 result.append(line)  # 保留空行
         return '\n'.join(result)
 
-    def deduplicate_chunks(self, chunks: List[str], threshold: float = 0.9) -> List[str]:
+    def deduplicate_chunks(self, chunks: List[str], threshold: float = 0.85) -> List[str]:
+        # 🔴 2026-10-08 改：`0.9` → **`0.85`** —— 对齐 `docs/说明/语料要求.md` §一#3
+        #    定死的那个数（「语义去重阈值 0.85」）。
+        #    ⚠️ **这一改动【当前零影响】** —— 本方法没有任何调用方（见 docstring 里那三条）。
         """
         对文档块进行语义去重。
         如果两个块的语义相似度超过阈值，只保留第一个。

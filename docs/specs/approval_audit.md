@@ -35,7 +35,11 @@
   ⇒ **表里少一条 ≠ 那次裁决没发生**。查历史时⛔ 别把"查不到"读成"没批过"。
 - **`owner` 与 `actor` 是两个身份**：admin 接管 alice 的会话时 `owner="alice"`、`actor="admin"`。
   合成一个字段 ⇒ 留痕当场变假话，**而且不报错**。
-- **`list_decisions(owner=...)` 是必填关键字参数**：`None` = 全量。
+- **`list_decisions(owner=..., limit=50, offset=0)` 是必填关键字参数**：`None` = 全量。
+- 🔴 **`offset` 是 2026-10-08 加的**（分页 · `frontend/README.md` §六）——
+  ⚠️ **翻页要正确，`ORDER BY` 必须是【全序】**：本表是 `created_at DESC, id DESC`，
+  第二条排序键 `id` 是**承重的**（连写的几条 `created_at` 极可能同毫秒）。
+  ⇒ **不是全序就会漏行/重行，而且不报错**。真库用例 ⇒ `api/test_approval_events_db.py::test_offset_paging_neither_skips_nor_repeats`。
   ⛔ **别给它加默认值** —— 那会让「我忘了传」与「我要查所有人」再也分不出来（`DEC-055` 口径）。
 - **`_COLUMNS` 的顺序必须与 `list_decisions` 的 `SELECT` 列顺序一致** ——
   靠 `zip` 配名，**错位不报错**，只会把 `decision` 显示成 `actor`。
@@ -43,11 +47,25 @@
 ## 关联
 
 `docs/decisions/DEC-088-接管页与硬门D的三个缺口.md` · `docs/specs/pending_approvals.md` ·
-`docs/specs/api_v1_agent.md` · `api/schema.sql`（`approval_events` 尚未进这份**生成的**快照，见下）
+`docs/specs/api_v1_agent.md` · `api/schema.sql` · `api/test_approval_events_db.py`（真库那一半）
 
-> ⚠️ **`api/schema.sql` 里现在还没有 `approval_events`** —— 那份文件是 `pg_dump` **生成的**
-> （文件头明写「⛔ 不要手改」），要它出现只能**重新导一次**（需要活着的库）。
-> 在那之前，**本模块的 `_DDL` 是唯一的权威**。
-> ⚠️ **顺带一条**：这表是**惰性**建的（`api/approval_audit.py:72` 的 `CREATE TABLE IF NOT EXISTS` 在写入路径里）
-> ⇒ **不先真跑一次 approve，表根本不存在**，`pg_dump` 照样导不出它。
-> 🔴 **两件事（重生成 + 真库用例）已登记** ⇒ `docs/待办总表.md` §三·附 **`N12`**（含可打印判据）。
+> ✅ **2026-10-08 已结清 —— `approval_events` 进 `api/schema.sql` 了**（`N12`）
+>
+> * **主判据（⛔ 不会把自己数进去 —— 靠【行首锚】）**：
+>   `grep -c '^CREATE TABLE public\.approval_events' api/schema.sql` ⇒ **1**（**改前 0**）。
+>   🔴 **这条判据被写歪过两次（都是"尺子自我指涉"）** ⇒ 过程留在 `api/schema.sql` 的文件头里：
+>   `grep -c 'approval_events'` 得 13 · `grep -c 'CREATE TABLE public.approval_events'`（无锚）得 2
+>   —— **都是因为它把写它的那句说明自己也数了进去**。加 `^` 后恒为 1。
+>   ⚠️ **`N12` 原写「应为 1」—— 那个数是猜的**（写它的人没见过真 dump）⇒ **真实判据是「0 → 非 0」**。
+> * 🔴 **「先真跑一次 approve」这一步【不需要再做】** —— 那次早就发生过：
+>   本机真库 `approval_events` **已有 456 行**，表**早就被惰性建出来了**
+>   （判据：`docker compose exec -T postgres psql -U postgres -d rag_db -tAc "SELECT count(*) FROM approval_events"`）。
+>   实测列与类型**逐格等于** `_DDL` ⇒ **PG 认这份 DDL**。
+>   ⚠️ **⛔ 别再为了"跑一次"往真库补写一条** —— 那是**假留痕**（比脏数据更糟，见下）。
+> * ✅ **补了真库用例** ⇒ `api/test_approval_events_db.py`（**6 条** · `-m needs_db` · 在 `rag_test` 上跑）：
+>   真写 → **真读回来** → 逐格断言。🔴 **反证跑过**：把 `_DDL` 的 `reason` 改成 `reasons` ⇒ **6 failed**；
+>   还原 ⇒ **6 passed** ⇒ 这条用例**真能抓住 DDL 写错**，⛔ 不是"恰好绿"。
+>
+> ⚠️ **一条仍要记住的**：这表是**惰性**建的（`CREATE TABLE IF NOT EXISTS` 在写入路径里）
+> ⇒ **在一个全新的库上，不先真跑一次 approve，`pg_dump` 照样导不出它**。
+> 本文件上面那句「`_DDL` 是唯一权威」**现在可以改成**：**`_DDL` 与 `api/schema.sql` 是同一份东西的两个视角**。

@@ -9,7 +9,7 @@ const path = require('node:path');
 
 const {
   messageText, summarizeToolCalls, formatElapsed, nextPollDelay,
-  buildContextQuery, buildApprovePayload,
+  buildContextQuery, buildApprovePayload, pagerState,
 } = require('./approvals.js');
 
 // ==================== ① messageText：content 可能是 str / list / 别的 ====================
@@ -117,4 +117,62 @@ test('脚本在【浏览器】环境下把 RagApprovals 挂到 window 上', () =
                     'nextPollDelay', 'buildContextQuery', 'buildApprovePayload']) {
     assert.strictEqual(typeof sandbox.window.RagApprovals[fn], 'function', `缺 ${fn}`);
   }
+});
+
+// ==================== ⑦ pagerState：分页的纯逻辑（`frontend/README.md` §六） ====================
+
+test('pagerState 首页：没有上一页，offset 从 0 开始', () => {
+  const s = pagerState({ offset: 0, limit: 50, hasMore: true, count: 50 });
+  assert.strictEqual(s.page, 1);
+  assert.strictEqual(s.hasPrev, false);
+  assert.strictEqual(s.hasNext, true);
+  assert.strictEqual(s.prevOffset, 0);
+  assert.strictEqual(s.nextOffset, 50);
+});
+
+test('pagerState 中间页：两边都有', () => {
+  const s = pagerState({ offset: 100, limit: 50, hasMore: true, count: 50 });
+  assert.strictEqual(s.page, 3);
+  assert.strictEqual(s.hasPrev, true);
+  assert.strictEqual(s.prevOffset, 50);
+  assert.strictEqual(s.nextOffset, 150);
+});
+
+test('pagerState 末页：hasMore=false ⇒ 没有下一页', () => {
+  const s = pagerState({ offset: 100, limit: 50, hasMore: false, count: 12 });
+  assert.strictEqual(s.hasNext, false);
+});
+
+test('pagerState 页码用【向下取整 +1】，⛔ 不是四舍五入', () => {
+  // offset=120、limit=50 ⇒ 第 3 页（floor(120/50)+1 = 3），不是第 2 也不是第 3.4
+  assert.strictEqual(pagerState({ offset: 120, limit: 50, hasMore: false }).page, 3);
+});
+
+test('🔴 pagerState：`hasMore` 缺失 ⇒ 必须 false —— 「没告诉你有更多」⛔ 不等于「有更多」', () => {
+  const s = pagerState({ offset: 0, limit: 50 });
+  assert.strictEqual(s.hasNext, false);
+});
+
+test('🔴 pagerState：⛔ 不许拿 `count === limit` 当「还有更多」', () => {
+  // 服务端明说 hasMore=false（正好一整页、后面没有了）⇒ 就算 count===limit 也不许显示下一页
+  const s = pagerState({ offset: 0, limit: 50, hasMore: false, count: 50 });
+  assert.strictEqual(s.hasNext, false, 'count===limit 被当成了「还有更多」—— 那是猜的，不是服务端说的');
+});
+
+test('pagerState：limit 非法（0/负/NaN）⇒ 不炸，且⛔ 不给出会打转的 nextOffset', () => {
+  for (const bad of [0, -5, NaN, undefined]) {
+    const s = pagerState({ offset: 0, limit: bad, hasMore: true });
+    assert.ok(Number.isInteger(s.nextOffset) && s.nextOffset > 0,
+      `limit=${bad} 时应回落到一个安全值，实得 nextOffset=${s.nextOffset}`);
+    assert.strictEqual(s.page, 1);
+  }
+});
+
+test('pagerState：prevOffset ⛔ 不许为负', () => {
+  assert.strictEqual(pagerState({ offset: 10, limit: 50, hasMore: false }).prevOffset, 0);
+});
+
+test('pagerState：带人读的页码标签', () => {
+  assert.strictEqual(pagerState({ offset: 0, limit: 50, hasMore: false }).label, '第 1 页');
+  assert.strictEqual(pagerState({ offset: 50, limit: 50, hasMore: false }).label, '第 2 页');
 });

@@ -11,6 +11,7 @@
  */
 
 const POLL_MS = 5000;
+const DEFAULT_PAGE_SIZE = 50;      // 与后端 `limit: int = 50` 的默认值同口径
 
 /** 一条消息的**可显示文本**。`content` 可能是 `str` / `list`（多模态 parts）/ 别的。 */
 function messageText(msg) {
@@ -73,9 +74,40 @@ function buildApprovePayload(threadId, owner, decision, editedText) {
   return q.toString();
 }
 
+/** 分页的**纯逻辑**（`frontend/README.md` §六）。
+ *
+ * 🔴 为什么要单独一条（那份规范里的两条红线）：
+ *  ① **⛔ 不许前端假分页** —— 本函数**只算"下一页从哪开始"**，⛔ 不切数组、⛔ 不缓存全量。
+ *     真正的分页由服务端 `limit` / `offset` 完成。
+ *  ② **⛔ 不许猜「还有更多」** —— `hasMore` **只能由服务端告诉我们**。
+ *     ⛔ 尤其**不许拿 `count === limit` 推**：那在"正好一整页、后面没有了"时会显示一个
+ *     **点不动的下一页**（而且不报错）。⇒ 缺失一律当 `false`
+ *     —— 「**没告诉你有更多**」⛔ 不等于「**有更多**」。
+ *
+ * ⚠️ 页码用 **`floor(offset / limit) + 1`**，⛔ 不是四舍五入（`limit=50, offset=120` ⇒ 第 3 页）。
+ * ⚠️ `limit` 非法（0 / 负 / NaN）⇒ 回落 `DEFAULT_PAGE_SIZE` —— ⛔ 否则 `nextOffset` 会**原地打转**。
+ */
+function pagerState({ offset, limit, hasMore } = {}) {
+  const lim = (typeof limit === 'number' && isFinite(limit) && limit > 0)
+    ? Math.floor(limit) : DEFAULT_PAGE_SIZE;
+  const off = (typeof offset === 'number' && isFinite(offset) && offset > 0)
+    ? Math.floor(offset) : 0;
+  const page = Math.floor(off / lim) + 1;
+  return {
+    page,
+    limit: lim,
+    offset: off,
+    hasPrev: off > 0,
+    hasNext: hasMore === true,              // 🔴 严格 `=== true`，见上面红线②
+    prevOffset: Math.max(0, off - lim),
+    nextOffset: off + lim,
+    label: '第 ' + page + ' 页',
+  };
+}
+
 const RagApprovals = {
   POLL_MS, messageText, summarizeToolCalls, formatElapsed, nextPollDelay,
-  buildContextQuery, buildApprovePayload,
+  buildContextQuery, buildApprovePayload, pagerState, DEFAULT_PAGE_SIZE,
 };
 
 if (typeof module !== 'undefined' && module.exports) {

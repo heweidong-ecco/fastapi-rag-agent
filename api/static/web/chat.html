@@ -4,94 +4,165 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>RAG 对话</title>
+<link rel="stylesheet" href="/static/app.css">
 <style>
-  :root { --line:#d8d8d8; --muted:#777; --bg:#fafafa; }
-  * { box-sizing: border-box; }
-  /* 🔴 2026-10-06 加（施工实测·订正⑧）—— **不是可有可无的一行**：
-     `#app` 身上写着内联 `style="display:flex"`，而作者样式的 `display` **压过**
-     UA 样式表里的 `[hidden] { display:none }` ⇒ `hidden` 属性**完全失效**，
-     登录页和主界面会**同时显示**（实测见施工单 Task 8）。
-     ⚠️ 只要页面上还有第二个「带 display 的 hidden 元素」，同一条就再犯一次 ⇒ 写成全局规则。 */
-  [hidden] { display: none !important; }
-  body { margin:0; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
-         display:flex; height:100vh; color:#222; }
-  #side { width:220px; border-right:1px solid var(--line); background:var(--bg);
-          display:flex; flex-direction:column; }
-  #side h2 { font-size:14px; margin:12px; color:var(--muted); }
-  #threads { flex:1; overflow-y:auto; }
-  .thread { padding:8px 12px; cursor:pointer; font-size:13px; border-bottom:1px solid #eee;
-            white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .thread.active { background:#e8f0fe; font-weight:600; }
-  #main { flex:1; display:flex; flex-direction:column; }
-  #log { flex:1; overflow-y:auto; padding:16px; }
-  .turn { margin-bottom:18px; }
-  .q { font-weight:600; }
-  .a { white-space:pre-wrap; line-height:1.7; }
-  .meta { color:var(--muted); font-size:12px; margin-top:6px; }
-  .badge { display:inline-block; padding:1px 6px; border-radius:3px; font-size:11px;
-           background:#fde8e8; color:#a33; margin-left:6px; }
-  .cite { color:#1a73e8; cursor:pointer; text-decoration:underline; }
-  .cite.open { font-weight:600; }
+  /* ══════════════════════════════════════════════════════════════════════════
+   * 本页只写【页面专属】规则；token 与通用组件在 `/static/app.css`
+   *   （= `frontend/README.md` §三–§五 那份规范的实现）。
+   *
+   * 🔴 **2026-10-09 重排**：按风格稿（+ `ui-ux-pro-max` 的 `Data-Dense Dashboard` 风格）
+   *   从"左边一条会话列表 + 右边上下堆消息"改成 **sidebar + page-head + 内容区**，
+   *   消息**卡片化并淡入**。
+   * ⚠️ **⛔ 没有改任何 class 名 / id / JS** —— 页面脚本按这些名字建元素
+   *   （判据：`id` 逐个核过，一个没丢）。
+   * ⛔ 文案口径也没动：熔断卡的「这不是故障」、拒答的「资料里没有」都是裁过的
+   *   （`DEC-090` / `DEC-091`）—— **改样式 ⛔ 不等于可以改字**。
+   * ══════════════════════════════════════════════════════════════════════════ */
+
+  /* ── 登录（未登录时唯一看得见的东西 —— 给它一块 hero） ── */
+  #login { max-width: 640px; margin: 9vh auto var(--sp-6); padding: 0 var(--sp-4); }
+  .login-sub { margin: var(--sp-2) 0 0; opacity: .92; }
+  .login-card { margin-top: var(--sp-4); }
+  .login-card > .hint { margin: 0 0 var(--sp-3); }
+
+  /* ── 侧栏里的会话列表（`.sidebar` 本身在 app.css） ── */
+  .side-sep { padding: var(--sp-4) var(--sp-4) 0; }
+  .side-sep h2 { font-size: var(--fs-cap); color: var(--fg-dim); margin: 0 0 var(--sp-2);
+                 letter-spacing: .02em; }
+  .threads { flex: 1; overflow-y: auto; min-height: 0; padding: 0 var(--sp-2); }
+  .thread { padding: var(--sp-2) var(--sp-3); border-radius: var(--r-ctl); cursor: pointer;
+            font-size: var(--fs-body); white-space: nowrap; overflow: hidden;
+            text-overflow: ellipsis; transition: background .12s; }
+  .thread:hover { background: color-mix(in srgb, var(--info) 8%, transparent); }
+  .thread.active { background: color-mix(in srgb, var(--info) 13%, transparent);
+                   color: var(--info); font-weight: 600; }
+  .side-foot { padding: var(--sp-3); }
+  .side-foot .btn { width: 100%; }
+
+  /* ── 消息流 ── */
+  /* ⚠️ **`margin: 0`，⛔ 不是 `0 auto`** —— 居中的话，消息的左边缘与上面的
+     `page-head`【不在一条线上】，看起来像两块东西拼的（2026-10-09 截图时看出来的）。 */
+  /* 🔴 `flex: 1; min-height: 0` 是 **2026-10-09 截图时才补的**（刀 2 检查点）：
+     原先只有 max-width/margin/padding ⇒ `.main` 那个 flex 列里**没人吃掉剩余高度**
+     ⇒ **空会话时消息区被挤成 0 高、输入框贴在页头下面**（截图里一眼就看出来，而
+     `node --test` 与 pytest **一条都不会红**）—— 本仓原话：「用例全绿证不了页面没坏」。
+     `min-height: 0` 不能省：flex 子项默认 `min-height: auto`，不加它 `overflow: auto` 不生效。 */
+  .log { flex: 1; min-height: 0; max-width: 900px; margin: 0;
+         padding: var(--sp-5) var(--sp-5) var(--sp-4); }
+
+  /* ⚠️ 动效只做【一个有意义的】：新消息**淡入上浮** —— 它表达"这条是刚来的"，
+     而不是为了好看而好看（`ui-ux-pro-max` 的 7 号规则：Motion conveys meaning）。
+     🔴 **必须带 `prefers-reduced-motion`** —— 那条例子里把它列为反模式。 */
+  .turn { margin-bottom: var(--sp-5); animation: msgRise .22s ease-out both; }
+  @keyframes msgRise {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: none; }
+  }
+  @media (prefers-reduced-motion: reduce) { .turn { animation: none; } }
+
+  .q { font-weight: 600; display: flex; gap: var(--sp-2); align-items: baseline; }
+  .q::before {
+    content: "问"; flex: none; font-size: var(--fs-cap); font-weight: 400;
+    color: var(--info); background: color-mix(in srgb, var(--info) 12%, transparent);
+    border-radius: var(--r-pill); padding: 1px var(--sp-2);
+  }
+  .a { white-space: pre-wrap; max-width: 62ch; margin-top: var(--sp-2); }
+  .meta { color: var(--fg-dim); font-size: var(--fs-cap); margin-top: var(--sp-2);
+          display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
+  .badge { }                                   /* 外观走 app.css 的 .badge */
+  /* 🔴 刀 2（§7.1①）：原文里**与答案逐字重合**的片段。
+     ⚠️ 语义色用 `--warn` 的那一档（"这是一个标记"），⛔ 别用渐变/彩色 —— 它旁边还有正文。
+     ⛔ 别把它做成整段变色：高亮的是"抄自原文的那几个字"，**空的时候一个字都不标**。 */
+  .src-body mark { background: color-mix(in srgb, var(--warn) 28%, transparent); color: inherit; }
+  .cite { color: var(--info); cursor: pointer; text-decoration: underline;
+          text-underline-offset: 2px; }
+  .cite.open { font-weight: 600; }
+
   /* 🔴 `DEC-089`：「甲 · 就地展开/收起」⇒ 卡片挂在该条回答【下面】，⛔ 不再是全局一个 #card。
-     每条回答自带一个（`addTurn` 里建，默认 `hidden`）。 */
-  .card { border:1px solid var(--line); border-radius:6px; padding:10px; margin-top:8px;
-          background:#fffbe6; font-size:13px; }
-  .card[hidden] { display:none; }
-  .card .src { font-weight:600; }
-  .card .src-meta { color:var(--muted); font-size:12px; margin:2px 0 6px; }
+     每条回答自带一个（`addTurn` 里建，默认 `hidden`）。⛔ 类名不改（JS 按它建）。 */
+  .card { border: 1px solid var(--line); border-left: 3px solid var(--info);
+          border-radius: var(--r-card); padding: var(--sp-3); margin-top: var(--sp-2);
+          background: color-mix(in srgb, var(--info) 6%, transparent); font-size: var(--fs-body); }
+  .card .src { font-weight: 600; }
+  .card .src-meta { color: var(--fg-dim); font-size: var(--fs-cap); margin: var(--sp-1) 0 var(--sp-2); }
+
   /* 🔴 `DEC-090` · `R3.2`：熔断卡片。**与 `.card` 分开一个元素** ——
      引用卡片由 `_openIndex` 驱动、每次重画都被清空，两者抢一个容器会互相抹掉。 */
-  .breaker { border:1px solid #e6b800; border-left:4px solid #e6b800; border-radius:6px;
-             padding:12px; margin-top:8px; background:#fffbe6; font-size:13px; }
-  .breaker[hidden] { display:none; }
-  .breaker .bk-title { font-weight:600; font-size:14px; margin-bottom:6px; }
-  .breaker .bk-row { display:flex; gap:8px; margin:3px 0; }
-  .breaker .bk-k { flex:0 0 5.5em; color:var(--muted); }
+  .breaker { border: 1px solid var(--line); border-left: 3px solid var(--warn);
+             border-radius: var(--r-card); padding: var(--sp-3); margin-top: var(--sp-2);
+             background: color-mix(in srgb, var(--warn) 10%, transparent); font-size: var(--fs-body); }
+  .breaker .bk-title { font-weight: 600; font-size: var(--fs-h3); margin-bottom: var(--sp-2); }
+  .breaker .bk-row { display: flex; gap: var(--sp-2); margin: var(--sp-1) 0; }
+  .breaker .bk-k { flex: 0 0 5.5em; color: var(--fg-dim); }
+
   /* 🔴 `DEC-091` · `F4` ①：无据拒答的提示条。**与 `.breaker` 分开一个类** ——
      那是"额度用完了"（该做的是等跨天 / 开新会话），这是"资料里没有"（该做的是换问法 / 补文档）：
      两者出路相反，合成一张卡会把用户引到**做不到的处置**上。
      ⚠️ 中性灰，⛔ 不用熔断那个警示黄 —— 拒答**不是故障**，不该看着像出事。 */
-  .noinfo { border:1px solid var(--line); border-left:4px solid var(--muted); border-radius:6px;
-            padding:10px 12px; margin-top:8px; background:#fafafa; font-size:13px; }
-  .noinfo[hidden] { display:none; }
-  .noinfo .ni-title { font-weight:600; font-size:14px; margin-bottom:4px; }
-  .noinfo .ni-body { color:var(--muted); }
-  #composer { border-top:1px solid var(--line); padding:12px; display:flex; gap:8px; }
-  #q { flex:1; padding:10px; font-size:15px; border:1px solid var(--line); border-radius:6px; }
-  button { padding:10px 18px; font-size:15px; cursor:pointer; border-radius:6px;
-           border:1px solid var(--line); background:#fff; }
-  button:disabled { opacity:.5; cursor:not-allowed; }
-  #stop { background:#fff0f0; }
-  #login { max-width:520px; margin:80px auto; }
-  #login input { width:100%; padding:10px; font-size:15px; }
-  .hint { color:var(--muted); font-size:13px; }
+  .noinfo { border: 1px solid var(--line); border-left: 3px solid var(--fg-dim);
+            border-radius: var(--r-card); padding: var(--sp-3); margin-top: var(--sp-2);
+            background: color-mix(in srgb, var(--fg-dim) 7%, transparent); font-size: var(--fs-body); }
+  .noinfo .ni-title { font-weight: 600; font-size: var(--fs-h3); margin-bottom: var(--sp-1); }
+  .noinfo .ni-body { color: var(--fg-dim); }
+
+  /* ── 输入区（固定在主区底部；`.main` 是 flex 列 ⇒ 自然贴底） ── */
+  #composer { border-top: 1px solid var(--line); background: var(--surface);
+              padding: var(--sp-3) var(--sp-5); display: flex; gap: var(--sp-2); }
+  #q { flex: 1; }
+
+  .hint { color: var(--fg-dim); font-size: var(--fs-body); }
 </style>
 </head>
 <body>
 
 <!-- ============ 登录态（没有 key 时唯一看得见的东西） ============ -->
 <div id="login" hidden>
-  <h1>RAG 对话</h1>
-  <p class="hint">粘一把 API Key（<code>sk-…</code>）。它只存在<strong>这台机器的 localStorage</strong> 里。</p>
-  <input id="apikey" type="password" placeholder="sk-…" autocomplete="off">
-  <p><button id="save">开始</button></p>
-  <p class="hint">没有 key ⇒ 在本机跑
-    <code>python3 scripts/issue_api_key.py &lt;你的名字&gt;</code></p>
+  <div class="hero login-hero">
+    <h1>青云精工 · RAG 对话</h1>
+    <p class="login-sub">检索 · 溯源 · 成本可见 —— 一个能指着引用说话的问答服务。</p>
+  </div>
+  <div class="card login-card">
+    <p class="hint">粘一把 API Key（<code>sk-…</code>）。它只存在<strong>这台机器的 localStorage</strong> 里。</p>
+    <input id="apikey" type="password" placeholder="sk-…" autocomplete="off">
+    <p style="margin:var(--sp-4) 0 0"><button id="save" class="btn primary">开始</button></p>
+    <p class="hint" style="margin-top:var(--sp-4)">没有 key ⇒ 在本机跑
+      <code>python3 scripts/issue_api_key.py &lt;你的名字&gt;</code></p>
+  </div>
 </div>
 
 <!-- ============ 主界面 ============ -->
-<div id="app" hidden style="display:flex; width:100%; height:100%">
-  <div id="side">
-    <h2>会话</h2>
-    <div id="threads"></div>
-    <div style="padding:8px"><button id="newthread" style="width:100%">＋ 新会话</button></div>
-  </div>
-  <div id="main">
-    <div id="log"></div>
+<div id="app" class="app-shell" hidden>
+
+  <aside id="side" class="sidebar">
+    <div class="brand">青云精工 · RAG</div>
+    <nav class="nav">
+      <a href="/chat" class="active">对话</a>
+      <a href="/approvals">人工接管</a>
+      <a href="/trace">执行轨迹</a>
+      <a href="/eval">评测</a>
+    </nav>
+
+    <div class="side-sep"><h2>会话</h2></div>
+    <div id="threads" class="threads"></div>
+    <div class="side-foot"><button id="newthread" class="btn">＋ 新会话</button></div>
+  </aside>
+
+  <div id="main" class="main">
+    <header class="page-head">
+      <h1>对话</h1>
+      <!-- 🔴 链选择器（刀 2 · 2026-10-09）：6 条链**各有各的实现**，让访客当场换一条再问同一个问题。
+           ⚠️ 选项由 `RagSse.CHAINS` 生成（⛔ 不在这里手写 —— 手写就会与 `sse.js` 那份漂移）。 -->
+      <label class="field">链 <select id="chain"></select></label>
+      <span class="spacer"></span>
+      <span class="hint" id="headhint">逐字回答 · 引用可点开 · 每轮报 token 与费用</span>
+    </header>
+
+    <div id="log" class="content log"></div>
+
     <div id="composer">
       <input id="q" placeholder="问点什么…" autocomplete="off">
-      <button id="send">发送</button>
-      <button id="stop" hidden>停止</button>
+      <button id="send" class="btn primary">发送</button>
+      <button id="stop" class="btn danger" hidden>停止</button>
     </div>
   </div>
 </div>
@@ -106,6 +177,7 @@
 
 const KEY_STORE = 'rag_api_key';
 const THREAD_STORE = 'rag_threads';
+const CHAIN_STORE = 'rag_chain';   // 上一次选的链（刀 2）
 
 // 状态机：idle → 请求中 → 流式中 → 完成｜已中断｜出错
 let state = 'idle';
@@ -214,6 +286,11 @@ function addTurn(question) {
 // 🔴 切分走 `RagSse.splitCitations` —— **正则只有那一份**（⛔ 本文件里不许再有第二份）。
 function renderAnswer(el, text, sources) {
   const turn = el.closest('.turn');
+  // 🔴 刀 2（§7.1①）：把**当前答案正文**记在 turn 上 —— 引用卡片要高亮
+  //    「答案与原文逐字重合的片段」，那就得知道答案是什么。
+  //    ⚠️ 记在**这里**（而不是在 `ask()` 的每一处 `renderAnswer` 之前各写一遍）——
+  //       那有 5 个调用点，漏一个的表现是"某些轮点开没有高亮"，而**不报错**。
+  turn._answer = text;
   // 🔴 `F4` ①（`DEC-091`）：**无据拒答**那一轮走另一条路（见 `renderRefusal`）。
   if (turn._refused) { renderRefusal(turn, el, text); return; }
   const byIndex = new Map(RagSse.resolveCitations(text, sources).map((r) => [r.index, r]));
@@ -298,8 +375,30 @@ function syncCard(turn) {
     m.className = 'src-meta';
     m.textContent = head.meta;
     const p = document.createElement('div');
-    // 🔴 用 textContent：文档正文里可能有尖括号 ⇒ innerHTML 会把它变成标签
-    p.textContent = src.content;
+    p.className = 'src-body';
+    // 🔴 刀 2（§7.1①）：**把「答案与这段原文逐字重合」的片段高亮出来**。
+    //    ⚠️ **它⛔ 不是"服务端给的命中区间"** —— `sources` 帧里没有任何位置字段
+    //       （只有 index / source / content / similarity）⇒ 本仓立场是「⛔ 不许印没有数据源的东西」，
+    //       所以高亮的是**一句真话**：「这几个字确实是从这段原文里来的」。
+    //    ⛔ **找不到重合就不高亮**（`overlapRanges` 回空数组）—— 不假装标了一段。
+    //    ⚠️ 阈值 6 个字：再短会把「保修期」这种词标得满屏黄。
+    //    🔴 全程 `createElement` / `textContent` 拼节点，⛔ **不用 innerHTML** ——
+    //       原文里可能有尖括号，innerHTML 会把它变成标签（本行上一版就是靠 textContent 防的）。
+    const body = String(src.content == null ? '' : src.content);
+    const ranges = RagSse.overlapRanges(body, turn._answer || '', 6);
+    if (!ranges.length) {
+      p.textContent = body;
+    } else {
+      let at = 0;
+      for (const r of ranges) {
+        if (r.start > at) p.appendChild(document.createTextNode(body.slice(at, r.start)));
+        const mk = document.createElement('mark');
+        mk.textContent = body.slice(r.start, r.end);
+        p.appendChild(mk);
+        at = r.end;
+      }
+      if (at < body.length) p.appendChild(document.createTextNode(body.slice(at)));
+    }
     card.appendChild(h); card.appendChild(m); card.appendChild(p);
   }
   card.hidden = !src;
@@ -368,17 +467,14 @@ async function ask() {
   $('send').disabled = true; $('stop').hidden = false;
   sentAt = performance.now();
 
+  // 🔴 6 条链的请求形状【不是同一套】（`rag_stream` 走 JSON body · 5 条 agent 走 query 参数 ·
+  //    `plan_execute` 那个键叫 `goal`）⇒ **统一交给 `RagSse.buildRequest` 一处生成**。
+  //    ⛔ 别在这页里再手拼一次 URL —— 两处一定漂移，而**表现是"没反应"，不报错**。
+  //    📄 形状表与依据 ⇒ `api/static/js/sse.js` 的 `CHAINS` 那段注释。
+  const chain = $('chain').value || 'rag_stream';
   try {
-    const resp = await fetch('/api/v1/rag/stream_search?thread_id=' + encodeURIComponent(threadId), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-API-Key': currentKey() },
-      // 🔴 三条前端必须遵守的（DEC-085 §3.3）：
-      //    ① citations 默认 False ⇒ 不显式传 true 就**根本没有 sources 帧**；
-      //    ② conversation_history 由后端按 (user, thread) 取 ⇒ 前端**不传**，
-      //       ⛔ 也别传 [] 去"清空"（后端那句 `if not req.conversation_history` 是 falsy 判断，[] 会被无视）。
-      body: JSON.stringify({ question, citations: true }),
-      signal: controller.signal,
-    });
+    const { url, init } = RagSse.buildRequest(chain, question, threadId, currentKey());
+    const resp = await fetch(url, Object.assign({}, init, { signal: controller.signal }));
 
     if (!resp.ok) {
       const { msg, relogin, breaker } = explainStatus(resp.status);
@@ -461,8 +557,12 @@ async function ask() {
     }
     const parts = [];
     if (exit === 'aborted') {
-      // 🔴 不是文案选择，是在说事实：usage 只在最后一帧回来，提前关流那帧到不了（DEC-084）
-      parts.push('中断未计费');
+      // 🔴 刀 2（§7.1②）：**说清"停在哪"**。
+      //    ⚠️ 不是文案选择，是在说事实：`usage` 只在**最后一帧**回来，
+      //       而我们提前关流 ⇒ **那帧到不了**（`DEC-084`）⇒ **没有 token 数可印**。
+      //    ⇒ 给数得出来的那个（已生成多少字）+ 明写未计费与原因。
+      //    📄 逻辑在 `sse.js::stoppedNotice`（有用例钉着，⛔ 别在这页里再拼一次）。
+      parts.push(RagSse.stoppedNotice(answer));
     } else if (usage) {
       parts.push(`${usage.model}`);
       parts.push(`${usage.prompt_tokens}+${usage.completion_tokens} tok`);
@@ -494,6 +594,24 @@ $('save').onclick = () => {
 $('send').onclick = ask;
 $('q').addEventListener('keydown', (e) => { if (e.key === 'Enter') ask(); });
 $('newthread').onclick = () => { newThread(); renderThreads(); showEmptyLog(); };
+
+// ---------- 链选择器（刀 2）----------
+// ⚠️ 选项**从 `RagSse.CHAINS` 生成** —— ⛔ 别在这页里手写一份（两份必然漂移，
+//    而漂移的表现是"某条链选了没反应"，不报错）。
+(function fillChains() {
+  const sel = $('chain');
+  for (const k of RagSse.CHAIN_KEYS) {
+    const opt = document.createElement('option');
+    opt.value = k;
+    opt.textContent = RagSse.CHAINS[k].label;
+    sel.appendChild(opt);
+  }
+  // 存过的链名**必须先在 CHAINS 里核一遍** —— 旧版本存下的名字（或手改过 localStorage）
+  // 会让 `sel.value = 'xxx'` 静默变成空串 ⇒ 发送时回落 `rag_stream`，而页面上看不出选的是哪条。
+  const saved = localStorage.getItem(CHAIN_STORE);
+  sel.value = RagSse.CHAINS[saved] ? saved : 'rag_stream';
+  sel.onchange = () => localStorage.setItem(CHAIN_STORE, sel.value);
+})();
 
 (currentKey() ? (showApp(), renderThreads()) : showLogin());
 </script>

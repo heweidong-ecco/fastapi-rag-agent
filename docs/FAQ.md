@@ -272,6 +272,8 @@ curl http://localhost:8000/api/v1/agent/tool_health -H "Authorization: Bearer <t
    ⇒ ⛔ **别再用旧地址，用上面的 `/trace`。**
    ⚠️ **上半页（轨迹）是进程内存，重启 API 即清空**，而且目前只有 Agent 链会写它 ——
    走 `/chat`（检索链）时**上半页必然是空的**，下半页的花费账仍然完整。
+> 🔴 **2026-10-09 更正（上面这句已不成立）**：`N16` **已于 2026-10-08 落地**（`DEC-093 §七`）—— `/rag/stream_search` **现在建轨迹**（判据：`grep -n 'start_trace' api/api_v1_rag.py` ⇒ 有）。⇒ **现在的"空"是"这条线程还没跑过"，⛔ 不是"这条链不建轨迹"**。⚠️ **`N16` 仍挂着的是另一半**：**其余 Agent 链**仍不建轨迹。
+
 3. 给最大工具调用次数加限制 —— 逻辑在 `api/agent_graph_advanced_learning.py:246` 的 `should_continue`。
 
 ### A4：Token 统计的数据重启后丢失？

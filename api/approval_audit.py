@@ -82,7 +82,7 @@ def record_decision(*, owner: str, actor: str, decision: str, edited: bool,
         print(f"[ApprovalAudit] 记录裁决失败（已忽略）: {e}")
 
 
-def list_decisions(*, owner: Optional[str], limit: int = 50) -> list:
+def list_decisions(*, owner: Optional[str], limit: int = 50, offset: int = 0) -> list:
     """读出裁决历史，**最新在前**。
 
     🔴 `owner` 是**必填关键字参数**（⛔ 不给默认值）：`None` ⇒ **全量**（admin 那条路），
@@ -90,6 +90,12 @@ def list_decisions(*, owner: Optional[str], limit: int = 50) -> list:
        ⛔ 而不是静默地变成"全量"（那是本仓最恨的那类漏洞，`DEC-055` 口径）。
 
     ⚠️ fail-open：库不可用 ⇒ 返回 `[]`（页面上少一段历史 ⛔ 好过整页 500）。
+
+    🔴 **2026-10-08 加 `offset`**（`frontend/README.md` §六 分页）——
+       端点用「**多取一条**」判 `has_more`（见 `api_v1_agent.agent_approval_history`）：
+       调用方若要 N 条，**传 `limit=N+1`**，拿到 N+1 条就说明后面还有。
+       ⚠️ **排序必须是【全序】**（`created_at DESC, id DESC`）—— 否则翻页会**漏行或重行**，
+       而**不报任何错**。现有排序满足（同一个 `created_at` 由 `id` 打平）。
     """
     from db import get_db
     where = "" if owner is None else "WHERE owner = %s "
@@ -100,8 +106,8 @@ def list_decisions(*, owner: Optional[str], limit: int = 50) -> list:
                 cur.execute(
                     "SELECT owner, actor, decision, edited, rounds, reason "
                     "FROM approval_events " + where +
-                    "ORDER BY created_at DESC, id DESC LIMIT %s",
-                    params + (limit,),
+                    "ORDER BY created_at DESC, id DESC LIMIT %s OFFSET %s",
+                    params + (limit, offset),
                 )
                 rows = cur.fetchall()
     except Exception as e:

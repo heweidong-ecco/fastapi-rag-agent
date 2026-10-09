@@ -1,0 +1,361 @@
+/* ============================================================================
+ * app.css —— 本仓前端的【共享样式表】
+ *
+ * ## 为什么要有它（2026-10-08 建）
+ *
+ * 🔴 **在那之前，本仓前端【没有设计系统】** —— 5 个页面**各带一份内联 `<style>`**
+ *    （11–62 行），`link rel="stylesheet"` **一处都没有**。实测后果：
+ *    · **同名 class 不同义**：`.card` 在 `chat.html` 是 `r=6px/p=10px`，
+ *      在 `trace.html` 是 `r=8px` **且硬编码 `#fff`** ⇒ **暗色主题下它就是一块白斑**；
+ *    · 改一处风格要改五处，而**没有任何门会因为你只改了四处而变红**。
+ *
+ * ## 权威
+ *
+ * 📄 **`frontend/README.md`** —— 方向（§一）· token（§三）· **排版规则（§四）**
+ *    · **组件清单与状态矩阵（§五）** · 列表与分页（§六）· 落地红线（§七）。
+ *    ⚠️ **本文件是那份规范的实现**；两份若冲突，**以那份为准**。
+ *
+ * ## ⛔ 三条落地红线（`frontend/README.md` §七）
+ *
+ * 1. **⛔ 不加 `package.json` / npm / 构建链** —— 本仓无构建，CI 是纯 Python + `node --test`
+ * 2. **⛔ 不引外网 CDN** —— demo 要能在创空间的容器里**离线起**
+ * 3. **⛔ 不改页面上的【文案口径】** —— 熔断卡的「这不是故障」、拒答的「资料里没有」
+ *    都是**裁过的**（`DEC-090` / `DEC-091`）⇒ **改样式 ⛔ 不等于可以改字**
+ *
+ * ## 🔴 一条不能删的规则
+ *
+ * `[hidden] { display: none !important; }` —— 见下面那段的实测说明。⛔ 别挪走、别弱化。
+ * ========================================================================= */
+
+/* ══════════════════ 1 · token（`frontend/README.md` §三）══════════════════ */
+
+:root {
+  /* 卡片底色：取自风格稿内嵌图采样，低饱和 */
+  --card-mint:  #e0eed7;  --card-sky:   #d8e2ee;  --card-sand: #ead2c6;
+  --card-peach: #fbe0d5;  --card-rose:  #eaceda;  --card-blush: #efd6d2;
+
+  /* 强调渐变：🔴 一屏最多一处（`frontend/README.md` §三 规矩 1）*/
+  --accent-grad: linear-gradient(135deg, #ff2e93 0%, #ff9a5a 35%, #7fd8d8 65%, #2f7bf6 100%);
+
+  /* 语义色：🔴 不跟风格稿走 —— 它是 dashboard 模板，没有"失败态" */
+  --ok: #2f9e5f;  --warn: #c9861a;  --bad: #c0392b;  --info: #2f7bf6;
+
+  --r-card: 16px; --r-ctl: 10px; --r-pill: 999px;
+
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px; --sp-6: 32px;
+
+  --fs-h1: 22px; --fs-h2: 17px; --fs-h3: 15px; --fs-body: 14px; --fs-cap: 12px;
+  --lh-tight: 1.3; --lh-body: 1.65;
+
+  --sidebar-w: 220px; --content-max: 1200px;
+
+  --bg: #f6f7f9; --surface: #fff; --line: #e6e8ec; --fg: #1c1f23; --fg-dim: #6b7280;
+
+  /* 等宽：🔴 数字必须用它（`frontend/README.md` §四 第 4 条）*/
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #131417; --surface: #1c1e22; --line: #2a2d33; --fg: #e8eaed; --fg-dim: #9aa0a6;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #131417; --surface: #1c1e22; --line: #2a2d33; --fg: #e8eaed; --fg-dim: #9aa0a6;
+}
+
+/* ══════════════════ 2 · 基础 ══════════════════ */
+
+* { box-sizing: border-box; }
+
+/* 🔴🔴 **这一行⛔ 不能删、⛔ 不能弱化**（原在 `chat.html` 的内联 `<style>` 里，2026-10-06 实测加的）：
+ *    `#app` 身上写着内联 `style="display:flex"`，而作者样式的 `display` **压过**
+ *    UA 样式表里的 `[hidden] { display:none }` ⇒ `hidden` 属性**完全失效**，
+ *    登录页和主界面会**同时显示**。
+ *    ⚠️ 只要页面上还有第二个「带 display 的 hidden 元素」，同一条就**再犯一次**
+ *    ⇒ 所以它是**全局规则**，不是某一页的补丁。
+ */
+[hidden] { display: none !important; }
+
+body {
+  margin: 0; color: var(--fg); background: var(--bg);
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: var(--fs-body); line-height: var(--lh-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ══════════════════ 3 · 排版（`frontend/README.md` §四）══════════════════ */
+
+/* 第 1 条：标题只用 3 级，⛔ 不许跳级 */
+h1 { font-size: var(--fs-h1); line-height: var(--lh-tight); margin: 0 0 var(--sp-4); font-weight: 650; }
+h2 { font-size: var(--fs-h2); line-height: var(--lh-tight); margin: 0 0 var(--sp-3); font-weight: 600; }
+h3 { font-size: var(--fs-h3); line-height: var(--lh-tight); margin: 0 0 var(--sp-2); font-weight: 600; }
+
+p  { margin: 0 0 var(--sp-4); }            /* 第 7 条：段间只有 --sp-4 */
+p + p, li + li { margin-top: var(--sp-2); }
+
+/* 第 4 条：🔴 数字必须等宽 —— 比例字体下**扫一列数字看不出量级** */
+.num, .metric-v, td.num, .k-money, .k-tokens, .k-ms {
+  font-family: var(--mono); font-variant-numeric: tabular-nums;
+}
+td.num, .metric-v { text-align: right; }
+
+/* 第 6 条：长串必须能断行（thread_id 会撑破布局）*/
+code, kbd, .mono, .tid {
+  font-family: var(--mono); font-size: .92em;
+  word-break: break-all;
+}
+
+/* 第 2 条：正文行宽 */
+.prose { max-width: 78ch; }
+.bubble-a { max-width: 62ch; }
+
+/* ══════════════════ 4 · 组件（`frontend/README.md` §五）══════════════════ */
+
+/* ── 4.1 布局：app-shell / page-head / split ── */
+
+.app-shell { display: flex; width: 100%; height: 100vh; }
+.sidebar {
+  width: var(--sidebar-w); flex: 0 0 var(--sidebar-w);
+  border-right: 1px solid var(--line); background: var(--surface);
+  display: flex; flex-direction: column; min-height: 0;
+}
+.sidebar > h2 { font-size: var(--fs-cap); margin: var(--sp-3); color: var(--fg-dim); letter-spacing: .02em; }
+.main { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.content { padding: var(--sp-4); overflow: auto; }
+
+.page-head {
+  display: flex; align-items: center; gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--line); background: var(--surface);
+}
+.page-head h1 { font-size: var(--fs-h2); margin: 0; }
+.page-head .spacer { flex: 1; }
+
+.split { display: flex; gap: var(--sp-4); align-items: flex-start; }
+.split > * { flex: 1; min-width: 0; }
+@media (max-width: 900px) { .split { flex-direction: column; } }
+
+/* ── 4.2 容器：card / panel ── */
+
+.card {
+  border: 1px solid var(--line); border-radius: var(--r-card); padding: var(--sp-4);
+  background: var(--surface); color: var(--fg);
+}
+.card + .card { margin-top: var(--sp-3); }
+.card-hover:hover { border-color: var(--info); cursor: pointer; }
+.card.selected { border-color: var(--info); box-shadow: 0 0 0 2px color-mix(in srgb, var(--info) 22%, transparent); }
+
+.panel { border: 1px solid var(--line); border-radius: var(--r-card); background: var(--surface); overflow: hidden; }
+.panel > .panel-head {
+  padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--line);
+  font-weight: 600; display: flex; align-items: center; gap: var(--sp-2);
+}
+.panel > .panel-body { padding: var(--sp-4); }
+
+/* 🔴 一屏最多一处用渐变 */
+.hero {
+  border-radius: var(--r-card); padding: var(--sp-5); color: #fff;
+  background: var(--accent-grad);
+}
+.hero h2, .hero h1 { color: #fff; }
+
+/* ── 4.3 数据展示：table / kv / badge / metric ── */
+
+table.tbl { width: 100%; border-collapse: collapse; font-size: var(--fs-body); }
+table.tbl th {
+  text-align: left; font-weight: 600; color: var(--fg-dim); font-size: var(--fs-cap);
+  background: var(--bg); padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--line);
+}
+table.tbl td { padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--line); height: 36px; }
+table.tbl tr:last-child td { border-bottom: 0; }
+table.tbl tbody tr:hover { background: color-mix(in srgb, var(--info) 6%, transparent); }
+
+.kv { display: flex; gap: var(--sp-3); margin: var(--sp-1) 0; }
+.kv > .k { flex: 0 0 6em; color: var(--fg-dim); }
+.kv > .v { flex: 1; min-width: 0; word-break: break-word; }
+
+.badge {
+  display: inline-block; padding: 1px var(--sp-2); border-radius: var(--r-pill);
+  font-size: var(--fs-cap); line-height: 1.7; white-space: nowrap;
+  background: color-mix(in srgb, var(--fg-dim) 14%, transparent); color: var(--fg-dim);
+}
+.badge.ok   { background: color-mix(in srgb, var(--ok) 16%, transparent);   color: var(--ok); }
+.badge.warn { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
+.badge.bad  { background: color-mix(in srgb, var(--bad) 16%, transparent);  color: var(--bad); }
+.badge.info { background: color-mix(in srgb, var(--info) 16%, transparent); color: var(--info); }
+
+.metric { display: inline-flex; flex-direction: column; gap: 2px; }
+.metric-v { font-size: var(--fs-h2); font-weight: 650; }
+.metric-l { font-size: var(--fs-cap); color: var(--fg-dim); }
+
+/* ── 4.4 交互：btn / input / select / list-row / toggle ── */
+
+/* 🔴 **状态一共四态**（`frontend/README.md` §五 5.4）：默认 / hover / 禁用 / **加载中**。
+   ⛔ 只写默认态 = 没做完 —— 加载中那一态现在**全仓没有**，加按钮时必须一起加。 */
+button, .btn {
+  display: inline-flex; align-items: center; gap: var(--sp-2); justify-content: center;
+  padding: var(--sp-2) var(--sp-4); font-size: var(--fs-body); line-height: 1.5;
+  font-family: inherit; color: var(--fg); cursor: pointer;
+  border: 1px solid var(--line); border-radius: var(--r-ctl); background: var(--surface);
+  transition: background .12s, border-color .12s;
+}
+button:hover:not(:disabled), .btn:hover:not(:disabled) { border-color: var(--fg-dim); }
+button:disabled, .btn:disabled, .btn[aria-busy="true"] { opacity: .5; cursor: not-allowed; }
+.btn.primary { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.btn.danger  { background: color-mix(in srgb, var(--bad) 12%, transparent); color: var(--bad); border-color: color-mix(in srgb, var(--bad) 35%, transparent); }
+.btn.ghost   { background: transparent; border-color: transparent; }
+/* 加载中：文字淡出 + 转圈（⛔ 不靠"按钮变灰"冒充 —— 那和禁用长得一样）*/
+.btn[aria-busy="true"]::before {
+  content: ""; width: 1em; height: 1em; border-radius: 50%;
+  border: 2px solid currentColor; border-top-color: transparent;
+  animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+input, textarea, select {
+  font-family: inherit; font-size: var(--fs-body); color: var(--fg); background: var(--surface);
+  padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line); border-radius: var(--r-ctl); width: 100%;
+}
+input:focus, textarea:focus, select:focus { outline: 2px solid color-mix(in srgb, var(--info) 45%, transparent); outline-offset: 1px; border-color: var(--info); }
+input:disabled, textarea:disabled, select:disabled { opacity: .55; cursor: not-allowed; }
+.field-error, input[aria-invalid="true"] { border-color: var(--bad); }
+
+.list-row {
+  padding: var(--sp-2) var(--sp-3); cursor: pointer; font-size: var(--fs-body);
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.list-row:hover { background: color-mix(in srgb, var(--info) 6%, transparent); }
+.list-row.active { background: color-mix(in srgb, var(--info) 12%, transparent); font-weight: 600; }
+
+.toggle { cursor: pointer; user-select: none; }
+.toggle::after { content: "▸"; display: inline-block; margin-left: var(--sp-1); transition: transform .12s; }
+.toggle.open::after { transform: rotate(90deg); }
+
+/* ── 4.5 反馈：alert / empty ── */
+
+.alert { border-radius: var(--r-ctl); padding: var(--sp-3) var(--sp-4); border: 1px solid var(--line); background: var(--surface); }
+.alert.error { border-color: color-mix(in srgb, var(--bad) 40%, transparent);  background: color-mix(in srgb, var(--bad) 8%, transparent); }
+.alert.warn  { border-color: color-mix(in srgb, var(--warn) 40%, transparent); background: color-mix(in srgb, var(--warn) 10%, transparent); }
+.alert.info  { border-color: color-mix(in srgb, var(--info) 35%, transparent); background: color-mix(in srgb, var(--info) 8%, transparent); }
+
+/* 🔴 空态【必须带一句"为什么空"】—— `frontend/README.md` §四 第 8 条。
+   ⚠️ 这条规矩原来只活在 `trace.js` 的 `emptyTraceReason` 里（`DEC-093`），现在提到规范层。
+   ⇒ ⛔ 只写"暂无数据" = 没做完：用户分不清"真没有"与"坏了"。 */
+.empty {
+  padding: var(--sp-5) var(--sp-4); text-align: center; color: var(--fg-dim);
+  border: 1px dashed var(--line); border-radius: var(--r-card);
+}
+.empty .why { margin-top: var(--sp-2); font-size: var(--fs-cap); }
+
+/* ── 4.6 本仓专有（⛔ 三者的语义各不同，别合并）── */
+
+/* 引用卡（`DEC-089`「甲 · 就地展开/收起」）—— 挂在该条回答【下面】，每条自带一个 */
+.citation-card { border-left: 3px solid var(--info); background: color-mix(in srgb, var(--info) 6%, transparent); }
+/* 熔断卡（`DEC-090` · `R3.2`）—— 额度用完了：该做的是【等跨天 / 开新会话】 */
+.breaker-card { border-left: 3px solid var(--warn); background: color-mix(in srgb, var(--warn) 10%, transparent); }
+/* 无据拒答（`DEC-091`）—— 资料里没有：该做的是【换问法 / 补文档】。
+   🔴 与上面出路【相反】⇒ 中性灰，⛔ 不用警示黄（**拒答不是故障**）*/
+.refusal-note { border-left: 3px solid var(--fg-dim); background: color-mix(in srgb, var(--fg-dim) 7%, transparent); }
+
+/* ── 4.7 列表与分页（`frontend/README.md` §六）── */
+
+/* 🔴 两条红线写在规范里，组件只是它的实现：
+   ① **⛔ 不许前端假分页** —— 本组件⛔ 不切数组、⛔ 不缓存全量；
+      翻页 = 带着新的 `offset` **再发一次请求**。
+   ② **⛔ 被截断必须说出来** —— 分页生效时没有截断；`has_more` 由**服务端**给，
+      ⛔ 不许前端拿 `count == limit` 猜（那会在"正好一整页"时显示一个点不动的下一页）。
+   ⚠️ **只有一页时整个控件不显示**（`hidden`）—— 一个永远点不动的翻页条比没有更糟。 */
+.pagination {
+  display: flex; align-items: center; gap: var(--sp-3);
+  padding: var(--sp-3) 0; color: var(--fg-dim); font-size: var(--fs-cap);
+}
+.pagination .page-label { font-variant-numeric: tabular-nums; }
+.pagination .page-hint { margin-left: auto; }
+
+/* ── 4.8 侧栏导航 / 网格 / 页头字段（2026-10-09 加 · 按风格稿的 dashboard 布局）── */
+
+/* 🔴 **全站唯一允许用渐变的地方之一**：侧栏顶部的品牌块。
+   ⚠️ **它【不承载任何数据】** —— 本仓有前科：`trace.html` 那两格"总 Token / 总花费"
+   在**没有数据来源**的情况下照样印出来，恒为 `--`（`DEC-093` 具体化 D）。
+   ⇒ 好看的东西⛔ 不许用来掩盖"这里其实没有数"。 */
+.brand {
+  margin: var(--sp-3); padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-ctl); color: #fff; font-weight: 650; letter-spacing: .01em;
+  background: var(--accent-grad);
+}
+
+.nav { display: flex; flex-direction: column; padding: 0 var(--sp-2); gap: 2px; }
+.nav a {
+  display: block; padding: var(--sp-2) var(--sp-3); border-radius: var(--r-ctl);
+  color: var(--fg-dim); text-decoration: none; font-size: var(--fs-body);
+}
+.nav a:hover { background: color-mix(in srgb, var(--info) 8%, transparent); color: var(--fg); }
+.nav a.active {
+  background: color-mix(in srgb, var(--info) 13%, transparent);
+  color: var(--info); font-weight: 600;
+}
+
+/* 卡片网格：宽屏两列、窄屏自动上下（⛔ 不写死列数 —— 写死了换个屏就挤） */
+.grid {
+  display: grid; gap: var(--sp-4); align-items: start;
+  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+}
+
+/* 页头里的输入行（label + 控件贴在一起） */
+.field {
+  display: inline-flex; align-items: center; gap: var(--sp-2);
+  color: var(--fg-dim); font-size: var(--fs-cap); white-space: nowrap;
+}
+.field input { width: auto; min-width: 160px; }
+
+/* 页头/侧栏在窄屏下的退让 */
+@media (max-width: 760px) {
+  .app-shell { flex-direction: column; height: auto; }
+  .sidebar { width: auto; flex: none; border-right: 0; border-bottom: 1px solid var(--line); }
+  .nav { flex-direction: row; flex-wrap: wrap; }
+  .page-head { flex-wrap: wrap; }
+}
+
+/* ══════════════════ 9 · 能力面板（2026-10-09 · 施工单刀 0）══════════════════
+ *
+ * 🔴 25 个能力面板复用这一套。**边界提示条的位置本身是要求** ——
+ *    业务方原话：「**让别人在用接口的时候要先看到这个提示，才给接口**」
+ *    ⇒ 所以 `.panel-boundary` 必须渲染在**提交按钮之前**（⛔ 不是页脚挂一行小字）。
+ * ⚠️ ⛔ 别在这里写死颜色 —— 语义色用 `--warn` / `--bad`（`frontend/README.md` §七 红线 3）。
+ * ========================================================================= */
+
+.panel-boundary {
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
+  border-left: 3px solid var(--warn);
+  background: color-mix(in srgb, var(--warn) 8%, transparent);
+  border-radius: var(--r-ctl);
+  padding: var(--sp-2) var(--sp-3);
+  margin-bottom: var(--sp-2);
+  font-size: var(--fs-cap);
+  line-height: var(--lh-body);
+  color: var(--fg-dim);
+}
+/* 第 5 条（`verify`）讲的是"我们自证到什么程度"，⛔ 与平台限制无关 ⇒ 换中性色，
+   免得访客把它读成"平台又有条限制"（规格 §3.6.2 乙） */
+.panel-boundary[data-boundary="verify"] {
+  border-color: var(--line); border-left-color: var(--fg-dim);
+  background: var(--surface);
+}
+
+/* 能力面板网格：比 .grid 更密（它是 420px 起，25 个面板要窄一点） */
+.panel-grid {
+  display: grid; gap: var(--sp-4); align-items: start; list-style: none;
+  padding: 0; margin: 0;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+}
+
+/* 参数行：label + 控件 */
+.panel-params {
+  display: grid; gap: var(--sp-2);
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+/* 结果区：长了要能滚，但⛔ 不许把整页撑飞 */
+.panel-out { margin-top: var(--sp-3); max-height: 22rem; overflow: auto; }
+.panel-out pre { margin: 0; font-family: var(--mono); font-size: var(--fs-cap); white-space: pre-wrap; }

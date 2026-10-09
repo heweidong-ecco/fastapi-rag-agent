@@ -57,6 +57,30 @@ router = APIRouter(prefix="/api/v1")
 async def root():
     return {"status": "ok", "version": "v1"}
 
+
+@router.get(
+    "/info",
+    tags=["公开"],
+    summary="服务索引（**原 `GET /` 的那段 JSON**，2026-10-09 挪来）",
+    description=(
+        "⚠️ 这一段**原先挂在 `GET /`** 上，而 `GET /` 在 2026-10-09 改成了"
+        "**总览首页**（302 → `/static/web/index.html`）。\n\n"
+        "🔴 裁定的原话是「**挪走，⛔ 不是删**」—— 所以它整段**原样**在这里，"
+        "⛔ 一个字都没改。**若你是来找那段 JSON 的，就是它。**"
+    ),
+)
+async def service_info():
+    """服务索引。⚠️ 内容原样照搬原 `GET /`（见 `api/main.py` 里那段注释的沿革）。"""
+    return {
+        "status": "ok",
+        "version": "2.0.0",
+        "services": {
+            "public": "/api/v1",
+            "rag": "/api/v1/rag",
+            "agent": "/api/v1/agent",
+        },
+    }
+
 # ==================== 认证接口 ====================
 @router.post(
     "/auth/login",

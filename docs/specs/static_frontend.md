@@ -3,6 +3,7 @@
 | 项 | 内容 |
 |---|---|
 | **状态** | 🟡 **部分可用**（2026-10-06 建 · `DEC-085` 段 1 第一刀 · 同日补 `DEC-089` 的 `F8` · `DEC-090` 的熔断卡片 · `DEC-091` 的无据拒答 · `DEC-093` 的 Trace 页 · 2026-10-07 补 `DEC-097` 的 Eval 页）—— **四个页面通了**：对话页（`DEC-085` · 引用卡片 `DEC-089` · **熔断卡片 `DEC-090`** · **无据拒答 `DEC-091`**）+ **接管页**（`DEC-088` · `F1`）+ **Trace 页**（`DEC-093` · `F2`）+ **Eval 页**（`DEC-097` · `F3`，🔴 **是【占位页】不是功能页** —— 见下） |
+| 🔴 **找前端的东西** | ⭐ **`frontend/索引.md`** —— **唯一查找入口**（业务方 2026-10-09 立的：「**不要用 grep 去找，也不准**」） |
 | **对外提供** | `GET /chat` → **302** `/static/web/chat.html`（`api/main.py:538`，**`include_in_schema=False`**）<br>`GET /approvals` → **302** `/static/web/approvals.html`（`api/main.py:547`，**同上**）<br>`GET /trace` → **302** `/static/web/trace.html`（`api/main.py:559`，**同上**）<br>🆕 `GET /eval` → **302** `/static/web/eval.html`（`api/main.py:572`，**同上**）<br>· 页面本体由已挂的 `/static` 托管（零构建、零新服务、零 CORS）<br>⚠️ **四条 302 都在无鉴权基线里**（`scripts/route-auth-baseline.txt`）—— **故意公开**：它们是"给人打开 HTML"的跳转，**本身不含数据**；真正的边界在页面调的后端接口上（⚠️ **`/eval` 例外**：它连后端接口都不调，见下） |
 | **谁在用** | 人（浏览器）。⚠️ **后端不 import 它、没有任何 `.py` 依赖它** —— 这就是本目录此前一直是"没人管"的原因 |
 
@@ -22,6 +23,8 @@
 | 🆕 `api/static/web/eval.html` | 37 | **Eval 页**（`DEC-097` · `F3`）—— 🔴 **占位页**：一个标题 + 一句实话 + **一个做成按钮的 `<a>`**，指向下面的子页。⛔ **页面上没有任何分数 / 对比箭头**（原 `F3` 那个写法**没有数据源**，硬做只能做出假页面） |
 | 🆕 `api/static/web/eval_gate.html` | 22 | **Eval 页的子网页** —— 🔴 **正文只有一行**：`agent-eval-gate · Agent 生产就绪评测门 · TODO`。<br>⚠️ 这一页**不 fetch 任何接口**（后端至今没有 `/agent/eval*` 路由，`B14` 仍是 ⬜）⇒ 它是**静态文字**，也是它比另外三页更没有暴露面的原因<br>⛔ 别"顺手"给它加返回链接 / 卡片 / 表格 —— 加了就不是业务方要的那一行了 |
 | 🆕 `api/test_eval_page.py` | 116 | **Eval 页守卫**（Python · 不连库）—— 3 条与另三页同构（302 / 目标在盘上 / 不在 openapi）+ **2 条页面本体的**：`<a href>` 真的指向子页、子页在盘上**且带那一行**（🔴 拿 `SUBPAGE_LINE` 常量钉，改文案会红） |
+| 🆕 `api/static/js/panel.js` | 116 | **能力面板的纯逻辑**（2026-10-09 · 施工单**刀 0**）—— 边界标注文案（规格 §3.6.2 那 5 条 · **唯一一份**）· `paramQuery` · `stateOf` 四态 · `emptyReason` · `truncationNotice`（`has_more` 与 `truncated` **两形状不合并**）· `errorText`（401/403 · 429 · 503 **三句话**）。<br>⚠️ 🔴 **第一版真栽过一条**：`stateOf` 只认 `'error' in payload` ⇒ **`{"status":"error"}` 被判成 `ok`**，而那正是本仓四类拒绝的**真实形状**（200 + `status:"error"`）⇒ 已改成两种形状都认 |
+| 🆕 `api/static/js/panel.test.js` | 156 | `node --test` 用例（**13 条**）—— 除功能断言外有一条**结构型守卫**：**边界文案只许在 `panel.js` 里出现一次**（数的是【文件】，⛔ 不是"我记得没抄第二份"）+ **假 window** 跑一遍（⛔ 少挂 `window.RagPanel` 页面就 ReferenceError） |
 | 🆕 `api/test_web_pages.py` | 112 | **全站页面守卫**（Python · 不连库）—— **扫 `api/static/` 下每个 `.html`**：`getJSON(…)`/`fetch(…)` 的字面量必须以 `/api/v1` 开头 + 1 条**防空跑**。<br>🔴 **2026-10-06（`DEC-094`）建的**：原先这条守卫只在 `api/test_trace_page.py` 里、**只读 `trace.html`** ⇒ 下一个页面照样能坏<br>⚠️ **用例数 = 被扫的 `.html` 个数 + 1** —— 走过 7 → 5（`DEC-096` 删两个坏页）→ **7**（`DEC-097` 加两个 Eval 页）。**页面一少它自动跟着少**，⛔ 那不是守卫变松<br>⚠️ **它对 Eval 这两页【空过】**：那两页一个 `fetch` 都没有 ⇒ 没有字面量可查（见 §⚠️ 那条） |
 
 ## ✅ 做了什么
@@ -90,6 +93,8 @@
     🔴 **⛔ 两条轴不合并、不相加** —— 它们**没有共同的步 id**，合成一棵树只能靠"时间接近"猜（详见下「看代码会误判」）。
   · 🔴 **页面必须解释"为什么空"**（`RagTrace.emptyTraceReason` 三条分支）—— 对话页走的是检索链，
     **那条链根本不建轨迹** ⇒ 演示时上半页**必然**是空的。只印一句"未找到"会让人以为整个功能坏了。
+> 🔴 **2026-10-09 更正（上面这句已不成立）**：`N16` **已于 2026-10-08 落地**（`DEC-093 §七`）—— `/rag/stream_search` **现在建轨迹**（判据：`grep -n 'start_trace' api/api_v1_rag.py` ⇒ 有）。⇒ **现在的"空"是"这条线程还没跑过"，⛔ 不是"这条链不建轨迹"**。⚠️ **`N16` 仍挂着的是另一半**：**其余 Agent 链**仍不建轨迹。
+
   · 🔴 **时间戳两层设防**：后端一律回带 `+00:00` 的 ISO（`token_tracker._iso_utc`），
     前端 `parseWhen()` **主动拒绝**不带区的时间戳（画 `--`）—— 因为库里那列是**无时区**的 `TIMESTAMP`。
   · 删掉了旧页那两格**假概览卡**（「总 Token」/「总花费」在追踪轴上**恒为 0**，见下「看代码会误判」）。
@@ -265,3 +270,72 @@ venv/bin/python -m pytest api/test_web_pages.py -q               # ⇒ 7 passed�
   **页面守卫改扫全站** · **`ci.yml` 的 `node --test` 改 glob + 防空跑** —— 含"裸 glob 更弱"的反证实测）
 - 🔴 `docs/decisions/DEC-097-Eval页降级为占位页.md`（**`F3`**：**把"跑分 + 对比箭头"改成占位页**的裁定 ·
   `/eval` 入口 · ⚠️ **它明写"这不是把功能做完了，是换了交付口径"**）
+
+---
+
+## 🔴 2026-10-08 · 分页（`frontend/README.md` §六）
+
+**改前的现状**：本仓**没有一个列表有 `offset`** —— 全是"取最近 N 条"，
+而 `approvals.html` **硬写 `limit=50`、界面不说明被截了**（**静默截断**）。
+
+**做了什么**（先做一条路，⛔ 不是一次铺开）：
+
+| 层 | 落点 |
+|---|---|
+| **后端** | `GET /agent/approvals/history` 加 **`offset`** · 响应补 **`has_more` / `limit` / `offset`**；`approval_audit.list_decisions(..., offset=0)` 加 `OFFSET` |
+| **纯逻辑** | `api/static/js/approvals.js` 的 **`pagerState()`** —— 页码/上下页/偏移量**全在这里算**，⛔ 页面不自己推 |
+| **CSS** | `api/static/app.css` 的 **`.pagination`** |
+| **页面** | `approvals.html` 的 `#pager`（⚠️ **新增**元素，⛔ 没改任何既有 class/id） |
+
+🔴 **更正（同日核出）**：本节初稿写「本仓没有一个列表有分页」——**不准确**。
+`/agent/trace/{thread_id}/cost` **早就做对了**：`items` 有 `LIMIT`，但响应给 `truncated`
+（`total.count > len(items)`）、**合计由 SQL 算整条线程**（⛔ 不受 LIMIT 影响）。
+⇒ 本仓有**两种**做法：**A `offset` 翻页**（用户要一直往下看）· **B 截断 + 说出来**（看汇总）。
+**两条路的共同那一半 —— 「必须说出来」—— 现在是门**：`api/test_truncation_declared.py`
+（凡收了 `limit` 的端点，响应必须有 `truncated` 或 `has_more`）。
+
+**两条红线**（规范里的）：
+
+1. **⛔ 不许前端假分页** —— 组件⛔ 不切数组、⛔ 不缓存全量；翻页 = **带新 `offset` 再发一次请求**。
+2. **⛔ 被截断必须说出来** —— `has_more` **只认服务端给的字段**；
+   ⛔ **尤其不许拿 `count == limit` 猜** —— 那在"正好一整页、后面没有了"时会显示一个
+   **点不动的下一页**，而且不报错。`pagerState` 用 **`hasMore === true`**（严格），缺失一律 `false`。
+
+📌 **判据（可打印）**：
+
+```bash
+node --test api/static/js/approvals.test.js                       # ⇒ 23 pass（含 pagerState 9 条）
+venv/bin/python -m pytest api/test_approval_events.py -q          # ⇒ 14 passed（含 has_more 两条）
+POSTGRES_DB=rag_test venv/bin/python -m pytest api/test_approval_events_db.py -q -m needs_db
+                                                                  # ⇒ 8 passed（含翻页不重不漏）
+```
+
+⚠️ **本份没解决**：**其余列表端点仍无分页**（`/agent/token/usage` · `/agent/cost/*` 等）——
+它们的"取最近 N 条"**仍然不说自己被截了**。⇒ 要铺开时照这一条的走法。
+⚠️ **已知局限**：`offset` 分页在**有新行插入时会漂移**（第 2 页可能重复上一页的某条）
+—— 页面每 5 秒轮询，所以这个窗口是真实存在的。⛔ 没做游标分页（那是另一件事）。
+
+
+---
+
+## 🔴 2026-10-09 · **首页还没做，但要求已经定了**（⛔ 别以为"4 个页面都有入口"就够了）
+
+> **业务方原话**：「**首页应该是要做成【主要功能】和【其他功能】分开，能点击跳转的**」
+
+| | |
+|---|---|
+| **业务方问过** | 「**是 specs 没记录吗**」—— 🔴 **当时的答案是【没有】**：<br>`grep -rn '主要功能\|其他功能'` ⇒ **全仓 0 命中**；本文件里也**只有 4 条页面路由**，⛔ 没有"首页"这一格 |
+| **现在的落点** | ⭐ **`frontend/页面与接口规格.md` §3.0**（**唯一权威** —— 那里有主次划分的建议 + "能点击跳转"的判据） |
+| **为什么写在这里** | 本文件是**前端模块的 spec** ⇒ 它必须**指出那份规格**，⛔ 不能各自记一半 |
+
+### 现状（⛔ 别读成"首页已经算了"）
+
+* ✅ **4 条页面路由**（`/chat` `/approvals` `/trace` `/eval`）—— **都能打开**
+* 🔴 **但【没有首页】**：`GET /`（`api/main.py:521`）返回的是 **JSON**（`{"status":"ok",…}`）⇒
+  访客打开域名**第一眼是一坨 JSON** —— 正是最高判据说的「**做成一堆、什么都放后端**」
+* 🔴 **且全仓 66 条路由里，约 53 条【没有任何可点入口】** ⇒ 按最高判据**都等于"没做"**
+  （逐条归位表 ⇒ 那份规格 §二）
+
+⚠️ **`GET /` 改返回是【已存在路由】的行为变更** ⇒ 动它要连带核三处：
+① 有没有消费者依赖那段 JSON ② **它在无鉴权基线里**（`scripts/route-auth-baseline.txt`）
+③ 新页面路由要不要与现有 4 条**同形**（302 · `include_in_schema=False` · 进基线）

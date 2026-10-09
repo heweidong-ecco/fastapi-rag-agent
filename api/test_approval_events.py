@@ -137,8 +137,8 @@ def test_list_narrows_by_owner(monkeypatch):
 
     sql, params = _select_of(conn)
     assert "WHERE" in sql.upper() and "OWNER" in sql.upper(), f"没有按 owner 收窄：{sql}"
-    assert params == ("alice", 50), (
-        f"参数应是 (owner, limit)，实际 {params} —— ⚠️ owner 没进 SQL 就是**查了所有人**"
+    assert params == ("alice", 50, 0), (
+        f"参数应是 (owner, limit, offset)，实际 {params} —— ⚠️ owner 没进 SQL 就是**查了所有人**"
     )
 
 
@@ -150,7 +150,7 @@ def test_list_owner_none_means_all(monkeypatch):
 
     sql, params = _select_of(conn)
     assert "OWNER = " not in sql.upper(), f"owner=None 却仍带了 owner 过滤：{sql}"
-    assert params == (50,), f"owner=None 时参数里不该有 owner，实际 {params}"
+    assert params == (50, 0), f"owner=None 时参数里不该有 owner，实际 {params}"
 
 
 def test_list_returns_rows_as_dicts(monkeypatch):
@@ -191,24 +191,30 @@ import asyncio
 import api_v1_agent as m
 
 
-def _history(monkeypatch, user_name, limit=50):
-    """直接调端点函数（⛔ 不经过 TestClient ⇒ 不触发 lifespan ⇒ 不需要库）。"""
+def _history(monkeypatch, user_name, limit=50, offset=0, rows=None):
+    """直接调端点函数（⛔ 不经过 TestClient ⇒ 不触发 lifespan ⇒ 不需要库）。
+
+    🔴 **2026-10-08 加 `offset` 与 `rows`**（分页 · `frontend/README.md` §六）——
+       `rows` 用来喂"比 limit 多一条"的情形，验**「多取一条」判 `has_more`** 那条路。
+    """
     seen = {}
 
-    def _fake_list(*, owner, limit):
+    def _fake_list(*, owner, limit, offset=0):
         seen["owner"] = owner
         seen["limit"] = limit          # ⚠️ 施工单这份假货漏了它，而它自己的用例要断言它
-        return []
+        seen["offset"] = offset
+        return list(rows) if rows else []
 
     monkeypatch.setattr(m, "list_decisions", _fake_list)
-    out = asyncio.run(m.agent_approval_history(limit=limit, user_name=user_name))
+    out = asyncio.run(m.agent_approval_history(limit=limit, offset=offset, user_name=user_name))
     return out, seen
 
 
 def test_history_narrows_to_self(monkeypatch):
     out, seen = _history(monkeypatch, "alice")
     assert seen["owner"] == "alice", f"普通用户必须只看自己的，实际查了 {seen['owner']!r}"
-    assert out == {"events": [], "count": 0, "requested_by": "alice"}
+    assert out == {"events": [], "count": 0, "has_more": False,
+                   "limit": 50, "offset": 0, "requested_by": "alice"}
 
 
 def test_history_admin_gets_all(monkeypatch):
@@ -218,6 +224,35 @@ def test_history_admin_gets_all(monkeypatch):
 
 
 def test_history_passes_limit_through(monkeypatch):
-    """`limit` ⛔ 别收下不用（签名看着对、行为是死的 —— 本仓栽过）。"""
+    """`limit` ⛔ 别收下不用（签名看着对、行为是死的 —— 本仓栽过）。
+
+    🔴 **2026-10-08 改**（分页）：端点现在向 `list_decisions` 要的是 **`limit + 1`** ——
+       多要的那一条只用来判 `has_more`，**不返回**。⇒ 断言从 `== 7` 改成 `== 8`，
+       ⛔ 不是"把用例放松了"，是**契约本身变了**。
+    """
     _, seen = _history(monkeypatch, "alice", limit=7)
-    assert seen["limit"] == 7
+    assert seen["limit"] == 8, "端点必须多要一条 —— 那是它判 has_more 的唯一依据"
+
+
+def test_history_offset_goes_through(monkeypatch):
+    """`offset` ⛔ 也别收下不用 —— 收了不用 = 翻页永远停在第 1 页。"""
+    _, seen = _history(monkeypatch, "alice", limit=50, offset=100)
+    assert seen["offset"] == 100
+
+
+def test_history_has_more_from_the_extra_row(monkeypatch):
+    """🔴 **`has_more` 的判法是「多要一条」**：拿到 `limit+1` 条 ⇒ 说明后面还有。
+
+    ⚠️ 它必须**只返回 `limit` 条** —— 多要的那一条是**探针**，⛔ 不是数据。
+    🔴 **⛔ 不许让前端拿 `count == limit` 去猜** —— 那在"正好一整页、后面没有了"时
+       会显示一个**点不动的下一页**，而且不报错（`frontend/README.md` §六 红线②）。
+    """
+    rows = [{"owner": "alice", "actor": "a", "decision": "approve",
+             "edited": False, "rounds": 1, "reason": f"r{i}"} for i in range(6)]
+
+    out_more, _ = _history(monkeypatch, "alice", limit=5, rows=rows[:6])   # 6 条 ⇒ 还有
+    assert out_more["has_more"] is True
+    assert len(out_more["events"]) == 5, "多要的那一条⛔ 不该返回"
+
+    out_end, _ = _history(monkeypatch, "alice", limit=5, rows=rows[:5])    # 5 条 ⇒ 到底了
+    assert out_end["has_more"] is False

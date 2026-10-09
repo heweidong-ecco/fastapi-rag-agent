@@ -118,6 +118,14 @@ async def log_and_track_request(request: Request, call_next):
 MIDDLEWARE_EXEMPT_PATHS = frozenset({
     "/", "/docs", "/redoc", "/docs/oauth2-redirect", "/openapi.json",
     "/health", "/ready", "/metrics",
+    # 🔴 2026-10-09（施工单刀 1）：`/api/v1/info` **与 `/` 是同一份静态服务索引**
+    #    （`/` 改成页面后，那段 JSON 挪到了这里）。
+    #    ⇒ 两者【同待遇】—— `/` 早就在本名单里（静态入口，不参与限流与配额），
+    #      一个豁免、一个记成"债"，读的人只会问"为什么同一个东西两种待遇"。
+    #    ⚠️ 它**零成本**（一个静态 dict，不碰库、不碰 Redis），没有限流的理由。
+    #    ⚠️ 副作用：它因此**不进** `scripts/route-auth-baseline.txt` 的无鉴权盘点
+    #       （那道门跳过本名单里的路径）⇒ 盘点数仍是 **5 条**（2026-10-09 实测）。
+    "/api/v1/info",
     "/api/v1/auth/login", "/api/v1/auth/refresh", "/api/v1/admin/create_user",
 })
 
@@ -518,17 +526,19 @@ app.include_router(public_router)
 app.include_router(rag_router)
 app.include_router(agent_router)
 
-@app.get("/")
-async def root():
-    return {
-        "status": "ok",
-        "version": "2.0.0",
-        "services": {
-            "public":"/api/v1",
-            "rag": "/api/v1/rag",
-            "agent": "/api/v1/agent",
-        },
-    }
+# 🔴 2026-10-09（施工单刀 1 · 规格 §〇.五 #6）：`/` 从【返回 JSON】改成【总览首页】。
+#    ⚠️ 那段服务索引 JSON **没有丢** —— 它**原样挪到了 `GET /api/v1/info`**（`api/api_v1.py`）。
+#    裁定的原话就是「**挪走**，⛔ 不是删」（那条要求来自业务方 2026-10-09 的选择项）。
+#    🔴 为什么非改不可：原先访客打开域名，第一眼是**一坨 JSON** —— 而最高判据说
+#       「**95% 的人不会去看代码**……**显示了，才知道你有做**」。
+#    ⚠️ 302 而不是 301（同 `/chat` 那族的理由）：页面将来换位置时，
+#       被永久缓存的 301 会把老用户钉在 404 上。
+#    ⚠️ 公开面**没变**：`/` 本来就在 `MIDDLEWARE_EXEMPT_PATHS` 里（静态入口，不参与限流配额）
+#       ⇒ 本条**不需要**动 `scripts/route-auth-baseline.txt`（2026-10-09 实测确认）。
+@app.get("/", include_in_schema=False)
+async def overview_page():
+    """把人送到**总览首页**。⚠️ `include_in_schema=False`：它是页面，⛔ 不是 API。"""
+    return RedirectResponse(url="/static/web/index.html", status_code=302)
 
 # 🔴 `DEC-085` §3.1：对话页的**入口 URL**（裁定 #10）。
 #    ⚠️ `/` **已被占**（上面那条返回 JSON 服务索引）—— ⛔ 别动它，本路由**单独一条**。

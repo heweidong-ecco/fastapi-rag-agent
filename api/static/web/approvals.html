@@ -4,37 +4,39 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>人工接管</title>
+<link rel="stylesheet" href="/static/app.css">
 <style>
-  :root { --fg:#1a1a1a; --muted:#6b7280; --line:#e5e7eb; --bg:#fafafa;
-          --human:#1d4ed8; --ai:#047857; --tool:#b45309; --bad:#b91c1c; }
-  * { box-sizing: border-box; }
-  [hidden] { display: none !important; }        /* ⚠️ 全局兜底：别让 hidden 被 display 覆盖 */
-  body { font: 14px/1.6 system-ui, sans-serif; color: var(--fg); background: var(--bg);
-         margin: 0; padding: 16px; }
-  h1 { font-size: 18px; margin: 0 0 4px; }
-  h2 { font-size: 15px; margin: 20px 0 8px; }
-  .sub { color: var(--muted); margin: 0 0 12px; }
+  /* 本页只写【页面专属】规则 —— 通用组件与 token 在 `/static/app.css`
+     （= `frontend/README.md` §三–§五 那份规范的实现）。
+     🔴 2026-10-08：删掉本页自带的 `:root`（与全局 token 同名不同值），硬编码色换成 token。
+     ⚠️ **本轮⛔ 没有改 class 名 / id / JS** —— 页面脚本按它们建元素。 */
+
+  :root {
+    /* 三种消息各一种颜色 —— 它们是**谁说的**，⛔ 不是好看用的 */
+    --human: var(--info); --ai: var(--ok); --tool: var(--warn);
+  }
+  body { padding: var(--sp-4); }
+  .sub { color: var(--fg-dim); margin: 0 0 var(--sp-3); }
   input, button, textarea { font: inherit; }
   input[type=password] { width: 320px; }
-  button { cursor: pointer; padding: 4px 12px; border: 1px solid var(--line);
-           background: #fff; border-radius: 6px; }
-  button.primary { border-color: #1d4ed8; color: #1d4ed8; }
-  button.danger  { border-color: var(--bad); color: var(--bad); }
-  #notice { margin: 8px 0; min-height: 1.4em; color: var(--muted); }
+  button.primary { border-color: var(--info); color: var(--info); }
+  button.danger  { border-color: var(--bad);  color: var(--bad); }
+  #notice { margin: var(--sp-2) 0; min-height: 1.4em; color: var(--fg-dim); }
   #notice.bad { color: var(--bad); }
-  table { border-collapse: collapse; width: 100%; background: #fff; }
-  th, td { border: 1px solid var(--line); padding: 6px 8px; text-align: left;
-           vertical-align: top; }
-  th { background: #f3f4f6; font-weight: 600; }
-  tr.pick > td { background: #eff6ff; }
-  .msg { border-left: 3px solid var(--line); padding: 2px 8px; margin: 4px 0; }
+
+  table { border-collapse: collapse; width: 100%; background: var(--surface); }
+  th, td { border: 1px solid var(--line); padding: var(--sp-2) var(--sp-2); text-align: left; vertical-align: top; }
+  th { background: var(--bg); font-weight: 600; }
+  tr.pick > td { background: color-mix(in srgb, var(--info) 8%, transparent); }
+
+  .msg { border-left: 3px solid var(--line); padding: 2px var(--sp-2); margin: var(--sp-1) 0; }
   .msg.human { border-color: var(--human); } .msg.ai { border-color: var(--ai); }
   .msg.tool  { border-color: var(--tool); }
-  .msg .role { font-weight: 600; font-size: 12px; color: var(--muted); }
+  .msg .role { font-weight: 600; font-size: var(--fs-cap); color: var(--fg-dim); }
   .msg pre { margin: 2px 0 0; white-space: pre-wrap; word-break: break-word; }
-  details > summary { cursor: pointer; color: var(--muted); font-size: 12px; }
-  #opbox { background: #fff; border: 1px solid var(--line); border-radius: 8px;
-           padding: 12px; margin: 8px 0; }
+  details > summary { cursor: pointer; color: var(--fg-dim); font-size: var(--fs-cap); }
+  #opbox { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-card);
+           padding: var(--sp-3); margin: var(--sp-2) 0; }
   #edited { width: 100%; min-height: 64px; }
 </style>
 </head>
@@ -72,6 +74,16 @@
   <thead><tr><th>属主</th><th>谁批的</th><th>裁决</th><th>改写</th><th>轮次</th><th>为什么</th></tr></thead>
   <tbody></tbody>
 </table>
+
+<!-- 🔴 分页控件（2026-10-08 加 · `frontend/README.md` §六）——
+     它补的是本页原来那个**静默截断**：原先硬写 `limit=50`，**界面不说明被截了**。
+     ⚠️ 这是**新增**元素，⛔ 没有改任何既有 class / id。 -->
+<div id="pager" class="pagination" hidden>
+  <button id="prevpage" class="btn">上一页</button>
+  <span id="pagelabel" class="page-label"></span>
+  <button id="nextpage" class="btn">下一页</button>
+  <span id="pagehint" class="page-hint"></span>
+</div>
 
 <script src="/static/js/approvals.js"></script>
 <script>
@@ -200,8 +212,15 @@ async function decide(decision) {
 
 /* ==================== 下 · 裁决历史 ==================== */
 
-async function loadHistory() {
-  const data = await getJSON('/api/v1/agent/approvals/history?limit=50');
+/* 🔴 分页（`frontend/README.md` §六）—— 当前页码状态，由 `pagerState` 算，⛔ 本页不自己推。
+   ⚠️ 原来这里硬写 `limit=50` —— 那是**静默截断**：界面不说明被截了。 */
+let histOffset = 0;
+const HIST_PAGE = 50;
+
+async function loadHistory(offset) {
+  if (offset === undefined) offset = histOffset;
+  const data = await getJSON(
+    '/api/v1/agent/approvals/history?limit=' + HIST_PAGE + '&offset=' + offset);
   const body = $('history').querySelector('tbody');
   body.innerHTML = '';
   for (const ev of data.events) {
@@ -214,7 +233,36 @@ async function loadHistory() {
     }
     body.appendChild(tr);
   }
+  histOffset = offset;
+  renderPager(data, offset);
 }
+
+/* 🔴 分页控件的渲染（`frontend/README.md` §六）。
+   ⚠️ **页码与"还有没有下一页"一律由 `RagApprovals.pagerState` 算** —— ⛔ 本页不自己推。
+      ⛔ 尤其**不拿 `count == limit` 猜 `has_more`**：那在"正好一整页、后面没有了"时
+      会显示一个**点不动的下一页**，而且不报错。`has_more` 只认服务端给的那个字段。
+   ⚠️ **只有一页时整个控件不显示** —— 一个永远点不动的翻页条比没有更糟。 */
+function renderPager(data, offset) {
+  const st = RagApprovals.pagerState({
+    offset: offset, limit: data.limit, hasMore: data.has_more,
+  });
+  const box = $('pager');
+  box.hidden = !st.hasPrev && !st.hasNext;
+  $('pagelabel').textContent = st.label + ' · 本页 ' + data.count + ' 条';
+  $('prevpage').disabled = !st.hasPrev;
+  $('nextpage').disabled = !st.hasNext;
+  // 🔴 两个偏移量存在 dataset 上，⛔ 不在闭包里另算一份（两处算 = 迟早不一致）
+  box.dataset.prev = String(st.prevOffset);
+  box.dataset.next = String(st.nextOffset);
+  $('pagehint').textContent = st.hasNext ? '后面还有' : '已经到底了';
+}
+
+$('prevpage').addEventListener('click', () => {
+  loadHistory(Number($('pager').dataset.prev)).catch((e) => notice(e.message, true));
+});
+$('nextpage').addEventListener('click', () => {
+  loadHistory(Number($('pager').dataset.next)).catch((e) => notice(e.message, true));
+});
 
 /* ==================== 刷新：轮询 5s，仅页面可见（裁定 5） ==================== */
 

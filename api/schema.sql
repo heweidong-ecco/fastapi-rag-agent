@@ -6,12 +6,41 @@
 --
 -- 生成方式（**从活着的数据库导**，不是手写）：
 --
---     docker compose exec -T postgres \
---       pg_dump -U postgres -d rag_db --schema-only --no-owner --no-privileges \
---       > api/schema.sql
+--     bash scripts/gen_schema_sql.sh          # ⇒ 重写本文件
+--     bash scripts/gen_schema_sql.sh --check  # ⇒ 只报「与活库是否一致」，⛔ 不写
 --
--- 生成时间：2026-09-29
+-- 🔴 **2026-10-08 起【必须走那个脚本】**（`DEC-115 §五·1` / `DEC-116`）——
+--    ⚠️ **本行原文是这条命令，它【会把手写头冲掉】**：
+--        `docker compose exec -T postgres pg_dump … --schema-only … > api/schema.sql`
+--    头是手写的、`pg_dump` 不产它 ⇒ 照原文跑一次，**上面这 70 多行当场没了，而且不报错**。
+--    `N12` 那次是**手工 `cat` 拼的**；脚本把这一步变成了结构（**本文件按【哨兵行】切**）。
+--
+-- 生成时间：2026-09-29 → **2026-10-08 重新生成**（`N12`）
 -- 来源数据库：本机开发库（Docker 容器 `postgres-rag`，镜像 `pgvector/pgvector:pg17`）
+--
+-- ## 🔴 2026-10-08 这次重新生成，改了什么（`N12`）
+--
+-- * ✅ **补上了 `approval_events`**（表 + 序列 + PK + 默认值）——
+--   它是**惰性建的**（`api/approval_audit.py` 的 `_DDL` 在写入路径里），
+--   所以要它进快照，**前提是那个库上真的发生过一次 approve**。
+--   📌 **主判据（⛔ 不会把自己数进去 —— 靠【行首锚】）**：
+--      `grep -c '^CREATE TABLE public\.approval_events' api/schema.sql` ⇒ **1**（**改前 0**）。
+--   🔴 **这条判据被【同一个人】写歪了两次，两次都是"尺子自我指涉"，所以留下过程：**
+--      · 第一版 = `grep -c 'approval_events'` ⇒ 只算 dump 正文是 **11**，
+--        但我把这段说明写进去之后，**它连说明一起数** ⇒ 全文件变 **13**。
+--      · 第二版 = `grep -c 'CREATE TABLE public.approval_events'` ⇒ 我**又**把这串原样写进说明
+--        ⇒ 实测 **2**（1 真 + 1 是这句说明自己）。
+--      · ✅ **第三版（现在这条）加 `^` 行首锚** —— dump 是**行首**输出的，而说明里那串在**行中**
+--        ⇒ 量到 **1**，且**再怎么写说明都不会动这个数**。
+--   ⚠️ **本仓同族**：`docs/复盘/2026-10-05-拿代理量当判据.md` · `docs/复盘/2026-10-02-判据写歪了不报错.md`。
+--   ⚠️ **`N12` 原写「应为 1」—— 那个数是猜的**（写它的人没见过真 dump）⇒ **真实判据是「0 → 非 0」**，
+--      且**要选一个不会被自己的说明撼动的串**。
+-- * ⚠️ **抹掉了一处【手改】**：旧文件 `api_keys.is_active` 那行尾上挂着一条
+--   `-- DEC-086：auth.py 按 COALESCE(is_active,1)=1 过滤；写侧是整数 0/1`。
+--   🔴 **这正是本文件头第 1 条警告说的那件事**（手改生成物 ⇒ 下次一跑生成命令就静默抹掉）。
+--   ⇒ **没有把它加回来**（加回来 = 留给下一次同一个坑）；那条说明的家在
+--   `api/db.py:80-90` · `docs/契约/数据模型.md` §`api_keys` · `docs/decisions/DEC-086-*.md`。
+-- * ℹ️ `\restrict` / `\unrestrict` 后面那串是 pg_dump 每次随机生成的 → **每次导都会变**，非缺陷。
 --
 -- ## 为什么要有它
 --
@@ -39,19 +68,25 @@
 --
 -- | 文档 | 说明 |
 -- |---|---|
--- | `docs/契约/数据模型.md` | **6 张表的逐字段说明**（人读的那份） |
+-- | `docs/契约/数据模型.md` | **7 张表的逐字段说明**（人读的那份 · 2026-10-08 由 6 更正） |
 -- | `api/db.py` | 建表代码（`create_table()`） |
 -- | `api/alembic/versions/` | 迁移（**只覆盖 3 处，不全**） |
 -- | `docs/说明/运维.md` §六 | 备份与恢复 |
 --
 -- ============================================================================
+--
+-- 🔴 切分规则：本行【以上】是【手写头】，本行【以下】是 `pg_dump` 的【原样输出】。
+--    `scripts/gen_schema_sql.sh` **按下面那行哨兵切**（2026-10-08 起）。
+--    ⛔ 别删/别改哨兵行，也别把它挪到别处 —— 改不了就改脚本，⛔ 不是改这里。
+-- ============================================================================
+-- ⛔⛔ 切分哨兵（**本行是手写头的最后一行** —— ⛔ 后面不许再有手写内容）—— 以下全部是 `pg_dump` 原样输出
 
 
 --
 -- PostgreSQL database dump
 --
 
-\restrict TUIKOl6jbVxuvXS6rc3Oe4fWWRif74BZcCGcMoePLwQUUq1WfbvSOfGiiNhX5yf
+\restrict js8ttVu9PGzU6g4jJcP0DWDZiK9MTLvwVAXAa3gOz1eBUSNuOihk0kQiyz2KxeF
 
 -- Dumped from database version 17.10 (Debian 17.10-1.pgdg12+1)
 -- Dumped by pg_dump version 17.10 (Debian 17.10-1.pgdg12+1)
@@ -96,7 +131,7 @@ CREATE TABLE public.api_keys (
     key_hash text NOT NULL,
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     expires_at timestamp without time zone NOT NULL,
-    is_active integer DEFAULT 1   -- DEC-086：auth.py 按 COALESCE(is_active,1)=1 过滤；写侧是整数 0/1
+    is_active integer DEFAULT 1
 );
 
 
@@ -118,6 +153,44 @@ CREATE SEQUENCE public.api_keys_id_seq
 --
 
 ALTER SEQUENCE public.api_keys_id_seq OWNED BY public.api_keys.id;
+
+
+--
+-- Name: approval_events; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.approval_events (
+    id integer NOT NULL,
+    owner text NOT NULL,
+    actor text NOT NULL,
+    raw_thread_id text,
+    graph text,
+    decision text NOT NULL,
+    edited boolean NOT NULL,
+    rounds integer,
+    reason text,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+
+--
+-- Name: approval_events_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.approval_events_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: approval_events_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.approval_events_id_seq OWNED BY public.approval_events.id;
 
 
 --
@@ -316,6 +389,13 @@ ALTER TABLE ONLY public.api_keys ALTER COLUMN id SET DEFAULT nextval('public.api
 
 
 --
+-- Name: approval_events id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.approval_events ALTER COLUMN id SET DEFAULT nextval('public.approval_events_id_seq'::regclass);
+
+
+--
 -- Name: budget_intercepts id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -364,6 +444,14 @@ ALTER TABLE ONLY public.api_keys
 
 ALTER TABLE ONLY public.api_keys
     ADD CONSTRAINT api_keys_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: approval_events approval_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.approval_events
+    ADD CONSTRAINT approval_events_pkey PRIMARY KEY (id);
 
 
 --
@@ -473,5 +561,5 @@ CREATE INDEX idx_token_usage_user ON public.token_usage_logs USING btree (user_n
 -- PostgreSQL database dump complete
 --
 
-\unrestrict TUIKOl6jbVxuvXS6rc3Oe4fWWRif74BZcCGcMoePLwQUUq1WfbvSOfGiiNhX5yf
+\unrestrict js8ttVu9PGzU6g4jJcP0DWDZiK9MTLvwVAXAa3gOz1eBUSNuOihk0kQiyz2KxeF
 

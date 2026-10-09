@@ -4,117 +4,162 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>执行轨迹与花费</title>
+<link rel="stylesheet" href="/static/app.css">
 <style>
-  :root { --fg:#1a1a1a; --muted:#6b7280; --line:#e5e7eb; --bg:#fafafa;
-          --trace:#1d4ed8; --cost:#047857; --bad:#b91c1c; --warn:#b45309; }
-  * { box-sizing: border-box; }
-  [hidden] { display: none !important; }        /* ⚠️ 全局兜底：别让 hidden 被 display 覆盖 */
-  body { font: 14px/1.6 system-ui, sans-serif; color: var(--fg); background: var(--bg);
-         margin: 0; padding: 16px; }
-  h1 { font-size: 18px; margin: 0 0 4px; }
-  h2 { font-size: 15px; margin: 20px 0 8px; }
-  .sub { color: var(--muted); margin: 0 0 12px; }
+  /* 本页只写【页面专属】规则 —— 通用组件与 token 在 `/static/app.css`
+     （= `frontend/README.md` §三–§五 那份规范的实现）。
+
+     🔴 **2026-10-08 改了什么**：本页原先自带着一套 `:root`（`--fg/--muted/--line/--bg/--bad/--warn`）
+     —— **与全局 token 同名却是另一套值**。那正是「同名 class 不同义」那个病的另一面：
+     一个页面里看到的 `--line` 和另一页的 `--line` 不是同一个颜色。
+     ⇒ **删掉本页的 `:root`**（除两条轴各自的颜色），改用全局 token。
+     ⚠️ **本轮⛔ 一个字的结构都没动**：没有改 class 名、没有改 id、没有动 JS。
+     ⛔ 文案口径也没动（`#empty` 里「为什么空」那几句是裁过的 · `DEC-093`）。 */
+
+  :root {
+    /* 两条轴各用一种颜色 —— 它们**不是同一种东西**，⛔ 别让人以为能按步对齐 */
+    --trace: var(--info); --cost: var(--ok);
+  }
+  /* ⚠️ 页面【不再自己给 body 加 padding】—— 外层的 `.app-shell` / `.content` 管布局
+     （2026-10-09 按风格稿重排：sidebar + page-head + 卡片网格）。 */
+  .content { overflow: auto; }
+  .sub { color: var(--fg-dim); margin: 0 0 var(--sp-3); }
   input, button { font: inherit; }
   input[type=password] { width: 320px; }
   input[type=text] { width: 260px; }
-  button { cursor: pointer; padding: 4px 12px; border: 1px solid var(--line);
-           background: #fff; border-radius: 6px; }
-  button.primary { border-color: #1d4ed8; color: #1d4ed8; }
-  #notice { margin: 8px 0; min-height: 1.4em; color: var(--muted); }
+  button.primary { border-color: var(--info); color: var(--info); }
+  #notice { margin: var(--sp-2) 0; min-height: 1.4em; color: var(--fg-dim); }
   #notice.bad { color: var(--bad); }
-  table { border-collapse: collapse; width: 100%; background: #fff; }
-  th, td { border: 1px solid var(--line); padding: 6px 8px; text-align: left;
-           vertical-align: top; }
-  th { background: #f3f4f6; font-weight: 600; }
-  td.num { text-align: right; font-variant-numeric: tabular-nums; }
-  tfoot td { background: #f9fafb; font-weight: 600; }
 
-  /* 两条轴用颜色分开 —— 它们**不是同一种东西**，⛔ 别让人以为能按步对齐 */
-  .axis { border-top: 3px solid var(--line); padding-top: 4px; margin-top: 24px; }
-  #traceaxis { border-color: var(--trace); }
-  #costaxis  { border-color: var(--cost); }
-  .tag { font-size: 12px; color: #fff; border-radius: 4px; padding: 1px 6px; margin-left: 6px;
-         font-weight: 400; vertical-align: 2px; }
+  table { border-collapse: collapse; width: 100%; background: var(--surface); }
+  th, td { border: 1px solid var(--line); padding: var(--sp-2) var(--sp-2); text-align: left; vertical-align: top; }
+  th { background: var(--bg); font-weight: 600; }
+  td.num { text-align: right; }
+  tfoot td { background: var(--bg); font-weight: 600; }
+
+  /* 🔴 只染【顶边】那一条 —— 原先写 `border-top: 3px solid` + `border-color: …`，
+     而 `border-color` 会作用到【四条边】⇒ 1px 的其余三边也被染色 ⇒ 渲染成整圈彩框。
+     ⚠️ 这是 2026-10-09 截图时看出来的（⛔ 不是想出来的）。 */
+  .axis { }                                  /* 外观交给 app.css 的 .panel */
+  #traceaxis { border-top: 3px solid var(--trace); }
+  #costaxis  { border-top: 3px solid var(--cost); }
+  .tag { font-size: var(--fs-cap); color: var(--bg); border-radius: var(--r-pill);
+         padding: 1px var(--sp-2); margin-left: var(--sp-2); font-weight: 400; vertical-align: 2px; }
   #traceaxis .tag { background: var(--trace); }
   #costaxis  .tag { background: var(--cost); }
 
-  .cards { display: flex; gap: 12px; flex-wrap: wrap; margin: 8px 0; }
-  .card { background: #fff; border: 1px solid var(--line); border-radius: 8px;
-          padding: 10px 16px; min-width: 130px; }
-  .card .k { font-size: 12px; color: var(--muted); }
-  .card .v { font-size: 20px; font-variant-numeric: tabular-nums; }
+  .cards { display: flex; gap: var(--sp-3); flex-wrap: wrap; margin: var(--sp-2) 0; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-card);
+          padding: var(--sp-3) var(--sp-4); min-width: 130px; }
+  .card .k { font-size: var(--fs-cap); color: var(--fg-dim); }
+  .card .v { font-size: 20px; }
 
-  #empty { background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px;
-           padding: 10px 12px; margin: 8px 0; }
+  /* 🔴 「为什么空」那句是裁过的（`DEC-093`）：⛔ 别把这几个字当样式改 */
+  #empty { background: color-mix(in srgb, var(--warn) 10%, transparent);
+           border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent);
+           border-radius: var(--r-card); padding: var(--sp-3); margin: var(--sp-2) 0; }
   #empty:empty { display: none; }
   .step.err { color: var(--bad); }
-  details > summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+  details > summary { cursor: pointer; color: var(--fg-dim); font-size: var(--fs-cap); }
   pre { white-space: pre-wrap; word-break: break-word; margin: 2px 0; }
-  #warn { color: var(--warn); font-size: 13px; }
+  #warn { color: var(--warn); font-size: var(--fs-body); }
 </style>
 </head>
 <body>
-<h1>执行轨迹与花费</h1>
-<p class="sub">
-  同一个线程，**两条轴各画各的** —— 它们的数据源不同、粒度不同，
-  <b>⛔ 对不上号</b>（没有共同的步 id，所以这里不画成一棵树）。
-</p>
+<div class="app-shell">
 
-<p>
-  <label>API Key：<input id="apikey" type="password" placeholder="X-API-Key"></label>
-  <button id="save">保存</button>
-  <label style="margin-left:16px">thread_id：<input id="thread" type="text" placeholder="default"></label>
-  <button id="load" class="primary">查询</button>
-</p>
-<div id="notice"></div>
+  <!-- 🔴 左侧导航（2026-10-09 加）—— 风格稿里每条边都有一条 sidebar，本页原先【没有】。
+       ⚠️ 导航项指向的都是【已存在的页面路由】（`/chat` `/approvals` `/trace` `/eval`）。 -->
+  <aside class="sidebar">
+    <div class="brand">青云精工 · RAG</div>
+    <nav class="nav">
+      <a href="/chat">对话</a>
+      <a href="/approvals">人工接管</a>
+      <a href="/trace" class="active">执行轨迹</a>
+      <a href="/eval">评测</a>
+    </nav>
+  </aside>
 
-<!-- ==================== 上 · 追踪轴 ==================== -->
-<section id="traceaxis" class="axis">
-  <h2>追踪轴 <span class="tag">进程内存 · 一次工具调用一条</span></h2>
-  <p class="sub" id="tracewho"></p>
+  <div class="main">
 
-  <div class="cards">
-    <!-- ⚠️ 这里【只有两格】。原先还印过「总 Token」「总花费」——
-         它们的来源是追踪轴，而 `finish_trace` 的两个调用点都没传那两个值
-         ⇒ 那两格**从上线起恒为 `--` / `¥0.0000`**。把假数印在页面上
-         正是「最容易假完成」那条硬门要防的（DEC-093 具体化 D）。
-         真金额在下半页的成本轴，那里是查库的。 -->
-    <div class="card"><div class="k">耗时</div><div class="v" id="ovDur">--</div></div>
-    <div class="card"><div class="k">工具调用</div><div class="v" id="ovTools">--</div></div>
-  </div>
+    <!-- 🔴 page-head —— 原先是正文里的一个 `<h1>` + 一行散落的 input，现在收进页头 -->
+    <header class="page-head">
+      <h1>执行轨迹与花费</h1>
+      <span class="spacer"></span>
+      <label class="field">API Key <input id="apikey" type="password" placeholder="X-API-Key"></label>
+      <button id="save">保存</button>
+      <label class="field">thread_id <input id="thread" type="text" placeholder="default"></label>
+      <button id="load" class="primary">查询</button>
+    </header>
 
-  <div id="empty"></div>
+    <div class="content">
+      <div id="notice"></div>
 
-  <div id="tracebox" hidden>
-    <p><b>提问：</b><span id="query"></span></p>
-    <table id="steps">
-      <thead><tr><th style="width:36px">#</th><th>工具</th><th style="width:90px">状态</th>
-                 <th style="width:90px">耗时</th><th>结果</th></tr></thead>
-      <tbody></tbody>
-    </table>
-    <div id="decbox" hidden>
-      <h3 style="font-size:13px;margin:12px 0 4px">决策过程</h3>
-      <ul id="decisions" style="margin:0;padding-left:20px"></ul>
+      <p class="sub">
+        同一个线程，<b>两条轴各画各的</b> —— 它们的数据源不同、粒度不同，
+        <b>⛔ 对不上号</b>（没有共同的步 id，所以这里不画成一棵树）。
+        ⇒ 所以下面<b>并排</b>摆，⛔ 不是上下叠成一棵"树"。
+      </p>
+
+      <!-- 🔴 两轴【并排】—— 窄屏自动改上下（`app.css` 的 `.grid`）-->
+      <div class="grid">
+
+        <!-- ==================== 左 · 追踪轴 ==================== -->
+        <section id="traceaxis" class="axis panel">
+          <div class="panel-head">追踪轴 <span class="tag">进程内存 · 一次工具调用一条</span></div>
+          <div class="panel-body">
+            <p class="sub" id="tracewho"></p>
+
+            <div class="cards">
+              <!-- ⚠️ 这里【只有两格】。原先还印过「总 Token」「总花费」——
+                   它们的来源是追踪轴，而 `finish_trace` 的两个调用点都没传那两个值
+                   ⇒ 那两格**从上线起恒为 `--` / `¥0.0000`**。把假数印在页面上
+                   正是「最容易假完成」那条硬门要防的（DEC-093 具体化 D）。
+                   真金额在右边那张成本轴，那里是查库的。 -->
+              <div class="card metric"><div class="metric-l">耗时</div><div class="metric-v" id="ovDur">--</div></div>
+              <div class="card metric"><div class="metric-l">工具调用</div><div class="metric-v" id="ovTools">--</div></div>
+            </div>
+
+            <div id="empty"></div>
+
+            <div id="tracebox" hidden>
+              <p><b>提问：</b><span id="query"></span></p>
+              <table id="steps">
+                <thead><tr><th style="width:36px">#</th><th>工具</th><th style="width:90px">状态</th>
+                           <th style="width:90px">耗时</th><th>结果</th></tr></thead>
+                <tbody></tbody>
+              </table>
+              <div id="decbox" hidden>
+                <h3 style="font-size:13px;margin:12px 0 4px">决策过程</h3>
+                <ul id="decisions" style="margin:0;padding-left:20px"></ul>
+              </div>
+              <details id="finalbox" hidden>
+                <summary>最终输出</summary>
+                <pre id="finalout"></pre>
+              </details>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== 右 · 成本轴 ==================== -->
+        <section id="costaxis" class="axis panel">
+          <div class="panel-head">成本轴 <span class="tag">PostgreSQL · 一次模型调用一条</span></div>
+          <div class="panel-body">
+            <p class="sub" id="costwho"></p>
+            <table id="costs">
+              <thead><tr><th style="width:36px">#</th><th style="width:170px">时间</th><th>用途</th>
+                         <th>模型</th><th style="width:90px">token</th><th style="width:100px">花费</th></tr></thead>
+              <tbody></tbody>
+              <tfoot><tr id="costtotal"></tr></tfoot>
+            </table>
+            <p id="warn"></p>
+          </div>
+        </section>
+
+      </div>
     </div>
-    <details id="finalbox" hidden>
-      <summary>最终输出</summary>
-      <pre id="finalout"></pre>
-    </details>
   </div>
-</section>
-
-<!-- ==================== 下 · 成本轴 ==================== -->
-<section id="costaxis" class="axis">
-  <h2>成本轴 <span class="tag">PostgreSQL · 一次模型调用一条</span></h2>
-  <p class="sub" id="costwho"></p>
-  <table id="costs">
-    <thead><tr><th style="width:36px">#</th><th style="width:170px">时间</th><th>用途</th>
-               <th>模型</th><th style="width:90px">token</th><th style="width:100px">花费</th></tr></thead>
-    <tbody></tbody>
-    <tfoot><tr id="costtotal"></tr></tfoot>
-  </table>
-  <p id="warn"></p>
-</section>
+</div>
 
 <p class="sub" style="margin-top:24px">
   ⚠️ 上半页（追踪轴）读的是 API 进程的<b>内存</b> —— <b>重启即清空</b>，而且目前只有
