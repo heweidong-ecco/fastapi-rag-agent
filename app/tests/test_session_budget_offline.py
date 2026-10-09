@@ -2,7 +2,7 @@
 
 ## 为什么本文件【不带】`needs_db`
 
-`docs/specs/token_tracker.md` 的 `①b · Task 2` 把判据拆成两份，本文件是**必须进 CI** 的那份：
+`app/billing/specs/token_tracker.md` 的 `①b · Task 2` 把判据拆成两份，本文件是**必须进 CI** 的那份：
 
 | 文件 | 标记 | 管什么 |
 |---|---|---|

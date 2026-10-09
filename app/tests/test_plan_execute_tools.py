@@ -656,7 +656,7 @@ def test_重规划把真实发起人传下去(monkeypatch):
        上一条同族的用例（`test_dynamic_input_receives_the_real_user_name`）守着 `dynamic_input` 那处漏传；
        而**重规划这处一直没人守**，原因是它的替身写成了 `lambda ctx: [...]`：
        **只接一个参数 ⇒ 只能发现"多传了"，发现不了"漏传"**。
-       🔴 **这正是这个洞漏到现在的原因**（`docs/specs/plan_execute.md` ⚠️①）。
+       🔴 **这正是这个洞漏到现在的原因**（`app/agent/specs/plan_execute.md` ⚠️①）。
 
     📌 本仓同族前科：那次修的根因是**盲替换命中了注释**，真调用点没改到；
        而写下来的教训（「改完要按行号核」）**是文字**，没能拦住这一处。

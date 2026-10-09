@@ -25,7 +25,7 @@
 
 后 4 条为什么删（摘要，全文 `DEC-065`）：
 · `GET /users/{user_id}` —— **一行数据都不读**，函数体就是 `return {"user_id": …, "detail": …}`
-  （参数校验演示）。本仓 `docs/specs/api_v1.md` 的 ⚠️④ 与待办表第 4 条早就写着「**要么真查库，要么删**」。
+  （参数校验演示）。本仓 `app/routing/specs/api_v1.md` 的 ⚠️④ 与待办表第 4 条早就写着「**要么真查库，要么删**」。
 · `GET /tool/benchmark` —— 它 benchmark 的是 **mock**：`get_weather` 是 `time.sleep(2)` +
   硬编码 `f"{city}当前温度25°C，晴"` ⇒ **证明不了任何生产事实**。
 · `POST /rag/async_ask` · `POST /rag/parallel_ask` —— **纯 mock**（`await asyncio.sleep(2)` 后返回
@@ -107,7 +107,7 @@ def test_users_by_id_stays_removed():
 
     ⚠️ 它当初唯一的行为是 `return {"user_id": user_id, "detail": include_detail}` ——
     **不查库、不看 `user_name`**，纯粹是 **Path/Query 参数校验演示**，却很容易被当成真接口用
-    （`docs/specs/api_v1.md` ⚠️④ 记的就是这个）。
+    （`app/routing/specs/api_v1.md` ⚠️④ 记的就是这个）。
 
     🔴 **⛔ 别把这里改成 `with TestClient(app) as client:`** —— 见
     `docs/decisions/DEC-058-不连库的用例用裸TestClient.md`。

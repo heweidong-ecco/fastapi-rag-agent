@@ -148,7 +148,7 @@ def resolve_rate_limit_identity(x_api_key: str | None, auth_header: str | None) 
 
        ⚠️ **为什么不是"降级到匿名桶"**：`anonymous` 是**一个** 20 容量 / 3 每秒的桶 ⇒
        库一挂，**所有带 key 的人都挤进同一个桶** ⇒ **大面积假 429** ——
-       那正是"**把库抖动算到用户头上**"，与 `docs/specs/deps.md` 里
+       那正是"**把库抖动算到用户头上**"，与 `app/routing/specs/deps.md` 里
        **1008 / 1011** 那条禁止的**归错因**是同一件事的限流版。
     """
     if x_api_key:

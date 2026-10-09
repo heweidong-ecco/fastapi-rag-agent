@@ -32,6 +32,22 @@ All notable changes to this project will be documented in this file.
   - ⚠️ **遗留**：`CHANGELOG` / `docs/复盘` / `docs/decisions`（除本两份）里的旧路径
     **⛔ 有意不改**（本仓立场：原始记录不改写）。断链门**只查 `.md` 目标**，`.py` 路径不在它射程内。
   - 📌 **段 2 / 段 3 的落点自此为 `app/<组>/specs/` 与 `app/…`**。
+- 🔴 **段 2（一）：spec 拆进模块** —— `docs/specs/` **44 份 spec 全部搬进 `app/<组>/specs/`**
+  （2026-10-09 · 业务方裁「拆进模块」· `DEC-125` §2.6）。⚠️ **`docs/specs/` 这个目录已不存在。**
+  - **新判据一句话**：**spec 与它的模块同目录** —— `app/core/config.py` ⇒ `app/core/specs/config.md`；
+    `app/` 根的模块（`main.py`）⇒ `app/specs/main.md`；模板与写作规范 ⇒ `app/specs/README.md`。
+  - 🔴 **同批改了三处【会瞎掉】的门**（⛔ 不同批改 = 模块 spec 门与提醒 hook 全部失明）：
+    `scripts/spec_status.sh`（**递归扫 `app/**/specs/` + 防空跑**）·
+    `.claude/hooks/spec-remind.py` · `.claude/hooks/pre-commit-gates.py` §④
+    ⇒ **三处都实测过**：`spec_status` ⇒ 42 有 / 14 缺 · `spec-remind` 喂真 JSON 出话 ·
+    提交门 §④ **真拦住**（探针 `app/core/zzz_probe2.py` ⇒ 退出码 2）。
+  - **97 个文件的引用改成新路径**（用 git 的 rename 对做**精确映射**，⛔ 不是裸正则）；
+    `docs/decisions/` 里的旧路径**加豁免**（本仓规矩：**原始记录不改写**）。
+  - **顺带删掉两件**（`DEC-125` §2.5 已裁）：`app/preprocess.py`（25 行硬编码 print 脚本、
+    零函数零调用方）· `prompt/`（0 文件空目录，git 里从来不存在）。
+    ⚠️ `bench/` **暂不动** —— 「要不要并进 `locust/`」还等你一句话。
+  - **判据**：`pytest` **913 passed / 2 skipped** · `bash scripts/ci-local.sh` **退出码 0** ·
+    断链门 / 孤儿门 **exit 0** · `spec_status` 42 有 / 14 缺（防空跑生效）。
 
 - 🔴 **`api/` 模块化：60 个平铺的产品模块拆成 7 个模块组 + `eval/` + 94 个测试进 `tests/`**
   （2026-10-09 · 业务方口述 · 裁定见 `docs/decisions/DEC-125`）。

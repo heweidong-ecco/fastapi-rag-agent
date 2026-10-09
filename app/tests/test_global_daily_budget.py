@@ -4,7 +4,7 @@
 
 ## 🔴 本文件补的是一个【真缺口】，不是"对称好看"
 
-`docs/specs/token_tracker.md` 的 `①b · Task 3` **只列了离线那份**。
+`app/billing/specs/token_tracker.md` 的 `①b · Task 3` **只列了离线那份**。
 但离线那份**从头到尾没有执行过那条 SQL** —— 它只 `AST` 取字面量做静态核对。
 ⇒ 意味着：**表名打错、列名打错、SQL 语法错，CI 永远绿。**
 

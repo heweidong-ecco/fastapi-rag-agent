@@ -7,7 +7,7 @@
 
 // ==================== 两条轴的名字，写死一处 ====================
 // ⚠️ 它们**不是**同一种东西，⛔ 别在页面别处再拼一遍字面量
-//    （见 docs/specs/tool_visualizer.md 顶部「两条轴别混」）。
+//    （见 app/tools/specs/tool_visualizer.md 顶部「两条轴别混」）。
 const AXIS_TRACE = '追踪轴（进程内存 · 一次工具调用一条）';
 const AXIS_COST = '成本轴（PG token_usage_logs · 一次模型调用一条）';
 

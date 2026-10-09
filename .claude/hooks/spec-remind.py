@@ -69,15 +69,19 @@ def main() -> int:
         return 0                       # 测试/配置不算产品模块
 
     mod = base[:-3]
-    spec_rel = f"docs/specs/{mod}.md"
-    spec_abs = os.path.join(cwd, "docs", "specs", f"{mod}.md")
+    # 🔴 2026-10-09（段 2）：spec **与它的模块同目录** —— `app/core/config.py` ⇒ `app/core/specs/config.md`。
+    #    `app/` 根的那几个模块（`main.py` 等）⇒ 落在 `app/specs/`。
+    #    ⛔ 别改回 `docs/specs/`：那是这次重构撤掉的"集中索引"。
+    _d = os.path.dirname(rel)                      # "app/core" / "app"
+    spec_rel = f"{_d}/specs/{mod}.md" if _d != "app" else f"app/specs/{mod}.md"
+    spec_abs = os.path.join(cwd, *spec_rel.split("/"))
 
     if os.path.exists(spec_abs):
         print(f"📋 你动了 `{rel}` —— 记得更新 `{spec_rel}`"
               f"（⭐ 关键节：「看代码会误判的地方」）", file=sys.stderr)
     else:
         print(f"📋 你动了 `{rel}` —— ⚠️ **它还没有 spec**（`{spec_rel}`）。"
-              f"做完记得建一份，模板见 `docs/specs/README.md`", file=sys.stderr)
+              f"做完记得建一份，模板见 `app/specs/README.md`", file=sys.stderr)
     return 0
 
 

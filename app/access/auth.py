@@ -144,7 +144,7 @@ def verify_api_key(api_key: str):
          然后照样连不上，而且**永远查不到原因**。
        * 改前是裸的 `with get_db()` ⇒ 库一抖就是**非结构化的 500**。
 
-       ⇒ 与 WS 侧**已裁**的 **1008 / 1011** 同一条口径（`docs/specs/deps.md` 的 ⚠️ 表）：
+       ⇒ 与 WS 侧**已裁**的 **1008 / 1011** 同一条口径（`app/routing/specs/deps.md` 的 ⚠️ 表）：
          **凭据不行 ⇒ 换 key；认证服务不行 ⇒ 重试、⛔ 别换 key。**
          HTTP 侧的对应值就是 **503 `SERVICE_UNAVAILABLE`**
          （`app/core/exceptions.py` 里**早就有这个码，此前从未被用过**）。

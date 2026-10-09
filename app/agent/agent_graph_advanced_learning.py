@@ -410,7 +410,7 @@ def create_react_subgraph():
 #
 # 🔴🔴 **这张名单是「6 个调 LLM 的节点里只有 4 个该流」那条判断的落点** ——
 #    它**⛔ 读代码推不出来**（要同时知道「这个节点的 LLM 输出是什么角色」＋「答案最终从哪来」）。
-#    完整对照表 ⇒ `docs/specs/agent_graph_advanced_learning.md` 的 ⭐ 节。
+#    完整对照表 ⇒ `app/agent/specs/agent_graph_advanced_learning.md` 的 ⭐ 节。
 #
 # | 节点 | 调什么 | 该流？| 为什么 |
 # |---|---|---|---|

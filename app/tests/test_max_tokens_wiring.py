@@ -101,7 +101,7 @@ def test_no_raw_chatopenai_outside_the_factory():
     assert not offenders, (
         "这些地方还在直连 ChatOpenAI ⇒ 绕开了唯一的构造落点（改 model/max_tokens 会漏掉它们）：\n  "
         + "\n  ".join(offenders)
-        + "\n请改走 `from llm_factory import make_llm` —— 角色见 docs/specs/llm_factory.md。"
+        + "\n请改走 `from llm_factory import make_llm` —— 角色见 app/core/specs/llm_factory.md。"
     )
 
 
@@ -111,7 +111,7 @@ def test_no_raw_chatopenai_outside_the_factory():
 # ⚠️ **这不是"从代码里推出来的规律"，是把 Task 5【改动前】的取值原样固化** ——
 #    Task 5 是**零行为变化**的收口，所以这张表必须等于改动前 15 处的实际取值
 #    （`agent_graph.py` 那类"用 fast"的地方**不许被顺手改成 chat**）。
-#    分类【为什么】这么分 ⇒ `docs/specs/token_tracker.md` 的分类表。
+#    分类【为什么】这么分 ⇒ `app/billing/specs/token_tracker.md` 的分类表。
 EXPECTED_ROLES = {
     # ---- 答案生成类：要完整答案 ⇒ answer(2000) ----
     "routing/api_v1_rag.py": ("chat", "answer"),          # get_llm_stream 流式答案 · WS agent 对外答案

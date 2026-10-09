@@ -12,8 +12,8 @@
       ⚠️ **这个组合不会自己报错** —— 要等人重启后去队列里找才发现。
       ⇒ 启动时由 `warn_if_backend_mismatch()` 给警告（唯一的防线）。
 
-📄 计划 / 裁定 ⇒ `docs/specs/api_v1_agent.md` 的「实施计划 ② · Task 2」·
-   模块 spec ⇒ `docs/specs/pending_approvals.md` · 判据 ⇒ `app/tests/test_pending_approvals.py`
+📄 计划 / 裁定 ⇒ `app/routing/specs/api_v1_agent.md` 的「实施计划 ② · Task 2」·
+   模块 spec ⇒ `app/agent/specs/pending_approvals.md` · 判据 ⇒ `app/tests/test_pending_approvals.py`
 """
 import threading
 import time
@@ -139,5 +139,5 @@ def warn_if_backend_mismatch(logger=None) -> None:
     if os.getenv("AGENT_CHECKPOINT_BACKEND") == "sqlite":
         msg = ("AGENT_CHECKPOINT_BACKEND=sqlite ⇒ 图状态会落盘，"
                "但待接管队列(pending_approvals)仍在内存 ⇒ 重启后队列会丢、会话变孤儿。"
-               "见 docs/specs/pending_approvals.md")
+               "见 app/agent/specs/pending_approvals.md")
         (logger.warning if logger else print)(msg)

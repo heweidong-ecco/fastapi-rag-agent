@@ -26,7 +26,7 @@
 ⇒ 用**长度前缀**：用户名占多少字符是写死的 ⇒ **切分点唯一** ⇒ 无歧义。
 
 📄 裁定 ⇒ `docs/decisions/DEC-056-多用户资源隔离的现状审计与分阶段收口.md`（决策 1 · 丙段）
-📄 模块 spec ⇒ `docs/specs/session_key.md` · 📌 判据 ⇒ `app/tests/test_session_key.py`
+📄 模块 spec ⇒ `app/access/specs/session_key.md` · 📌 判据 ⇒ `app/tests/test_session_key.py`
 """
 
 

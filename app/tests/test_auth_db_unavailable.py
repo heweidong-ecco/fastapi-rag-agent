@@ -11,7 +11,7 @@
 是真是假** ⇒ 报 401 = **替用户断言「你的 key 坏了」** ⇒ 他会去换一把**没问题的** key，
 然后照样连不上 —— 且**永远查不到原因**。
 
-⇒ 与 WS 侧**已裁的 1008 / 1011**同一口径（`docs/specs/deps.md` 的 ⚠️ 表）：
+⇒ 与 WS 侧**已裁的 1008 / 1011**同一口径（`app/routing/specs/deps.md` 的 ⚠️ 表）：
 **凭据不行 ⇒ 换 key；认证服务不行 ⇒ 重试、别换 key**。HTTP 侧的对应值 = **503
 `SERVICE_UNAVAILABLE`**（`app/core/exceptions.py` 里早就有这个码，从来没被用过）。
 

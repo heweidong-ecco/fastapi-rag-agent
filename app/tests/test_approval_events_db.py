@@ -27,7 +27,7 @@
 
 ⚠️ **本文件写的是 `approval_events`，不隔离的后果比脏数据更重** ——
 `approval_events` 是**审计留痕**表：往真库塞一条假裁决 = **假留痕**
-（本仓立场：`docs/specs/approval_audit.md`「**表里少一条 ≠ 那次裁决没发生**」，
+（本仓立场：`app/agent/specs/approval_audit.md`「**表里少一条 ≠ 那次裁决没发生**」，
 反过来同样成立 —— **表里多一条假的，就是在伪造"批过"**）。
 
 📌 **本文件不进 CI**（CI 无 postgres service，见 `app/pytest.ini`）。

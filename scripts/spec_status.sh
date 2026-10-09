@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# spec_status.sh —— **对账**：`app/` 的模块 ↔ `docs/specs/` 的 spec
+# spec_status.sh —— **对账**：`app/` 的模块 ↔ **它自己目录下 `specs/` 里的** spec
+# 🔴 2026-10-09（段 2）：spec 已**随模块搬进** `app/<组>/specs/`，⛔ 不再是集中的 `docs/specs/`。
 #
 # ## 它回答一个问题
 #
@@ -12,7 +13,7 @@
 # ## 用法
 #
 #     bash scripts/spec_status.sh              # 只打对账结果
-#     bash scripts/spec_status.sh --write      # 顺带【重写】docs/specs/README.md 的模块表
+#     bash scripts/spec_status.sh --write      # 顺带【重写】app/specs/README.md 的模块表
 #     bash scripts/spec_status.sh --missing    # 只列缺 spec 的（给 hook 用）
 #     bash scripts/spec_status.sh --non-modules # 只列【不是模块】的（给 pre-commit 第 ④ 道门用）
 #
@@ -20,7 +21,8 @@
 #
 # * **模块** = `app/*.py` 里**非测试、非 conftest** 的（`test_*` / `conftest` 不算产品模块）
 #   ⚠️ **再减掉 `NON_MODULE_FILES`** —— 那 3 个是**手动 / 离线脚本**，不是产品模块（见下表与理由）
-# * **有 spec** = `docs/specs/<模块名>.md` 存在
+# * **有 spec** = **该模块自己目录下的 `specs/<模块名>.md`** 存在
+#   （`app/` 根的那几个模块 —— 如 `main.py` —— 落在 `app/specs/`）
 #
 # ## ⚠️ 三条设计说明
 #
@@ -53,7 +55,8 @@ from collections import defaultdict
 
 MODE = sys.argv[1]
 REPO = os.getcwd()
-SPECS = os.path.join(REPO, "docs", "specs")
+# ⚠️ 这个变量只用于**模板 README** 的读写；spec 的**查找**见下面那次递归（`have`）。
+SPECS = os.path.join(REPO, "app", "specs")
 
 # ── 0. 【不是模块的 .py】── 2026-10-07 加（乙单 · `裁单-清账与spec-20261007.md` §乙-3）
 # 「模块 = app/*.py」还有第二个盲区：**手动脚本 / 离线脚本**也住在 `app/` 下 ——
@@ -70,7 +73,9 @@ SPECS = os.path.join(REPO, "docs", "specs")
 #      · `tools_with_cache.py` **是模块**（业务方 2026-10-07 裁：**⛔ 不删，要接回调用链**）
 #    ⇒ 机械规则把「**脚本**」与「**模块，只是没接上**」混成一类 ⇒ 只能**逐条给理由**。
 NON_MODULE_FILES = {
-    "preprocess":          "手动脚本：跑一遍 `DocumentPreprocessor`，肉眼比对输入输出",
+    # ⚠️ 2026-10-09（段 2）：`preprocess.py` **已删**（`DEC-125` §2.5 ⓒ）——
+    #    它是 25 行硬编码 print 脚本、零函数零调用方；真功能 `DocumentPreprocessor`
+    #    已在 `app/rag/document_preprocessor.py` 且被上传链路真调用。
     "plan_constraints":    "手动实验脚本：对比不同约束下的任务规划（**会真调 LLM**）",
     "evaluate_with_ragas": "RAGAS **离线**评测脚本（有 `__main__`，不在服务路径上）",
 }
@@ -112,10 +117,19 @@ if len(mods) < 40:
 
 # ── 2. 扫 spec ──
 have = {}
-if os.path.isdir(SPECS):
-    for f in os.listdir(SPECS):
+# 🔴 2026-10-09（段 2）：递归扫 `app/**/specs/*.md` —— **spec 与它的模块同目录**。
+#    ⛔ 别改回"只看一处目录"：那正是这次重构要消的"集中索引"。
+for _r, _d, _fs in os.walk(os.path.join(REPO, "app")):
+    _d[:] = [x for x in _d if x != "__pycache__"]
+    if os.path.basename(_r) != "specs":
+        continue
+    for f in _fs:
         if f.endswith(".md") and f != "README.md":
-            have[f[:-3]] = f
+            have[f[:-3]] = os.path.relpath(os.path.join(_r, f), REPO)
+# 🔴 防空跑：一份都扫不到 ⇒ 当场红（「扫不到」与「都没问题」在输出上一模一样）
+if not have:
+    print("🔴 防空跑：一份 spec 都没扫到 —— 枚举口径又变了，⛔ 下面的对账结论不可信。")
+    raise SystemExit(2)
 
 # ── 2b. 【非 .py 的子系统】── 2026-10-06 加（`DEC-085` 段 1 第一刀）
 # 上面那句「模块 = app/*.py」原先**默认每个子系统都有 .py 入口**。前端打破了这个默认：
@@ -152,7 +166,7 @@ nonmod_conflict = [k for k in NON_MODULE_FILES if k in have]
 
 def spec_status(name):
     """从 spec 文件里读它自报的状态（第一张表的『状态』行）"""
-    p = os.path.join(SPECS, have.get(name, ""))
+    p = os.path.join(REPO, have.get(name, ""))
     if not have.get(name) or not os.path.exists(p):
         return "❓ 未知"
     try:
@@ -203,7 +217,7 @@ if MODE == "write":
         + E
         + tail
     )
-    print(f"✅ 已重写 docs/specs/README.md 的模块表（{len(mods)} 个模块）")
+    print(f"✅ 已重写 app/specs/README.md 的模块表（{len(mods)} 个模块）")
     sys.exit(0)
 
 # ── 5. 报告 ──
@@ -214,7 +228,7 @@ print(f"  🔴 没 spec        {len(missing)}   ← 别人【不知道它们存�
 print(f"  🗑  spec 有、代码没了 {len(extra)}   ← 模块删了，spec 残留")
 if extra:
     for k in extra:
-        print(f"        docs/specs/{have[k]}")
+        print(f"        {have[k]}")
 # ⚠️ 这一行是【显示】的，不是"通过"的：非 .py 子系统**不在上面的 ok 里**（ok 由 app/*.py 推）
 #    ⇒ 不打出来就等于它**哪一档都不占**，看起来像漏了一批。
 nonpy = [k for k in have if k in NON_PY_MODULES
@@ -222,7 +236,7 @@ nonpy = [k for k in have if k in NON_PY_MODULES
 if nonpy:
     print(f"  🧩 非 .py 子系统   {len(nonpy)}   ← 没有 app/*.py 模块，代码在别处（见脚本里的 NON_PY_MODULES）")
     for k in sorted(nonpy):
-        print(f"        docs/specs/{have[k]}  →  {NON_PY_MODULES[k]}/")
+        print(f"        {have[k]}  →  {NON_PY_MODULES[k]}/")
 # ⚠️ 同 `nonpy`：这几个**不在上面任何一档里**（不是产品模块 ⇒ 不进 `mods`）
 #    ⇒ **打了才看得见**；不打就等于**悄悄消失**。
 if nonmods:
@@ -239,7 +253,7 @@ if nonmod_conflict:
     print()
     print(f"  🔴 口径打架 {len(nonmod_conflict)} 个：既在 NON_MODULE_FILES、又有 spec ⇒ 二者只能留一个")
     for k in nonmod_conflict:
-        print(f"        docs/specs/{have[k]}")
+        print(f"        {have[k]}")
 print()
 if missing:
     print("没 spec 的（按行数降序，前 15）：")

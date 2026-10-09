@@ -22,7 +22,7 @@ PreToolUse hook —— **`git commit` 之前，自动跑本仓的六道门**。
 | ① | **凭据门** | `scripts/check_secrets.sh` | PUBLIC 仓里混进明文凭据（**进了历史就改不掉**） |
 | ② | **链接检查** | `scripts/check_doc_links.sh` | 文档里指向不存在的路径（**当天已犯 4 次**） |
 | ③ | **孤儿检查** | `scripts/check_doc_orphans.sh` | 建了文档**但没人指向它**（索引挂空） |
-| ④ | **模块 spec 门**（内联） | — | 新增 `app/*.py` 模块却没有 `docs/specs/<模块>.md` |
+| ④ | **模块 spec 门**（内联） | — | 新增 `app/**/*.py` 模块却没有**同目录 `specs/<模块>.md`** |
 | ⑤ | **路由鉴权门** | `scripts/check_route_auth.py --baseline` | 新引入了**没有鉴权依赖**的路由（含 WebSocket）|
 | ⑥ | **静态检查门** 🆕 | `scripts/check_lint_baseline.sh` | 新出现的**未使用导入 / 语法级错误**（ruff · **基线棘轮**，2026-10-07 加）|
 
@@ -117,9 +117,13 @@ def new_modules_without_spec(repo: str):
             continue                     # 测试不算产品模块
         if base[:-3] in nonmods:
             continue                     # 【不是模块】（手动/离线脚本）⇒ 不要求 spec
-        spec = os.path.join(repo, *SPECS_DIR, base[:-3] + ".md")
+        # 🔴 2026-10-09（段 2）：spec **与它的模块同目录** —— 见 `spec-remind.py` 同一处注释。
+        _d = os.path.dirname(f)                    # "app/core" / "app"
+        spec_rel = (f"{_d}/specs/{base[:-3]}.md" if _d != "app"
+                    else f"app/specs/{base[:-3]}.md")
+        spec = os.path.join(repo, *spec_rel.split("/"))
         if not os.path.exists(spec):
-            bad.append((f, os.path.join(*SPECS_DIR, base[:-3] + ".md")))
+            bad.append((f, spec_rel))
     return bad
 
 
@@ -276,7 +280,7 @@ def main() -> int:
             print("", file=sys.stderr)
             print("   ⇒ 为什么硬拦：**没有 spec 的模块，别人不知道它存在、也不知道做到哪。**",
                   file=sys.stderr)
-            print("   ⇒ 建 spec 的模板见 docs/specs/README.md（**⭐ 关键节是「看代码会误判的地方」**）",
+            print("   ⇒ 建 spec 的模板见 app/specs/README.md（**⭐ 关键节是「看代码会误判的地方」**）",
                   file=sys.stderr)
             print("   ⇒ ⚠️ 但它**如果是手动/离线脚本、不是产品模块** —— ⛔ 别为它造 spec：",
                   file=sys.stderr)

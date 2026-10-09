@@ -372,7 +372,7 @@ def test_edited_approval_actually_wakes_the_model(monkeypatch):
     实测（2026-10-04，真服务）：`approve` 返回耗时 **0.017s**、`answer` **= 输入原文** ——
     图在 `update_state` 之后**直接 END**，`tools` / `agent` 一个没跑。
 
-    ⚠️ 这正是 `docs/specs/api_v1_agent.md` Task 3 里那句
+    ⚠️ 这正是 `app/routing/specs/api_v1_agent.md` Task 3 里那句
     「不能『跳过模型直接把这个答案返回』—— 那样后续节点（`tools`→`agent`）看不到它」
     所要求的形态 —— **而改前的实现做的恰恰是它禁止的那件事**。
     """

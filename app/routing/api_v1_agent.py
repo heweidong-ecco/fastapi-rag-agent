@@ -910,7 +910,7 @@ async def advanced_agent_chat_stream(
        **最后一帧汇总**才看到 `answer`。⚠️ 别为了"看起来也在流"把 `calc_execute` 的
        **表达式提取过程**放出去 —— 那是中间产物，不是答案。
        📄 节点对照表（6 个调 LLM 的节点里只有 4 个该流）⇒
-       `docs/specs/agent_graph_advanced_learning.md` 的 ⭐ 节
+       `app/agent/specs/agent_graph_advanced_learning.md` 的 ⭐ 节
     2. **`supervisor` 的路由词（`SEARCH`/`CALCULATOR`/…）不会出现** —— 它**也是**调 LLM 的
        节点，会**真的进到流里**，靠 `STREAMABLE_NODES` 白名单挡掉（⛔ 不是"它不产生块"）。
 
@@ -1940,7 +1940,7 @@ async def agent_cost_overview(
 
     🔴 **为什么必须改**：改前它自称"最直观的『花了多少钱』查询接口"，
     但实测 admin 在库里有 **4216 tokens**、它答 `0` —— **不报错、界面照常出数**。
-    📄 实跑记录 ⇒ `docs/specs/token_tracker.md` 的 `①b` Task 7 段。
+    📄 实跑记录 ⇒ `app/billing/specs/token_tracker.md` 的 `①b` Task 7 段。
 
     ⚠️ **"今天花了多少"不归本接口** —— 那是 `R1.3` 口径，
        去 `/agent/token/budget`（或看板）。本接口答的是"一共"。

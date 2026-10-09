@@ -741,11 +741,11 @@ bash scripts/list_endpoints.sh >/dev/null   # 确认服务在
 | `.env.example` | 加 `# EMBEDDING_MODEL_MAIN=...` | `grep -n 'EMBEDDING_MODEL_MAIN' .env.example` |
 | `docs/契约/环境变量.md` | ① 新增该变量一行 ② 🔴 **更正 `:67` 那句「embedding ⛔ 不能换，必须 DashScope」**（Task 0 若已实测通，说明**模型可换、端点不变**） ③ `:52` 的「（`text-embedding-v2`）」改成变量口径 | `grep -n 'EMBEDDING_MODEL_MAIN' docs/契约/环境变量.md` |
 | `docs/契约/数据模型.md:44` | 维度 + 模型名 | 同上 |
-| `docs/specs/embedding_client.md` | §对外提供那行的签名（`model="text-embedding-v2"` ⇒ 从 env 读） | `grep -n 'EMBEDDING_MODEL_MAIN' docs/specs/embedding_client.md` |
-| `docs/specs/cache.md`（**在，8901 B**） | 缓存键格式**变了** ⇒ **必须写**（`get_cache_key` 多了必填形参 `model`） | `grep -n 'emb:\|get_cache_key' docs/specs/cache.md` |
-| `docs/specs/token_tracker.md:488` | 单价表加新模型 | `grep -n 'qwen3.7-text-embedding-flash' docs/specs/token_tracker.md` |
+| `app/rag/specs/embedding_client.md` | §对外提供那行的签名（`model="text-embedding-v2"` ⇒ 从 env 读） | `grep -n 'EMBEDDING_MODEL_MAIN' app/rag/specs/embedding_client.md` |
+| `app/core/specs/cache.md`（**在，8901 B**） | 缓存键格式**变了** ⇒ **必须写**（`get_cache_key` 多了必填形参 `model`） | `grep -n 'emb:\|get_cache_key' app/core/specs/cache.md` |
+| `app/billing/specs/token_tracker.md:488` | 单价表加新模型 | `grep -n 'qwen3.7-text-embedding-flash' app/billing/specs/token_tracker.md` |
 | `README.md:32` · `ROADMAP.md:49` | 「Embedding 走 DashScope `text-embedding-v2`」⇒ 变量口径 | `grep -n 'text-embedding-v2' README.md ROADMAP.md` |
-| 🔴 `docs/specs/config.md:77` | 「**embedding 仍固定走 `DASHSCOPE_API_KEY`**（`text-embedding-v2`）」 | `grep -n 'text-embedding-v2' docs/specs/config.md` |
+| 🔴 `app/core/specs/config.md:77` | 「**embedding 仍固定走 `DASHSCOPE_API_KEY`**（`text-embedding-v2`）」 | `grep -n 'text-embedding-v2' app/core/specs/config.md` |
 
 🔴 **别靠上面这张表**（它是人手列的，会漏）—— **用这条命令现数**（**2026-10-08 自查时就是它照出 `config.md` 漏了的**）：
 ```bash

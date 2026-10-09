@@ -10,7 +10,7 @@
 ⚠️ 本模块是 **fail-open** 的：写/读失败一律**打一行日志继续** ——
    留痕是**旁路**，⛔ 不该让「批准」这个动作 500，也不该让页面整页崩。
 
-📄 表形状 ⇒ 下面 `_DDL` · spec ⇒ `docs/specs/approval_audit.md`
+📄 表形状 ⇒ 下面 `_DDL` · spec ⇒ `app/agent/specs/approval_audit.md`
 """
 from typing import Optional
 
