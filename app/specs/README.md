@@ -232,7 +232,7 @@ grep -o ':[0-9][0-9][0-9]' docs/specs/*.md | grep -v 'app/specs/README.md' | wc 
 
 | 文档 | 说明 |
 |---|---|
-| `docs/文档地图.md` | 全项目文档索引 |
+| `docs/文档地图.md` | ⚠️ **已瘦成指针页**（2026-10-09）；文档导航看各层 `CLAUDE.md` |
 | `docs/原理/架构.md` | 架构视角（模块怎么连） |
 | `ROADMAP.md` | 功能视角（有哪些功能） |
 | `scripts/spec_status.sh` | 对账脚本 |

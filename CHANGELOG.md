@@ -24,6 +24,18 @@ All notable changes to this project will be documented in this file.
     已修（`f not in ("README.md", "CLAUDE.md")`）。
   - **判据**：`spec_status` **56 有 / 0 缺 / 0 残留** · 断链门/孤儿门/索引门 **exit 0** ·
     `test_remind_hooks` **22 通过** · `pytest` **913 passed / 2 skipped** · `ci-local` **退出码 0**。
+- 🔴 **段 3（二）：`docs/文档地图.md` 瘦成指针页 —— 357 行 → 103 行**（业务方 2026-10-09 裁「**丙**」）。
+  - **为什么可以瘦**：它那两张表（§一 优先级索引 · §二 全部文档按角色分类，共 ~270 行）
+    **已被各层 `CLAUDE.md` 接管** ⇒ 留着就是**两份索引必然分叉**。
+  - **保留两样【别处没有】的**：
+    · **文档放置判据**（「这份东西该写进哪一层」）
+    · 🔴 **「还没有的」诚实清单** —— ⚠️ **`ROADMAP.md` 的功能表直接引用它**
+      （「文档体系欠账」那一行的**判据来源**就是这里 ⇒ 删了就悬空）
+  - **13 处"看文档地图"的说法改掉了** —— 它**不再承担导航**（`README` / `CLAUDE.md` /
+    `ROADMAP` / `CONTRIBUTING` / `.claude/commands/handoff.md` / `app/specs/README.md` / `docs/CLAUDE.md`）。
+  - ⚠️ **没有动孤儿门** —— 它不是删除，文件还在、仍被指着 ⇒ `KEY_TARGETS` 无需改。
+    （正是选「丙」而不是「乙」的理由：**改门要单独拍**。）
+  - **判据**：断链门 / 孤儿门 **exit 0** · `ci-local` **退出码 0**。
 
 - 🔴 **容器目录改名：`api/` → `app/`**（2026-10-09 · 业务方口述 · 裁定见 `docs/decisions/DEC-126`）。
   **纯改名，⛔ 不改包语义、⛔ 不改 Docker 语义、⛔ 不改行为** ——
