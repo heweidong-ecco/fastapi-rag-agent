@@ -10,6 +10,41 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- 🔴 **新立【第 ⑦ 道提交门】—— 过期导入门**（2026-10-09 · 📄 **`DEC-128`** · 待办 `N21` 结清）——
+  拦的是 **`app/` 之外的 `.py` 里【模块搬了家但导入没改】**（`from auth import …`）。
+  - **为什么必须有**：当天 `#123` 模块化重构**静默打断两个活工具**（其中一个是**发凭据**的
+    `issue_api_key.py`），而 **913 条 pytest**（脚本不在采集范围）与 **CI 的 `compileall`**
+    （只查语法，而这是**导入期**错）**双双照不到**。
+    📄 ⇒ `docs/复盘/2026-10-09-测试全绿而活路径坏了两次.md`
+  - 🆕 `scripts/check_stale_imports.sh`（**bash 里嵌 python** —— 提交门的执行器是 `bash <path>`，
+    `.py` 直接挂不上）· 🆕 `scripts/test_check_stale_imports.sh`（**自测 7 条**，
+    含两条「**判不了必须是 exit 2**」的正例）· 两样**都进了 CI**。
+  - **三态**：`0` 干净 / `1` 有（点名 `文件:行` 与**新家**）/ **`2` 判不了**（拿不到 git ·
+    `app/` 不在）—— ⛔ **`2` 不等于通过**（同 `check_dep_vulns.sh` 那条口径）。
+  - 🔴 **两条设计选择**：① 文件清单走 **`git ls-files`**（同断链门/孤儿门）——
+    ⚠️ **实测教训**：初稿按**目录名**跳过，**漏了 `venv-ragas/`**（本仓有**第二个**虚拟环境）
+    ⇒ 扫了 **7870** 个文件而不是 **13** 个；**"按目录名列举"永远会漏**。
+    ② 用 **`ast`** ⛔ 不用正则（正则会把**注释与 docstring 里**的同一行也算进去）。
+  - ⚠️ **它【不覆盖】**：字符串里的陈旧路径（`API_DIR = REPO_ROOT / "api"` 那种 ——
+    猜路径**误报太高**，**故意不猜**）· `app/` 内部的过期导入（由 ruff + pytest 兜）。
+  - **判据**：`bash scripts/check_stale_imports.sh` ⇒ exit 0（扫 13 个文件）·
+    `bash scripts/test_check_stale_imports.sh` ⇒ **7 条全过** ·
+    提交门汇总行出现 **`过期导入门 ✅`**（⚠️ 必须**喂 stdin** 才看得见，空跑是静默假通过）。
+
+- 🗑 **删掉 `langchain-community`（全仓零 import）· 补进 `langgraph-sdk` / `langgraph-prebuilt`**
+  （2026-10-09 · 📄 **`DEC-128`**）—— `app/requirements.txt` 现 **48 个包行 = 42 个 `==` + 6 个 `>=`**。
+  - **删它**的依据（三条**实测**）：① 全仓零 import；② 声明它的四个包**全都写在 `extra` 里**；
+    ③ 🔴 **卸掉之后 `get_agent_executor()` 真身照常建出来**（工具仍是那三个）
+    —— ⚠️ 这一条必需：`langchain_classic/agents/__init__.py:60-72` **确实有** `from langchain_community…`
+    的字样，**只看那段会"以为卸不掉"**，实测证明它在 `try/except` 里、真用法走懒加载映射表。
+  - **补它们**是业务方的裁定（⚠️ **与我给的建议相反**，依据与代价照记）——
+    口径是「**依赖清单单一化**」：会进 demo 镜像的包，版本要在一份里看得见。
+    🔴 **代价**：这两行会**跟着 `langgraph` 一起动**，下次升 `langgraph` 时若区间冲突
+    **解析会直接报错**（`DEC-127` 实测过同型：`langgraph-sdk 0.4.4` 与 `langgraph 1.0.10` 互斥）
+    ⇒ **那时先改这两行，⛔ 别怀疑是网络问题**。
+  - **判据**：`grep -cE '^[A-Za-z][^#]*==' app/requirements.txt` ⇒ **42** ·
+    `pip uninstall langchain-community` 后真身仍起得来 · `check_dep_vulns.sh` ⇒ **152 包 / 0 条**。
+
 - ✅ **依赖漏洞【清零】—— `langchain-core` 0.3 → 1.x 连锁升级**（2026-10-09 · 📄 **`DEC-127`**）——
   业务方裁「**甲 · 完整修好**」。`SECURITY.md` §3.4 那 19 条 ⇒ **0 条**。
   - **升了 8 个包**：`langchain` 0.3.30→**1.4.4** · `langchain-core` 0.3.86→**1.6.9**（**总闸**）·

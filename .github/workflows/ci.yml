@@ -299,6 +299,16 @@ jobs:
           "$PY_ROUTE" scripts/check_ci_job_timeouts.py
           bash scripts/test_check_ci_job_timeouts.sh
 
+          # ⭐ 过期导入门（2026-10-09 加，`N21`）—— `app/` 之外的 .py 里，
+          #   **模块搬了家但导入没改**（`from auth import …`）。
+          #   🔴 背景：当天 `#123` 模块化重构**静默打断两个活工具**（一个是**发凭据**的那个），
+          #      而 **913 条 pytest 照不到**（脚本不在采集范围）·
+          #      **`compileall` 照不到**（只查语法，这是**导入期**错）。
+          #   ⚠️ `exit 2 = 判不了`（拿不到 git / `app/` 不在）—— 与"干净"分开，⛔ 别读成通过。
+          #   ⚠️ 自测 7 条（含两条"判不了必须是 2"），每条约 0.2s。
+          bash scripts/check_stale_imports.sh
+          bash scripts/test_check_stale_imports.sh
+
           # ⭐ 两个【提醒型】hook 的自测（2026-10-05 加，`DEC-080`）—— 10 条，~1s。
           #   ⚠️ hook 只在 Claude 会话里跑，**CI 里不会触发它们** —— 那为什么还要在这儿测？
           #      因为被测的是**脚本本身**（判据 / 路径剪枝 / 不崩），⛔ 不是"CI 里会发生什么"；

@@ -15,6 +15,7 @@
 | `check_route_auth.py` | **新引入了没鉴权的路由** |
 | `check_ci_job_timeouts.py` | **每个 CI job 带 `timeout-minutes`** |
 | `check_index_sync.sh` | **索引声明覆盖的东西还在不在** |
+| `check_stale_imports.sh` | 🆕 **`app/` 之外的 .py 里，模块搬了家但导入没改**（`from auth import …`）—— 2026-10-09 加（`N21`） |
 
 **工具 / 自测**
 | 脚本 | 用途 |
@@ -27,6 +28,7 @@
 | `seed_isolation_*.sh` | 三家常驻隔离语料 / 会话 |
 | `backup.sh` · `issue_api_key.py` · `list_endpoints.sh` | 备份 · 发 key · 列接口 |
 | `test_check_*.sh` · `test_remind_hooks.sh` · `test_impact.sh` | ⭐ **门自己的自测**（**进 CI**） |
+| `test_check_stale_imports.sh` | 🆕 过期导入门的自测（**7 条**，含两条「**判不了必须是 exit 2**」的正例） |
 | `doc-links-ignore.txt` · `ruff-baseline.txt` · `route-auth-baseline.txt` | 三份**判据数据** |
 
 ## 🔴 本层特有的规矩

@@ -8,13 +8,14 @@
 #       钉死行的行尾注释里都写着原来的 `>=`，而**本段注释自己**也在演示这两个符号
 #       ⇒ 不排除注释的 `grep -c '=='` / `grep -c '>='` 数出来的是**假数**，
 #       且**那个假数还随本段文字自己变化** ⇒ ⛔ 别把裸 `grep -c` 当判据）：
-#         grep -cE '^[A-Za-z][^#]*==' app/requirements.txt   ⇒ 41
+#         grep -cE '^[A-Za-z][^#]*==' app/requirements.txt   ⇒ 42
 #         grep -cE '^[A-Za-z][^#]*>=' app/requirements.txt   ⇒ 6
 #         grep -nE '^[A-Za-z].*==\s*(#|$)' app/requirements.txt ⇒ 空（**无空版本行**）
 #    ✅ **另有 3 个原先【完全无约束】的裸名**（`langgraph-checkpoint` / `langgraph-checkpoint-sqlite` /
-#       `matplotlib`）—— **本次一并钉死**（它们装在本机 venv 里，取得到实测版本）。
-#       ⇒ 现在 **47 个包行 = 41 个 `==` + 6 个 `>=` + 0 个裸名**
-#       （41 而非 40：2026-10-09 加了 `langchain-classic`，见下方 `DEC-127` 那段）。
+#       `matplotlib`）—— **2026-10-09 一并钉死**（它们装在本机 venv 里，取得到实测版本）。
+#       ⇒ 现在 **48 个包行 = 42 个 `==` + 6 个 `>=` + 0 个裸名**
+#       ⚠️ **两个数当天变过**（⛔ 别拿旧数去核对）：`+langchain-classic` ⇒ 41 ·
+#          `-langchain-community` `+langgraph-sdk` `+langgraph-prebuilt` ⇒ **42**。
 #
 # Web 框架与服务器
 fastapi==0.141.1    # ← 2026-10-09 钉死（原 fastapi>=0.115.0 · SECURITY.md §3.5）
@@ -42,7 +43,15 @@ openai==2.54.0    # ← 2026-10-09 **大版本跳**（原 1.109.1 · `langchain-
                   #    ⚠️ 选了 **2.x** 而不是 resolver 默认的 3.x ⇒ 见 `docs/decisions/DEC-127`
 langchain==1.4.4    # ← 2026-10-09 **大版本跳**（原 0.3.30）· 总闸是 `langchain-core` 0.3→1.x · `DEC-127`
 langchain-openai==1.7.0    # ← 2026-10-09 **大版本跳**（原 0.2.14）· `DEC-127`
-langchain-community==0.3.31    # ← 2026-10-09 钉死（原 langchain-community>=0.3.13,<0.4 · SECURITY.md §3.5）
+# 🗑 2026-10-09 **删**：此处原有 `langchain-community==0.3.31` —— 业务方当天裁「删」。
+#    ⚠️ 判据（三条，都实测过）：① 全仓**零 import**（`grep -rn langchain_community app/` ⇒ 空）；
+#    ② 所有声明它的包（`langchain` · `langchain-classic` · `mem0ai` · `posthog`）
+#       **全都写在 `extra` 里** ⇒ **没有任何包硬依赖它**；
+#    ③ **卸掉它之后** `app/routing/api_v1_rag.py::get_agent_executor()` **真身照常建出来**
+#       （工具仍是 `['calculator','date_today','web_search']`）⇒ ⛔ 不是"以为没用到"。
+#    ⚠️ **加回来的条件**：若哪天用到 `langchain_classic` 那些**懒加载**工具
+#       （`create_sql_agent` / `load_tools` 之类，映射表在 `langchain_classic/agents/__init__.py:85-93`）
+#       ⇒ 那时缺的就是它，**加回一行即可**。
 langchain-core==1.6.9    # ← 2026-10-09 **大版本跳**（原 0.3.86）· 🔴 **这条链的【总闸】** · `DEC-127`
 langchain-classic==1.0.8    # ← 2026-10-09 🆕 —— **langchain 1.x 把 legacy agent API 搬来了这里**
                             #    🔴 没有它，`app/routing/api_v1_rag.py` 的 `/ws/agent` **整条活路径起不来**
@@ -114,6 +123,19 @@ python-multipart==0.0.32    # ← 2026-10-09 钉死（原 python-multipart>=0.0.
 #     此处原先又裸名重复了一次（无约束）。重复条目会掩盖版本漂移，已删除。
 langgraph-checkpoint==4.2.0    # ← 2026-10-09 **大版本跳**（原 3.0.1；它原先还是**裸名**）· `DEC-127`
 langgraph-checkpoint-sqlite==3.1.1    # ← 2026-10-09（原 3.0.3）· ⚠️ 它逼着 `langgraph-checkpoint` 上 4.x · `DEC-127`
+# 🔴 2026-10-09 **新登记**（业务方当天裁「补进去」，⛔ 不是我在代码里用到了它们）——
+#    `langgraph-sdk` / `langgraph-prebuilt` 是 `langgraph` 的**传递依赖**，
+#    原先**不在本清单里**（只由 `langgraph` 的区间约束）。
+#    ⚠️ **补的理由**：本仓「**依赖清单单一化**」的口径 —— 凡会进 demo 镜像的包，
+#       **版本要在这一份里看得见**（清单外的东西 = 没人盯）。
+#       📌 顺带：`langgraph-sdk` **曾是漏洞包**（`PYSEC-2026-2194/2575` · `CVE-2026-104873`），
+#       现在这一版是干净的 —— 但"干净"这件事只有**看得见版本**才说得出。
+#    ⚠️ **代价（写清楚，⛔ 别只记好处）**：这两行会**跟着 `langgraph` 一起动** ——
+#       下次升 `langgraph` 时，若新版本要的区间与这两行冲突，**解析会直接报错**
+#       （`DEC-127` 实测过这种形态：`langgraph-sdk 0.4.4` 与 `langgraph 1.0.10` 互斥）。
+#       ⇒ 那时先改这两行，⛔ 别怀疑是网络问题。
+langgraph-sdk==0.4.6    # ← 2026-10-09 新登记（原地钉 · 取本机 venv 实测版本）
+langgraph-prebuilt==1.1.0    # ← 2026-10-09 新登记（同上）
 # mem0 2.x 起 Memory.__init__ 不再接受 dict，代码使用 Memory.from_config(dict)，需 >=2.0
 mem0ai==2.0.20    # ← 2026-10-09 钉死（原 mem0ai>=2.0.0 · SECURITY.md §3.5）
 
