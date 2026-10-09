@@ -1881,14 +1881,22 @@ async def agent_token_recent(
     limit: int = 20,
     user_name: str = Depends(get_current_user_hybrid),
 ):
-    """获取最近的 Token 使用记录。
+    """获取**你自己**最近的 Token 使用记录。
 
     🔴 **2026-10-08：加了 `truncated`**（`frontend/README.md` §六 红线②「被截断必须说出来」）——
        改前它**取了 N 条就走了**，调用方**分不清"就这么多"与"被截了"**。
     ⚠️ 判法同 `/agent/approvals/history`：**多要一条** —— 多要的那条**只当探针，不返回**
        （⛔ 不拿 `len == limit` 猜：那在"正好 N 条、后面没有了"时会误报截断）。
+
+    🔴🔴 **2026-10-09（`N20`）：本端点此前【收了 `user_name` 却从没用它】** ——
+       函数体写的是 `get_recent_usage(limit + 1)`，而那读的是 `_usage_records`
+       （**进程内所有人共用的一张表**）⇒ **它返回的是所有人的记录，每条还带别人的 `user_name`**。
+       ⚠️ 端点的 docstring 一直写着"获取最近的 Token 使用记录"、**没有一个字说这是全站的**
+       ⇒ 调用方**看不出它越权**（本仓最恨的那种形态）。
+       ⇒ 现已把身份**传下去**（`get_recent_usage(limit + 1, user_name)`）。
+       📌 守卫 ⇒ `api/test_token_recent_scope.py`（两个用户各记一笔 ⇒ 查一个只回他自己的）。
     """
-    rows = get_recent_usage(limit + 1)
+    rows = get_recent_usage(limit + 1, user_name)
     truncated = len(rows) > limit
     if truncated:
         rows = rows[:limit]
