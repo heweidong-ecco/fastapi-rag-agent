@@ -42,6 +42,12 @@ api_keys_table = Table(
     Column("created_at", DateTime, server_default=func.now()),
     Column("expires_at", DateTime, nullable=False),
     Column("is_active", Integer, server_default="1"),  # 新增字段，默认1表示激活
+    # 🔴 2026-10-09（B1 · `DEC-129`）：角色接 DB 的落点。
+    #    ⚠️ **可空、⛔ 无 server_default** —— 与 `app/core/db.py` 的 DDL 保持一致：
+    #    "没写"要走**回退**（探针身份 + admin），"写了 free"是明确裁决，两者不是一回事。
+    #    📌 本模块只是给 Alembic autogenerate 用的**声明式镜像**，⛔ 运行时建表**不读它**
+    #      （以 `db.py:create_table()` 的 DDL 为准，见本文件顶部那段）。
+    Column("role", Text, nullable=True),
 )
 
 # 新增：花费明细表

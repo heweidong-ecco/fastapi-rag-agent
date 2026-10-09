@@ -44,6 +44,7 @@ for a in "$@"; do
     --write)       MODE="write" ;;
     --missing)     MODE="missing" ;;
     --non-modules) MODE="nonmodules" ;;
+    --skip-dirs)   MODE="skipdirs" ;;
     -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
     *) echo "未知参数: $a" >&2; exit 2 ;;
   esac
@@ -189,6 +190,17 @@ if MODE == "nonmodules":
     # 只打【模块名】，一行一个（好让调用方 `splitlines()`）。
     for m, p, n in nonmods:
         print(m)
+    sys.exit(0)
+
+if MODE == "skipdirs":
+    # 🔴 2026-10-09（B1 顺带修）：**同一件事的两处实现曾经不一致** ——
+    #    本脚本 `_API_SKIP_DIRS` 里**早就排掉了 `alembic/`**（"迁移脚本，重构前就扫不到"），
+    #    而 `pre-commit-gates.py` 第 ④ 道门那份**内联实现没排** ⇒
+    #    新增一份 alembic 迁移会被**误判成"新增模块没有 spec"**并**硬拦提交**（实测踩到）。
+    #    ⇒ 这里把它**吐出来**，让门跟着同一份名单走，⛔ 而不是在门里再抄一遍
+    #      （理由同 `--non-modules`：抄一份必然分叉）。
+    for d in sorted(_API_SKIP_DIRS):
+        print(d)
     sys.exit(0)
 
 # ── 4. 模块表（README 用）──

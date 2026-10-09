@@ -15,7 +15,7 @@
 --    头是手写的、`pg_dump` 不产它 ⇒ 照原文跑一次，**上面这 70 多行当场没了，而且不报错**。
 --    `N12` 那次是**手工 `cat` 拼的**；脚本把这一步变成了结构（**本文件按【哨兵行】切**）。
 --
--- 生成时间：2026-09-29 → **2026-10-08 重新生成**（`N12`）
+-- 生成时间：2026-09-29 → **2026-10-08 重新生成**（`N12`）→ **2026-10-09 再生成**（B1：`api_keys.role`）
 -- 来源数据库：本机开发库（Docker 容器 `postgres-rag`，镜像 `pgvector/pgvector:pg17`）
 --
 -- ## 🔴 2026-10-08 这次重新生成，改了什么（`N12`）
@@ -86,7 +86,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict js8ttVu9PGzU6g4jJcP0DWDZiK9MTLvwVAXAa3gOz1eBUSNuOihk0kQiyz2KxeF
+\restrict RdGcehzkrgWCw1hI0wzZc65jmJJmZWsT28OMzYOs4VLuIVfrQen0DPbnk2fpCgQ
 
 -- Dumped from database version 17.10 (Debian 17.10-1.pgdg12+1)
 -- Dumped by pg_dump version 17.10 (Debian 17.10-1.pgdg12+1)
@@ -131,7 +131,8 @@ CREATE TABLE public.api_keys (
     key_hash text NOT NULL,
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     expires_at timestamp without time zone NOT NULL,
-    is_active integer DEFAULT 1
+    is_active integer DEFAULT 1,
+    role text
 );
 
 
@@ -495,6 +496,13 @@ ALTER TABLE ONLY public.token_usage_logs
 
 
 --
+-- Name: api_keys_user_name_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX api_keys_user_name_idx ON public.api_keys USING btree (user_name);
+
+
+--
 -- Name: documents_embedding_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -561,5 +569,5 @@ CREATE INDEX idx_token_usage_user ON public.token_usage_logs USING btree (user_n
 -- PostgreSQL database dump complete
 --
 
-\unrestrict js8ttVu9PGzU6g4jJcP0DWDZiK9MTLvwVAXAa3gOz1eBUSNuOihk0kQiyz2KxeF
+\unrestrict RdGcehzkrgWCw1hI0wzZc65jmJJmZWsT28OMzYOs4VLuIVfrQen0DPbnk2fpCgQ
 

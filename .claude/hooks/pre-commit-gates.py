@@ -112,6 +112,30 @@ def non_module_files(repo: str):
     return {x.strip() for x in r.stdout.splitlines() if x.strip()}
 
 
+def skip_dirs(repo: str):
+    """`app/` 下【不算产品模块】的目录名集合 —— 问 `spec_status.sh --skip-dirs`。
+
+    🔴 为什么是"去问脚本"：同一件事（哪些不算产品模块）**两处实现过一次分叉** ——
+    `spec_status.sh` 早排掉了 `alembic/`，而本文件那份内联实现没排 ⇒
+    新增一份迁移被误判成"新增模块没有 spec"并**硬拦提交**（2026-10-09 实测踩到）。
+    ⇒ **名单只有一个来源**，同 `non_module_files()` 的理由（`DEC-101`）。
+
+    ⚠️ 拿不到（脚本不在 / 跑失败）⇒ 返回**空集**：门会**更严**（多要一次 spec），⛔ 不会更松。
+    宁可多问一句，也不放过一个真模块。
+    """
+    script = os.path.join(repo, "scripts", "spec_status.sh")
+    if not os.path.exists(script):
+        return set()
+    try:
+        r = subprocess.run(["bash", script, "--skip-dirs"],
+                           cwd=repo, capture_output=True, text=True, timeout=30)
+    except Exception:
+        return set()
+    if r.returncode != 0:
+        return set()
+    return {x.strip() for x in r.stdout.splitlines() if x.strip()}
+
+
 def new_modules_without_spec(repo: str):
     """返回：**本次新增、但没有 spec** 的模块文件列表。"""
     try:
@@ -122,6 +146,7 @@ def new_modules_without_spec(repo: str):
     if r.returncode != 0:
         return None
     nonmods = non_module_files(repo)
+    skipdirs = skip_dirs(repo)
     bad = []
     for f in r.stdout.splitlines():
         f = f.strip()
@@ -132,6 +157,12 @@ def new_modules_without_spec(repo: str):
             continue                     # 测试不算产品模块
         if base[:-3] in nonmods:
             continue                     # 【不是模块】（手动/离线脚本）⇒ 不要求 spec
+        # 🔴 2026-10-09（B1 顺带修）：**整目录跳过**（`tests/` `specs/` `static/` `alembic/` …）。
+        #    ⚠️ 曾经这里**没有这一步**，而 `spec_status.sh` 有 ⇒ **同一件事两处实现分叉**：
+        #    新增一份 alembic 迁移会被**误判成"新增模块没有 spec"**并**硬拦提交**（实测踩到）。
+        #    ⇒ 名单**问脚本**（`--skip-dirs`），⛔ 不在这份文件里再抄一遍。
+        if skipdirs & set(f.split("/")[1:-1]):
+            continue
         # 🔴 2026-10-09（段 2）：spec **与它的模块同目录** —— 见 `spec-remind.py` 同一处注释。
         _d = os.path.dirname(f)                    # "app/core" / "app"
         spec_rel = (f"{_d}/specs/{base[:-3]}.md" if _d != "app"
