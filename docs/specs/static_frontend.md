@@ -23,6 +23,8 @@
 | 🆕 `api/static/web/eval.html` | 37 | **Eval 页**（`DEC-097` · `F3`）—— 🔴 **占位页**：一个标题 + 一句实话 + **一个做成按钮的 `<a>`**，指向下面的子页。⛔ **页面上没有任何分数 / 对比箭头**（原 `F3` 那个写法**没有数据源**，硬做只能做出假页面） |
 | 🆕 `api/static/web/eval_gate.html` | 22 | **Eval 页的子网页** —— 🔴 **正文只有一行**：`agent-eval-gate · Agent 生产就绪评测门 · TODO`。<br>⚠️ 这一页**不 fetch 任何接口**（后端至今没有 `/agent/eval*` 路由，`B14` 仍是 ⬜）⇒ 它是**静态文字**，也是它比另外三页更没有暴露面的原因<br>⛔ 别"顺手"给它加返回链接 / 卡片 / 表格 —— 加了就不是业务方要的那一行了 |
 | 🆕 `api/test_eval_page.py` | 116 | **Eval 页守卫**（Python · 不连库）—— 3 条与另三页同构（302 / 目标在盘上 / 不在 openapi）+ **2 条页面本体的**：`<a href>` 真的指向子页、子页在盘上**且带那一行**（🔴 拿 `SUBPAGE_LINE` 常量钉，改文案会红） |
+| 🆕 `api/static/js/panel.js` | 116 | **能力面板的纯逻辑**（2026-10-09 · 施工单**刀 0**）—— 边界标注文案（规格 §3.6.2 那 5 条 · **唯一一份**）· `paramQuery` · `stateOf` 四态 · `emptyReason` · `truncationNotice`（`has_more` 与 `truncated` **两形状不合并**）· `errorText`（401/403 · 429 · 503 **三句话**）。<br>⚠️ 🔴 **第一版真栽过一条**：`stateOf` 只认 `'error' in payload` ⇒ **`{"status":"error"}` 被判成 `ok`**，而那正是本仓四类拒绝的**真实形状**（200 + `status:"error"`）⇒ 已改成两种形状都认 |
+| 🆕 `api/static/js/panel.test.js` | 156 | `node --test` 用例（**13 条**）—— 除功能断言外有一条**结构型守卫**：**边界文案只许在 `panel.js` 里出现一次**（数的是【文件】，⛔ 不是"我记得没抄第二份"）+ **假 window** 跑一遍（⛔ 少挂 `window.RagPanel` 页面就 ReferenceError） |
 | 🆕 `api/test_web_pages.py` | 112 | **全站页面守卫**（Python · 不连库）—— **扫 `api/static/` 下每个 `.html`**：`getJSON(…)`/`fetch(…)` 的字面量必须以 `/api/v1` 开头 + 1 条**防空跑**。<br>🔴 **2026-10-06（`DEC-094`）建的**：原先这条守卫只在 `api/test_trace_page.py` 里、**只读 `trace.html`** ⇒ 下一个页面照样能坏<br>⚠️ **用例数 = 被扫的 `.html` 个数 + 1** —— 走过 7 → 5（`DEC-096` 删两个坏页）→ **7**（`DEC-097` 加两个 Eval 页）。**页面一少它自动跟着少**，⛔ 那不是守卫变松<br>⚠️ **它对 Eval 这两页【空过】**：那两页一个 `fetch` 都没有 ⇒ 没有字面量可查（见 §⚠️ 那条） |
 
 ## ✅ 做了什么

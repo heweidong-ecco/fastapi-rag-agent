@@ -316,3 +316,46 @@ input:disabled, textarea:disabled, select:disabled { opacity: .55; cursor: not-a
   .nav { flex-direction: row; flex-wrap: wrap; }
   .page-head { flex-wrap: wrap; }
 }
+
+/* ══════════════════ 9 · 能力面板（2026-10-09 · 施工单刀 0）══════════════════
+ *
+ * 🔴 25 个能力面板复用这一套。**边界提示条的位置本身是要求** ——
+ *    业务方原话：「**让别人在用接口的时候要先看到这个提示，才给接口**」
+ *    ⇒ 所以 `.panel-boundary` 必须渲染在**提交按钮之前**（⛔ 不是页脚挂一行小字）。
+ * ⚠️ ⛔ 别在这里写死颜色 —— 语义色用 `--warn` / `--bad`（`frontend/README.md` §七 红线 3）。
+ * ========================================================================= */
+
+.panel-boundary {
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
+  border-left: 3px solid var(--warn);
+  background: color-mix(in srgb, var(--warn) 8%, transparent);
+  border-radius: var(--r-ctl);
+  padding: var(--sp-2) var(--sp-3);
+  margin-bottom: var(--sp-2);
+  font-size: var(--fs-cap);
+  line-height: var(--lh-body);
+  color: var(--fg-dim);
+}
+/* 第 5 条（`verify`）讲的是"我们自证到什么程度"，⛔ 与平台限制无关 ⇒ 换中性色，
+   免得访客把它读成"平台又有条限制"（规格 §3.6.2 乙） */
+.panel-boundary[data-boundary="verify"] {
+  border-color: var(--line); border-left-color: var(--fg-dim);
+  background: var(--surface);
+}
+
+/* 能力面板网格：比 .grid 更密（它是 420px 起，25 个面板要窄一点） */
+.panel-grid {
+  display: grid; gap: var(--sp-4); align-items: start; list-style: none;
+  padding: 0; margin: 0;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+}
+
+/* 参数行：label + 控件 */
+.panel-params {
+  display: grid; gap: var(--sp-2);
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+/* 结果区：长了要能滚，但⛔ 不许把整页撑飞 */
+.panel-out { margin-top: var(--sp-3); max-height: 22rem; overflow: auto; }
+.panel-out pre { margin: 0; font-family: var(--mono); font-size: var(--fs-cap); white-space: pre-wrap; }
