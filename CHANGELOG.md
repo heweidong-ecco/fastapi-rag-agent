@@ -48,6 +48,23 @@ All notable changes to this project will be documented in this file.
     ⚠️ `bench/` **暂不动** —— 「要不要并进 `locust/`」还等你一句话。
   - **判据**：`pytest` **913 passed / 2 skipped** · `bash scripts/ci-local.sh` **退出码 0** ·
     断链门 / 孤儿门 **exit 0** · `spec_status` 42 有 / 14 缺（防空跑生效）。
+- 🔴 **段 2（二）：补齐 14 份缺失的模块 spec ⇒ 现在 56 个模块【一个不缺】**（2026-10-09）。
+  - 补的是：`logger_config` `exceptions` `jwt_handler` `memory_store` `browser_tools`
+    `websocket_callback` `schemas` `mcp_tool_factory` `simple_tools` `simple_tools_impl`
+    `document_preprocessor` `document_parser` `code_executor_impl` `cost_dashboard`。
+  - 每份按 `app/specs/README.md` 的四段式写，**重头是「⚠️ 看代码会误判的地方」** ——
+    内容来自**代码里的 ⚠️/🔴 注释**与 `docs/复盘/` / `DEC-*`，⛔ **不是读一遍代码的转录**
+    （本仓立场：**转录即负债**）。举几个只在那节里才有的：
+    · `browser_tools` **不在工具表里**（`N13` 摘掉），⛔ 且不许改成 `async`
+    · `simple_tools_impl` 的**返回值形状是逐字约定**的（失败也返回字符串、⛔ 不抛）
+    · `code_executor_impl` 的白名单里那两项是**业务方裁「放开」的**，⛔ 别当漏洞删
+    · `cost_dashboard` 的 **5 个格子口径不同**（前 4 格本人 / 第 5 格全站）
+    · `memory_store` 的 mem0 签名漂移**修过两次**，第一次是因为**判据只量了"不抛异常"**
+  - 🔴 **同时修掉 `spec_status.sh --write` 的一个旧假设**：它按「spec 与 README 同级」拼链接
+    ⇒ 现在 spec 分散在 8 个目录，链接**全断**（断链门报 14 处）。
+    已改成**标签写真实仓内路径 + 链接写相对 README 的路径**。
+  - **判据**：`bash scripts/spec_status.sh` ⇒ **56 有 / 0 缺** · 断链门 exit 0 · 孤儿门 exit 0 ·
+    `pytest` **913 passed / 2 skipped** · `ci-local` **退出码 0**。
 
 - 🔴 **`api/` 模块化：60 个平铺的产品模块拆成 7 个模块组 + `eval/` + 94 个测试进 `tests/`**
   （2026-10-09 · 业务方口述 · 裁定见 `docs/decisions/DEC-125`）。

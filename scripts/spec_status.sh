@@ -193,7 +193,12 @@ if MODE == "nonmodules":
 rows = []
 for m, p, n in sorted(mods, key=lambda x: x[0]):
     if m in have:
-        rows.append(f"| `{p}` | {n} | ✅ [`specs/{m}.md`](./{m}.md) | {spec_status(m)} |")
+        # 🔴 2026-10-09（段 2）：spec 已**分散**在 8 个 `specs/` 目录里
+        #    ⇒ ⛔ 不能再拼 `./{m}.md`（那是"与 README 同级"的旧假设）。
+        #    改成：**标签写真实仓内路径**（断链门按它核）+ **链接写相对本 README 的路径**。
+        _rel = have[m]                                  # 如 app/tools/specs/browser_tools.md
+        _link = os.path.relpath(os.path.join(REPO, _rel), SPECS)
+        rows.append(f"| `{p}` | {n} | ✅ [`{_rel}`]({_link}) | {spec_status(m)} |")
     else:
         rows.append(f"| `{p}` | {n} | 🔴 **缺** | ❓ 未知 |")
 table = "\n".join(rows)
