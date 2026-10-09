@@ -968,7 +968,20 @@ def get_agent_executor():
     global _agent_executor, _agent_llm
     if _agent_executor is None:
         # ⚠️ 全部放在函数内：导入期不拉 langchain
-        from langchain.agents import create_tool_calling_agent, AgentExecutor
+        #
+        # 🔴 2026-10-09（`DEC-127`）：**这一行原本是 `from langchain.agents import …`** ——
+        #    `langchain` 升到 1.x 之后，**那两个符号在那里已经没有了**
+        #    （实测 `AttributeError: module 'langchain.agents' has no attribute 'create_tool_calling_agent'`），
+        #    本函数**当场 ImportError** ⇒ `/ws/agent` **整条活路径起不来**。
+        #    ⇒ 官方把 legacy agent API 搬进了 **`langchain-classic`**（`langchain-core>=1.4.4` 兼容）
+        #      ⇒ 改成从那里导入，**实现一行没动**。
+        #    ⚠️ ⛔ **别以为"测试全绿"就是没坏** —— `app/tests/test_ws_auth.py` 那两条用例
+        #       `monkeypatch.setattr(api_v1_rag, "get_agent_executor", …)` **把本函数整个换掉了**
+        #       ⇒ 它们测的是"鉴权之前端点体不许跑"（对的），**但不构成本函数能用的证据**。
+        #    📌 判据（可打印，⛔ 别用 pytest 当这条的凭证）：
+        #       `./venv/bin/python -c "import sys;sys.path.insert(0,'app');import routing.api_v1_rag as m;m.get_agent_executor()"`
+        #       ⇒ 不抛 ImportError
+        from langchain_classic.agents import create_tool_calling_agent, AgentExecutor
         from langchain_core.prompts import ChatPromptTemplate
         # 🔴 2026-10-08 收口（批① Task 4）：**实现**改为调**共享工具**，**外壳保持 async**。
         #

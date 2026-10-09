@@ -10,6 +10,36 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- ✅ **依赖漏洞【清零】—— `langchain-core` 0.3 → 1.x 连锁升级**（2026-10-09 · 📄 **`DEC-127`**）——
+  业务方裁「**甲 · 完整修好**」。`SECURITY.md` §3.4 那 19 条 ⇒ **0 条**。
+  - **升了 8 个包**：`langchain` 0.3.30→**1.4.4** · `langchain-core` 0.3.86→**1.6.9**（**总闸**）·
+    `langchain-openai` 0.2.14→**1.7.0** · `langchain-text-splitters` 0.3.11→**1.1.3** ·
+    `langgraph` 1.0.1→**1.2.14** · `langgraph-checkpoint` 3.0.1→**4.2.0** ·
+    `langgraph-checkpoint-sqlite` 3.0.3→**3.1.1** · **`openai` 1.109.1→2.54.0**。
+    ⚠️ **`openai` 不是可选项**（`langchain-openai` 1.x 硬要 `>=2.26.0`），
+    而它落在 **RAG 主路径**上（`embedding_client.py` · `query_rewriter.py`）——
+    🔴 **业务方裁「夹在 2.x」而非 resolver 默认的 3.x**（`DEC-127` §2.1）。
+  - 🆕 **加 `langchain-classic==1.0.8`** —— `langchain` 1.x **删掉了 legacy agent API**，
+    不走它 `/ws/agent` 那条**活路径直接 ImportError**（`DEC-127` §2.4）。
+    **代码只改了 1 行 import，实现一行没动。**
+  - 🔴 **推翻了我自己写过的计划**：原「小版本 5 个先做 / 大版本 4 个另做」**是错的** ——
+    除 `pyjwt` 外剩下 8 个包**全塌在同一个总闸上**，是【一件事】，⛔ 不是两批。
+  - 🔴🔴 **最该记住的一条：`/ws/agent` 真的坏了，而 913 条测试【全绿】** ——
+    唯一提到它的两条用例（`app/tests/test_ws_auth.py:292` / `:376`）把 `get_agent_executor`
+    **`monkeypatch` 掉了** ⇒ 函数体从没执行 ⇒ `ImportError` 永远碰不到。
+    ⛔ **「测试全绿」≠「活路径没坏」**。是**手工调真身**才抓到的
+    （`ImportError: cannot import name 'create_tool_calling_agent' from 'langchain.agents'`）。
+  - 🔴 **顺带修掉一个「门自己会撒谎」的 bug**：`scripts/check_dep_vulns.sh` 原先只看
+    `pip-audit` 的退出码，而**「找到漏洞」与「Python 抛异常（如网络超时）」退出码都是 1**
+    ⇒ **网络崩了被报成「🔴 有已知漏洞」**（实测栽过一次）。已改成**按「输出是不是合法 JSON」判**，
+    自测从 1 相扩到 **3 相**（含「**判不了必须落 2**」那一相）。
+  - ⚠️ **真服务验证【未做】** —— 改的是 LLM 调用链，本仓「测试全过」⛔ 不算这条的凭证（`DEC-127` §五·5）。
+  - **判据**：`pytest app/ -m "not integration and not needs_db" -q` ⇒ **913 passed / 2 skipped** ·
+    `bash scripts/ci-local.sh` ⇒ **退出码 0** · `bash scripts/check_dep_vulns.sh` ⇒ **退出码 0**
+    +「扫了 165 个包，**0 条**」· 断链 / 孤儿 / 索引 / 凭据四道门 ⇒ **exit 0** ·
+    **真身**：`python -c "…import routing.api_v1_rag as m; m.get_agent_executor()"` ⇒ **不抛错**、
+    且 `AgentExecutor` 带 `['calculator','date_today','web_search']`。
+
 - ✅ **依赖漏洞清掉 2 条：`pyjwt` 2.14.0 ⇒ 2.15.0**（2026-10-09 · `SECURITY.md` §3.4）——
   ⚠️ **它是那 9 个漏洞包里【唯一】能单独升的**（实测只装它自己）
   ⇒ 从 **21 条 / 9 包** 降到 **19 条 / 8 包**（清掉 `PYSEC-2026-4141` / `4183`）。
