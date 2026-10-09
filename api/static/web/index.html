@@ -54,6 +54,19 @@
   .card .why { display: block; margin-top: var(--sp-2); color: var(--fg-dim);
                font-size: var(--fs-cap); line-height: var(--lh-body); }
 
+  /* 🔴 **每张卡的两行**（`DEC-121`）：
+     `.why` = 人话（访客看得懂的说明）· `.apis` = 模块名 / 接口名。
+     ⚠️ 两句业务方的话要【同时】满足：
+       ①「只会看你**做了哪些功能、哪些接口**」⇒ `.apis` 必须**留着**（证明"我真做了"）
+       ②「看 demo 的人**也不是技术人员**」⇒ 标题与人话说明必须**不用内部术语**
+     ⇒ **⛔ 不许把 `.apis` 删掉**（守卫：`api/test_index_page.py` 那条「每张卡都要有副标题」）。 */
+  .card .apis { display: block; margin-top: var(--sp-2);
+                font-family: var(--mono); font-size: 11px; line-height: var(--lh-body);
+                color: var(--fg-dim); opacity: .8; word-break: break-word; }
+
+  /* 分组小标题（= 访客会问的问题，⛔ 不是模块名） */
+  #others > h3 { color: var(--fg-dim); letter-spacing: .02em; }
+
   /* 🔴 还没做的入口：**明写"未上线"，⛔ 不是死链** ——
      一个点了 404 的卡比没有卡更糟（最高判据说的是"能点、能看见"，
      ⛔ 不是"看起来能点但点下去什么都没有"）。每做完一刀点亮一个。 */
@@ -94,36 +107,66 @@
     <h2>主要功能</h2>
     <ul class="panel-grid" id="primary">
       <li class="card card-hover"><a href="/chat">对话</a>
-          <span class="why">登录 → 提问 → 逐字流式回答 → 点开引用看原文 → 随时停止。</span></li>
-      <li class="card card-off"><span>检索三模式</span><span class="badge">未上线</span>
-          <span class="why">向量 / 混合（BM25+RRF）/ 精排，外加查询改写。施工中（刀 3）。</span></li>
+          <span class="why">登录 → 提问 → 逐字流式回答 → 点开引用看原文 → 随时停止。</span>
+          <span class="apis">POST /rag/stream_search（SSE 流式）</span></li>
+      <li class="card card-off"><span>三种检索方式</span><span class="badge">未上线</span>
+          <span class="why">同一个问题，向量 / 混合（BM25+RRF）/ 精排各跑一遍，外加查询改写。</span>
+          <span class="apis">pg_search · hybrid_search · rerank_search · rewrite_search</span></li>
       <li class="card card-hover"><a href="/approvals">人工接管</a>
-          <span class="why">敏感工具调用会停下来等人批；点开看完整上下文，批准 / 拒绝 / 代填结论。</span></li>
-      <li class="card card-off"><span>成本可见</span><span class="badge">未上线</span>
-          <span class="why">每次调用的 token 与费用、按会话与用途汇总、四层额度。施工中（刀 4）。</span></li>
-      <li class="card card-hover"><a href="/trace">执行轨迹</a>
-          <span class="why">一次调用里 agent 走了哪些步、每步花了多少（两轴分屏）。</span></li>
+          <span class="why">敏感工具调用会停下来等人批；点开看完整上下文，批准 / 拒绝 / 代填结论。</span>
+          <span class="apis">GET /agent/pending · POST /agent/approve</span></li>
+      <li class="card card-off"><span>花了多少</span><span class="badge">未上线</span>
+          <span class="why">每次调用的 token 与费用，按会话与用途汇总，四层额度上限。</span>
+          <span class="apis">GET /agent/cost/* · /agent/token/*</span></li>
+      <li class="card card-hover"><a href="/trace">它走了哪些步</a>
+          <span class="why">一次调用里 agent 走了哪些步、每步花了多少（两轴分屏）。</span>
+          <span class="apis">GET /agent/trace/{thread_id} · /agent/traces</span></li>
     </ul>
 
     <h2 style="margin-top:var(--sp-5)">其他功能</h2>
-    <ul class="panel-grid" id="others">
-      <li class="card card-off"><span>知识库</span><span class="badge">未上线</span>
-          <span class="why">上传 / 删除文档，自己传一篇就能立刻在对话里问它。施工中（刀 10）。</span></li>
-      <li class="card card-off"><span>工具 / MCP</span><span class="badge">未上线</span>
-          <span class="why">可用工具清单、健康状态、MCP 动态工具表。施工中（刀 5）。</span></li>
-      <li class="card card-off"><span>记忆</span><span class="badge">未上线</span>
-          <span class="why">写入 / 检索长期记忆。施工中（刀 5）。</span></li>
-      <li class="card card-off"><span>执行器</span><span class="badge">未上线</span>
-          <span class="why">在无网硬化容器里跑代码。施工中（刀 6）。</span></li>
-      <li class="card card-off"><span>预算 / 熔断</span><span class="badge">未上线</span>
-          <span class="why">额度检查、预估、拦截记录。施工中（刀 4）。</span></li>
-      <li class="card card-off"><span>系统状态</span><span class="badge">未上线</span>
-          <span class="why">health / ready / Prometheus 指标。施工中（刀 6）。</span></li>
-      <li class="card card-hover"><a href="/eval">评测</a>
-          <span class="why">接入 Agent 生产就绪评测门（现状是占位页）。</span></li>
-      <li class="card card-off"><span>运维探针</span><span class="badge">未上线</span>
-          <span class="why">限流桶 / 配额 / 缓存的可见证据（调试视角）。施工中（刀 7）。</span></li>
-    </ul>
+    <!-- 🔴 分组按【访客会问的问题】，⛔ 不按模块（`DEC-121` · 依据见
+         `frontend/行业口径-导航与信息架构.md` §二：「按模块组织」是公认反模式，
+         行业叫 "shipping the org chart"）。⚠️ 分组是【本 Agent 拟的】，
+         业务方若要自己分 ⇒ 改这三行 <h3> 即可，⛔ 不用重做。 -->
+    <div id="others">
+
+      <h3>答案是怎么来的</h3>
+      <ul class="panel-grid">
+        <li class="card card-off"><span>传我自己的文档</span><span class="badge">未上线</span>
+            <span class="why">自己传一篇，立刻能在对话里问它（按文档类型自动分档切块）。</span>
+            <span class="apis">POST /rag/upload_document · DELETE /rag/documents/{id}</span></li>
+        <li class="card card-off"><span>它会去网上查吗</span><span class="badge">未上线</span>
+            <span class="why">会。工具清单里有联网搜索 —— 它属于「会把数据发到本机之外」那一类。</span>
+            <span class="apis">GET /agent/available_tools · /agent/mcp_tools_dynamic</span></li>
+        <li class="card card-off"><span>它记得住上一轮吗</span><span class="badge">未上线</span>
+            <span class="why">记得。可以写入 / 检索长期记忆，换会话也在。</span>
+            <span class="apis">POST /agent/memory/add · GET /agent/memory/search</span></li>
+      </ul>
+
+      <h3 style="margin-top:var(--sp-4)">它会不会乱来</h3>
+      <ul class="panel-grid">
+        <li class="card card-off"><span>它会写代码跑代码吗</span><span class="badge">未上线</span>
+            <span class="why">会，但跑在隔离沙箱里：⛔ 无网 · 只读根 · 非 root · 有超时与内存上限。</span>
+            <span class="apis">POST /agent/execute_code</span></li>
+        <li class="card card-off"><span>花太多会怎样</span><span class="badge">未上线</span>
+            <span class="why">会自动停下，并且告诉你"这是额度用尽、⛔ 不是故障"。</span>
+            <span class="apis">GET /agent/budget/check · /estimates · /intercepts</span></li>
+        <li class="card card-off"><span>限流真的在跑吗</span><span class="badge">未上线</span>
+            <span class="why">能当场看见限流桶 / 配额 / 缓存的实际数值（调试视角，⛔ 不是产品功能）。</span>
+            <span class="apis">GET /debug/rate_limit/{user} · /debug/cache_stats</span></li>
+      </ul>
+
+      <h3 style="margin-top:var(--sp-4)">它靠不靠谱</h3>
+      <ul class="panel-grid">
+        <li class="card card-off"><span>现在服务正常吗</span><span class="badge">未上线</span>
+            <span class="why">存活 / 就绪探针 + Prometheus 指标。</span>
+            <span class="apis">GET /health · /ready · /metrics</span></li>
+        <li class="card card-hover"><a href="/eval">你怎么知道它做得对</a>
+            <span class="why">接的是「Agent 生产就绪评测门」（现状是占位页 —— ⛔ 别当成"评测能用"）。</span>
+            <span class="apis">GET /eval · agent-eval-gate</span></li>
+      </ul>
+
+    </div>
 
   </main>
 
