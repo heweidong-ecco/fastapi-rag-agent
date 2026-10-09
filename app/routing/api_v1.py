@@ -177,11 +177,14 @@ async def create_user(
     user_name: str = Depends(require_admin),
 ):
     """管理员创建新用户并返回 API Key"""
-    api_key = create_user_api_key(req.user_name, req.expire_days)
+    # ⚠️ `req.role` 默认 `None` ⇒ 写进库的是 `NULL`（= "还没裁决"）——
+    #    ⛔ 别在这里补一个 `or "free"`，那会把"没写"与"写了 free"变成同一件事（B1 · `DEC-129`）。
+    api_key = create_user_api_key(req.user_name, req.expire_days, role=req.role)
     return {
         "user_name": req.user_name,
         "api_key": api_key,
         "expire_days": req.expire_days,
+        "role": req.role,
         "warning": "请立即保存此Key，它只显示一次！",
     }
 

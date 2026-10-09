@@ -39,9 +39,10 @@ from access.auth import create_user_api_key, hash_api_key   # noqa: E402,F401
 from core.db import get_db                                  # noqa: E402
 
 
-def issue(user_name: str, days: int) -> None:
-    api_key = create_user_api_key(user_name, expire_days=days)
-    print(f"✅ 已为用户 {user_name!r} 发一把 key（{days} 天）：")
+def issue(user_name: str, days: int, role: str | None = None) -> None:
+    api_key = create_user_api_key(user_name, expire_days=days, role=role)
+    shown = role if role is not None else "（未指定 ⇒ 库里写 NULL ⇒ 读侧按用户名回退）"
+    print(f"✅ 已为用户 {user_name!r} 发一把 key（{days} 天 · role={shown}）：")
     print()
     print(f"    {api_key}")
     print()
@@ -70,6 +71,11 @@ def main() -> int:
     ap.add_argument("user_name")
     ap.add_argument("--days", type=int, default=30)
     ap.add_argument("--revoke", action="store_true", help="撤销该用户名下全部 key")
+    # 🔴 2026-10-09（B1 · `DEC-129`）：角色。
+    #    ⚠️ **不给默认值**（`default=None`）—— "不传"与"传了 free"**不是一回事**：
+    #    不传 ⇒ 库里写 `NULL` ⇒ 读侧按用户名**回退**；传了 ⇒ 就是裁决。
+    ap.add_argument("--role", default=None,
+                    help="角色（free / premium / admin）。⛔ 不传 ≠ 传 free —— 不传走回退")
     args = ap.parse_args()
 
     if args.revoke:
@@ -78,7 +84,7 @@ def main() -> int:
               f"：{args.user_name!r} 共 {n} 行")
         return 0
 
-    issue(args.user_name, args.days)
+    issue(args.user_name, args.days, role=args.role)
     return 0
 
 

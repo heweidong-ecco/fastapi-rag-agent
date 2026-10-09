@@ -44,23 +44,43 @@ def _is_expired(expires_at, now=None) -> bool:
     return expires_at < (now if now is not None else datetime.now())
 
 
-def create_user_api_key(user_name: str, expire_days: int = 30) -> str:
+def create_user_api_key(user_name: str, expire_days: int = 30, role: str | None = None) -> str:
     """
     为新用户生成API Key并存入数据库。
     返回明文Key（只在生成时显示一次，之后无法找回）。
+
+    ## `role`（2026-10-09 · B1 · `DEC-129`）
+
+    ⚠️ **默认 `None` ⇒ 写进库的是 `NULL`** —— 而 `get_user_role` 把 `NULL` 当
+    「**还没人裁决**」⇒ **走回退**（探针身份 + `admin` 特判 + 其余 FREE）。
+    🔴 **⛔ 别给它一个默认值 `"free"`** —— 那会把"没写"与"写了 free"**变成同一件事**，
+    而 B1 整套设计正是靠这条区分活着（见 `app/access/permission.py` 的 docstring）。
+
+    ⚠️ 传了值就**按传入的写**（⚠️ 不校验取值 —— 脏值的处置在**读侧**：
+    `UserRole(raw)` 转不出来就回退，见 `permission.py`）。
+    ⛔ **写侧不做白名单**是**有意的**：多一处白名单 = 多一处会与 `UserRole` 分叉的事实源。
     """
     api_key = generate_api_key()
     hashed = hash_api_key(api_key)
     expires_at = datetime.now() + timedelta(days=expire_days)
-    
+
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO api_keys (user_name, key_hash, expires_at) VALUES (%s, %s, %s)",
-                (user_name, hashed, expires_at)
+                "INSERT INTO api_keys (user_name, key_hash, expires_at, role) "
+                "VALUES (%s, %s, %s, %s)",
+                (user_name, hashed, expires_at, role)
             )
             conn.commit()
-    
+
+    # 🔴 **写侧必须主动失效缓存**（B1 · `DEC-129`）—— 见 `permission.get_user_role`：
+    #    它在**配额热路径**上带 60s 进程内缓存；不失效 ⇒ 改完角色**最多 60s 内还是旧的**，
+    #    而那种"改了不生效"看起来像 bug，会把排查带到错的地方。
+    #    ⚠️ **不给它包 `try/except`** —— `invalidate_role_cache` 是**纯内存**操作，没有可失败的理由；
+    #    包一层宽捕获就是本仓最恨的「静默降级」（真坏了也不出声）。
+    from access.permission import invalidate_role_cache   # 函数内 import：避免模块级循环依赖
+    invalidate_role_cache(user_name)
+
     return api_key
 # 创建管理员身份的代码
 def ensure_admin_exists(logger=None):
