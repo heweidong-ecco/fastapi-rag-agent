@@ -89,6 +89,27 @@ jobs:
       - name: 静态检查（ruff · 基线棘轮）
         run: bash scripts/check_lint_baseline.sh
 
+  secrets-history:
+    # 🔴 2026-10-09 加（业务方裁「做 E」）—— **补上凭据门扫不到的那一半**。
+    #    `scripts/check_secrets.sh` 只扫 **staged 的新增行** ⇒ **扫不到历史**（`SECURITY.md` §五 记着这条）。
+    #    gitleaks **扫全历史** ⇒ 两者互补，⛔ 不是重复。
+    #
+    # ⚠️ **它新开一个 job（⛔ 不塞进 pytest 那块 run）** ——
+    #    塞进去的话 `scripts/ci-local.sh` 会**逐字执行**它，而本机没装 gitleaks ⇒ 本地恒红。
+    #    ⇒ 它与 `CodeQL` 同类：**只在 GitHub 上跑**。
+    name: 历史密钥扫描（gitleaks · 全历史）
+    runs-on: ubuntu-latest
+    # 🔴 本仓纪律：每个 job 必须带 timeout-minutes（有门钉着）
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # ⚠️ 必须全历史 —— 只扫当前树的那个不是本 job 的目的
+      - name: gitleaks（扫全历史）
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   offline-tests:
     name: 离线测试（app/ 全套 · 减 integration/needs_db · redis）
     runs-on: ubuntu-latest

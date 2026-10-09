@@ -192,16 +192,25 @@ def resolve_quota_identity(x_api_key: str | None, auth_header: str | None) -> st
     （中间件本体要连库，行为测试会退化成"环境依赖型通过"）。
     🔴 2026-10-05（待办 `N9`）才抽的 —— 原先它**写在 `dispatch` 里**，那段没法单独测。
 
-    ⚠️ **它与限流那条【故意不同】，⛔ 别顺手"统一"**：
-    那边 `None` 会**跳过用户级限流**；这边 `None` 走的是**这个中间件本来就有**的
-    "未识别身份 ⇒ 原样放行"出口（改动前就写着：「⚠️「匿名可打」是另一个问题（`B9`）」）。
+    🔴 **2026-10-09（业务方裁「A1」）：本函数【已与限流那条对齐】——**
+       原先它与限流**故意不同**（`None` 把"真匿名"和"判不了"混在一起，匿名因此**整层绕过配额**）。
+       现在与 `resolve_rate_limit_identity` **同一口径**：
+       * **`"anonymous"` = 判了，就是匿名** ⇒ **进配额**，`get_user_role("anonymous")`
+         归到 **FREE 最低档**（`app/access/permission.py` 的「其余全部 FREE」）
+       * **`None` = 判不了**（认证服务不可用）⇒ 中间件据此**跳过本次**用户级配额
 
-    🔴 2026-10-05（`N9`）：**认证服务不可用（库挂了）⇒ 也返回 `None`**，
+       ⚠️ **代价（业务方已知并接受）**：全体匿名**共用一个 FREE 日预算**
+       ⇒ 一个爬虫打满 ⇒ 其余匿名请求当日 429。⚠️ 这不是"漏"，是**取向**：
+       旧行为（匿名完全不受限）比它**更糟**；而**全站日级**上限仍在，不依赖身份。
+       📄 逐条见 `SECURITY.md` §3.1。
+
+    🔴 2026-10-05（`N9`）：**认证服务不可用（库挂了）⇒ 返回 `None`**，
        ⛔ 不是让它抛出去 —— 抛出去会把这个**成本控制**层变成一处新的 500
        （它所处的位置与限流一样：中间件里的异常**不会被 `AppException` 处理器接住**）。
        理由见 `auth.verify_api_key` 的 docstring；取向同 `token_tracker` 的 fail-open。
     """
     user_name = None
+    _unavailable = False          # 🆕 2026-10-09（A1）：**"判不了"**（库挂了）—— 与"判了是匿名"分开
 
     # 方式一：从X-API-Key获取
     if x_api_key:
@@ -214,7 +223,7 @@ def resolve_quota_identity(x_api_key: str | None, auth_header: str | None) -> st
             logger.bind(request_id=request_id_var.get()).error(
                 f"🔴 认证服务不可用 ⇒ 本次【跳过】额度检查 (fail-open)：{exc}"
             )
-            user_name = None
+            _unavailable = True
 
     # 方式二：从Authorization头获取JWT（⚠️ 保留"API Key 验不过还会试 JWT"这个顺序，
     #         ⛔ 别改成验不过就直接返回 —— 那是行为变化）
@@ -222,7 +231,11 @@ def resolve_quota_identity(x_api_key: str | None, auth_header: str | None) -> st
         from access.jwt_handler import verify_access_token
         user_name = verify_access_token(auth_header[7:])
 
-    return user_name
+    if user_name:
+        return user_name
+    # 🔴 2026-10-09（业务方裁「A1」）：**真匿名 ⇒ 返回 `"anonymous"`（进配额，走 FREE 最低档）**；
+    #    ⛔ **只有"判不了"才返回 `None`**（那才该 fail-open）。
+    return None if _unavailable else "anonymous"
 
 
 def _rate_limited_payload(retry_after: int = 60) -> dict:
@@ -398,7 +411,10 @@ class QuotaMiddleware(BaseHTTPMiddleware):
         # 🔴 2026-10-05（`N9`）：**"库挂了"也走这个出口**（`resolve_quota_identity` 返回 `None`）——
         #    这个中间件**本来**就把"识别不了"当放行 ⇒ 库里抖一下，⛔ 不该变成全站 500。
         #    ⚠️ 上面那行 ERROR 日志保证它**不静默**（与 `rate_limiter` 的 fail-open 同一条纪律）。
-        if not user_name:
+        # 🔴 2026-10-09（A1）：**从 `if not user_name` 改成 `is None`** ——
+        #    真匿名现在返回 `"anonymous"`（**要进配额**），只有"判不了"才是 `None`。
+        #    ⚠️ **写成 `if not user_name` 会把匿名又放过去** ⇒ 这条门等于没修。
+        if user_name is None:
             return await call_next(request)
 
         info = get_token_budget_info(user_name)

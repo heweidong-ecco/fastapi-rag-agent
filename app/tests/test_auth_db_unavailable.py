@@ -253,11 +253,17 @@ def test_额度中间件遇库异常时留下响的日志(monkeypatch, logs):
     assert any("额度" in m or "认证服务不可用" in m for m in logs), f"日志没说清是哪一层被跳过了：{logs}"
 
 
-def test_额度中间件_库好的但key无效仍是None(monkeypatch):
-    """🔄 反向守卫：**真的**验不过 ⇒ 仍是 `None`（该走原有的放行出口，不是新行为）。"""
+def test_额度中间件_库好的但key无效就是匿名(monkeypatch):
+    """🔴 **2026-10-09 改（业务方裁「A1」）：验不过 ⇒ `"anonymous"`，⛔ 不再是 `None`。**
+
+    ⚠️ **这条【有意不等于】改动前** —— 旧行为是"验不过 ⇒ `None` ⇒ 跳过配额"，
+    而那正是 `SECURITY.md` §3.1 那个洞（**匿名可以无限量打**）。
+    现在 `None` **只留给"判不了"**（库挂了），真匿名一律是 `"anonymous"` ⇒ **进配额**。
+    📄 `app/main.py` 的 `resolve_quota_identity` docstring · `SECURITY.md` §3.1。
+    """
     monkeypatch.setattr(auth, "verify_api_key", lambda k: None)
 
-    assert main.resolve_quota_identity("sk-forged", None) is None
+    assert main.resolve_quota_identity("sk-forged", None) == "anonymous"
 
 
 def test_额度中间件_库好的key有效就返回用户名(monkeypatch):
@@ -267,9 +273,17 @@ def test_额度中间件_库好的key有效就返回用户名(monkeypatch):
     assert main.resolve_quota_identity("sk-good", None) == "alice"
 
 
-def test_额度中间件_没带凭据就是None():
-    """🔄 反向守卫：没带任何凭据 ⇒ `None`（与改动前逐字一致）。"""
-    assert main.resolve_quota_identity(None, None) is None
+def test_额度中间件_没带凭据就是匿名():
+    """🔴 **2026-10-09 改（业务方裁「A1」）：没带凭据 ⇒ `"anonymous"`，⛔ 不再是 `None`。**
+
+    ⚠️ **这是 A1 的【核心那一条】**：真匿名必须**进配额**（走 FREE 最低档），
+    否则匿名就是**整层绕过**（`SECURITY.md` §3.1）。
+    ⚠️ **反向守卫**：若哪天有人把它改回 `None`，本条**立刻红** —— 那正是"匿名又放开了"。
+    """
+    assert main.resolve_quota_identity(None, None) == "anonymous"
+
+    # 🔒 与它成对的那条：**"判不了"仍必须是 `None`**（fail-open 没被这次改动带走）
+    #    —— 见上面 `test_额度中间件遇库异常时跳过而不是全站500`。
 
 
 def test_额度中间件_APIKey验不过还会去试JWT(monkeypatch):
