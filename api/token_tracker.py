@@ -454,8 +454,26 @@ def get_user_overview(user_name: str) -> dict:
         "by_purpose": by_purpose,
     }
 
-def get_recent_usage(limit: int = 20):
+def get_recent_usage(limit: int = 20, user_name: str = None):
+    """最近若干条使用记录。
+
+    🔴 **2026-10-09（`N20`）：加【可选】`user_name` —— 给了就只看这个人。**
+
+    ⚠️ **改前是什么样**：端点 `GET /agent/token/recent` 的签名**收了 `user_name`**
+       （`Depends(get_current_user_hybrid)`），而函数体写的是 `get_recent_usage(limit + 1)`
+       ⇒ **身份根本没往下传** ⇒ 它返回的是 `_usage_records` 里**所有人的**记录，
+       **每条还带着别人的 `user_name`**。
+       ⇒ 那是 `DEC-056` / `DEC-065` 那一族的同型（**身份收了不用 ⇒ 静默查全库**）；
+          在公开 demo 上把这条接口露出去 = **越权**（`DEC-124` §1.2）。
+
+    🔴 **顺序要紧**：**先按人过滤，再取最后 `limit` 条** ——
+       ⛔ 反过来（先切片再过滤）会在"总记录很多、这个人占得少"时**回空**，
+       而那看起来像"他没有记录"，**不报任何错**。
+    """
     with _lock:
+        rows = _usage_records
+        if user_name:
+            rows = [u for u in rows if u.user_name == user_name]
         return [
             {
                 "model": u.model,
@@ -468,7 +486,7 @@ def get_recent_usage(limit: int = 20):
                 "cost": round(u.cost, 4),
                 "timestamp": u.timestamp,
             }
-            for u in _usage_records[-limit:]
+            for u in rows[-limit:]
         ]
 
 # ==================== 预算控制 ====================

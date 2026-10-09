@@ -584,6 +584,31 @@ async def eval_page():
     """把人送到 Eval 页。⚠️ `include_in_schema=False`：它不是 API，⛔ 别混进 openapi。"""
     return RedirectResponse(url="/static/web/eval.html", status_code=302)
 
+# 🔴 2026-10-09（施工单**刀 3**）：**检索实验室**的入口 URL。形状与上面四条**逐字同款**。
+#    ⚠️ 它是规格 §2.2 那 5 条检索接口的**唯一可点入口**（`pg_search` · `hybrid_search` ·
+#       `rerank_search` · `rewrite_search` · `/rag/search`）—— 此前它们只有 `chat.html` 那条流式
+#       被人点到过，另**五条一条入口都没有**（按最高判据 = 等于没做）。
+#    🔴 代价已认：这是**新公开路由** ⇒ `check_route_auth.py --baseline` 会 exit 1
+#       ⇒ **已显式写进 `scripts/route-auth-baseline.txt`**（一次有意识的操作）。
+#       ⚠️ 它**不含数据**：真正的边界在它调的那 5 条接口上 —— **5 条都带鉴权**
+#       （`get_current_user_hybrid`）。
+@app.get("/lab", include_in_schema=False)
+async def lab_page():
+    """把人送到检索实验室。⚠️ `include_in_schema=False`：它不是 API，⛔ 别混进 openapi。"""
+    return RedirectResponse(url="/static/web/lab.html", status_code=302)
+
+# 🔴 2026-10-09（施工单**刀 4**）：**成本看板**的入口 URL。形状与上面五条**逐字同款**。
+#    ⚠️ 它盖的是规格 §2.5 的 9 条 + §2.6 的 3 条（扣掉三条【有意不露】⇒ 页面 9 个面板）——
+#       在这之前**这 12 条一条入口都没有**。
+#    🔴 代价已认：这是**新公开路由** ⇒ `check_route_auth.py --baseline` 会 exit 1
+#       ⇒ **已显式写进 `scripts/route-auth-baseline.txt`**（一次有意识的操作）。
+#       ⚠️ 它**不含数据**：真正的边界在它调的那 9 条接口上 —— **9 条都带鉴权**
+#       （`get_current_user_hybrid`）。
+@app.get("/cost", include_in_schema=False)
+async def cost_page():
+    """把人送到成本看板。⚠️ `include_in_schema=False`：它不是 API，⛔ 别混进 openapi。"""
+    return RedirectResponse(url="/static/web/cost.html", status_code=302)
+
 # 新增  嵌入了 Prometheus 指标采集
 # 指标暴露接口
 @app.get("/metrics")
