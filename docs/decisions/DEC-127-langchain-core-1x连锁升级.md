@@ -130,6 +130,21 @@ langchain-core  0.3.86 → >=1.2.31          ← 总闸
 3. ⛔ **要不要把 `langgraph-sdk` / `langgraph-prebuilt` 补进 `requirements.txt`**（§三）
 4. ✅ **依赖漏洞已清零** —— 2026-10-09 实测 `bash scripts/check_dep_vulns.sh` ⇒
    **`（扫了 165 个包，0 条）` + 退出码 0**。§3.4 那 19 条 **全部清掉**（`pyjwt` 那 2 条已于同日单独清）。
-5. ⚠️ **真服务验证 —— ⛔ 尚未做**。计划里它是**必做项**（改的是 LLM 调用链），
-   而本仓「测试全过」⛔ **不算**这条的凭证。
-   📌 待验的三条：`/ws/agent` 端到端 · `/rag/*` 的 embedding 与查询改写（`openai` 2.x）· 记账金额正确。
+5. ✅ **真服务验证【已做】**（2026-10-09，起真服务 + 真调 LLM）—— 三条全过：
+
+| 验什么 | 怎么验 | 结果 |
+|---|---|---|
+| **`/ws/agent` 端到端**（**就是那条修过的活路径**） | WS 连 `/api/v1/ws/agent`，首帧 `{"type":"auth","api_key":…}` | ✅ 回 `{"type":"ready"}` ⇒ 发问题 ⇒ **thinking → final（"3 加 5 等于 8。"）→ done**，**3 帧、无 error** |
+| **`/rag/*` 的 embedding + 查询改写**（`openai` 2.x 直接落点） | `POST /api/v1/rag/search?mode=accurate_norerank` | ✅ **HTTP 200**；`rewrite_enabled=True` · **`rewrite_ms=3726`**（真调了 LLM）· `bm25_enabled=True` · **命中 3 条**且是正确语料 |
+| **记账金额** | `GET /api/v1/agent/token/usage` | ✅ `{"user_name":"…","summary":{"total_tokens":906,"total_cost":0.001913,"calls":2}}` —— **账记到了认证出来的人头上**，且 `calls` 与实调次数对得上 |
+
+   ⚠️ **一条别误读**：用**新用户**搜时命中 **0 条** —— ✅ 那是**按 `requested_by` 过滤的正确隔离行为**
+   （`app/rag/bm25_index.py:65`），⛔ **不是**检索坏了。**正控**：拿 `isolation_a`（自己名下有 6 篇）
+   再搜 ⇒ **命中 3 条**。📌 **"0 条"必须配上正控才算验过**。
+
+6. 🔴 **`#123` 模块化重构【顺带打断的两个活工具】—— 本轮一并修了**
+   （📄 复盘 ⇒ `docs/复盘/2026-10-09-测试全绿而活路径坏了两次.md`）：
+   `scripts/issue_api_key.py`（`from auth import` · `from db import`）·
+   `scripts/check_corpus_dedup.py`（`API_DIR = REPO_ROOT / "api"` + `from chunker import`）。
+   ⚠️ **两处 913 条测试都照不到**（脚本不在 pytest 采集范围；`compileall` 只查语法，
+   而这是**导入期**错）⇒ ⛔ **别把这一条读成本次依赖升级的锅**，它是**当天另一个改动**留下的。

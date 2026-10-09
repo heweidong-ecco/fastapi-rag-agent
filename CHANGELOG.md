@@ -33,7 +33,26 @@ All notable changes to this project will be documented in this file.
     `pip-audit` 的退出码，而**「找到漏洞」与「Python 抛异常（如网络超时）」退出码都是 1**
     ⇒ **网络崩了被报成「🔴 有已知漏洞」**（实测栽过一次）。已改成**按「输出是不是合法 JSON」判**，
     自测从 1 相扩到 **3 相**（含「**判不了必须落 2**」那一相）。
-  - ⚠️ **真服务验证【未做】** —— 改的是 LLM 调用链，本仓「测试全过」⛔ 不算这条的凭证（`DEC-127` §五·5）。
+  - ✅ **真服务验证【已做】**（起真服务 + 真调 LLM）—— `/ws/agent` 端到端 ⇒ `ready → thinking →
+    final("3 加 5 等于 8。") → done`，**无 error** · `/rag/search` ⇒ HTTP 200 + **`rewrite_ms=3726`**
+    （改写真调了 LLM）+ 命中 3 条 · `token/usage` ⇒ `total_cost=0.001913` / `calls=2`，
+    **账记到了认证出来的人头上**。
+    ⚠️ **一条别误读**：新用户搜出 **0 条** = **按 `requested_by` 的正确隔离**（`bm25_index.py:65`），
+    ⛔ 不是检索坏了 —— **正控**：拿名下有语料的 `isolation_a` 再搜 ⇒ **命中 3 条**。
+    📌 **"0 条"必须配上正控才算验过。**
+
+- 🔴 **修掉两处被 `#123` 模块化重构【静默打断】的活工具**（2026-10-09 · 📄 **复盘
+  `docs/复盘/2026-10-09-测试全绿而活路径坏了两次.md`**）——
+  `scripts/issue_api_key.py`（`from auth import …` ⇒ `access.auth`）·
+  `scripts/check_corpus_dedup.py`（**两处**：`API_DIR = REPO_ROOT / "api"` ⇒ `"app"`，
+  以及 `from chunker import …` ⇒ `rag.chunker`）。
+  ⚠️ **`issue_api_key.py` 是【发凭据】的那把工具** —— 它坏了等于"进不去系统"。
+  🔴 **913 条测试与 CI 的 `compileall` 全都照不到**：脚本不在 pytest 采集范围内，
+  而 `compileall` **只查语法** —— 这是**导入期**错。
+  - **判据**：`./venv/bin/python scripts/issue_api_key.py --help` ⇒ **不再 ModuleNotFoundError** ·
+    `./venv/bin/python scripts/check_corpus_dedup.py` ⇒ **退出码 0**（第三层 `⇒ ran`）。
+  - ⬜ **还没做成门** —— 现在是一次性机械扫描（命令在复盘 §四）。
+    按本仓「**门挂在别处就等于没有门**」已登记 `docs/待办总表.md` **`N21`**。
   - **判据**：`pytest app/ -m "not integration and not needs_db" -q` ⇒ **913 passed / 2 skipped** ·
     `bash scripts/ci-local.sh` ⇒ **退出码 0** · `bash scripts/check_dep_vulns.sh` ⇒ **退出码 0**
     +「扫了 165 个包，**0 条**」· 断链 / 孤儿 / 索引 / 凭据四道门 ⇒ **exit 0** ·
