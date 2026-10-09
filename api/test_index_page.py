@@ -89,10 +89,22 @@ def _strip_comments(text: str) -> str:
     这正是本仓记过的那条：**「判据里的字面会数到自己」**。
     📄 同型：`api/static/js/sse.test.js` 的 `stripComments`（`docs/复盘/2026-10-06-守卫的靶子没定准.md`）。
 
+    🔴🔴 **2026-10-09 第二个坑（同一个函数里）**：首版写作 `_CSS_COMMENT.sub("", text)`
+    —— **全文**扫 `/* … */`。而**卡片上的接口标注里写着 `GET /agent/cost/*`**
+    ⇒ 那个 `/*` **被当成 CSS 注释的开头**，一路吃到文件里**下一个 `*/`**
+    ⇒ **守卫看到的是被删掉半页的 HTML**（6 条用例同时红，报"只认出 2 个 `<a href>`"）。
+    ⇒ **剥注释必须【限定在 `<style>` 里】** —— 正文里的 `/*` 是**数据**，⛔ 不是注释。
+    ⚠️ 同一族第三次：**守卫的靶子要定准** —— 剥多了 = 守卫变瞎，**而它不会喊**。
+
     ⛔ **有意不剥行尾 `//`** —— 剥它要区分 `https://` 里的 `//`（需要真词法器），
     而"剥错"的方向是**守卫变瞎**（假绿），比多报一次**糟得多**（同上那份复盘的口径）。
     """
-    return _CSS_COMMENT.sub("", _HTML_COMMENT.sub("", text))
+    without_html_comments = _HTML_COMMENT.sub("", text)
+
+    def _clean_style(m: "re.Match[str]") -> str:
+        return "<style>" + _CSS_COMMENT.sub("", m.group(1)) + "</style>"
+
+    return re.sub(r"<style>(.*?)</style>", _clean_style, without_html_comments, flags=re.S)
 
 
 def _index_html() -> str:
@@ -181,6 +193,51 @@ def test_every_entry_card_has_a_class():
     no_class = [t for t in lis if not re.search(r'class\s*=\s*["\'][^"\']+["\']', t)]
     assert not no_class, (
         f"这些入口卡没带 class ⇒ 它们不会拿到卡片外观（页面上会是一条裸链接）：{no_class}"
+    )
+
+
+def test_every_card_carries_its_api_names():
+    """🔴 **每张卡都必须带「接口标注」那一行**（业务方 2026-10-09 点名"值得保留"）。
+
+    **他的原话**：「新版**值得保留的是**：`POST /rag/stream_search（SSE 流式）`，
+    **接口标注**，**字体要再缩小，太大了**」。
+    ⇒ 与他另一句**同时**成立：「只会看你**做了哪些功能、哪些接口**」——
+    接口标注就是那句要求的**兑现物**。⛔ **删掉它，那句要求就没人满足了**（而页面上看不出来）。
+    ⇒ 所以这条门钉的是**结构**：13 张卡一张都不能漏。
+    """
+    html = _index_html()
+    cards = re.findall(r'<li class="card[^"]*">.*?</li>', html, re.S)
+    # 🔴 先证明尺子有读数（空集合断言会一路绿着放行 —— `DEC-065` 那族）
+    assert len(cards) >= 13, f"只匹配到 {len(cards)} 张卡 —— 扫到 13 张才算数"
+    missing = [c[:50] for c in cards if 'class="apis"' not in c]
+    assert not missing, (
+        f"这些卡没有「接口标注」⇒ 业务方那句「只会看你做了哪些功能、哪些接口」"
+        f"就没有东西兑现了：{missing}"
+    )
+
+
+def test_other_section_is_not_grouped():
+    """⛔ **「其他功能」不许分组**（业务方 2026-10-09：「**分组小标题多余**」）。
+
+    ⚠️ **背景**：上一版（已 `git revert`）按"访客会问的问题"把它分成 3 组，业务方看过之后
+    判「**不好**」并点名这一条。⇒ **8 张卡就是 8 张卡**。
+    ⛔ 别再把「答案是怎么来的 / 它会不会乱来 / 它靠不靠谱」那类小标题加回来。
+
+    🔴🔴 **本门的第一版【抓不到它要抓的东西】（2026-10-09 当场用反证发现）**：
+    首版扫的是 `<ul id="others">…</ul>` 的**里面**，而分组小标题在真实写法里是加在
+    **`<ul>` 的外面**（上一版就是 `<div id="others">` 包着 3 个 `<h3>` + 3 个 `<ul>`）
+    ⇒ 我把 `<h3>` 插进去做反证，**它没红**。
+    ⇒ **改成钉「`</h2>其他功能` 与 `<ul … id="others">` 之间只许有空白」** ——
+      那是分组的唯一自然落点，也顺带钉住"不许再包一层 div 进来"。
+    ⚠️ 同一族第 N 次：**门的靶子要定准**（📄 `docs/复盘/2026-10-06-守卫的靶子没定准.md`）。
+    """
+    html = _index_html()
+    gap = re.search(r'其他功能</h2>(.*?)<ul class="panel-grid" id="others">', html, re.S)
+    assert gap, "找不到「其他功能」标题到 #others 列表之间那一段 —— 结构变了，先核标记"
+    leftover = gap.group(1).strip()
+    assert leftover == "", (
+        f"「其他功能」和它的卡片列表之间多了东西（多半是分组小标题）：{leftover[:120]!r}\n"
+        f"⇒ 业务方 2026-10-09 已判「分组小标题多余」，⛔ 别加回来"
     )
 
 
