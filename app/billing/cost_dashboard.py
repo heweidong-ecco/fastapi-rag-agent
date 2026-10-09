@@ -2,6 +2,7 @@
 成本统计可视化面板（Gradio）
 """
 import os
+import re
 import gradio as gr
 import matplotlib
 matplotlib.use('Agg')  # 非交互式后端，避免线程问题
@@ -200,8 +201,24 @@ def export_cost_csv(user_name: str, days: int = 30) -> str:
         return None
     
     # 生成 CSV 文件
-    filename = f"cost_report_{user_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-    filepath = os.path.join(tempfile.gettempdir(), filename)
+    #
+    # 🔴 2026-10-10（CodeQL `py/path-injection` · 真问题）：**`user_name` 是用户可控的**
+    #    —— `routing/schemas.py:UserCreate.user_name` 只限制了**长度**（3–50），
+    #    **⛔ 没有任何字符白名单** ⇒ 一个叫 `../../x` 的账号能把这条路径
+    #    **写出 `tempdir` 之外**（受限：扩展名恒为 `.csv`）。
+    #    ⚠️ 触发面窄（要 **admin** 才能建出这种用户名），但**这是真缺陷**，⛔ 不是误报。
+    #    ⇒ 处置分两层：
+    #      ① **只对【文件名】做白名单**（⛔ 不动 `user_name` 的准入策略 —— 那是另一件事，
+    #         改了会影响已有的账号与用例）；
+    #      ② **纵深防御**：拼完之后**再核一次真实落点**在不在 tempdir 之内。
+    safe_user = re.sub(r"[^A-Za-z0-9_.-]", "_", user_name)
+    filename = f"cost_report_{safe_user}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    tmpdir = os.path.realpath(tempfile.gettempdir())
+    filepath = os.path.join(tmpdir, filename)
+    if os.path.realpath(os.path.dirname(filepath)) != tmpdir:
+        # 走到这里说明上面那层白名单被绕过了（比如有人把它删了）⇒ **响亮地失败**，
+        # ⛔ 不要"静默改成默认文件名"（那会让缺陷隐身）。
+        raise ValueError(f"成本报表的落点不在临时目录内，已拒绝：{filepath!r}")
     
     with open(filepath, 'w', newline='', encoding='utf-8-sig') as f:
         writer = csv.writer(f)

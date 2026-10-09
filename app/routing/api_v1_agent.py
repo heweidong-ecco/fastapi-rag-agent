@@ -3,6 +3,7 @@ API v1 路由集中定义
 所有 /api/v1 前缀的接口在此管理。
 """
 import asyncio
+from loguru import logger
 from fastapi import APIRouter, Depends, Query
 from core.exceptions import ErrorCode, AppException
 from routing.deps import get_current_user_hybrid
@@ -2121,8 +2122,17 @@ async def agent_cost_records(
             records = records[:limit]
         return {"records": records, "count": len(records), "truncated": truncated,
                 "requested_by": user_name}
-    except Exception as e:
-        return {"error": str(e)}
+    except Exception:
+        # ⚠️ `as e` 已去掉 —— 异常对象交给 `logger.exception` 自己取（`sys.exc_info()`），
+        #    留着不用反而会被 `ruff` 的 `F841` 报（本仓的静态检查门会红）。
+        # 🔴 2026-10-10（CodeQL `py/stack-trace-exposure` · 真问题）：
+        #    **⛔ 不把异常原文回给调用方** —— 本端点**任何已认证用户都能打**
+        #    （`Depends(get_current_user_hybrid)`，**不是** admin-only），
+        #    而 `str(e)` 会把 **SQL 片段 / 连接串 / 文件路径**一起带出去。
+        #    ⚠️ **本仓「失败要说出来」那条不变**（熔断/失败⛔ 不许退化成白屏）——
+        #    仍然**说**，只是**不再说内部细节**：细节进服务端日志，调用方拿到的是可读的失败原因。
+        logger.exception("查询成本记录失败（调用方 {}）", user_name)
+        return {"error": "查询成本记录失败，请稍后重试（详细信息见服务端日志）"}
     
 # ====  添加轨迹追踪查询 接口 ====================
 
