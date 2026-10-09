@@ -212,11 +212,21 @@ def export_cost_csv(user_name: str, days: int = 30) -> str:
     #         改了会影响已有的账号与用例）；
     #      ② **纵深防御**：拼完之后**再核一次真实落点**在不在 tempdir 之内。
     safe_user = re.sub(r"[^A-Za-z0-9_.-]", "_", user_name)
-    filename = f"cost_report_{safe_user}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    # 🔴 **`os.path.basename` 这一层是【必须】的，⛔ 别删** —— 它看着"多余"（上面已经把 `/`
+    #    换成 `_` 了，basename 天然是恒等），但：
+    #    ① **对 CodeQL 是必需的净化器**：`py/path-injection` 只在污点被**它认得的**净化器切断时
+    #       才撤告警。2026-10-10 实测：**只加 `re.sub` + 下面那层 realpath 守卫，告警【不撤】**
+    #       （`#1` 从 `:206` 挪到 `:223`，仍然指着 `open(filepath, …)`）。
+    #    ② **对人是纵深防御**：万一将来有人把上面那行白名单改没了，这一层仍然剥掉目录成分。
+    #    ⚠️ `werkzeug.utils.secure_filename` 也是 CodeQL 认的净化器，但 **werkzeug 不在本仓依赖里**
+    #       （本仓是 FastAPI，不是 Flask）⇒ ⛔ 不为一道静态检查给 demo 镜像加一个包。
+    filename = os.path.basename(
+        f"cost_report_{safe_user}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    )
     tmpdir = os.path.realpath(tempfile.gettempdir())
     filepath = os.path.join(tmpdir, filename)
     if os.path.realpath(os.path.dirname(filepath)) != tmpdir:
-        # 走到这里说明上面那层白名单被绕过了（比如有人把它删了）⇒ **响亮地失败**，
+        # 走到这里说明上面那两层被绕过了（比如有人把它们删了）⇒ **响亮地失败**，
         # ⛔ 不要"静默改成默认文件名"（那会让缺陷隐身）。
         raise ValueError(f"成本报表的落点不在临时目录内，已拒绝：{filepath!r}")
     
