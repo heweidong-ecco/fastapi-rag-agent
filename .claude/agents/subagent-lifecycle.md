@@ -16,60 +16,49 @@ Everything below is the mechanics of that sentence.
 
 ---
 
-## 1. Relationship to `tag.md` (what this supersedes)
-
-`.claude/agents/tag.md` currently states a **blanket ban** on creating subagents.
-This policy **supersedes the ban**, and **preserves its intent**. Precisely:
-
-| From `tag.md` | Status now |
-|---|---|
-| "Do not create subagents" (blanket ban) | ⛔ **Superseded** — temporary, task-scoped subagents are allowed under §4 |
-| "prefer `settings.json` / `commands/` / `hooks/` / `*.sh` over subagents" | ✅ **Kept** — it is now rung 2 of the ladder in §3 |
-| "subagents burn tokens; blind testing/verification is acceptable" | ✅ **Kept** — it is the reason for the ladder |
-| "**creating a subagent requires human review (HITL)**" | ✅ **Kept, and narrowed** — HITL is now required **only for *standing* subagents** (§6). Temporary ones need no approval. |
-| "run tasks serially in the main agent" | ✅ **Kept** |
-
----
-
-## 2. Vocabulary (so the rest is unambiguous)
+## 1. Vocabulary (so the rest is unambiguous)
 
 | Term | Meaning |
 |---|---|
-| **Ephemeral subagent** | A subagent definition whose lifetime is bounded by **one task**. Default and normal case. |
+| **Ephemeral subagent** | A subagent definition whose lifetime is bounded by **one task**. The default and normal case. |
 | **Standing subagent** | A subagent definition that persists across sessions and is reused by unrelated tasks. **Requires human approval.** |
-| **Task** | A single deliverable with a stated **stop condition**. Not "a whole refactor"; that is many tasks. |
-| **Retire** | Move the definition out of the active directory so it is no longer offered as an option. A **file move**, not a note (§7). |
+| **Task** | A single deliverable with a stated **stop condition**. "Refactor the repo" is not a task; it is many tasks. |
+| **Retire** | Move the definition out of the active directory so it is no longer offered as an option. A **file move**, not a note (§6). |
 
 ---
 
-## 3. Decision ladder — try the cheapest rung first
+## 2. Decision ladder — try the cheapest rung first
 
 Before spawning anything, walk down this list and stop at the first rung that works:
 
 | # | Rung | Use when |
 |---|---|---|
 | 1 | **Do it in the main session** | The default. Always try this first. |
-| 2 | **`settings.json` / `commands/` / `hooks/` / a shell or Python script** | The work is *repeatable* and *mechanical*. A script is cheaper, testable, and leaves a trace. (`tag.md`'s original guidance.) |
-| 3 | **Ephemeral subagent** (§4) | The work is **long-running**, **separable**, and keeping it in the main session would **exhaust context** on a task that can run to a stated stop condition. |
-| 4 | **Standing subagent** (§6) | A human has explicitly approved it. |
+| 2 | **`settings.json` / `commands/` / `hooks/` / a shell or Python script** | The work is *repeatable* and *mechanical*. A script is cheaper, testable, and leaves a trace. |
+| 3 | **Ephemeral subagent** (§3) | The work is **long-running**, **separable**, and keeping it in the main session would **exhaust context** on a task that can run to a stated stop condition. |
+| 4 | **Standing subagent** (§5) | A human has explicitly approved it. |
 
 ⛔ **Do not skip to rung 3 because it is convenient.** The justification for rung 3 must be
 "this is long and separable", not "I would rather not do it sequentially".
 
+⚠️ Rung 2 exists because subagents are **expensive**: they duplicate context, they cannot ask
+the human anything mid-flight, and their work has to be re-verified anyway. A script you can
+read in ten lines beats an agent you cannot read at all.
+
 ---
 
-## 4. Creating an ephemeral subagent
+## 3. Creating an ephemeral subagent
 
-### 4.1 The definition must exist **before** the subagent is spawned
+### 3.1 The definition must exist **before** the subagent is spawned
 
 Write `.claude/agents/<name>.md` first, then spawn. Not the other way round —
 otherwise the ephemeral rule has no machine trace.
 
-### 4.2 Required frontmatter
+### 3.2 Required frontmatter
 
 ```yaml
 ---
-name: <lowercase-english-kebab-case>          # ⛔ never CJK — see 4.3
+name: <lowercase-english-kebab-case>          # ⛔ never CJK — see 3.3
 description: <one line: when a caller should use this>
 tools: <comma-separated tool list>
 ephemeral: true                                # always true for rung 3
@@ -82,33 +71,33 @@ created: <YYYY-MM-DD>
 
 Then the body: what the subagent must do, what it must **not** do, and what it returns.
 
-### 4.3 Naming
+### 3.3 Naming
 
 - **English, lowercase, kebab-case.** e.g. `import-rewriter`, `doc-link-fixer`, `spec-migrator`.
-- ⛔ **No Chinese characters in the filename.** Two reasons, both concrete:
-  1. Tooling that derives identifiers from paths (`Claude Code`'s own project-directory
+- ⛔ **No Chinese characters in the filename.** Two concrete reasons:
+  1. Tooling that derives identifiers from paths (Claude Code's own project-directory
      encoding, `git ls-tree` output, many CI steps) collapses non-ASCII characters and can
-     then collide two distinct names into one.
+     then **collide two distinct names into one**.
   2. The subagent `name:` is an **address** used to resume it later. An address that cannot
      be typed on a US keyboard is not an address.
 
-### 4.4 Hard limits on an ephemeral subagent
+### 3.4 Hard limits on an ephemeral subagent
 
 | Rule | Why |
 |---|---|
 | **One task only.** | It is defined by its `task_scope`. A second task means a second definition. |
-| **Must not spawn its own subagents.** | Otherwise the retirement rule (§5) cannot reach the grandchildren, and the tree outlives the task. |
+| **Must not spawn its own subagents.** | Otherwise the retirement rule (§4) cannot reach the grandchildren, and the tree outlives the task. |
 | **Must have a stop condition.** | A subagent without one cannot be retired, because "done" is undefined. |
 | **Must not perform outward-facing or irreversible actions** (push, PR, deploy, delete outside the repo workspace). | Those stay in the main session, where the human's approval is in scope. |
 | **Must not be used to route around a denial.** | If a permission was denied in the main session, delegating it to a subagent is a bypass, not a solution. |
 
 ---
 
-## 5. Retirement — **mandatory**, at task end
+## 4. Retirement — **mandatory**, at task end
 
 Retirement happens when the task ends, whether it **succeeded, was abandoned, or was superseded**.
 
-### 5.1 Move the definition
+### 4.1 Move the definition
 
 ```bash
 git mv .claude/agents/<name>.md .claude/agents/tmp/<task_category>/<name>.md
@@ -117,7 +106,7 @@ git mv .claude/agents/<name>.md .claude/agents/tmp/<task_category>/<name>.md
 Grouping by `<task_category>` is what makes the archive navigable later:
 *"what did we use for the last migration?"* is answerable; a flat pile of names is not.
 
-### 5.2 Stamp it as retired
+### 4.2 Stamp it as retired
 
 Add to the frontmatter of the moved file:
 
@@ -128,7 +117,7 @@ permanent_candidate: true | false
 notes: <one line: what worked, what did not — optional but valuable>
 ```
 
-### 5.3 Register it
+### 4.3 Register it
 
 Append one line to `.claude/agents/tmp/README.md` (the archive index):
 
@@ -136,7 +125,7 @@ Append one line to `.claude/agents/tmp/README.md` (the archive index):
 - <task_category> | <name> | <retired date> | <outcome> | <permanent_candidate?>
 ```
 
-### 5.4 The rule that makes this a rule
+### 4.4 The rule that makes this a rule
 
 > ⛔ **An ephemeral definition left in `.claude/agents/` after its task is a defect.**
 > It will be offered to future sessions as if it were generally applicable,
@@ -144,7 +133,7 @@ Append one line to `.claude/agents/tmp/README.md` (the archive index):
 
 ---
 
-## 6. Promotion to standing (human approval required)
+## 5. Promotion to standing (human approval required)
 
 If a retired subagent has `permanent_candidate: true`, or a session believes a definition
 should become standing, then:
@@ -165,7 +154,7 @@ future sessions will do without anyone asking.
 
 ---
 
-## 7. Why retirement is a **file move** and not a note
+## 6. Why retirement is a **file move** and not a note
 
 This repository has learned the same lesson repeatedly, in its own words:
 
@@ -178,21 +167,21 @@ change. A note cannot do that; a move can.
 
 ---
 
-## 8. Edge cases
+## 7. Edge cases
 
 | Situation | Ruling |
 |---|---|
 | The task is abandoned halfway | **Still retire**, `outcome: abandoned`. A half-used definition is the most likely one to be accidentally reused. |
-| Two sessions create the same subagent name | Names collide by design. The second session must retire the first (§5) or pick a different name. There is no "override". |
+| Two sessions create the same subagent name | Names collide by design. The second session must retire the first (§4) or pick a different name. There is no "override". |
 | The task turns out to be trivial | Retire immediately. The definition's existence is not itself a commitment to use it. |
-| A retired definition is needed again | **Recreate it as a new ephemeral definition** (§4), copying from the archive. Do not un-retire in place — that would erase the record of its first run. |
-| The definition is a duplicate of an existing standing subagent | Do not create it. Use the standing one. |
+| A retired definition is needed again | **Recreate it as a new ephemeral definition** (§3), copying from the archive. Do not un-retire in place — that would erase the record of its first run. |
+| The definition duplicates an existing standing subagent | Do not create it. Use the standing one. |
 
 ---
 
-## 9. Enforcement — ⬜ **prose-only today** (known weakness)
+## 8. Enforcement — ⬜ **prose-only today** (known weakness)
 
-Right now this policy is **not machine-enforced**. Consistent with §7, that means it is weak.
+Right now this policy is **not machine-enforced**. Consistent with §6, that means it is weak.
 
 The natural enforcement, when it is built, is a `PreToolUse` hook:
 
@@ -203,18 +192,18 @@ The natural enforcement, when it is built, is a `PreToolUse` hook:
   definition's frontmatter to the approval prompt.
 - **Why ask and not block**: an unrecognised name is sometimes the harness's own built-in
   agent set, which this policy does not govern. Blocking those would break unrelated work.
-- ⚠️ **Follow this repo's existing rule for hooks**: a gate must be able to **prove it can go
-  red** before it is trusted. See `.claude/README.md` for the shape of the existing gates,
+- ⚠️ **Follow this repo's existing rule for hooks**: a gate must be able to **prove it can
+  go red** before it is trusted. See `.claude/README.md` for the shape of the existing gates,
   and the self-test convention in `scripts/test_*.sh`.
 
 ⬜ **Not built.** Recorded here so that "we have a policy" is not mistaken for "we have a gate".
 
 ---
 
-## 10. Quick checklist
+## 9. Quick checklist
 
-Before spawning: does a cheaper rung work? → is this long and separable? → does the
+**Before spawning**: does a cheaper rung work? → is this long and separable? → does the
 definition exist with `ephemeral: true`, a `task_scope`, and a `stop_condition`?
 
-At task end: `git mv` to `tmp/<task_category>/` → stamp `retired` / `outcome` /
+**At task end**: `git mv` to `tmp/<task_category>/` → stamp `retired` / `outcome` /
 `permanent_candidate` → add the index line → if it deserves to be standing, **ask**.

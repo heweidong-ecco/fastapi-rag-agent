@@ -33,8 +33,10 @@ All notable changes to this project will be documented in this file.
     `ci.yml` 内联 `import config` → `import core.config`（**这道门自己抓到的**）·
     `frontend/索引.md` 清单 28 处（**索引同步门抓到的**）·
     `.gitignore` 加 `!.claude/agents/tmp/`（上面那条 `tmp/` 匹配任意层级，**会把归档一起排除**）
-  - **顺带**：新增 `.claude/agents/subagent-lifecycle.md`（subagent 生命周期与授权规范，英文）+
-    `subagent-lifecycle.md` 的退役归档索引；`tag.md` 加取代标记（原文保留不删）。
+  - **顺带**：新增 `.claude/agents/subagent-lifecycle.md`（**subagent 生命周期与授权规范**，英文 ——
+    业务方 2026-10-09：subagent 可以用，但**只建当次任务的临时 subagent**，任务结束**移进
+    `tmp/<任务类>/` 归档**；**常驻 subagent 必须人工批准**）+ `.claude/agents/tmp/README.md`（归档索引）。
+
   - ⬜ **未做**：段 2（44 份 spec 拆进 `api/<组>/specs/`）· 段 3（53 份目录级 `CLAUDE.md` 索引）·
     4 个 `.claude/hooks` 的判据。
 
