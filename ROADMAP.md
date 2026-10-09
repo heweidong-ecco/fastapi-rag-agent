@@ -469,7 +469,8 @@ bash scripts/list_endpoints.sh          # 默认 http://127.0.0.1:8000
 > **C 本地依赖扫描**（它扫出上面那 21 条）· **D CodeQL** · **E gitleaks** · **F 威胁模型** · **H Grafana 口令**
 > 📄 `SECURITY.md`（含 §3.4 那张漏洞表和"已收掉的"留痕）
 >
-> ⚠️ 分支 `fix/security-ports`（已推）。
+> ✅ **PR [#125](https://github.com/heweidong-ecco/fastapi-rag-agent/pull/125)** —— 分支 `fix/security-ports`。
+> ⚠️ **合并纪律**：⛔ **Agent 自己开的 PR 不许自合** —— 要先问业务方「可以合吗」。
 
 > ## 🔴🔴 **2026-10-09 · 接续块（模块化重构）**（⛔ 下面所有更早的块原文保留，勿照旧读）
 >
