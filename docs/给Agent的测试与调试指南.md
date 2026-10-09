@@ -171,12 +171,12 @@ POSTGRES_DB=rag_test ../venv/bin/python -m pytest . -q
 | 应用日志（按日滚动） | `logs/api_YYYY-MM-DD.log`（仓库根）**和** `app/logs/api_YYYY-MM-DD.log`（历史日志在这里，两处都有） |
 | 错误日志 | 同上，`error_*.log` |
 | 起服务时看失败原因 | uvicorn 的 stderr —— `... > /tmp/api.log 2>&1 &` 然后 `tail` 它 |
-| 本仓特有的定位技巧 | 🔴 **本仓的错误日志带 rich 的变量树**（`│ └ <starlette...>`），**裸 grep 很容易误命中**。先 `sed 's/\x1b\[[0-9;]*m//g'` 去 ANSI，再只 grep 指向 `app/` 的帧：`grep -E "File \".*/api/"` |
+| 本仓特有的定位技巧 | 🔴 **本仓的错误日志带 rich 的变量树**（`│ └ <starlette...>`），**裸 grep 很容易误命中**。先 `sed 's/\x1b\[[0-9;]*m//g'` 去 ANSI，再只 grep 指向 `app/` 的帧：`grep -E "File \".*/app/"` |
 
 **定位一个 500 的标准动作**（实测有效）：
 
 ```bash
-sed 's/\x1b\[[0-9;]*m//g' /tmp/api.log | grep -E "File \".*/api/" | tail -6      # 哪几行本仓代码
+sed 's/\x1b\[[0-9;]*m//g' /tmp/api.log | grep -E "File \".*/app/" | tail -6      # 哪几行本仓代码
 sed 's/\x1b\[[0-9;]*m//g' /tmp/api.log | grep -E "^(TypeError|ValueError|RuntimeError|KeyError|AttributeError|openai\..*Error)" | tail -4   # 什么异常
 ```
 
