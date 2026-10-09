@@ -744,6 +744,28 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- 🔴 **修掉 CodeQL 在 `app/` 上报的 3 条【真】告警**（2026-10-10 · 📄 裁定见 commit `e722306`）——
+  CodeQL 2026-10-09 上线后在 `app/` 攒了 **6 条**、一直没人裁；逐条读代码后：**3 真 / 3 假阳**。
+  - 🔴 **`py/path-injection` · `cost_dashboard.py:206`**：`UserCreate.user_name` **只有长度限制、
+    ⛔ 没有字符白名单** ⇒ 一个叫 `a/../../evil` 的账号能让成本报表的 CSV **写到 `tempdir` 之外**。
+    **两层修法**：① 只对**文件名**做白名单（⛔ 不动 `user_name` 的准入策略）
+    ② 纵深防御 —— 拼完再核真实落点、不在 tempdir 内就**响亮地 raise**（⛔ 不静默改成默认名）。
+    ⚠️ **触发面窄**（要 **admin** 才能建出这种用户名），⛔ 但是真缺陷。
+    📌 **反证**（⚠️ 我第一版写错了，一并记下）：`'../../evil'` **逃不出去**（`..` 被粘进段名）；
+    **要有 `/` 才成** —— `'a/../../evil'` 改前真的落到 tempdir 之外。
+  - 🔴 **`py/stack-trace-exposure` · `api_v1_agent.py:1992` + `:2125`**：`GET /agent/cost/records`
+    **任何已认证用户都能打**（⛔ 不是 admin-only），而 `except: return {"error": str(e)}`
+    会把 **SQL 片段 / 连接串 / 文件路径**一起回给他。📌 `:1992` 的**源头在 `token_tracker.py:657`**
+    （那个 `{"error": str(e)}` 进了 report）⇒ **两处一起改**。
+    🔴 **本仓「失败要说出来」那条【不变】** —— 仍然说，只是**不再说内部细节**：
+    细节进服务端日志，调用方拿到可读的失败原因。
+  - ⚠️ **另 3 条判为假阳并 dismiss**（`executor_server.py:114` 是**容器内**服务、端口不映射；
+    `sse.py:113` 只是转发点；`auth.py:17` 的 sha256 算的是 **128 位随机 API key** ⇒ 快哈希才对）。
+  - ⬜ **同族还有两处没被标到**（`api_v1_rag.py:1136` · `plan_execute.py:653/660/661`）——
+    ⛔ **别把「没被标」读成「没问题」** ⇒ 登记 `docs/待办总表.md` **`N23`**（**未裁**）。
+  - **判据**：`pytest` ⇒ **933 passed / 2 skipped** · 五道门 ⇒ 全 exit 0 ·
+    路径注入的反证（可打印）见上。
+
 - 🔴 **匿名绕过配额【已修】**（2026-10-09 · 业务方裁「**A1**」· `SECURITY.md` §3.1）——
   🔴 **落 A1 = 推翻一条写在代码里的【有意设计】**：`resolve_quota_identity` 的 docstring 原写着
   「**它与限流那条【故意不同】，⛔ 别顺手『统一』**」。改法是**把两件事分开**（照限流那条的做法）：

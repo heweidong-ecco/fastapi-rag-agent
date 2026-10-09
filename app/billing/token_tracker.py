@@ -653,8 +653,13 @@ def generate_monthly_report(user_name: str, year: int = None, month: int = None)
                 model_rows = cur.fetchall()
                 
     except Exception as e:
+        # 🔴 2026-10-10（CodeQL `py/stack-trace-exposure` · 真问题 · **#2 的根因**）：
+        #    这个 `{"error": str(e)}` **就是** `GET /agent/monthly_report` 那条告警的**源头** ——
+        #    report 被端点原样返回，异常原文（SQL 片段 / 连接串 / 路径）就跟着出去。
+        #    ⚠️ **日志这一行【一个字没改】**（细节本来就该留在服务端），
+        #    只把**返回给调用方**的那份换成**不带内部细节**的可读原因。
         print(f"[Token] 生成月度报告失败: {e}")
-        return {"error": str(e)}
+        return {"error": "生成月度报告失败，请稍后重试（详细信息见服务端日志）"}
     
     # 构建报告
     return {
