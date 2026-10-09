@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>检索实验室</title>
+<link rel="stylesheet" href="/static/app.css">
+<style>
+  /* 本页只写【页面专属】规则 —— 通用组件与 token 在 `/static/app.css`
+     （= `frontend/README.md` §三–§五 那份规范的实现）。⛔ 别在这里另起一套 :root。 */
+
+  /* 🔴 **每个能力面板顶部都必须有边界提示条**（规格 §3.6.1 的②）——
+     业务方原话：「**让别人在用接口的时候要先看到这个提示，才给接口**」
+     ⇒ 所以 `.panel-boundary` 排在**提交按钮之前**（⛔ 不是页脚挂一行小字）。
+     守卫 ⇒ `api/test_lab_page.py`（钉"提示条出现在按钮之前"这条【顺序】）。 */
+  #boundary { margin: 0 0 var(--sp-4); }
+
+  /* 面板网格里的 `section` 自带卡片外观（`.panel`），⛔ 不用再套一层 */
+  .panel-grid > .panel { display: flex; flex-direction: column; }
+
+  .hint { margin: var(--sp-2) 0 0; color: var(--fg-dim); font-size: var(--fs-cap); line-height: var(--lh-body); }
+  .panel-params .field { display: flex; width: 100%; }
+  .panel-params .field input { min-width: 0; flex: 1; }
+  .panel-params select { width: 100%; }
+  /* `mode` 那一格横跨整行 —— 窄格里下拉会把选项文字截断（2026-10-09 截图看出来的） */
+  .field-wide { grid-column: 1 / -1; }
+  .panel-actions { margin-top: var(--sp-3); }
+
+  /* 结果表里那列分数：等宽 + 右对齐（`frontend/README.md` §四 第 4 条）*/
+  .panel-out td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+  .panel-out td .badge { margin-left: var(--sp-2); }
+  .panel-out pre { max-height: 8rem; overflow: auto; }
+
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="app-shell">
+
+  <aside class="sidebar">
+    <div class="brand">青云精工 · RAG</div>
+    <nav class="nav">
+      <a href="/chat">对话</a>
+      <a href="/lab" class="active">检索实验室</a>
+      <a href="/approvals">人工接管</a>
+      <a href="/trace">执行轨迹</a>
+      <a href="/eval">评测</a>
+    </nav>
+  </aside>
+
+  <div class="main">
+
+    <header class="page-head">
+      <h1>检索实验室</h1>
+      <span class="spacer"></span>
+      <label class="field">API Key <input id="apikey" type="password" placeholder="X-API-Key"></label>
+      <button id="save">保存</button>
+    </header>
+
+    <div class="content">
+      <div id="notice"></div>
+
+      <!-- 🔴🔴 边界标注（规格 §3.6.1 的② · 提示在前、接口在后）
+           ⚠️ 文案【只从 RagPanel 取】—— ⛔ 别在这份 HTML 里再抄一遍。
+              守卫：`api/static/js/panel.test.js` 的「边界文案只许有一份」。 -->
+      <section class="panel" id="boundary" aria-label="使用前必读（平台与额度边界）">
+        <div class="panel-body">
+          <h2 style="margin-top:0">使用前必读</h2>
+          <div class="panel-boundary" data-boundary="platform_restart"></div>
+          <div class="panel-boundary" data-boundary="quota"></div>
+          <div class="panel-boundary" data-boundary="rate_limit"></div>
+          <div class="panel-boundary" data-boundary="real_api"></div>
+          <!-- ⚠️ 第 5 条是【另一类】（讲"我们自证到什么程度"，与平台限制无关）
+               ⇒ 单独一个小标题，⛔ 不与上面四条并排（规格 §3.6.2 乙） -->
+          <h3>怎么验证它真的做完了</h3>
+          <div class="panel-boundary" data-boundary="verify"></div>
+        </div>
+      </section>
+
+      <p class="hint" style="margin-bottom:var(--sp-1)">
+        同一个问题，<b>五条链各跑一次</b> —— 它们的<b>分数口径不同</b>（余弦得分 / RRF 融合分 /
+        Cross-Encoder logits），<b>⛔ 不能横向比大小</b>，只能各自看排序。
+      </p>
+      <p class="hint" style="margin-bottom:var(--sp-4)">
+        5 条接口都<b>只检索你自己名下</b>的文档 ⇒ 先到「知识库」传一篇，这里才有命中。
+      </p>
+
+      <!-- 🔴 五个面板 = 规格 §2.2 的那 5 条检索接口（`/rag/search` 见最后一块）。
+           ⚠️ 路径与分数字段名**都从 `RagLab` 取**，⛔ 页面里不写字面量
+              （写了 `api/test_web_pages.py` 会管前缀，但**字段名**没人管得了）。
+           守卫：`api/static/js/lab.test.js`（五个 path 必须带 /api/v1）+
+                 `api/test_lab_page.py`（五个面板都在）。
+           🔴 页面脚本靠 `data-panel` 这个键认面板 —— 用的是 `RagLab.PANELS` 的 key。 -->
+      <div class="panel-grid">
+
+        <section class="panel" data-panel="pg">
+          <div class="panel-head">纯向量检索 <span class="badge">pg_search</span></div>
+          <div class="panel-body">
+            <div class="panel-boundary" data-boundary="real_api"></div>
+            <div class="panel-params">
+              <label class="field">问题 <input data-param="question" type="text" placeholder="例：净利润是多少"></label>
+              <label class="field">top_k <input data-param="top_k" type="number" min="1" max="20" value="3"></label>
+            </div>
+            <p class="hint">pgvector 余弦打分（<code>similarity</code>），<b>不做</b>关键词、不改写、不重排 —— 这是对照组。</p>
+            <div class="panel-actions"><button class="btn primary" data-run>运行</button></div>
+            <div class="panel-out" hidden></div>
+          </div>
+        </section>
+
+        <section class="panel" data-panel="hybrid">
+          <div class="panel-head">混合检索 <span class="badge">hybrid_search</span></div>
+          <div class="panel-body">
+            <div class="panel-boundary" data-boundary="real_api"></div>
+            <div class="panel-params">
+              <label class="field">问题 <input data-param="question" type="text" placeholder="例：净利润是多少"></label>
+              <label class="field">top_k <input data-param="top_k" type="number" min="1" max="20" value="3"></label>
+            </div>
+            <p class="hint">向量 + BM25 关键词，RRF 融合（k=60）。分数是 <code>rrf_score</code>，很小，⛔ 别拿阈值卡它。</p>
+            <div class="panel-actions"><button class="btn primary" data-run>运行</button></div>
+            <div class="panel-out" hidden></div>
+          </div>
+        </section>
+
+        <section class="panel" data-panel="rerank">
+          <div class="panel-head">Cross-Encoder 精排 <span class="badge">rerank_search</span></div>
+          <div class="panel-body">
+            <div class="panel-boundary" data-boundary="real_api"></div>
+            <div class="panel-params">
+              <label class="field">问题 <input data-param="question" type="text" placeholder="例：净利润是多少"></label>
+              <label class="field">top_k <input data-param="top_k" type="number" min="1" max="20" value="3"></label>
+            </div>
+            <p class="hint">
+              ⚠️ 它要跑 Cross-Encoder（torch），而<b>演示镜像里没装 torch 系</b>（<code>DEC-034</code>）
+              ⇒ 在演示机上大概率跑不了。真跑不了时下面会<b>说清是环境限制</b>，⛔ 不是功能坏了。
+            </p>
+            <div class="panel-actions"><button class="btn primary" data-run>运行</button></div>
+            <div class="panel-out" hidden></div>
+          </div>
+        </section>
+
+        <section class="panel" data-panel="rewrite">
+          <div class="panel-head">查询改写 + 混合检索 <span class="badge">rewrite_search</span></div>
+          <div class="panel-body">
+            <div class="panel-boundary" data-boundary="real_api"></div>
+            <div class="panel-params">
+              <label class="field">问题 <input data-param="question" type="text" placeholder="例：净利润是多少"></label>
+              <label class="field">top_k <input data-param="top_k" type="number" min="1" max="20" value="3"></label>
+              <label class="field">thread_id <input data-param="thread_id" type="text" placeholder="default"></label>
+            </div>
+            <p class="hint">先用 LLM 改写再检索 ⇒ <b>这条真花钱</b>；它按 <code>thread_id</code> 计入会话额度。</p>
+            <div class="panel-actions"><button class="btn primary" data-run>运行</button></div>
+            <div class="panel-out" hidden></div>
+          </div>
+        </section>
+
+        <section class="panel" data-panel="pipeline">
+          <div class="panel-head">综合检索（四模式） <span class="badge">/rag/search</span></div>
+          <div class="panel-body">
+            <div class="panel-boundary" data-boundary="real_api"></div>
+            <div class="panel-params">
+              <label class="field">问题 <input data-param="question" type="text" placeholder="例：净利润是多少"></label>
+              <label class="field">top_k <input data-param="top_k" type="number" min="1" max="20" value="3"></label>
+              <label class="field field-wide">mode <select data-param="mode"></select></label>
+              <label class="field">thread_id <input data-param="thread_id" type="text" placeholder="default"></label>
+            </div>
+            <div class="panel-params" style="margin-top:var(--sp-2)">
+              <label class="field"><input data-param="generate_answer" type="checkbox" style="width:auto"> 生成答案（真调 LLM）</label>
+              <label class="field"><input data-param="citations" type="checkbox" style="width:auto"> 答案里标引用</label>
+            </div>
+            <p class="hint">
+              一条链把改写 / 扩展 / BM25 / 精排四段<b>按 mode 拼起来</b>，并回各段耗时。
+              ⚠️ <code>accurate</code> 与 <code>full</code> 含精排 ⇒ 同样受上面那条<b>环境限制</b>。
+            </p>
+            <p class="hint">
+              <code>fast</code> = 向量 + BM25 + RRF · <code>accurate</code> = 加改写与精排 ·
+              <code>accurate_norerank</code> = 加改写、不重排 · <code>full</code> = 再加查询扩展。
+            </p>
+            <div class="panel-actions"><button class="btn primary" data-run>运行</button></div>
+            <div class="panel-out" hidden></div>
+          </div>
+        </section>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/static/js/panel.js"></script>
+<script src="/static/js/lab.js"></script>
+<script>
+'use strict';
+/* ⚠️ 本页每个 URL 都从 `RagLab.buildRequest()` / `RagPanel.paramQuery()` 出 —— ⛔ 不写字面量。
+   原因：字面量一旦少 `/api/v1`，页面上**不报任何错**（`DEC-094` 那个 100% 打不开的事故）。 */
+const KEY_STORE = 'rag_api_key';        // ⚠️ 与 chat / approvals / trace 同一个 localStorage 键
+const $ = (id) => document.getElementById(id);
+
+function key() { return localStorage.getItem(KEY_STORE) || ''; }
+
+function notice(msg, bad) {
+  const el = $('notice');
+  el.textContent = msg || '';
+  el.className = bad ? 'alert error' : '';
+  if (msg && !bad) el.className = 'alert info';
+}
+
+// ⚠️ 与 trace.html / approvals.html 同款口径：401/429/5xx 分开说（`DEC-082` / `N9`）。
+// 🔴 这里**只加一句"到底是什么错"** —— 文案仍然是 `RagPanel.errorText` 那一份，⛔ 不重编。
+function detailText(payload) {
+  if (!payload) return '';
+  if (typeof payload.error === 'string') return payload.error;
+  if (typeof payload.detail === 'string') return payload.detail;
+  if (payload.detail) return JSON.stringify(payload.detail);
+  return '';
+}
+
+function readValues(el) {
+  const v = {};
+  el.querySelectorAll('[data-param]').forEach(function (c) {
+    v[c.dataset.param] = (c.type === 'checkbox') ? c.checked : c.value;
+  });
+  return v;
+}
+
+function el(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text !== undefined) n.textContent = text;   // ⛔ 一律 textContent，别用 innerHTML 拼数据
+  return n;
+}
+
+/* ==================== 渲染 ==================== */
+
+function renderError(out, panelKey, status, payload) {
+  out.innerHTML = '';
+  const box = el('div', 'alert error');
+  const line = RagPanel.errorText(status) + (detailText(payload) ? '（' + detailText(payload) + '）' : '');
+  box.appendChild(el('div', '', line));
+  // 🔴 环境限制（演示镜像没装 torch）与"功能坏了"**必须分开说** —— 见 `RagLab.envLimitHint`。
+  const hint = RagLab.envLimitHint(panelKey, status);
+  if (hint) box.appendChild(el('div', 'hint', hint));
+  out.appendChild(box);
+}
+
+function renderStateError(out, payload) {
+  out.innerHTML = '';
+  const box = el('div', 'alert error');
+  box.appendChild(el('div', '', detailText(payload) || '这条被拒了（返回体里带着 status:"error"）。'));
+  out.appendChild(box);
+}
+
+function renderKv(out, title, rows, isNumber) {
+  const box = el('div');
+  box.appendChild(el('h3', '', title));
+  const tbl = el('table', 'tbl');
+  rows.forEach(function (r) {
+    const tr = el('tr');
+    tr.appendChild(el('td', '', r[0]));
+    const td = el('td', isNumber ? 'num' : '');
+    td.textContent = (typeof r[1] === 'boolean') ? (r[1] ? '开' : '关') : String(r[1]);
+    tr.appendChild(td);
+    tbl.appendChild(tr);
+  });
+  box.appendChild(tbl);
+  out.appendChild(box);
+}
+
+function renderTable(out, rows) {
+  const tbl = el('table', 'tbl');
+  const hr = el('tr');
+  ['#', '分数', '来源', '内容'].forEach(function (h) { hr.appendChild(el('th', '', h)); });
+  const thead = el('thead'); thead.appendChild(hr); tbl.appendChild(thead);
+
+  const tb = el('tbody');
+  rows.forEach(function (row, i) {
+    const tr = el('tr');
+    tr.appendChild(el('td', '', String(i + 1)));
+    // 🔴 缺分数画 `—`：⛔ **不编 0**（本仓立场：「不许印没有数据源的数」）。
+    tr.appendChild(el('td', 'num', row.score === null ? '—' : String(row.score)));
+    const src = el('td', '', row.source || '—');
+    if (row.from) src.appendChild(el('span', 'badge', row.from));
+    tr.appendChild(src);
+    const c = el('td');
+    c.appendChild(el('pre', '', row.content));
+    tr.appendChild(c);
+    tb.appendChild(tr);
+  });
+  tbl.appendChild(tb);
+  out.appendChild(tbl);
+}
+
+function renderAnswer(out, payload) {
+  const box = el('div');
+  box.appendChild(el('h3', '', '生成的答案'));
+  box.appendChild(el('pre', '', RagLab.answerOf(payload)));
+  const sources = Array.isArray(payload.sources) ? payload.sources : [];
+  if (sources.length) {
+    box.appendChild(el('h3', '', '答案里标出的引用'));
+    sources.forEach(function (s) {
+      const line = el('div', 'kv');
+      line.appendChild(el('span', 'k', '来源 ' + (s.index === undefined ? '?' : s.index)));
+      const v = el('span', 'v', (s.source === undefined ? '' : String(s.source))
+        + (s.similarity === undefined || s.similarity === null ? '（这帧没给分数 —— ⛔ 不编）' : ' · 分数 ' + s.similarity));
+      line.appendChild(v);
+      box.appendChild(line);
+    });
+  }
+  out.appendChild(box);
+}
+
+function renderOk(out, panelKey, payload) {
+  out.innerHTML = '';
+  const state = RagPanel.stateOf(payload);
+  if (state === 'error') { renderStateError(out, payload); return; }
+
+  if (panelKey === 'pipeline') {
+    const stages = RagLab.stageRows(payload);
+    if (stages.length) renderKv(out, '这条链开了哪几段', stages, false);
+    const timing = RagLab.timingRows(payload);
+    if (timing.length) renderKv(out, '各段耗时（毫秒）', timing, true);
+  }
+
+  if (RagLab.answerOf(payload)) renderAnswer(out, payload);
+
+  const rows = RagLab.rowsOf(panelKey, payload);
+  const trunc = RagPanel.truncationNotice(payload);
+  if (trunc) out.appendChild(el('div', 'hint', trunc));
+  if (!rows.length) {
+    // 🔴 空态必须解释【为什么空】（`frontend/README.md` §四 第 8 条）。
+    const box = el('div', 'empty');
+    box.appendChild(el('div', '', '这条没有命中任何文档。'));
+    box.appendChild(el('div', 'why', RagLab.emptyReason(panelKey)));
+    out.appendChild(box);
+    return;
+  }
+  out.appendChild(el('div', 'hint', '共 ' + rows.length + ' 条命中。'));
+  renderTable(out, rows);
+}
+
+/* ==================== 运行 ==================== */
+
+async function runPanel(panelKey, section) {
+  const out = section.querySelector('.panel-out');
+  const btn = section.querySelector('[data-run]');
+  const values = readValues(section);
+
+  if (!values.question || !values.question.trim()) {
+    notice('先在「' + section.querySelector('.panel-head').textContent.trim() + '」里填一个问题', true);
+    return;
+  }
+  notice('');
+
+  const req = RagLab.buildRequest(panelKey, values);
+  const url = req.path + RagPanel.paramQuery(req.query);
+
+  btn.setAttribute('aria-busy', 'true');   // 加载态（`.btn[aria-busy]` 那套 · 四态之一）
+  btn.disabled = true;
+  out.hidden = false;
+  out.textContent = '请求中…';
+
+  try {
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-API-Key': key() },
+      body: JSON.stringify(req.body),
+    });
+    const text = await r.text();
+    let payload = null;
+    try { payload = JSON.parse(text); } catch (e) { payload = null; }
+
+    if (!r.ok) { renderError(out, panelKey, r.status, payload); return; }
+    if (payload === null) { out.textContent = '返回的不是 JSON：' + text.slice(0, 300); return; }
+    renderOk(out, panelKey, payload);
+  } catch (e) {
+    out.innerHTML = '';
+    out.appendChild(el('div', 'alert error', '请求发不出去：' + e.message));
+  } finally {
+    btn.removeAttribute('aria-busy');
+    btn.disabled = false;
+  }
+}
+
+/* ==================== 装配 ==================== */
+
+// mode 下拉的选项【从 RagLab.MODE_LABELS 出】—— ⛔ 不在这份 HTML 里手写四个 option
+// （手写了就多一份枚举，改了后端这边不报错）。
+document.querySelectorAll('select[data-param="mode"]').forEach(function (sel) {
+  Object.keys(RagLab.MODE_LABELS).forEach(function (m) {
+    const o = document.createElement('option');
+    o.value = m;
+    o.textContent = RagLab.MODE_LABELS[m];
+    if (m === 'accurate_norerank') o.selected = true;   // 与后端默认值一致
+    sel.appendChild(o);
+  });
+});
+
+document.querySelectorAll('[data-panel]').forEach(function (section) {
+  const panelKey = section.dataset.panel;
+  section.querySelector('[data-run]').addEventListener('click', function () {
+    runPanel(panelKey, section);
+  });
+  section.querySelectorAll('[data-param="question"]').forEach(function (input) {
+    input.addEventListener('keydown', function (e) { if (e.key === 'Enter') runPanel(panelKey, section); });
+  });
+});
+
+// 边界标注的文案【只从 RagPanel 取】—— ⛔ 别在这里再抄一遍（规格 §3.6.2）
+document.querySelectorAll('[data-boundary]').forEach(function (n) {
+  n.textContent = RagPanel.boundaryText(n.dataset.boundary);
+});
+
+// 额度那条要【当场读数】。⚠️ 未登录拿不到 ⇒ **保留不带数字的那句**，⛔ 不编数。
+function refreshQuota() {
+  fetch('/api/v1/agent/token/budget', { headers: { 'X-API-Key': key() } })
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (b) {
+      if (!b || b.used_today === undefined) return;
+      document.querySelector('[data-boundary="quota"]').textContent = RagPanel.boundaryText('quota', {
+        used: b.used_today, limit: b.daily_budget, remaining: b.remaining,
+      });
+    })
+    .catch(function () { /* 取不到就留着不带数字那句 */ });
+}
+
+$('apikey').value = key();
+$('save').onclick = function () {
+  localStorage.setItem(KEY_STORE, $('apikey').value.trim());
+  notice('已保存 API Key');
+  refreshQuota();
+};
+// ⚠️ 首次是【提示】不是【错误】—— 用 info 样式，⛔ 别一打开就红着一块（那看着像页面坏了）。
+if (!key()) notice('先填 API Key —— 这 5 条接口都要鉴权');
+refreshQuota();
+</script>
+</body>
+</html>

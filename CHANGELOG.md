@@ -122,6 +122,51 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- 🔴 **检索实验室（`GET /lab`）—— 5 条检索接口第一次有了可点入口**（2026-10-09 · 施工单**刀 3** · `DEC-123`）——
+  **前端初稿的第一条能力页**。规格 §2.2 那 5 条（`pg_search` · `hybrid_search` · `rerank_search` ·
+  `rewrite_search` · `/rag/search`）**一条一个面板**，填参数、点运行、当场看真实分数。
+  🔴 **此前只有 `chat.html` 那条**流式**被人点到过**，另五条**一条入口都没有** ⇒ 按最高判据
+  （「**只会看你做了哪些功能、哪些接口**……**别人无法点击使用，95% 的人会直接当你没做**」）**等于没做**。
+
+  **三处不是"照抄一个页面"的地方：**
+  · 🔴 **三条链的分数字段名各不相同**（余弦 `similarity` / RRF `rrf_score` / Cross-Encoder
+    `rerank_score`）⇒ 由 `RagLab.PANELS[key].score` **一处给**，⛔ 页面里不写字面量
+    —— 猜错**不报任何错**，只是画出一列空的（本仓记过多次的形态）。页面上也明写
+    「**⛔ 不能横向比大小**」（三种口径没有同一个量纲）。
+  · 🔴 **`rerank` 的错态必须说清是【环境限制】** —— 演示镜像里**没装 torch 系**（`DEC-034`）⇒
+    `RagLab.envLimitHint` **只对 5xx** 给"这是环境限制，⛔ 不是功能坏了"（规格 §3.6 那条**归因**要求）。
+    ⚠️ **401/429 不走这条**（那是 key / 额度，⛔ 别拿环境去盖）。
+  · 🔴 **`/rag/search` 那块带「生成答案 + 标引用」两个开关** ⇒ **硬门 B 的非流式那条链
+    （`/rag/search` → `answer_with_citations`）第一次有了界面**。
+    ⚠️ **但硬门 B 整体⛔ 不因此翻 ✅** —— 它的判定原文还有别的句子。
+
+  🔴 **边界标注的落法（本刀定 · ⛔ 刀 4–7 照这个来）**：规格 §3.6.1 要求"每个能力页的接口处、
+  **面板顶部、排在提交按钮之前**"。⇒ **页面顶部放完整 5 条**（与首页逐字同款，保证一条不缺）
+  ＋**每个面板顶部放一条最相关的**（本页五块都放 `real_api`）。
+  ⛔ **没把 5 条抄进每个面板** —— 25 个提示框会把业务方要的「**一眼就能看到**」稀释掉。
+
+  **改了这些地方**（⛔ 一处都不许只改一头）：`api/main.py` 加 `/lab` 302 ·
+  `scripts/route-auth-baseline.txt` 加 `/lab`（故意公开：跳转页，不含数据）·
+  `api/test_web_pages.py` 的 `_REQUIRED` 加 `web/lab.html`（⛔ 不加这页**永不受那道门管**）·
+  首页「检索三模式」那张卡 **未上线 ⇒ 可点** · `chat.html` / `trace.html` 侧边栏加「检索实验室」。
+
+  📌 判据（可打印）：`venv/bin/python -m pytest api/test_lab_page.py -q` ⇒ **7 passed** ·
+  `node --test api/static/js/lab.test.js` ⇒ **pass 20 / fail 0** ·
+  `venv/bin/python scripts/check_route_auth.py --baseline` ⇒ **exit 0**。
+  🔴 **四条反证都跑过**（⛔ 不是"看着写了"）：拿掉一个 `data-panel` / 把提示条挪到按钮**之后** /
+  删掉 `lab.js` 的 `<script>` / 去掉某个路径的 `/api/v1` —— **各自都当场红**。
+
+  🔴 **写这个页面时被一条【既有】守卫拦住过一次**（同族第 4 次）：我在新页面里写了三处
+  「**相似度**」，而 `api/static/js/sse.test.js` 有一条结构型守卫 —— 那个词在 `static/js` +
+  `static/web` 里**只许出现在 `sse.js`**（`DEC-089` 的引用卡片头）⇒ `ci-local.sh` **当场红**。
+  修法：本页把三种分数统一叫「**分数**」（这本来也更准 —— "相似度"只有 `pg_search` 那条对得上，
+  另两条是 `rrf_score` / `rerank_score`）。📄 同族前三次见 `docs/specs/static_frontend.md` 那张表。
+
+  ⚠️ **本刀⛔ 没证的事**：**运行结果**没有自动化判据（真调 5 条接口 + 真库）⇒
+  用例只证"路由在 / 面板在 / 提示条在按钮前 / 路径对 / 归一逻辑对"。
+  ⚠️ 全量 `bash scripts/ci-local.sh` ⇒ **退出码 0**（pytest **899 passed / 2 skipped** · node **128 pass**）
+  —— ⛔ **别抄这三个数**，跑命令。
+
 - 🔴 **对话页：链选择器（6 条链）+ 引用高亮 + 「停止」后的去向**（2026-10-09 · 施工单**刀 2**）——
   **前端初稿的第二刀**。三件：
 

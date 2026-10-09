@@ -152,6 +152,7 @@ bash scripts/list_endpoints.sh          # 默认 http://127.0.0.1:8000
 | 可观测（Grafana 看板） | 🔴 | ⚠️ **数据源 + 看板是【手工配置】的**（在 `grafana.db` 里，**仓库无 provisioning**）⇒ **上云会"容器起来了但没看板"** |
 | eval 接入（`agent-eval-gate`） | ⬜ | 见 `施工单 §8.2` |
 | **对话页一条线**（登录 → 提问 → 流式逐字 → 引用点开 → 停止 → 每轮 token / 费用） | ✅ | 🔵 **2026-10-06（段 1 第一刀 · `DEC-085` 十二条裁定）** —— `GET /chat` → `api/static/web/chat.html`（**本仓第一条面向人的页面路由**）+ `api/static/js/sse.js`（纯逻辑，`node --test`）<br>⚠️ **`sse.js` 是【唯一】解析引用的地方**（`window.RagSse`）—— 页面与用例共用一份，⛔ 别各写一份正则<br>📌 判据（可打印）：`node --test api/static/js/sse.test.js` ⇒ **32 pass**（⚠️ **现算**：第一刀时 **18**，`DEC-089` 后 23，`DEC-090` 后 29）· `venv/bin/python -m pytest api/test_chat_page.py -q` ⇒ **3 passed** · `bash scripts/ci-local.sh` ⇒ 退出码 0（node 那步**并进了 `offline-tests` 的 `run` 块**，否则"本地 CI 等价"是假的）<br>📄 `docs/specs/static_frontend.md`（新）· `docs/decisions/DEC-085-对话页一条线的四个契约.md` · `DEC-089`（引用卡片）· `DEC-090`（熔断卡片）· `DEC-091`（无据拒答）—— ⚠️ **这一页后续三刀都在它身上动**，本行的数字以**现算**为准 |
+| 🔵 **检索实验室**（5 条检索接口的界面 · 规格 §2.2） | ✅ | 🔵 **2026-10-09（前端初稿 · **刀 3** · `DEC-123`）** —— `GET /lab` → `api/static/web/lab.html` + `api/static/js/lab.js`（纯逻辑，`node --test`）<br>🔴 **它是第一个【能力页】**（刀 4–7 照它这个形状做）—— 规格 §2.2 那 5 条一条一个面板：`pg_search` · `hybrid_search` · `rerank_search` · `rewrite_search` · `/rag/search`<br>⚠️ **此前只有 `chat.html` 那条**流式**被人点到过**，另五条**一条入口都没有** ⇒ 按最高判据**等于没做**<br>🔴 **三条链的分数字段名各不相同**（`similarity` / `rrf_score` / `rerank_score`）⇒ 由 `RagLab.PANELS[key].score` 一处给（⛔ 页面不写字面量 —— 猜错**不报错**，只画一列空的）· 页面上明写「**⛔ 不能横向比大小**」<br>🔴 **`rerank` 的错态说清是【环境限制】**（演示镜像没装 torch · `DEC-034`）—— 但**只对 5xx**，401/429 ⛔ 不走这条<br>🔴 **边界标注的落法（本刀定 · ⛔ 刀 4–7 照这个来）**：**页面顶部完整 5 条**（与首页逐字同款）＋**每个面板顶部一条**，**排在提交按钮之前**（业务方原话「**让别人在用接口的时候要先看到这个提示，才给接口**」）<br>🆕 **`/rag/search` 那块带「生成答案 + 标引用」两个开关** ⇒ **硬门 B 的非流式那条链第一次有了界面**（⚠️ **但硬门 B 整体⛔ 不因此翻 ✅**）<br>📌 判据（可打印）：`venv/bin/python -m pytest api/test_lab_page.py -q` ⇒ **7 passed** · `node --test api/static/js/lab.test.js` ⇒ **pass 20 / fail 0** · `venv/bin/python scripts/check_route_auth.py --baseline` ⇒ **exit 0**（`/lab` 已进无鉴权基线，**故意公开**）<br>📄 `docs/specs/static_frontend.md` · `docs/decisions/DEC-123-刀3检索实验室的两个落点.md`（含**四条反证实测**）<br>⚠️ **本刀⛔ 没证的事**：**运行结果**没有自动化判据（真调 5 条接口 + 真库）⇒ 用例只证"路由在 / 面板在 / 提示条在按钮前 / 路径对 / 归一逻辑对" |
 | **接管页**（人工接管的界面 · 硬门 D 的演示那一栏） | ✅ | 🔵 **2026-10-06（段 1 第二刀 · `DEC-088` · `F1`）** —— `GET /approvals` → `api/static/web/approvals.html` + `api/static/js/approvals.js`（纯逻辑，`node --test`）；后端同批补 `GET /agent/pending/context` · `GET /agent/approvals/history` · `api/approval_audit.py`（留痕落 PG）<br>🔴 **页面级的过滤才是那道边界**（接口的四类拒绝**全是 HTTP 200 + `{"status":"error"}`**）⇒ 只看 `r.ok` 会把"无权查看"当成成功<br>🔴 **两处既有端点同批收窄**（`/agent/pending` 本人默认 · `/agent/approve` 加可选 `owner`）—— ⚠️ **不属于 `F1` 本身**，是同 PR 顺手修的（`DEC-051` 先例）<br>📌 判据（可打印）：`node --test api/static/js/approvals.test.js` ⇒ **14 pass** · 7 份用例合跑 ⇒ **54 passed** · `venv/bin/python scripts/check_route_auth.py --baseline; echo "exit=$?"` ⇒ **exit=0**<br>🔴🔴 **2026-10-06 同日修了一个真事故**（`DEC-094`）：这个页面的 **4 条 fetch 全少 `/api/v1`** ⇒ **它从合进去那天起 100% 打不开**，而**三层判据一条都没红**（页面用例只看 302 · JS 用例只测纯函数 · 路由门只管后端）。✅ 现已补齐前缀（改前 4 条**全 404** ⇒ 改后 401 / 401 / **405**（POST-only）/ 401）。<br>📌 **判据（可打印）**：`grep -n "getJSON('/\|fetch('/" api/static/web/approvals.html` ⇒ **4 条，全部带 `/api/v1`**<br>📄 `docs/specs/static_frontend.md` · `docs/decisions/DEC-088-接管页与硬门D的三个缺口.md` · 🔴 `docs/decisions/DEC-094-前缀事故收尾与CI用例改glob.md` |
 | **Trace 页**（执行轨迹 + 成本） | ✅ | 🔵 **2026-10-06（段 1 第六刀 · `DEC-093` · `F2`）** —— `GET /trace` → `api/static/web/trace.html` + `api/static/js/trace.js`（纯逻辑，`node --test`）；后端加 **1 条只读端点** `GET /agent/trace/{thread_id}/cost`（路由 **36 → 37**）<br>🔴 **两轴分屏，⛔ 不合成一棵树** —— 开工前先核出 `F2` 原措辞**没有单一数据源**：追踪轴（工具调用 · **进程内存**）与成本轴（模型调用 · PG）**没有共同的步 id** ⇒ 硬凑只能靠"时间接近"**猜**层级（业务方据此另裁「乙 · 两轴分屏」）<br>🔴 **页面必须解释"为什么空"** —— ~~对话页走检索链，那条链**从不建轨迹** ⇒ 演示时上半页**必然**是空的~~ ⇒ 🔴 **2026-10-09 更正：这半句已不成立** —— `N16` **已于 2026-10-08 落地**（`DEC-093 §七`），`/rag/stream_search` **现在建轨迹**（判据 `grep -n 'start_trace' api/api_v1_rag.py`）。⚠️ **仍挂着的是另一半**：**其余 Agent 链**仍不建轨迹<br>✅ **它替代的旧页 `api/static/trace_viewer.html` 已于 2026-10-07 删除**（`DEC-096` · `F5`）—— 旧页 fetch **不带认证头**，加了鉴权后打开**必 401**；⛔ 别再照旧找它<br>📌 判据（可打印）：`node --test api/static/js/trace.test.js` ⇒ **24 pass** · `venv/bin/python -m pytest api/test_trace_cost.py api/test_trace_page.py -q` ⇒ **22 passed** · `POSTGRES_DB=rag_test venv/bin/python -m pytest api/test_trace_cost_db.py -q` ⇒ **9 passed** · `venv/bin/python scripts/check_route_auth.py --baseline; echo "exit=$?"` ⇒ **exit=0**<br>📄 `docs/specs/static_frontend.md` · `docs/decisions/DEC-093-Trace页两轴分屏.md` |
 | 前端（其余 1 个页面） | 🔶 | **全仓无 `package.json`、无构建** —— ~~Eval 页~~ 🔶 **2026-10-07 做了【占位版】**（`DEC-097` · `F3` —— 业务方把口径从「跑分 + 对比箭头」**换成「一个按钮 + 子页一行字」**，⚠️ **⛔ 不是把那个功能做完了**）；⚠️ **它的前置 `B14` 仍不存在** ⇒ 后端**没有任何 `/agent/eval*` 路由**，**没有数据源**（⛔ 不是"只差画出来"）；~~Trace 页~~ ✅ **2026-10-06 已做**（`DEC-093` · 见上一行）· ~~硬门 A·C 的其余前端项~~ ✅ **同日结清**（`DEC-092` —— ②「C 的其余出口」经核**无指称对象** ⇒ 删）<br>✅ **R3.2 熔断卡片 2026-10-06 已做**（同「④ 做到哪了」的段 1 第四刀 · `DEC-090`）· ✅ **同日前端另有两刀**（引用卡片 `DEC-089` · 无据拒答 `DEC-091`，都改在 `chat.html` / `sse.js` 上）—— ⛔ **别把这一行读成"前端一条都没动"**<br>✅ **两个存量坏页 2026-10-07 已删**（`DEC-096` · `F5` —— 业务方改判「两个都删」；`api/static/*.html` 现只剩 `websocket_test.html`）⇒ `docs/待办总表.md` |
@@ -245,6 +246,12 @@ bash scripts/list_endpoints.sh          # 默认 http://127.0.0.1:8000
         · ⚠️ **顺手收窄两处既有端点**（`/agent/pending` 本人默认 · `/agent/approve` 加可选 `owner`）—— **不属于 `F1` 本身**，`DEC-051` 先例
         · 🔴 **⛔ 硬门 D 不因此翻 ✅**（`DEC-088` §六·6：判定原文还有「重启后仍能接管」之类的前提）
      ✅ Trace 页（`DEC-093` · `F2`）· 🔶 **Eval 页 —— 2026-10-07 做了【占位版】**（`DEC-097` · `F3`：`GET /eval` → 一个按钮 → 子页一行字；⚠️ **原口径的「跑分 + 对比箭头」一件没做**，前置 `B14` 仍不存在）· ~~硬门 A·C 其余前端项~~ ✅ **2026-10-06 结清**（`R3.2` 熔断卡片随第四刀 · 无据拒答随第五刀 · ②「C 的其余出口」经核**无指称对象** ⇒ 删 · `DEC-092`）
+     🔵 前端【初稿】= 10 刀（施工单 ⇒ `fastapi-rag-agent-TODO待办/施工单-20261009-前端初稿.md`）
+     ✅ 刀 0 地基（`panel.js` 能力面板纯逻辑）· 刀 1 总览首页 · 刀 2 对话页（`DEC-085`/`089`–`122`）
+     ✅ **刀 3 检索实验室** ← **2026-10-09 做完**（`DEC-123`；**规格 §2.2 那 5 条检索接口**一条一个面板 · `GET /lab`）
+        · 🔴 **第一个【能力页】** —— 刀 4–7 照它的形状（页面顶部 5 条边界 + 每面板一条、排在按钮之前）
+        · ⚠️ **它不是检查点**；**检查点 3 在刀 8**（存量 3 页接设计系统 · 做完停一次）
+     ⬜ 刀 4 成本看板 · `5` 工具与记忆 · `6` 系统与执行器 · `7` 运维探针 · 🔴 `8`（**检查点 3**）· `9` 分页 · `10` 知识库
 ⬜ ④ 测内存定机器 → ⑤ 买域名 → ⑥ 上云 → ⑦ 开隧道 → ⑧ 保护/自验/发链接
 ```
 
@@ -398,6 +405,50 @@ bash scripts/list_endpoints.sh          # 默认 http://127.0.0.1:8000
 > ⚠️ **仍未验**：真杀子进程的恢复**已验**；**高并发压力 / 创空间那台机器 / 长跑内存漂移** ⇒ **未做**。
 
 ### ⑤ 下一步 + 阻塞项
+
+> ## 🔴🔴 **2026-10-09 · 接续块（刀 3 之后）**（⛔ 下面所有更早的块原文保留，勿照旧读）
+>
+> ### ✅ 本轮做完 = **刀 3 · 检索实验室**
+>
+> **`GET /lab`** → `api/static/web/lab.html` —— 规格 §2.2 那 **5 条检索接口**一条一个面板
+> （`pg` / `hybrid` / `rerank` / `rewrite` / `pipeline`）。**第一个【能力页】**。
+> 📌 判据：`venv/bin/python -m pytest api/test_lab_page.py -q` ⇒ **7 passed** ·
+> `node --test api/static/js/lab.test.js` ⇒ **pass 20 / fail 0** · 裁定 ⇒ **`DEC-123`**（含四条反证）。
+> ⚠️ **全量**：跑 `bash scripts/ci-local.sh`（⛔ 别抄数）。
+>
+> ### 🔴 本轮新定的**两条口径**（会绑到刀 4–7）
+>
+> | 定什么 | 内容 | 落点 |
+> |---|---|---|
+> | **能力页的边界标注怎么落** | **页面顶部完整 5 条**（与首页逐字同款）＋**每个面板一条**，**排在提交按钮之前**；⛔ **没把 5 条抄进每个面板**（那会把"一眼看到"稀释掉） | `DEC-123` §1.1 · 守卫 `api/test_lab_page.py` |
+> | **侧边栏导航的增长口径** | 只放**「主要功能」那 5 类**（对话 / 检索实验室 / 人工接管 / **成本看板** / 执行轨迹）—— ⛔ 别把每个新页面都塞进去（那会退化成第二个首页） | `DEC-123` §三 |
+>
+> ### ⚠️ 同一批：**首页一张卡点亮了**
+>
+> 「检索三模式」**未上线 ⇒ 可点**（`/lab`）。⇒ 实测首页 **可点 5 张 / 未上线 8 张**
+> （未上线的：成本可见 / 知识库 / 工具·MCP / 记忆 / 执行器 / 预算·熔断 / 系统状态 / 运维探针 —— 属刀 4–7、10）。
+> 📌 判据（可打印）：`grep -c 'card card-off' api/static/web/index.html` ⇒ **8**。
+> **全部点亮**才算满足最高判据（「每个能力都要有可点入口」）。
+>
+> ### ▶️ 下一步 = **刀 4 · 成本看板**
+>
+> §2.5 的 9 条 + §2.6 的 3 条 + `/dashboard` 入口。🔴 **开工前先核一件事**（业务方选的「先核可见性」）：
+> `GET /agent/budget/intercepts` **含别人的拦截记录口径** ⇒ 核清"本人可见"还是"全站含别人"
+> —— 本人可见 ⇒ 露；含别人 ⇒ ⛔ **不露**（并把结论写进 spec）。
+> ⚠️ **别印假数**：看板第 2 格是**内存口径**（`DEC-047` §遗留）⇒ 页面要**标明它是内存**。
+>
+> ### 🔴 未合 / 已合（**别再照旧读上一条**）
+>
+> **PR `#121`【已合】**（`gh pr view 121 --json state` ⇒ `MERGED` · 主干 `31c7248`）——
+> ⚠️ 上一版接续块写着"未合、业务方说可以合"，**那一格已过期**。
+> **当前**：无在飞 PR · 工作区干净（本轮刀 3 的改动**还没提交**）。
+>
+> ### ⚠️ 仍卡在业务方的
+>
+> | # | 等什么 | 现在 |
+> |---|---|---|
+> | 1 | 🔴 **信息架构的「卡片怎么分组」** | ⏸ **他说他自己分**（本 Agent 拟过一版被判「不好」，已回退）—— 是改 3 行 `<h3>` 的事 |
+> | 2 | **`docs/待办总表.md` 的未结数** | ⚠️ 完结的硬条件之一（「**待办和所有任务清空才是完结**」）⇒ 跑 `grep -n '业务方裁：做[到]' docs/待办总表.md` |
 
 > ## 🔴🔴 **2026-10-09 傍晚 · 接续块**（⛔ 下面所有更早的块原文保留，勿照旧读）
 >

@@ -105,9 +105,9 @@
       <li class="card card-hover"><a href="/chat">对话</a>
           <span class="why">登录 → 提问 → 逐字流式回答 → 点开引用看原文 → 随时停止。</span>
           <span class="apis">POST /rag/stream_search（SSE 流式）</span></li>
-      <li class="card card-off"><span>检索三模式</span><span class="badge">未上线</span>
-          <span class="why">向量 / 混合（BM25+RRF）/ 精排，外加查询改写。施工中（刀 3）。</span>
-          <span class="apis">pg_search · hybrid_search · rerank_search · rewrite_search</span></li>
+      <li class="card card-hover"><a href="/lab">检索三模式</a>
+          <span class="why">向量 / 混合（BM25+RRF）/ 精排，外加查询改写 —— 5 个面板各带参数，跑完看真实分数。</span>
+          <span class="apis">POST /rag/pg_search · /rag/hybrid_search · /rag/rerank_search · /rag/rewrite_search · /rag/search</span></li>
       <li class="card card-hover"><a href="/approvals">人工接管</a>
           <span class="why">敏感工具调用会停下来等人批；点开看完整上下文，批准 / 拒绝 / 代填结论。</span>
           <span class="apis">GET /agent/pending · POST /agent/approve</span></li>
