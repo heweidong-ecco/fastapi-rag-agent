@@ -128,6 +128,43 @@ def test_overview_page_carries_the_boundary_notices_on_first_screen():
     )
 
 
+def test_no_navigation_target_appears_twice():
+    """🔴 **同一个目标⛔ 不许在一页里出现两次** —— 这条是【业务方看出来的缺陷】变成的门。
+
+    2026-10-09 首版首页**同时**挂了侧边栏和正文卡片 ⇒
+    `/chat` `/approvals` `/trace` `/eval` **各出现两次**。
+    业务方原话：「**侧边栏的和主页面有重叠**」——
+    ⚠️ 他说的**不是几何重叠**（那没有），是**功能重叠**：同一个地方说了两遍。
+
+    ⇒ 裁定（2026-10-09 · 甲）：**首页去侧边栏**（门户形态 —— 首页的职责是目录，
+      它不需要"我在哪个模块"的导航）；**侧边栏留内页**（那里确实要"我在哪 + 去哪"）。
+      依据是行业口径：落地/门户页用顶部导航，侧边栏是"应用内导航"（Ant Design）。
+
+    ⚠️ **当时 8 条用例全绿** —— 没有一条问过"同一个地方是不是说了两遍"。
+    """
+    html = _index_html()
+    hrefs = re.findall(r'<a\b[^>]*href\s*=\s*["\']([^"\']+)["\']', html)
+    # 🔴 先证明尺子有读数（空集合断言会一路绿着放行 —— `DEC-065` 那族）
+    assert len(hrefs) >= 4, f"只认出 {len(hrefs)} 个 <a href> —— 扫描失效了"
+    dupes = sorted({h for h in hrefs if hrefs.count(h) > 1})
+    assert not dupes, (
+        f"这些目标在同一页出现了两次：{dupes} —— 同一个地方说了两遍，"
+        "读的人会以为它们是两件不同的事（业务方把这个叫「侧边栏和主页面有重叠」）"
+    )
+
+
+def test_overview_page_has_no_sidebar():
+    """🔴 首页**不挂侧边栏**（2026-10-09 甲案）—— 与上一条是**一对**。
+
+    ⛔ 别"顺手"把侧边栏加回来：加了它就必然与正文的卡片重复（上一条会红）。
+    内页（`/chat` 等）保留侧边栏 —— 那里它是"我在哪 + 去哪"，不与正文重复。
+    """
+    assert 'class="sidebar"' not in _index_html(), (
+        "首页挂了侧边栏 ⇒ 它和正文的卡片必然重复（见上一条用例）。"
+        "首页是【目录】，不需要'我在哪个模块'的导航。"
+    )
+
+
 def test_every_entry_card_has_a_class():
     """🔴 **每个入口卡都必须带 `class`** —— 这条是【截图时看出来的缺陷】变成的门。
 

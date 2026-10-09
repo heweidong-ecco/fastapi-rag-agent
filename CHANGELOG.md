@@ -27,15 +27,26 @@ All notable changes to this project will be documented in this file.
   ⚠️ **首页上 5 个入口还是"未上线"**（检索实验室 / 成本看板 / 工具与记忆 / 系统与执行器 /
   知识库 / 运维探针 —— 属刀 3–7、10）：它们渲染成**不可点的卡 + 明写"未上线"**，⛔ **不是死链**
   —— 一个点了 404 的卡比没有卡更糟。**每做完一刀点亮一个**。
+  🔴🔴 **首页的形态改过一次（业务方 2026-10-09 看截图后提的）**：首版首页**同时挂了侧边栏和正文卡片**
+  ⇒ 而 `/chat` `/approvals` `/trace` `/eval` **四个目标在同一页各出现两次**。
+  业务方原话：「**侧边栏的和主页面有重叠**」。⚠️ 我核了两层：
+  **几何上没重叠**（`.sidebar` 固定 220px、`.main` 是 `flex:1`，1280 / 1400 / 1000 三档各截过一张），
+  **但功能上真的重了**。⇒ 裁定（**甲**）：**首页 = 门户形态**（顶部条 + 居中卡片列 + 文档流滚动，⛔ 无侧边栏），
+  **侧边栏留内页**。依据：落地/门户页用顶部导航、侧边栏是"应用内导航"（Ant Design 口径）。
+  ⇒ 补两条门：`test_no_navigation_target_appears_twice` · `test_overview_page_has_no_sidebar`。
+  ⚠️ **同批还修了一个截图才看出来的布局 bug**：`app.css` 基础规则 `p + p, li + li { margin-top }`
+  在网格里把**第二项起**往下推 ⇒ **同一行的卡片高低不齐**。
+  ⇒ 首页用 `.panel-grid > li { margin-top: 0 }` 清掉（⛔ 没改那条全局规则本身 —— 它对竖排列表是对的）。
+
   🔴 **一条是【截图时才发现的】**：`#others` 里「评测」那张卡**漏了 `class`** ⇒
   它**没有卡片外观**，页面上**唯一可点的入口反而最不像一张卡**，而当时 7 条用例**全绿**
   （它们只看"分区/外链/边界标注"，一条都不看卡片长什么样）。
   ⇒ 补了第 8 条**结构门**（每个入口 `<li>` 必须带 `class`），并**做过反证**（拿掉那个 class ⇒ 它立刻红）。
   ⚠️ **写那条门时又栽了同一族的坑**：首版直接在原文上找 `<li`，**命中了本页 `<style>` 里的注释**
   ⇒ 报两个假阳性。**「判据里的字面会数到自己」**（`N14` 那条）。⇒ 守卫改成**先剥注释再扫**。
-  📌 门：`pytest api/test_index_page.py api/test_main.py api/test_web_pages.py -q` ⇒ **19 passed**
-  （`api/test_index_page.py` 8 条先红后绿）· 全量 `bash scripts/ci-local.sh` ⇒
-  **887 passed / 2 skipped**（node 那步 **95**）。
+  📌 门：`pytest api/test_index_page.py api/test_main.py api/test_web_pages.py -q` ⇒ **21 passed**
+  （`api/test_index_page.py` 10 条先红后绿）· 全量 `bash scripts/ci-local.sh` ⇒
+  **889 passed / 2 skipped**（node 那步 **95**）。
 
 - 🔴 **按风格稿把 `chat` 页重排成同一个 dashboard 骨架**（2026-10-09）——
   与上一版 `trace` 同一套：**sidebar（品牌渐变块 + 4 条导航 + 会话列表 + 新会话）· page-head · 内容区**；
