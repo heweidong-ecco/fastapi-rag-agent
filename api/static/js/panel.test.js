@@ -36,6 +36,15 @@ test('boundaryText：额度那条是【当场读数】，⛔ 不写死', () => {
   assert.match(s, /120/); assert.match(s, /500/); assert.match(s, /380/);
 });
 
+test('🔴 boundaryText：没数据时⛔ 不许把 undefined 印出去（首页未登录就走这条路）', () => {
+  // 本仓立场：「不许印"没有数据源"的数」（规格 §五 · trace 页那两格的前科）。
+  for (const k of ['quota', 'rate_limit']) {
+    const s = boundaryText(k);                    // ⛔ 不传 data
+    assert.doesNotMatch(s, /undefined|NaN|null/, `${k} 把空值拼进文案了：${s}`);
+    assert.ok(s.length > 10, `${k} 的无数据版太短 ⇒ 等于没说`);
+  }
+});
+
 test('⚠️ boundaryText：verify 是【另一类】—— 它讲"我们自证到什么程度"，⛔ 与平台限制无关', () => {
   // 混进前 4 条里会让归因【反向】（访客读成"验证不完整也是平台的锅"）。
   const s = boundaryText('verify');

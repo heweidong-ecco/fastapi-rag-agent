@@ -52,8 +52,9 @@ import pytest
 
 from main import static_dir
 
-# 必须含有的页面 —— 只有 3 个都发现得到，才说明"扫描真的在工作"。
-_REQUIRED = ("web/approvals.html", "web/chat.html", "web/trace.html")
+# 必须含有的页面 —— 只有这些都发现得到，才说明"扫描真的在工作"。
+# ⚠️ 加进这里 = "这个页面删了是件该被看见的事"，⛔ 不是随手 Grep。
+_REQUIRED = ("web/approvals.html", "web/chat.html", "web/index.html", "web/trace.html")
 
 # 调用点里的字符串字面量：单引号 / 双引号 / 反引号都收。
 # ⚠️ 反引号收进来是有意的：`fetch(`/agent/${id}`)` **同样是坏的**，别放过。

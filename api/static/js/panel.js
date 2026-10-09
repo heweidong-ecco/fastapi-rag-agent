@@ -21,16 +21,37 @@
  */
 const BOUNDARY_KEYS = ['platform_restart', 'quota', 'rate_limit', 'real_api', 'verify'];
 
-/** 取一条边界文案。`data` 只有 `quota` / `rate_limit` 两条用得上（要当场读数）。 */
+/**
+ * 取一条边界文案。
+ *
+ * 🔴 **两种形态，由 `data` 决定**：
+ * - **给了数**（`quota` / `rate_limit`）⇒ 出现**具体数字**（规格 §3.6.3：⛔ 不许写成"有限制"这种虚的）
+ * - **没给数**（未登录 / 还没取到）⇒ 给**不带数字的说明版**，并**指向哪里能看到数**
+ *
+ * ⚠️ **⛔ 绝不在没数据时把 `undefined` 印出去** —— 本仓立场：
+ *    「**不许印"没有数据源"的数**」（规格 §五 · `api/test_trace_page.py` 那个前科）。
+ *    ⇒ 所以调用的地方**必须**判断自己有没有数，而不是拼上去碰运气。
+ * ⚠️ 未知 key ⇒ **抛错**（`DEC-051` 那族：响亮 > 静默）。
+ */
 function boundaryText(key, data) {
   const d = data || {};
+  const known = (v) => v !== undefined && v !== null && v !== '';
+  const hasQuota = known(d.used) && known(d.limit) && known(d.remaining);
+  const hasRpm = known(d.rpm);
+
   switch (key) {
     case 'platform_restart':
       return '本 demo 跑在魔搭创空间的免费档上。平台重启后会清空数据 —— 这是【平台限制】，⛔ 不是系统故障。';
     case 'quota':
       // ⚠️ 数字必须【当场读数】—— 写死就过期（本仓前科：手写的路由表已经对不上了）
+      if (!hasQuota) {
+        return '每个访客有独立的每日 token 额度；登录后这里会显示你「今日已用 / 上限 / 剩余」。';
+      }
       return `你今日已用 ${d.used} / 上限 ${d.limit} tokens，剩余 ${d.remaining}。`;
     case 'rate_limit':
+      if (!hasRpm) {
+        return '每个访客有独立的额度桶，按分钟限流；超了会看到 429 与一张说明卡（⛔ 不是你点坏了）。';
+      }
       return `每个访客有独立的额度桶；限流约 ${d.rpm} 次/分钟。超了会看到 429 与一张说明卡（⛔ 不是你点坏了）。`;
     case 'real_api':
       return '这里真的在调大模型：每次提问都会产生真实的 token 消耗。额度用尽当天不再服务，次日恢复。';
