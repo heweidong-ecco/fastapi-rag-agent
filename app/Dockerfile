@@ -60,7 +60,7 @@ RUN mkdir -p /root/.pip && echo "[global]\nindex-url = https://pypi.tuna.tsinghu
 #
 #      | 包         | 形态        | 谁用它                                    |
 #      |------------|-------------|-------------------------------------------|
-#      | `locust`   | **外部 CLI** | **代码里 0 处 import**；靠 `locust -f locustfile_hybrid.py` 跑 |
+#      | `locust`   | **外部 CLI** | **代码里 0 处 import**；靠 `locust -f locust/locustfile_hybrid.py` 跑 |
 #      | `ragas`    | **库**      | **只被 `evaluate_with_ragas.py` import**（那个脚本自己就是入口） |
 #      | `datasets` | **库**      | 同上                                      |
 #

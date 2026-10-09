@@ -65,6 +65,19 @@ All notable changes to this project will be documented in this file.
     已改成**标签写真实仓内路径 + 链接写相对 README 的路径**。
   - **判据**：`bash scripts/spec_status.sh` ⇒ **56 有 / 0 缺** · 断链门 exit 0 · 孤儿门 exit 0 ·
     `pytest` **913 passed / 2 skipped** · `ci-local` **退出码 0**。
+- 🔴 **段 2（三）：`bench/` 并进 `locust/`** ⇒ **压测只有一个家**（业务方 2026-10-09 裁）。
+  - **`api/`→`app/` 那批之后仓根只剩 3 个 `locustfile*.py`**；`bench/` 里还有**第 4 个** +
+    一份 README ⇒ 两代压测件、两个家。现在全部收进 **`locust/`**。
+  - ⚠️ **并进来时撞名了，改了名**：`bench/locustfile.py` ⇒ **`locust/locustfile_bench.py`**
+    （它与仓库根那个 `locustfile.py` **同名**，不改名会覆盖）。
+    🔴 **`locust/` 里现在是【两代】压测件，⛔ 别读混**：
+    · `locustfile.py` / `_v2` / `_hybrid` —— **上一代**，被 `app/tests/test_locust_payload.py` **守卫着**
+    · `locustfile_bench.py` —— **这一代**（`T5-8`），业务方 2026-10-07 裁「**不进 pytest**」
+  - 连带改：`app/tests/test_locust_payload.py` 的 `LOCUSTFILES`（**加了 `locust/` 前缀**，
+    它按 `REPO / name` 读文件）· `.github/PULL_REQUEST_TEMPLATE.md`（CI 不编译 `locust/`）·
+    `app/Dockerfile` 一处注释 · `locust/README.md` 抬头与命令。
+  - **判据**：`pytest app/tests/test_locust_payload.py -q` ⇒ **7 passed** · 全量 **913 passed / 2 skipped** ·
+    `ci-local` **退出码 0** · 断链门 / 孤儿门 exit 0。
 
 - 🔴 **`api/` 模块化：60 个平铺的产品模块拆成 7 个模块组 + `eval/` + 94 个测试进 `tests/`**
   （2026-10-09 · 业务方口述 · 裁定见 `docs/decisions/DEC-125`）。

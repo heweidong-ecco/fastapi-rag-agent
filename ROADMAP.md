@@ -424,7 +424,10 @@ bash scripts/list_endpoints.sh          # 默认 http://127.0.0.1:8000
 >        + **三处门同步跟上并实测**（`spec_status.sh` 递归+防空跑 · `spec-remind.py` · `pre-commit-gates.py` §④
 >        —— 探针 `app/core/zzz_probe2.py` **真被拦**）· 删了 `preprocess.py` / `prompt/`
 >        · **判据**：913 passed / 2 skipped · ci-local 退出码 0 · 断链门/孤儿门 exit 0
->     ⬜ **段 2（二）**：补 **14 份缺失 spec**（清单跑 `bash scripts/spec_status.sh`）
+>     ✅ **段 2（二）**：**14 份缺失 spec 已补齐** ⇒ `spec_status` **56 有 / 0 缺**
+>     ✅ **段 2（三）**：**`bench/` 已并进 `locust/`**（业务方 2026-10-09 裁）⇒ 压测**只有一个家**
+>        ⚠️ 并进来时 **`bench/locustfile.py` 改名为 `locustfile_bench.py`** —— 它与根那个 `locustfile.py` **同名**，不改名会撞
+>        ⚠️ `locust/` 里现在有**两代**压测件，⛔ 别读混（上一代 3 个被 `test_locust_payload.py` 守卫；`locustfile_bench.py` 是 `T5-8`，明令**不进 pytest**）
 >     ⬜ **段 3**：**53 份目录级 `CLAUDE.md`** —— 它是**该层的索引表 + 主要内容**，渐进式披露
 >        ⚠️ **`docs/文档地图.md` 的拆解【随段 3 做】** —— 它要被分发到的正是那 53 份，段 3 之前**没有落点**
 >     ⬜ **段 3**（**53 份目录级 `CLAUDE.md`** —— 它是**该层的索引表 + 主要内容**，渐进式披露；根 `CLAUDE.md` 248 → ≤120 行）

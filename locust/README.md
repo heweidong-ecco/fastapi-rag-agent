@@ -1,4 +1,13 @@
-# `bench/` —— 压测（`T5-8`）
+# `locust/` —— 压测
+
+> 🔴 **2026-10-09（段 2 收尾）**：原 `bench/` **已并进本目录**（业务方裁「并进 `locust/`」）
+> —— 压测从此**只有一个家**。⚠️ 并进来时 **`bench/locustfile.py` 改名为 `locustfile_bench.py`**：
+> 它与仓库根那个 `locustfile.py` **同名**，不改名会撞。
+>
+> 📌 本目录现在装着**两代**压测件，⛔ **别读混**：
+> · `locustfile.py` / `locustfile_v2.py` / `locustfile_hybrid.py` —— **上一代**，被
+>   `app/tests/test_locust_payload.py` **守卫着**（那三个名字就写在该测试里）
+> · `locustfile_bench.py` —— **这一代**（`T5-8`），业务方 2026-10-07 裁「**不进 pytest**」
 
 > 📌 **这是什么**：**放在仓库里给来看代码的人看的、固定环境下的压测负载数据**。
 > ⛔ **不是内部调优工具**，⛔ **不跑在 CI 里**。
@@ -54,10 +63,10 @@ PY
 
 ```bash
 # ① 免费档（默认）—— 零花费，可反复跑
-locust -f bench/locustfile.py --headless -u 10 -r 2 -t 60s
+locust -f locust/locustfile_bench.py --headless -u 10 -r 2 -t 60s
 
 # ② 付费档 —— 🔴 真调 embedding + 真打库，**每次请求都花钱**
-BENCH_PAID=1 locust -f bench/locustfile.py --headless -u 5 -r 1 -t 60s
+BENCH_PAID=1 locust -f locust/locustfile_bench.py --headless -u 5 -r 1 -t 60s
 ```
 
 ⚠️ **用哪个 python**：本仓的 locust 装在 `./venv`（`venv/bin/locust`），

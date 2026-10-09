@@ -38,7 +38,8 @@ Agent 自己开的 PR 不许自合**（依 agent-eval-gate 的 D-23：单人仓�
 - [ ] **实机验证**：<命令 + 实际输出；没实机跑就不勾>
 - [ ] **本机预检**：`python3.10 -m compileall app/ -q` 已过
 
-> ⚠️ 改动涉及 `locustfile*.py` 时注意：**CI 不编译仓库根目录**，漏跑 `py_compile` 则语法错了 CI 照样绿。
+> ⚠️ 改动涉及 `locust/locustfile*.py` 时注意：**CI 不编译 `locust/`**（它只 `compileall app/`），
+> 漏跑 `py_compile` 则语法错了 CI 照样绿。
 
 ## 四、回滚
 

@@ -21,7 +21,9 @@ from pathlib import Path
 from main import app
 
 REPO = Path(__file__).resolve().parents[2]
-LOCUSTFILES = ("locustfile.py", "locustfile_v2.py", "locustfile_hybrid.py")
+# 🔴 2026-10-09（段 2 收尾）：压测件已收进 `locust/` ⇒ 这几个名字**要带目录**
+#    （下面按 `REPO / name` 读文件，⛔ 不是按模块名 import）。
+LOCUSTFILES = ("locust/locustfile.py", "locust/locustfile_v2.py", "locust/locustfile_hybrid.py")
 
 # 只检查这两个"形状出过错"的端点；其余端点（如 /rag/insert 用 body）不动
 QUERY_ONLY_PATHS = ("/api/v1/agent/mcp_chat", "/api/v1/rag/search")

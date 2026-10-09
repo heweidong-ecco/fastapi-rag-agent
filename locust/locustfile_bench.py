@@ -27,9 +27,9 @@
 ```bash
 export RAG_API_KEY=...      # ⛔ 绝不写进本文件 / 绝不进仓（凭据在仓外受管地）
 export RAG_BASE_URL=http://localhost:8000
-locust -f bench/locustfile.py --headless -u 10 -r 2 -t 60s --only-summary
+locust -f locust/locustfile_bench.py --headless -u 10 -r 2 -t 60s --only-summary
 ```
-详见 `bench/README.md`。
+详见 `locust/README.md`。
 """
 import os
 import sys
