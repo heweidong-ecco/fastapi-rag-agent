@@ -1,5 +1,5 @@
 'use strict';
-/* 成本看板的**纯逻辑**：九个面板的路径/参数/口径标注 + 结果归一 + 格式化。
+/* 成本看板的**纯逻辑**：十个面板的路径/参数/口径标注 + 结果归一 + 格式化。
  * ⛔ 本文件不碰 DOM、不发请求 —— 与 `panel.js` / `lab.js` / `trace.js` 同一形状。
  *
  * 🔴 为什么单独一个文件：**"这一格的数是【谁的】、来自【哪里】"必须只有一份**。
@@ -9,7 +9,7 @@
  *    + **谁的数**（本人 / 全站）。
  */
 
-/* ══════════════ 1 · 九个面板（规格 §2.5 的 9 条 + §2.6 的 3 条）══════════════
+/* ══════════════ 1 · 十个面板（规格 §2.5 的 9 条 + §2.6 的 3 条 − 有意不露的 2 条）══════════════
  *
  * 🔴 `source` 三态（⛔ 别合并 —— 它们对"重启后还在不在"的答案相反）：
  *      `db`    读 `token_usage_logs` / `cost_records` 表 ⇒ **重启不影响**
@@ -25,6 +25,7 @@ const PANELS = {
   monthly:    { path: '/api/v1/agent/cost/monthly_report', name: '月度报告',    source: 'db',    scope: 'self' },
   budget:     { path: '/api/v1/agent/token/budget',        name: '我的额度',    source: 'db',    scope: 'self+global' },
   memusage:   { path: '/api/v1/agent/token/usage',         name: '进程内累计',  source: 'mem',   scope: 'self' },
+  recent:     { path: '/api/v1/agent/token/recent',        name: '最近使用记录', source: 'mem',   scope: 'self' },
   check:      { path: '/api/v1/agent/budget/check',        name: '预算检查',    source: 'mem',   scope: 'self' },
   estimates:  { path: '/api/v1/agent/budget/estimates',    name: '单次预估成本', source: 'const', scope: 'config' },
   intercepts: { path: '/api/v1/agent/budget/intercepts',   name: '我的拦截次数', source: 'mem',   scope: 'self' },
@@ -36,15 +37,15 @@ const SOURCE_LABELS = {
   const: '代码里的常量表',
 };
 
-/** 🔴 **有意不露**的三条（`DEC-124`）—— 它们**不是"懒得做"**，是**露出来会撒谎 / 会越权**。
- *  ⚠️ 每一条都必须写明理由（规格 §2.14 的口径：不露也要写成一条记录）。 */
+/** 🔴 **有意不露**的两条（`DEC-124`）—— 它们**不是"懒得做"**，是**露出来会撒谎**：
+ *  两条都是**全站口径、不分用户**。⚠️ 每一条都必须写明理由（规格 §2.14：不露也要写成一条记录）。
+ *
+ * 📌 **沿革**：本表原先有**三条**，第三条是 `token/recent`（**它读的表里带别人的 user_name**）。
+ *    🔴 **2026-10-09（`N20`）后端把身份接上了** ⇒ 它变成**本人口径** ⇒ 已**移出本表、加进 `PANELS`**
+ *       （「最近使用记录」，source = `mem`）。
+ *    ⚠️ **⛔ 别只修后端不加面板** —— 那等于"修好了却还藏着"，与最高判据相拗
+ *       （「显示了出来才知道你有做」）；反过来也⛔ 别只加面板不修后端（那就把越权露出来了）。 */
 const NOT_EXPOSED = [
-  {
-    path: '/api/v1/agent/token/recent',
-    why: '它读的是进程内那张【所有人共用】的记录表（_usage_records），'
-       + '每条记录里都带【别人的 user_name】。⇒ 公开 demo 不露（同 §2.14 那类）。'
-       + '⚠️ 端点的 user_name 形参【收了却没用】（get_recent_usage(limit+1) 没传它）—— 已登记。',
-  },
   {
     path: '/api/v1/agent/token/purpose',
     why: '【全站口径、不分用户】（get_purpose_summary() 吃的是全体累加的字典）。'
@@ -224,6 +225,13 @@ function tableOf(key, p) {
       show(r.thread_id), show(r.tool_name),
     ]));
     return { cols: ['时间', '模型', '用途', 'token', '花费（元）', 'thread_id', '工具'], rows };
+  }
+  if (key === 'recent') {
+    const rows = rowsOfTable(payload, 'recent_usage').map((r) => ([
+      show(r.timestamp), show(r.model), show(r.purpose),
+      fmtNum(r.total_tokens), fmtMoney(r.cost),
+    ]));
+    return { cols: ['时间', '模型', '用途', 'token', '花费（元）'], rows };
   }
   if (key === 'history') {
     const rows = rowsOfTable(payload, 'history').map((r) => ([

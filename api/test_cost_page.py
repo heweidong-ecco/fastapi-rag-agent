@@ -13,9 +13,9 @@
 |---|---|---|
 | 5 | 两个脚本都引了 | 少任一个 ⇒ 页面里 `RagPanel.*` / `RagCost.*` 全 `ReferenceError` |
 | 6 | 路径由 `RagCost.buildRequest` 出 | 页面自己拼路径 ⇒ 少 `/api/v1` 不报错（`DEC-094`） |
-| 7 | 九个面板都在 | 少一个 = 那条接口按最高判据**等于没做** |
+| 7 | 十个面板都在 | 少一个 = 那条接口按最高判据**等于没做** |
 | 8 | 🔴 **每个面板都要有【口径标签】** | 这一页同时有**读库 / 进程内存 / 配置常量**三种数，而它们对"重启后还在不在"的答案不同<br>⛔ 不标 ⇒ 读的人**会把"进程内存 0"当成"我没花过钱"**（`DEC-047` 真栽过：库里有 4216 tokens，界面答 0，**不报错**） |
-| 9 | 🔴 **三条【有意不露】的接口不许被页面请求** | 其中 `token/recent` 返回的记录**带别人的 user_name** ⇒ 露给公开访客是越权 |
+| 9 | 🔴 **两条【有意不露】的接口不许被页面请求** | 两条都是**全站口径、不分用户** ⇒ 露了会让"我的花费"那几格**撒谎** |
 | 10 | 边界提示条排在提交按钮**之前** | 规格 §3.6.1 的② + 业务方原话（`DEC-123` §1.1） |
 
 📌 判据（可打印）：`venv/bin/python -m pytest api/test_cost_page.py -q -p no:warnings`
@@ -31,15 +31,17 @@ STATIC_PREFIX = "/static/"
 PAGE_NAME = "web/cost.html"
 EXPECTED_LOCATION = STATIC_PREFIX + PAGE_NAME
 
-#: 九个面板 —— 必须与 `api/static/js/cost.js` 的 `RagCost.PANELS` 的键**逐字一致**。
+#: 十个面板 —— 必须与 `api/static/js/cost.js` 的 `RagCost.PANELS` 的键**逐字一致**。
 EXPECTED_PANELS = (
     "overview", "records", "history", "monthly", "budget",
-    "memusage", "check", "estimates", "intercepts",
+    "memusage", "recent", "check", "estimates", "intercepts",
 )
 
-#: 🔴 三条【有意不露】—— 页面⛔ 不许请求它们（`DEC-124`）。理由见 `RagCost.NOT_EXPOSED`。
+#: 🔴 两条【有意不露】—— 页面⛔ 不许请求它们（`DEC-124`）。理由见 `RagCost.NOT_EXPOSED`。
+#: ⚠️ **沿革**：本表原先有**三条**，第三条 `token/recent` 因**读的表里带别人的 `user_name`** 而不露；
+#:    🔴 **2026-10-09（`N20`）后端把身份接上了** ⇒ 它变成本人口径 ⇒ **已移出本表、加成第 10 个面板**。
+#:    ⛔ **别只修后端不加面板**（"修好了却还藏着"），也⛔ 别只加面板不修后端（那会把越权露出来）。
 NOT_EXPOSED = (
-    "/api/v1/agent/token/recent",
     "/api/v1/agent/token/purpose",
     "/api/v1/agent/token/thread",
 )
@@ -112,8 +114,8 @@ def test_page_builds_urls_via_the_tested_helper():
     )
 
 
-def test_page_has_all_nine_panels():
-    """🔴 **9 个面板一个都不能少**（= 规格 §2.5 的 9 条 + §2.6 的 3 条 − 有意不露的 3 条）。
+def test_page_has_all_ten_panels():
+    """🔴 **10 个面板一个都不能少**（= 规格 §2.5 的 9 条 + §2.6 的 3 条 − 有意不露的 2 条）。
 
     ⚠️ 反证：删掉任何一个 `data-cost="…"` ⇒ 本条红。
     """
@@ -152,11 +154,13 @@ def test_every_panel_declares_where_its_number_comes_from():
         )
 
 
-def test_page_never_requests_the_three_not_exposed_endpoints():
-    """🔴 三条【有意不露】的接口⛔ 不许被这个页面请求（`DEC-124` §1）。
+def test_page_never_requests_the_not_exposed_endpoints():
+    """🔴 两条【有意不露】的接口⛔ 不许被这个页面请求（`DEC-124` §1）。
 
-    最要紧的是 `/agent/token/recent` —— 它读的是进程内那张**所有人共用**的记录表，
-    **每条记录里都带别人的 `user_name`**。露给公开访客就是**越权**。
+    两条都是**全站口径、不分用户** —— 露给公开访客会让"我的花费"那几格**撒谎**。
+    ⚠️ 原先这一条还护着第三条 `token/recent`（**每条记录带别人的 `user_name`**）；
+    🔴 **2026-10-09 后端把身份接上了**（`N20`）⇒ 它**已合法地走进页面**（第 10 个面板）。
+    ⇒ **本用例现在只拦那两条全站口径的**。
 
     ⚠️ 判据 = **页面源码里不许出现这三条路径的任何一条**。
        ⛔ 别改成"在 `RagCost.NOT_EXPOSED` 里查一下" —— 那张表是**说明用**的，
@@ -166,7 +170,6 @@ def test_page_never_requests_the_three_not_exposed_endpoints():
     for path in NOT_EXPOSED:
         assert path not in text, (
             f"页面里出现了 {path} —— 它属于【有意不露】那三条（见 `DEC-124`）：\n"
-            f"  · token/recent 每条记录带【别人的 user_name】\n"
             f"  · token/purpose / token/thread 是【全站口径、不分用户】\n"
             f"⇒ 公开 demo ⛔ 不露；它们各有本人口径的替代出口。"
         )

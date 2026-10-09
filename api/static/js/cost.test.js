@@ -17,9 +17,9 @@ const {
 
 /* ══════════════ 1 · 路径与面板数 ══════════════ */
 
-test('🔴 九个面板的 path【全部带 `/api/v1`】—— 少前缀页面就 100% 404（`DEC-094`）', () => {
+test('🔴 十个面板的 path【全部带 `/api/v1`】—— 少前缀页面就 100% 404（`DEC-094`）', () => {
   const keys = Object.keys(PANELS);
-  assert.strictEqual(keys.length, 9, `规格 §2.5(9) + §2.6(3) − 有意不露(3) = 9，实际 ${keys.length}`);
+  assert.strictEqual(keys.length, 10, `规格 §2.5(9) + §2.6(3) − 有意不露(2) = 10，实际 ${keys.length}`);
   for (const k of keys) {
     assert.match(PANELS[k].path, /^\/api\/v1\//, `${k} 的 path 没带 /api/v1：${PANELS[k].path}`);
   }
@@ -32,16 +32,16 @@ test('🔴 面板与「有意不露」两张表【不许重叠】—— 一条�
   }
 });
 
-test('🔴 「有意不露」三条都必须写明理由（⛔ 不许只写个路径就完事）', () => {
+test('🔴 「有意不露」两条都必须写明理由（⛔ 不许只写个路径就完事）', () => {
   // 规格 §2.14 的口径：不露也要**写成一条可读的记录**，否则下一个人会以为"忘了做"。
-  assert.strictEqual(NOT_EXPOSED.length, 3);
+  assert.strictEqual(NOT_EXPOSED.length, 2);
   for (const item of NOT_EXPOSED) {
     assert.ok(item.why && item.why.length > 20, `${item.path} 的理由太短 ⇒ 等于没说`);
   }
   const paths = NOT_EXPOSED.map((x) => x.path).sort();
   assert.deepStrictEqual(paths, [
-    '/api/v1/agent/token/purpose', '/api/v1/agent/token/recent', '/api/v1/agent/token/thread',
-  ], '不露的必须是这三条（另三条 §2.5 端点各有本人口径的替代）');
+    '/api/v1/agent/token/purpose', '/api/v1/agent/token/thread',
+  ], '不露的是这两条（都是全站口径）；⚠️ `token/recent` 已修好并移进 PANELS —— 见它那一行');
 });
 
 test('🔴 panelOf：未登记的 key 必须【抛错】，⛔ 不许静默回落', () => {
@@ -51,7 +51,7 @@ test('🔴 panelOf：未登记的 key 必须【抛错】，⛔ 不许静默回�
 /* ══════════════ 2 · 口径标注（本页最要紧的一半）══════════════ */
 
 test('🔴 memoryWarning：**只有** source=mem 的面板才挂警——db / const 挂了就是狼来了', () => {
-  for (const k of ['memusage', 'check', 'intercepts']) {
+  for (const k of ['memusage', 'recent', 'check', 'intercepts']) {
     assert.match(memoryWarning(k), /重启归零/, `${k} 是内存口径，必须警示`);
   }
   for (const k of ['overview', 'records', 'history', 'monthly', 'budget', 'estimates']) {
@@ -62,7 +62,7 @@ test('🔴 memoryWarning：**只有** source=mem 的面板才挂警——db / co
 test('🔴 三态 source 一个都不能少，且必须是这三种（口径地图）', () => {
   const bySource = {};
   for (const k of Object.keys(PANELS)) bySource[PANELS[k].source] = (bySource[PANELS[k].source] || 0) + 1;
-  assert.deepStrictEqual(bySource, { db: 5, mem: 3, const: 1 }, `实际 ${JSON.stringify(bySource)}`);
+  assert.deepStrictEqual(bySource, { db: 5, mem: 4, const: 1 }, `实际 ${JSON.stringify(bySource)}`);
 });
 
 test('🔴 scopeNote：budget 那条必须**同时**点名"本人"与"全站"', () => {
@@ -82,6 +82,7 @@ test('buildRequest：参数只给收它的端点（⛔ 别给九条都塞 days/l
   assert.deepStrictEqual(buildRequest('overview', { days: 3, limit: 9 }).query, {});
   assert.deepStrictEqual(buildRequest('intercepts', { days: 3 }).query, {});
   assert.deepStrictEqual(buildRequest('memusage', {}).query, {});
+  assert.deepStrictEqual(buildRequest('recent', { days: 3, limit: 9 }).query, {});
   assert.deepStrictEqual(buildRequest('estimates', {}).query, {});
   assert.deepStrictEqual(buildRequest('budget', {}).query, {});
 });
@@ -162,6 +163,7 @@ test('kvRows：check 没传 tool_name 时,预估那格要说清"估不了",⛔ �
 
 test('tableOf：records / history / overview.by_purpose / monthly.by_purpose / estimates 各一张', () => {
   assert.strictEqual(tableOf('records', { records: [] }).cols.length, 7);
+  assert.strictEqual(tableOf('recent', { recent_usage: [] }).cols.length, 5);
   assert.strictEqual(tableOf('history', { history: [] }).cols.length, 4);
   assert.strictEqual(tableOf('overview', { by_purpose: {} }).cols.length, 4);
   assert.strictEqual(tableOf('monthly', { by_purpose: [] }).cols.length, 5);
@@ -221,6 +223,6 @@ test('把 cost.js 当【经典脚本】跑一遍 ⇒ window.RagCost 存在且接
                    'tableOf', 'table2Of', 'truncationNotice', 'emptyReason', 'fmtMoney']) {
     assert.strictEqual(typeof w.RagCost[k], 'function', `window.RagCost.${k} 不是函数`);
   }
-  assert.strictEqual(Object.keys(w.RagCost.PANELS).length, 9);
-  assert.strictEqual(w.RagCost.NOT_EXPOSED.length, 3);
+  assert.strictEqual(Object.keys(w.RagCost.PANELS).length, 10);
+  assert.strictEqual(w.RagCost.NOT_EXPOSED.length, 2);
 });

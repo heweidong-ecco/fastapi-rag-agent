@@ -99,10 +99,10 @@
         </div>
       </section>
 
-      <!-- 🔴 九个面板 = 规格 §2.5 的 9 条 + §2.6 的 3 条，扣掉三条【有意不露】（见本页底部）。
+      <!-- 🔴 十个面板 = 规格 §2.5 的 9 条 + §2.6 的 3 条，扣掉两条【有意不露】（见本页底部）。
            ⚠️ 路径与口径标签都从 `RagCost` 取 —— ⛔ 页面里不写 URL 字面量。
-           守卫 ⇒ `api/static/js/cost.test.js`（九条 path 必须带 /api/v1）+
-                 `api/test_cost_page.py`（九个面板都在）。 -->
+           守卫 ⇒ `api/static/js/cost.test.js`（十条 path 必须带 /api/v1）+
+                 `api/test_cost_page.py`（十个面板都在）。 -->
       <div class="panel-grid">
 
         <section class="panel" id="cost-overview" data-cost="overview">
@@ -177,6 +177,17 @@
           </div>
         </section>
 
+        <section class="panel" data-cost="recent">
+          <div class="panel-head">最近使用记录 <span class="badge src-mem">进程内存</span></div>
+          <div class="panel-body">
+            <div class="panel-boundary slim" data-boundary="platform_restart"></div>
+            <p class="hint" data-meta="mem"></p>
+            <p class="hint">⚠️ <b>只回你自己</b>的记录（这条端点 2026-10-09 才把身份接上 —— 在那之前它返回<b>所有人</b>的）。</p>
+            <div class="panel-actions"><button class="btn primary" data-run>查询</button></div>
+            <div class="panel-out" hidden></div>
+          </div>
+        </section>
+
         <section class="panel" data-cost="check">
           <div class="panel-head">预算检查 <span class="badge src-mem">进程内存</span></div>
           <div class="panel-body">
@@ -218,7 +229,7 @@
            规格 §2.14 的口径：不露也要**写成一条可读的记录**，否则下一个人会以为忘了做。
            ⚠️ 这张表由 `RagCost.NOT_EXPOSED` **填**，⛔ 别在 HTML 里再写一遍。 -->
       <section class="panel" id="notexposed" style="margin-top:var(--sp-4)">
-        <div class="panel-head">⛔ 有意【不露】的三条接口（写明理由）</div>
+        <div class="panel-head">⛔ 有意【不露】的两条接口（写明理由）</div>
         <div class="panel-body">
           <p class="hint" style="margin-top:0">
             它们不是"没做"，是<b>公开 demo 上露出来会撒谎或越权</b> ——
@@ -436,7 +447,7 @@ $('save').onclick = function () {
   notice('已保存 API Key');
   refreshQuota();
 };
-if (!key()) notice('先填 API Key —— 这 9 条接口都要鉴权');
+if (!key()) notice('先填 API Key —— 这 10 条接口都要鉴权');
 refreshQuota();
 </script>
 </body>
