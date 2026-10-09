@@ -10,6 +10,21 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- 🔴 **段 3：`CLAUDE.md` 分层覆盖 —— 全仓 53 份**（2026-10-09）。
+  - **性质变了**：每份 `CLAUDE.md` **不再是"模块规则"，而是【该层的索引表 + 主要内容】**。
+    业务方原话：「agent 进来，**从入口进来必须先看 `CLAUDE.md`**，**信息不够，需求再转**」
+    ⇒ **渐进式披露**：根（**每次会话都加载**）→ 各层（**懒加载**，读写到那层才注入）。
+  - ⚠️ **成本很低**：子目录的 `CLAUDE.md` **只在读写该目录文件时才注入** ⇒
+    53 份里绝大多数在任一次会话里**根本不会被加载**。
+  - **仓库根 `CLAUDE.md`**：🆕 加 **「📇 本仓目录索引」**（顶层导航 + 最常去的三个入口）；
+    `docs/specs/` 的旧路径**改成新的同目录口径**；**skills 必用表全文搬进
+    `docs/规范/skills必用表.md`**（根里只留摘要 + 指针，判据没放宽）。
+  - 🔴 **顺带被门抓到一个真问题**：`specs/` 目录里也放了 `CLAUDE.md`（该层的索引表）
+    ⇒ `spec_status.sh` 的递归扫描**把它当成一份 spec** ⇒ 报「spec 有、代码没了 1」的**假阳性**。
+    已修（`f not in ("README.md", "CLAUDE.md")`）。
+  - **判据**：`spec_status` **56 有 / 0 缺 / 0 残留** · 断链门/孤儿门/索引门 **exit 0** ·
+    `test_remind_hooks` **22 通过** · `pytest` **913 passed / 2 skipped** · `ci-local` **退出码 0**。
+
 - 🔴 **容器目录改名：`api/` → `app/`**（2026-10-09 · 业务方口述 · 裁定见 `docs/decisions/DEC-126`）。
   **纯改名，⛔ 不改包语义、⛔ 不改 Docker 语义、⛔ 不改行为** ——
   **判据**：`pytest` **913 passed / 2 skipped** · `bash scripts/ci-local.sh` **退出码 0** ·

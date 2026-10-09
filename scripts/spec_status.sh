@@ -124,7 +124,9 @@ for _r, _d, _fs in os.walk(os.path.join(REPO, "app")):
     if os.path.basename(_r) != "specs":
         continue
     for f in _fs:
-        if f.endswith(".md") and f != "README.md":
+        # ⚠️ 2026-10-09（段 3）：`specs/` 目录里**也有 `CLAUDE.md`**（那是该层的索引表）
+        #    ⇒ ⛔ 不排除它会**被当成一份 spec**（报成「spec 有、代码没了」的假阳性）。
+        if f.endswith(".md") and f not in ("README.md", "CLAUDE.md"):
             have[f[:-3]] = os.path.relpath(os.path.join(_r, f), REPO)
 # 🔴 防空跑：一份都扫不到 ⇒ 当场红（「扫不到」与「都没问题」在输出上一模一样）
 if not have:
