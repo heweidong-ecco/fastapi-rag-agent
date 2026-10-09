@@ -39,6 +39,12 @@ All notable changes to this project will be documented in this file.
 
   - ⬜ **未做**：段 2（44 份 spec 拆进 `api/<组>/specs/`）· 段 3（53 份目录级 `CLAUDE.md` 索引）·
     4 个 `.claude/hooks` 的判据。
+  - 🆕 **补 `spec-remind` 与 `route-auth-remind` 的自测**（`scripts/test_remind_hooks.sh` **10 → 22 条**）。
+    **实测结论**：**5 个 hook 在重构后的新结构下全部正确** —— ⚠️ 此前那句「部分失明」是
+    **读代码的推断，不是实测**（本仓有同型复盘）。真正的缺口是这两个 hook **从没有自测**
+    （「门必须能测出自己会红」`DEC-061`）。
+    🔴 **变异自证抓到一条假用例**：首版 6 条**拿掉 `api/` 前缀判据后全绿**
+    （被 `test_` / `.md` 两个旁支挡住）⇒ 已补 `T14c` 专测该判据，重跑变异即红。
 
 - 🔴 **首页每张卡加回「接口标注」那一行**（2026-10-09 · 业务方对回退后那一版的**逐条要求**）——
   他的原话：「**新版值得保留的是**：`POST /rag/stream_search（SSE 流式）`，**接口标注**，
