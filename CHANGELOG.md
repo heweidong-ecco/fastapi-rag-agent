@@ -761,6 +761,18 @@ All notable changes to this project will be documented in this file.
     细节进服务端日志，调用方拿到可读的失败原因。
   - ⚠️ **另 3 条判为假阳并 dismiss**（`executor_server.py:114` 是**容器内**服务、端口不映射；
     `sse.py:113` 只是转发点；`auth.py:17` 的 sha256 算的是 **128 位随机 API key** ⇒ 快哈希才对）。
+  - 🔴 **回查结果（2026-10-10 · `#129` + `#130` 合完之后）**：
+    `#2` / `#3`（`stack-trace-exposure`）⇒ ✅ **分析自动判 `fixed`**；
+    `#1`（`py/path-injection`）⇒ 🔴 **三轮都没撤**，最后**带理由 dismiss**。
+    ⚠️ **为什么撤不掉（实测，⛔ 别重复踩）**：`py/path-injection` **不认**本仓用的那几种净化 ——
+    ① `re.sub` 白名单 ② `os.path.basename` ③ `realpath` 守卫**都不认**；
+    它认的是 `werkzeug.utils.secure_filename` 那一类，而 **werkzeug 不在本仓依赖里**
+    （本仓是 FastAPI）⇒ ⛔ **不为一道静态检查给 demo 镜像加一个生产依赖**。
+    📌 **行为上的缺陷是真修好了**（反证：`user_name='a/../../evil'` 改前真写到 `tempdir` 之外、
+    改后不会）⇒ **防护在代码里，不在那个页面上**。
+    ✅ **最终全仓 open 告警 = 0**（3 条 `fixed` · 6 条 `dismissed`，每条 dismissal 都写了理由）。
+    ⚠️ **并发出一条通用教训**：`.github/workflows/codeql.yml` 的 `paths-ignore` **能阻止新告警**，
+    但**关不掉已存在的**（GitHub 对"不再被分析的文件"不判 `fixed`）⇒ 那两条只能另行 dismiss。
   - ⬜ **同族还有两处没被标到**（`api_v1_rag.py:1136` · `plan_execute.py:653/660/661`）——
     ⛔ **别把「没被标」读成「没问题」** ⇒ 登记 `docs/待办总表.md` **`N23`**（**未裁**）。
   - **判据**：`pytest` ⇒ **933 passed / 2 skipped** · 五道门 ⇒ 全 exit 0 ·

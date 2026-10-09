@@ -212,14 +212,22 @@ def export_cost_csv(user_name: str, days: int = 30) -> str:
     #         改了会影响已有的账号与用例）；
     #      ② **纵深防御**：拼完之后**再核一次真实落点**在不在 tempdir 之内。
     safe_user = re.sub(r"[^A-Za-z0-9_.-]", "_", user_name)
-    # 🔴 **`os.path.basename` 这一层是【必须】的，⛔ 别删** —— 它看着"多余"（上面已经把 `/`
-    #    换成 `_` 了，basename 天然是恒等），但：
-    #    ① **对 CodeQL 是必需的净化器**：`py/path-injection` 只在污点被**它认得的**净化器切断时
-    #       才撤告警。2026-10-10 实测：**只加 `re.sub` + 下面那层 realpath 守卫，告警【不撤】**
-    #       （`#1` 从 `:206` 挪到 `:223`，仍然指着 `open(filepath, …)`）。
-    #    ② **对人是纵深防御**：万一将来有人把上面那行白名单改没了，这一层仍然剥掉目录成分。
-    #    ⚠️ `werkzeug.utils.secure_filename` 也是 CodeQL 认的净化器，但 **werkzeug 不在本仓依赖里**
-    #       （本仓是 FastAPI，不是 Flask）⇒ ⛔ 不为一道静态检查给 demo 镜像加一个包。
+    # 🔴 **`os.path.basename` 这一层是【纵深防御】，⛔ 别删** —— 它看着"多余"
+    #    （上面已经把 `/` 换成 `_` 了，basename 天然恒等），但**万一将来有人把那行白名单删了**，
+    #    这一层仍然剥掉目录成分。
+    #
+    # 🔴 **⚠️ 更正（2026-10-10 实测，⛔ 别信旧注释）**：本行原先写着
+    #    「basename 是 **CodeQL 官方认的**路径净化器」—— **实测【不成立】**：
+    #    加了它之后重跑分析，`#1` **照旧 open**（行号从 `:223` 挪到 `:233`，仍指着 `open(filepath, …
+    #    ⇒ **`py/path-injection` 在这条路径上没被撤**。
+    #    同批实测：`re.sub` 白名单 + 下面那层 `realpath` 守卫，它**也不认**。
+    #    ⇒ **CodeQL 认的是 `werkzeug.utils.secure_filename` 那一类**，而 **werkzeug 不在本仓依赖里**
+    #      （本仓是 FastAPI）—— ⛔ **不为一道静态检查给 demo 镜像加一个生产依赖**
+    #      （同「ruff 不进 `requirements.txt`」那条理由）。
+    #    📌 **所以那条告警是【带理由 dismiss】的**，理由写在 GitHub 上：
+    #      「行为已修 + 反证过（`user_name='a/../../evil'` 改前真写到 tempdir 之外、改后不会）
+    #       + 三层防护都在 + 不引 werkzeug 是有意的」。
+    #    ⛔ **别看到 alert 被 dismiss 就以为这条路不用防** —— 防护在代码里，不在那个页面上。
     filename = os.path.basename(
         f"cost_report_{safe_user}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
     )
