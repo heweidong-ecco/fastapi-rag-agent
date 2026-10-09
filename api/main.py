@@ -5,28 +5,28 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from dotenv import load_dotenv
 
-from config import validate_config
-from logger_config import setup_logger  # ⚠️ 2026-09-20 删 `logger`（D1/pyflakes 报 redefinition）：:59 会 `logger = setup_logger()` 覆盖它，覆盖前从未使用
-from exceptions import AppException, ErrorCode
-from api_v1 import router as public_router
-from api_v1_rag import router as rag_router
-from api_v1_agent import router as agent_router
-from pending_approvals import warn_if_backend_mismatch   # `②` Task 2（B5）：启动自检，见 startup_event
-from db import create_table, init_pool, close_pool
-from auth import ensure_admin_exists
+from core.config import validate_config
+from core.logger_config import setup_logger  # ⚠️ 2026-09-20 删 `logger`（D1/pyflakes 报 redefinition）：:59 会 `logger = setup_logger()` 覆盖它，覆盖前从未使用
+from core.exceptions import AppException, ErrorCode
+from routing.api_v1 import router as public_router
+from routing.api_v1_rag import router as rag_router
+from routing.api_v1_agent import router as agent_router
+from agent.pending_approvals import warn_if_backend_mismatch   # `②` Task 2（B5）：启动自检，见 startup_event
+from core.db import create_table, init_pool, close_pool
+from access.auth import ensure_admin_exists
 
-from cache import redis_client
+from core.cache import redis_client
 # 新增 令牌桶 在 main.py 中集成限流中间件：
 # 新增 实现“全局 + 用户”两层令牌桶防护 全局限流器 用户级限流器，rate_limiter 已设置
 from starlette.middleware.base import BaseHTTPMiddleware
-from rate_limiter import global_limiter, user_limiter
+from access.rate_limiter import global_limiter, user_limiter
 # 新增  嵌入了 Prometheus 指标采集
-from metrics import track_request,REQUEST_IN_PROGRESS
+from core.metrics import track_request,REQUEST_IN_PROGRESS
 
-from metrics import  get_metrics
-from db import get_db
+from core.metrics import  get_metrics
+from core.db import get_db
 
-from cache import warmup_cache  # ← 新增这一行
+from core.cache import warmup_cache  # ← 新增这一行
 
 load_dotenv()
 # ==================== 应用初始化 ====================
@@ -161,7 +161,7 @@ def resolve_rate_limit_identity(x_api_key: str | None, auth_header: str | None) 
         #
         # ⚠️ 验不过时**降级到匿名桶，⛔ 不是拒绝** —— 因为**匿名还开着**，
         #    客户端本来就可以不带 key。拒绝会把匿名入口一起关掉，那是**另一个决定**（B9 仍挂着）。
-        from auth import verify_api_key
+        from access.auth import verify_api_key
 
         # 🔴 2026-10-05（`N9`）：**验不了**（库不可用）与**验不过**是两回事 —— 见 docstring。
         # ⚠️ **只捕 `AppException`**：`verify_api_key` 声称库不可用时抛的就是它。
@@ -178,7 +178,7 @@ def resolve_rate_limit_identity(x_api_key: str | None, auth_header: str | None) 
         if verified:
             return f"user:{verified}"
     if auth_header and auth_header.startswith("Bearer "):
-        from jwt_handler import verify_access_token
+        from access.jwt_handler import verify_access_token
         jwt_user = verify_access_token(auth_header[7:])
         if jwt_user:
             return f"user:{jwt_user}"
@@ -205,7 +205,7 @@ def resolve_quota_identity(x_api_key: str | None, auth_header: str | None) -> st
 
     # 方式一：从X-API-Key获取
     if x_api_key:
-        from auth import verify_api_key
+        from access.auth import verify_api_key
         # ⚠️ **只捕 `AppException`**（⛔ 不是 `except Exception`）——
         #    见 `resolve_rate_limit_identity` 里同一条注释。
         try:
@@ -219,7 +219,7 @@ def resolve_quota_identity(x_api_key: str | None, auth_header: str | None) -> st
     # 方式二：从Authorization头获取JWT（⚠️ 保留"API Key 验不过还会试 JWT"这个顺序，
     #         ⛔ 别改成验不过就直接返回 —— 那是行为变化）
     if not user_name and auth_header and auth_header.startswith("Bearer "):
-        from jwt_handler import verify_access_token
+        from access.jwt_handler import verify_access_token
         user_name = verify_access_token(auth_header[7:])
 
     return user_name
@@ -324,7 +324,7 @@ app.add_middleware(RateLimitMiddleware)
 #    ⇒ 直接撤会开一个「单用户跨会话无限花」的洞。所以撤旧的同时**就地**接上 token 口径 = `R1.3`。
 from datetime import datetime, timedelta
 
-from token_tracker import get_token_budget_info
+from billing.token_tracker import get_token_budget_info
 
 
 def _next_day_reset_ts() -> int:
@@ -424,7 +424,7 @@ class QuotaMiddleware(BaseHTTPMiddleware):
 app.add_middleware(QuotaMiddleware)
 
 # ==================== 自动规范化请求体中的文本字段中间件 ====================
-from document_preprocessor import DocumentPreprocessor
+from rag.document_preprocessor import DocumentPreprocessor
 import json
 preprocessor = DocumentPreprocessor()
 
@@ -732,7 +732,7 @@ async def readiness_check():
 
 # ==================== 应用启动时建表 ====================
 import asyncio
-from tool_health import run_health_check
+from tools.tool_health import run_health_check
 async def scheduled_health_check():
     """定时健康检查后台任务"""
     while True:
@@ -761,7 +761,7 @@ async def startup_event():
     #    （`Application startup failed. Exiting.`），比"MCP 挂了"本身更糟。
     #    ⇒ 这里起不来就**只记一条 warning**，首次真正调用时 actor 会自己重试。
     try:
-        from agent_graph_advanced import _get_actor
+        from agent.agent_graph_advanced import _get_actor
         await _get_actor()
         logger.info("MCP 长驻会话已就绪")
     except Exception as e:                      # noqa: BLE001
@@ -782,7 +782,7 @@ async def graceful_shutdown():
     # ⚠️ **⛔ 不调它也不会漏子进程**（loop 关时 holder task 会走到 finally，实测跑完全量无残留），
     #    但显式关能让"什么时候释放那 ~84 MB"是**可预期**的。
     try:
-        from agent_graph_advanced import aclose_mcp_session
+        from agent.agent_graph_advanced import aclose_mcp_session
         await aclose_mcp_session()
         logger.info("MCP 长驻会话已关闭")
     except Exception as e:                      # noqa: BLE001
@@ -834,7 +834,7 @@ app.mount("/static", StaticFiles(directory=static_dir), name="static")
 #    门关时该重绑定**不发生** ⇒ **`/dashboard` 路由不存在**、且 `len(app.routes)` 会**变小**。
 #    这是"关掉面板"的应有语义；默认分支（门开）与改动前**逐位一致**。
 if os.getenv("ENABLE_DASHBOARD", "true") == "true":
-    from cost_dashboard import create_dashboard
+    from billing.cost_dashboard import create_dashboard
     import gradio as gr
     # 访问面板 启动服务后，浏览器打开 http://localhost:8000/dashboard。
     dashboard = create_dashboard()

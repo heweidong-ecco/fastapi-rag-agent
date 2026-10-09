@@ -186,7 +186,9 @@ jobs:
           python - <<'PY'
           import os, socket, sys
           sys.path.insert(0, "api")
-          import config
+          # 🔴 2026-10-09（模块化重构）：`config` 已挪进 `api/core/` ⇒ 裸名 `import config`
+          #    会 `ModuleNotFoundError`（**本门自己抓到过一次** —— 见 ci-local 的报错）。
+          import core.config as config
           print(f"[ci-config] LLM_MODEL_FAST = {config.LLM_MODEL_FAST}")
           print(f"[ci-config] LLM_MODEL_CHAT = {config.LLM_MODEL_CHAT}")
           print(f"[ci-config] .env 存在吗    = {os.path.exists('.env')}")

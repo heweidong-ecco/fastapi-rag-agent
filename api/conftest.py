@@ -20,7 +20,7 @@ os.environ.setdefault("GRADIO_ANALYTICS_ENABLED", "False")
 import pytest
 from fastapi.testclient import TestClient
 from main import app
-from config import LOGIN_USER_NAME, LOGIN_PASSWORD
+from core.config import LOGIN_USER_NAME, LOGIN_PASSWORD
 
 
 class FakeRedis:
@@ -61,7 +61,7 @@ class FakeRedis:
         """
         import json
 
-        from session_key import session_key
+        from access.session_key import session_key
         return [
             json.loads(x)
             for x in self.lists.get(f"chat_history:{session_key(user_name, thread_id)}", [])

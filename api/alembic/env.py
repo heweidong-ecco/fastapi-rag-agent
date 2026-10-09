@@ -10,7 +10,7 @@ import sys
 
 # 将 api 目录加入 Python 路径，以便导入 config 模块
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from config import POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_HOST, POSTGRES_PORT, POSTGRES_DB
+from core.config import POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_HOST, POSTGRES_PORT, POSTGRES_DB
 
 # 构造数据库 URL
 DB_URL = f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
@@ -36,7 +36,7 @@ if config.config_file_name is not None:
 # for 'autogenerate' support
 # from myapp import mymodel
 # target_metadata = mymodel.Base.metadata
-from db_metadata import metadata
+from core.db_metadata import metadata
 target_metadata = metadata
 
 # other values from the config, defined by the needs of env.py,

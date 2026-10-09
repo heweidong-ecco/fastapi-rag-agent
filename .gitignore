@@ -73,3 +73,9 @@ demo/设置与命令/
 #   🔴 要留的是【结论】—— 配色/圆角/间距 token 与方向 ⇒ `frontend/README.md`（与「探针只留结论」同理）
 #   ⚠️ 业务方给的那份稿仍然是他给的，只是留结论不留原件。
 frontend/*.fig
+
+# 🔴 2026-10-09：上面那条 `tmp/` **没有前导斜杠** ⇒ 它匹配**任意层级**的 `tmp/`
+#    ⇒ 会连带把 `.claude/agents/tmp/`（subagent 退役归档）一起排除。
+#    而那份归档**必须入库**（`subagent-lifecycle.md` §5 的落点；不入库 = 换台机器就没了）。
+#    ⇒ 反向加回来。⚠️ 下面这条**必须放在 `tmp/` 之后**（.gitignore 后写的规则优先）。
+!.claude/agents/tmp/

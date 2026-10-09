@@ -10,6 +10,34 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- 🔴 **`api/` 模块化：60 个平铺的产品模块拆成 7 个模块组 + `eval/` + 94 个测试进 `tests/`**
+  （2026-10-09 · 业务方口述 · 裁定见 `docs/decisions/DEC-125`）。
+  **⛔ 只动位置与导入，不改行为** —— **判据**：`pytest` **913 passed / 2 skipped**（基线 909/2）·
+  `bash scripts/ci-local.sh` **退出码 0**（含 155 条 node 前端测试）。
+  - **新结构**：`core`(8) · `routing`(7) · `access`(5) · `billing`(4) · `agent`(9) · `rag`(10) ·
+    `tools`(13) · `eval`(5) · `tests`(94)；`api/` 根**只留 `main.py` 与 `conftest.py`**
+    （⭐ 后者一留，`api/` 就在 `sys.path` 上 ⇒ 测试仍可用裸导入）。
+  - **154 个 `.py` 全部走 `git mv`**（保历史，git 认到 168 个 rename）；
+    **导入改写 537 处 / 115 个文件**，用**绝对写法**（根 = `api/`）——
+    ⛔ 不用相对写法（脚本直跑会失败）、⛔ 不用 `api.` 前缀（容器里 `/app` 就是 `api/`，**线上必 ImportError**）。
+  - 🔴 **修掉 6 类「静默坏」**（这类**不报错、只出错**，逐条见 `DEC-125 §四`）：  
+    ① **10 个测试用 `glob("*.py")` 扫 `api/`** ⇒ 挪走后**扫到 0 个文件**，而**空集合断言恒为真**
+    ⇒ 改 `_product_py()` 递归 + **防空跑断言**（其中一个测试自带的防空跑用例**当场就红了** ✅）  
+    ② `mcp_server.py` **被当脚本跑** ⇒ `sys.path[0]` 是 `api/tools/` ⇒ 加 sys.path 引导  
+    ③ `config.py` 的 `.env` 推算 ④ `logger_config` 的 `logs/` · `browser_tools` 的 `screenshots/`
+    ⇒ 各上溯一层（不改会**静默写错目录**）  
+    ⑤ `__import__("agent.agent_graph")` 返回**顶层包** ⇒ 改 `importlib.import_module`  
+    ⑥ `agent_graph_advanced` 用 `with_name("mcp_server.py")` 找同目录 ⇒ 改显式路径
+  - **连带改的**（判据绑在路径上的）：`pytest.ini` 加 `pythonpath` ·
+    `scripts/spec_status.sh` **改递归 + 防空跑 + 白名单自检复用扫描结果** ·
+    `ci.yml` 内联 `import config` → `import core.config`（**这道门自己抓到的**）·
+    `frontend/索引.md` 清单 28 处（**索引同步门抓到的**）·
+    `.gitignore` 加 `!.claude/agents/tmp/`（上面那条 `tmp/` 匹配任意层级，**会把归档一起排除**）
+  - **顺带**：新增 `.claude/agents/subagent-lifecycle.md`（subagent 生命周期与授权规范，英文）+
+    `subagent-lifecycle.md` 的退役归档索引；`tag.md` 加取代标记（原文保留不删）。
+  - ⬜ **未做**：段 2（44 份 spec 拆进 `api/<组>/specs/`）· 段 3（53 份目录级 `CLAUDE.md` 索引）·
+    4 个 `.claude/hooks` 的判据。
+
 - 🔴 **首页每张卡加回「接口标注」那一行**（2026-10-09 · 业务方对回退后那一版的**逐条要求**）——
   他的原话：「**新版值得保留的是**：`POST /rag/stream_search（SSE 流式）`，**接口标注**，
   **字体要再缩小，太大了**」＋「**分组小标题多余**」＋「**标题太口语了**……**用原来的**」。

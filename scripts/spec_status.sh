@@ -76,19 +76,39 @@ NON_MODULE_FILES = {
 }
 
 # ── 1. 扫模块 ──
+# 🔴 2026-10-09（模块化重构）：模块已按组收进 `api/<组>/`（core · routing · access ·
+#    billing · agent · rag · tools），另加 `api/eval/` 与 `api/tests/`。
+#    ⚠️ 原先那句 `os.listdir(api)` **只看一层** ⇒ 重构后只能看到
+#       `main.py` / `conftest.py` / `preprocess.py` —— **那 60 个模块一个都扫不到**。
+#       而本脚本的输出形态是「🔴 缺失 N 个 / ✅ 全部有」⇒ **扫到 0 个会打印成"没什么可报的"**，
+#       与"确实都没问题"**长得一样**（本仓原话：「**空跑 = 静默假通过**」）。
+#    ⇒ 改成**递归**，并排掉【不是产品模块】的目录：
+#       `tests/`（测试）· `specs/`（不是 .py）· `static/`（前端资源）·
+#       `alembic/`（迁移脚本，重构前就扫不到）· 缓存目录
+_API_SKIP_DIRS = {"tests", "specs", "static", "alembic", "__pycache__",
+                  "logs", ".pytest_cache", ".ruff_cache"}
+
 mods = []
 nonmods = []
-for f in sorted(os.listdir(os.path.join(REPO, "api"))):
-    if not f.endswith(".py"):
-        continue
-    if f.startswith("test_") or f == "conftest.py":
-        continue
-    p = os.path.join("api", f)
-    n = sum(1 for _ in io.open(os.path.join(REPO, p), encoding="utf-8", errors="ignore"))
-    if f[:-3] in NON_MODULE_FILES:
-        nonmods.append((f[:-3], p, n))
-        continue
-    mods.append((f[:-3], p, n))
+for _root, _dirs, _files in os.walk(os.path.join(REPO, "api")):
+    _dirs[:] = sorted(d for d in _dirs if d not in _API_SKIP_DIRS)
+    for f in sorted(_files):
+        if not f.endswith(".py"):
+            continue
+        if f.startswith("test_") or f == "conftest.py":
+            continue
+        p = os.path.relpath(os.path.join(_root, f), REPO)
+        n = sum(1 for _ in io.open(os.path.join(REPO, p), encoding="utf-8", errors="ignore"))
+        if f[:-3] in NON_MODULE_FILES:
+            nonmods.append((f[:-3], p, n))
+            continue
+        mods.append((f[:-3], p, n))
+
+# 🔴 防空跑：递归口径再坏一次的话，这里当场红，⛔ 不许静默变成"没什么可报的"。
+if len(mods) < 40:
+    print(f"🔴 防空跑：只扫到 {len(mods)} 个产品模块（预期 ≥ 40）—— 枚举口径坏了，"
+          f"⛔ 下面的对账结论**不可信**。")
+    raise SystemExit(2)
 
 # ── 2. 扫 spec ──
 have = {}
@@ -122,8 +142,12 @@ ok      = [(m, p, n) for m, p, n in mods if m in have]
 # ⇒ 两条**机械可判**的自检（**都不拦**，只报 —— 本脚本按设计不拦任何东西）：
 #    ① 表里的名字**必须还在** `api/` 下（文件没了 ⇒ 白名单烂了）
 #    ② 表里的名字**不许有 spec**（有 ⇒ 有人给了它"模块"待遇，两边口径打架）
-nonmod_gone     = [k for k in NON_MODULE_FILES
-                   if not os.path.exists(os.path.join(REPO, "api", k + ".py"))]
+# ⚠️ 2026-10-09：原先按 `api/<名>.py` **一层**判"文件还在不在" ⇒ 重构后
+#    那 3 个脚本全挪了位置（`plan_constraints` → `agent/`、`evaluate_with_ragas` → `eval/`）
+#    ⇒ 一律被误报成"白名单过期"。改成**拿上面那次递归扫描的结果反查**，
+#    ⛔ 不再自己拼路径（拼一次就多一个会漂的口径）。
+_found_nonmod = {k for k, _, _ in nonmods}
+nonmod_gone     = [k for k in NON_MODULE_FILES if k not in _found_nonmod]
 nonmod_conflict = [k for k in NON_MODULE_FILES if k in have]
 
 def spec_status(name):
