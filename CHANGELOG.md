@@ -10,6 +10,58 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- 🔴 **依赖就地【钉死】：`>=` 43 行 ⇒ `==` 40 行**（2026-10-09 · `SECURITY.md` §3.3 / §3.5）——
+  业务方：「**文档中所有要修复和漏洞，能修的全部处理好**」。原先 `app/requirements.txt`
+  **46 个包行【全是 `>=` 或裸名】** ⇒ **每次 build 可能拉到不同版本**。
+  做法：**取本机 venv 的实测版本就地钉**，⛔ **不新增约束文件**
+  （`DEC-034` 裁的是「**不另建**约束文件」，**在原地钉不冲突**）。
+  - ⚠️ **仍 `>=` 的 6 个**（`sentence-transformers` · `transformers` · `ragas` · `opencv-python` ·
+    `datasets` · `camelot-py[cv]`）：**不在本机 venv 里**（构建期被 `app/Dockerfile` 裁掉）
+    ⇒ **取不到实测版本，钉了就是编一个数**。
+  - 🔴 **另有 3 个是【完全无约束】的裸名**（`langgraph-checkpoint` · `langgraph-checkpoint-sqlite` ·
+    `matplotlib`）—— **比 `>=` 更松**（**连下界都没有**）。⚠️ **第一轮漏了它们**；
+    复查时发现三者**都装在本机 venv 里**（3.0.1 / 3.0.3 / 3.10.9）⇒ ⛔ 不属于
+    「取不到实测版本」那一类 ⇒ **已一并钉死**。
+  - 🔴 **更正本批自己写歪过的一条判据**：原先记「**38 行 `==`**」—— 实测**包行只有 37 行**，
+    第 38 个命中是**那条判据注释行自己**（它含 `==`）。同型第二处：判据写「`grep -c '>='` ⇒ **6**」，
+    实测 **49**（钉死行的行尾注释里都写着原来的 `>=`）。
+    ⚠️ **这正是本仓记过多次的「判据写歪了不报错」** —— 命令跑得通，**但数的是另一个量**。
+  - **判据**（⚠️ **两条都必须排除 `#` 之后的注释**）：
+    `grep -cE '^[A-Za-z][^#]*==' app/requirements.txt` ⇒ **40** ·
+    `grep -cE '^[A-Za-z][^#]*>=' app/requirements.txt` ⇒ **6** ·
+    `grep -nE '^[A-Za-z].*==\s*(#|$)' app/requirements.txt` ⇒ **空**（无空版本行）。
+
+- 🔴 **安全收尾 D / E / F / H**（2026-10-09 · 业务方逐条裁「**A1 B1 不要C 要F 做DEH**」）——
+  - **D · CodeQL**（SAST）⇒ 🆕 `.github/workflows/codeql.yml`。
+    ⚠️ **只在 GitHub 上跑** —— ⛔ **不进 `ci-local`**（本机没装）。
+  - **E · gitleaks** ⇒ `ci.yml` 新 job `secrets-history`，**扫全历史** —— 补上凭据门
+    「**只扫 staged 新增行**」那个缺口。⛔ **特意没塞进 pytest 那块 `run`**
+    （塞进去 `ci-local` 会逐字执行它 ⇒ **本机恒红**）。
+  - **F · 威胁模型** ⇒ 🆕 `docs/威胁模型.md`（一页简版：资产 / 信任边界 / 攻击者 /
+    **已接受的残余风险**）。
+  - **H · Grafana 口令** ⇒ `docker-compose.yml` 改成 `${GRAFANA_ADMIN_PASSWORD:-admin}`，
+    ⛔ **不再写死 `admin`**。⚠️ **上公网前必须在 `.env` 里设真口令**
+    （回落到 `admin` 只是本地开发够用）。
+  - ⛔ **不装 Dependabot** —— 它会**自动开 PR**，与本仓「**PR 别频繁开**」正面冲突。
+  - **判据**：`docker compose config >/dev/null` · `scripts/check_ci_job_timeouts.py`
+    （每个 job 都带 timeout）· `check_doc_links.sh` / `check_doc_orphans.sh` ⇒ `exit 0`。
+
+- 🆕 **本地依赖漏洞扫描 `scripts/check_dep_vulns.sh`**（2026-10-09 · ⛔ **不依赖 GitHub**）——
+  用 **`pip-audit`**（开源 CLI，**本机跑**）。⛔ **不用 Dependabot**
+  （它会自动开 PR，与本仓「PR 别频繁开」冲突）。
+  ✅ **带 `--self-test`**（拿一个已知有 CVE 的包当夹具，**证明它真会红**）；
+  ✅ **三态**：`0` 过 / `1` 有漏洞 / **`2` = 没跑（⛔ 不算通过）**。
+  🔴 **它扫出 21 条已知漏洞 / 9 个包** ⇒ 新立 `SECURITY.md` **§3.4**（⛔ **未修**，排单独一轮）。
+  ⚠️ **这个数会自己变** —— 当天早先扫出的是 **16 条 / 7 个包**，晚间复扫**长到 21 / 9**
+  （新增 `langchain` 与 `langchain-core`，**两个都是 0.3 → 1.x 的大版本跳**）。
+  同脚本、同文件、同正则 ⇒ 差异只能来自 **advisory 库**（`pip-audit` **每次联网取**）
+  ⇒ ⛔ **引用之前先跑一遍，别抄文档里的数**。
+  ⚠️ **顺带查实**：`pip-audit` ⛔ **不能**直接扫全量 `requirements.txt` ——
+  `transformers` 与 `gradio` 在**全新解析**下冲突（`ResolutionImpossible`），而那是**既有状况**
+  （venv 里从没同时装过）⇒ 脚本改扫**过滤后**那份（**与 `ci.yml` / `Dockerfile` 同一套正则**）。
+  - **判据**：`bash scripts/check_dep_vulns.sh --self-test` ⇒ ✅ **证明它真会红** ·
+    `bash scripts/check_dep_vulns.sh` ⇒ **退出码 1 + 21 条**（⛔ 这是**待修状态**，不是脚本坏了）。
+
 - ✅ **收掉 3 个暴露到局域网的端口**（2026-10-09 · `SECURITY.md` §3.2）——
   `docker-compose.yml` 的 **`8000`（API）/ `9090`（Prometheus）/ `3000`（Grafana）**
   从 `"0.0.0.0"` 改成 **`127.0.0.1`**（**与 PG/Redis 同一手法**）。
@@ -560,6 +612,21 @@ All notable changes to this project will be documented in this file.
   📄 `docs/说明/语料重建-开工页.md` · `docs/说明/语料要求.md`
 
 ### Fixed
+
+- 🔴 **匿名绕过配额【已修】**（2026-10-09 · 业务方裁「**A1**」· `SECURITY.md` §3.1）——
+  🔴 **落 A1 = 推翻一条写在代码里的【有意设计】**：`resolve_quota_identity` 的 docstring 原写着
+  「**它与限流那条【故意不同】，⛔ 别顺手『统一』**」。改法是**把两件事分开**（照限流那条的做法）：
+  - **`"anonymous"` = 判了，就是匿名** ⇒ **进配额**（`get_user_role("anonymous")` ⇒ **FREE 最低档**）；
+  - **`None` = 判不了**（库挂了）⇒ 中间件据此**只跳过本次**。
+  改了三处（⛔ **少一处这个修法就是假的**）：
+  ① `resolve_quota_identity` 真匿名返回 `"anonymous"`（原为 `None`）·
+  ② `QuotaMiddleware` 的 `if not user_name` ⇒ **`if user_name is None`**
+  （⚠️ **写成 `not` 会把匿名又放过去 ⇒ 等于没修**）·
+  ③ **删掉**那句 docstring —— 把理由与被推翻的东西**一起写进注释**。
+  ⚠️ **两条既有用例【故意编码了旧行为】⇒ 已按新行为改写**（⛔ **不是删掉让门变绿**），
+  并新增**反向守卫**（谁把它改回 `None` 就红）。
+  - **判据**：`./venv/bin/python -m pytest app/ -m "not integration and not needs_db" -q`
+    ⇒ **913 passed / 2 skipped**。
 
 - 🔴 **语料去重【加强】—— 原那套是「三重不可用」；新增跨文档检查器**（2026-10-08 · `DEC-118`）——
   **业务方原话**：「**去重这块，有脚本，但是不一定好，不一定完整，需要加强，如果没有就新增完整的去重脚本。**」

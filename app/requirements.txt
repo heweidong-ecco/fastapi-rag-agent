@@ -1,10 +1,19 @@
 # 🔴 2026-10-09（安全收口 · SECURITY.md §3.5）：**版本改为【就地钉死】**
 #    原先是全部 `>=` ⇒ 每次 build 可能拉到不同版本。
 #    ⚠️ ⛔ 没有新增约束文件 —— DEC-034 裁的是「不另建约束文件」，这里是**在原地钉**，不冲突。
-#    ⬜ 下面这 5 个【故意仍是 >=】：它们**不在本机 venv 里**（构建期被裁，见 app/Dockerfile）
+#    ⬜ 下面这 6 个【故意仍是 >=】：它们**不在本机 venv 里**（构建期被裁，见 app/Dockerfile）
 #       ⇒ 本机取不到实测版本 ⇒ 钉了就是**编一个数**：
 #       sentence-transformers · transformers · ragas · opencv-python · datasets · camelot-py[cv]
-#    📌 判据：grep -c '==' app/requirements.txt ⇒ 38 · grep -c '>=' app/requirements.txt ⇒ 6
+#    📌 判据（⚠️ **两条都得排除 `#` 之后的注释** ——
+#       钉死行的行尾注释里都写着原来的 `>=`，而**本段注释自己**也在演示这两个符号
+#       ⇒ 不排除注释的 `grep -c '=='` / `grep -c '>='` 数出来的是**假数**，
+#       且**那个假数还随本段文字自己变化** ⇒ ⛔ 别把裸 `grep -c` 当判据）：
+#         grep -cE '^[A-Za-z][^#]*==' app/requirements.txt   ⇒ 40
+#         grep -cE '^[A-Za-z][^#]*>=' app/requirements.txt   ⇒ 6
+#         grep -nE '^[A-Za-z].*==\s*(#|$)' app/requirements.txt ⇒ 空（**无空版本行**）
+#    ✅ **另有 3 个原先【完全无约束】的裸名**（`langgraph-checkpoint` / `langgraph-checkpoint-sqlite` /
+#       `matplotlib`）—— **本次一并钉死**（它们装在本机 venv 里，取得到实测版本）。
+#       ⇒ 现在 **46 个包行 = 40 个 `==` + 6 个 `>=` + 0 个裸名**。
 #
 # Web 框架与服务器
 fastapi==0.141.1    # ← 2026-10-09 钉死（原 fastapi>=0.115.0 · SECURITY.md §3.5）
@@ -87,13 +96,13 @@ python-multipart==0.0.32    # ← 2026-10-09 钉死（原 python-multipart>=0.0.
 # Agent langGraph
 # 注：langgraph 与 langchain-core 已在上方「大模型与 AI 框架」段声明**带约束**的版本，
 #     此处原先又裸名重复了一次（无约束）。重复条目会掩盖版本漂移，已删除。
-langgraph-checkpoint
-langgraph-checkpoint-sqlite
+langgraph-checkpoint==3.0.1    # ← 2026-10-09 钉死（原为**裸名 · 完全无约束** · SECURITY.md §3.5）
+langgraph-checkpoint-sqlite==3.0.3    # ← 2026-10-09 钉死（同上）
 # mem0 2.x 起 Memory.__init__ 不再接受 dict，代码使用 Memory.from_config(dict)，需 >=2.0
 mem0ai==2.0.20    # ← 2026-10-09 钉死（原 mem0ai>=2.0.0 · SECURITY.md §3.5）
 
 # Gradio
-matplotlib
+matplotlib==3.10.9    # ← 2026-10-09 钉死（原为**裸名 · 完全无约束** · SECURITY.md §3.5）
 # 工具
 playwright==1.62.0    # ← 2026-10-09 钉死（原 playwright>=1.48.0 · SECURITY.md §3.5）
 
