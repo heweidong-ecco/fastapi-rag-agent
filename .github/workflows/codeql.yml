@@ -1,0 +1,40 @@
+# CodeQL —— SAST（业务方 2026-10-09 裁「**做 D**」）
+#
+# ⚠️ **为什么加它**：`SECURITY.md` §五 原先写着「**SAST：无**」。
+#    它是 GitHub 自带的静态分析，**只扫描、⛔ 不开 PR** ⇒ 与「**PR 别频繁开**」不冲突。
+#
+# ⚠️ **它跑在 GitHub 的 runner 上**（本机不跑）⇒ ⛔ 不影响 `scripts/ci-local.sh` 的"CI 等价"。
+# ⚠️ 本仓是 PUBLIC 仓 ⇒ **CodeQL 免费**。
+#
+# 📌 判据：仓库的 Security 页出现 CodeQL 的分析结果；Actions 里有一个叫 `CodeQL` 的 workflow。
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # ⚠️ 每周跑一次 —— 依赖/规则集会变，只跑 PR 会漏掉"没改代码但规则变了"
+    - cron: '23 3 * * 1'   # 周一 03:23 UTC（避开整点，同本仓既有习惯）
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: 分析（python）
+    runs-on: ubuntu-latest
+    # 🔴 本仓纪律：**每个 job 必须带 `timeout-minutes`**（`scripts/check_ci_job_timeouts.py` 会核）
+    timeout-minutes: 20
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: python
+      - uses: github/codeql-action/analyze@v3
