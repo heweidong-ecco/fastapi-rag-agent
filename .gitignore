@@ -8,7 +8,7 @@ venv/
 #   `ragas` 无论装 0.1.x 还是 0.4.x，都会把产品 venv 弄坏（实测 --dry-run）：
 #     0.4.3    ⇒ openai 1.109.1 → 2.54.0（主版本跳跃）
 #     0.1.21   ⇒ langchain 0.3.30 → 0.2.17、langchain-core → 0.2.43（降级）
-#   而 `api/evaluate_with_ragas.py` **不 import 任何本仓模块**（纯 HTTP + 第三方）
+#   而 `app/eval/evaluate_with_ragas.py` **不 import 任何本仓模块**（纯 HTTP + 第三方）
 #   ⇒ 可以完全隔离。见 DEC-031。
 venv-ragas/
 __pycache__/

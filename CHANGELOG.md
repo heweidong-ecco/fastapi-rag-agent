@@ -10,6 +10,29 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- 🔴 **容器目录改名：`api/` → `app/`**（2026-10-09 · 业务方口述 · 裁定见 `docs/decisions/DEC-126`）。
+  **纯改名，⛔ 不改包语义、⛔ 不改 Docker 语义、⛔ 不改行为** ——
+  **判据**：`pytest` **913 passed / 2 skipped** · `bash scripts/ci-local.sh` **退出码 0** ·
+  6 道门全绿 · `docker compose config` 通过。
+  - **为什么**：`api/` **名不副实** —— 它装的是**整个应用**（`agent/` `rag/` `tools/` `billing/`），
+    不只是 API。改名后 **`from routing.api_v1 import X` 这类导入一个字都没动**
+    （`app/` 仍当容器 = `sys.path` 根，⛔ 不是包）。
+  - ⛔ **否决了「做成 `app.` 包」**：那要多付 **510 处导入改写 + Docker 构建上下文改到仓根 +
+    新建仓根 `.dockerignore`（否则 927 M 的 `venv/` 进 daemon）+ 一次 15–20 分钟 build 验证**，
+    而它换来的**不是**上面那个缺陷的修复。
+  - ⛔ **也没有**把 `routing/` 改成 `api/`（业务方原话里有这一条）——
+    **今天 `routing/` 与 URL `/api/v1/` 并不撞名**；改成 `api/` 反而会**制造**歧义
+    （`app/api/api_v1.py` 会被导入成 `api.api_v1`）。
+  - **改动面**：**196 个文件 `git mv`** · **105 个文件的路径引用**
+    （`docker-compose.yml` 的 `context:` ×2 · `dev.sh` · `ci.yml` · `scripts/` · **3 个 hook** ·
+    `frontend/索引.md` 清单 · 文档 prose）。**导入 0 处改写。**
+  - ⚠️ **过程中的两处自伤（已修）**：① `agent_graph_advanced.py` / `test_agent_repairs.py` 那两条
+    **反例注释**被逐字替换后**整段失去意义**（原意是"写相对路径会变成 `api/api/…`"）⇒ 整句重写；
+    ② 首轮脚本的扩展名白名单漏了 `.txt` / `.sql` / `.Dockerfile` ⇒ 那几处漏改，已补。
+  - ⚠️ **遗留**：`CHANGELOG` / `docs/复盘` / `docs/decisions`（除本两份）里的旧路径
+    **⛔ 有意不改**（本仓立场：原始记录不改写）。断链门**只查 `.md` 目标**，`.py` 路径不在它射程内。
+  - 📌 **段 2 / 段 3 的落点自此为 `app/<组>/specs/` 与 `app/…`**。
+
 - 🔴 **`api/` 模块化：60 个平铺的产品模块拆成 7 个模块组 + `eval/` + 94 个测试进 `tests/`**
   （2026-10-09 · 业务方口述 · 裁定见 `docs/decisions/DEC-125`）。
   **⛔ 只动位置与导入，不改行为** —— **判据**：`pytest` **913 passed / 2 skipped**（基线 909/2）·

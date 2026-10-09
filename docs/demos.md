@@ -28,7 +28,7 @@
 ```bash
 cd ~/Desktop/Product/agent-projects/projects/fastapi-rag-agent
 docker compose up -d postgres redis          # 只起 DB/Redis
-cd api && ENABLE_DASHBOARD=false ../venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
+cd app && ENABLE_DASHBOARD=false ../venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
 curl -s localhost:8000/health
 # ⇒ {"status":"healthy","checks":{"database":"ok","redis":"ok","embedding_api":"deferred to external monitoring"}}
 ```

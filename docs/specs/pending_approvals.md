@@ -1,4 +1,4 @@
-# `api/pending_approvals.py`
+# `app/agent/pending_approvals.py`
 
 | 项 | 内容 |
 |---|---|
@@ -24,7 +24,7 @@
 - ⚠️ **只在内存** ⇒ **进程重启即清空**（v1 有意如此，见下）
 - ⬜ **没有分页 / 过滤** —— `list_pending()` 一次返回全部。⚠️ 队列长起来会一次性打给调用方
   · 🔴 **2026-10-06 说明（`DEC-088` 缺口③）**：端点 `GET /agent/pending` 的**可见性**已收窄为
-    **本人默认 · admin 全量**，但 ⚠️ **那两行过滤写在【端点里】（`api/api_v1_agent.py`），
+    **本人默认 · admin 全量**，但 ⚠️ **那两行过滤写在【端点里】（`app/routing/api_v1_agent.py`），
     ⛔ 本模块一行都没改** —— `list_pending()` 仍然**返回全部**。
     ⇒ **别以为"收窄了"就轮到本模块了**：在这里加过滤**等于把授权逻辑搬进数据层**，
     而本模块**没有**、也**拿不到** `user_name`（它只按调用方给的键找）。
@@ -33,15 +33,15 @@
   ⚠️ **轮次上限（`rounds`）不等于超时清理** —— 它只封"**同一个人反复批**"这一条路；
      登记后**根本没人批**的会话，照样**永久留队**。两件事，别混。
 - ➡️ **`B6`（接管后续跑）已做**（`②` Task 3 · 2026-10-03）—— ⚠️ **但续跑逻辑不在本模块里**，
-  在 `api/api_v1_agent.py` 的 `approve_agent_action`（见 `docs/specs/api_v1_agent.md`）。
+  在 `app/routing/api_v1_agent.py` 的 `approve_agent_action`（见 `docs/specs/api_v1_agent.md`）。
   **本模块只负责"谁停了 / 是谁的 / 停在哪张图"**，⛔ 不碰"批了之后图怎么接着跑"。
 - 🔴 **队列【也】按身份分桶了**（丙段）：键 = `session_key(user_name, thread_id)`。
   ⚠️ 改动前它和 checkpoint 一样按**裸 `thread_id`** 记账 ⇒ 两个人用同一个 `thread_id`
   时，**队列里也串号** —— `/agent/approve` 会拿着**别人的**键去续跑。
-- ✅ **有测试**：`api/test_pending_approvals.py`（7 条 · **纯离线** ⇒ 进 CI）
-  · 🆕 丙段另有 `api/test_approve_ownership.py`（归属校验 · 歧义拒绝）
-  · `api/test_memory_chat_approval.py`（图名登记 + `/agent/approve` 按图路由）
-  · 🆕 **轮次上限**：`api/test_approval_resume.py` §⑥（4 条：首次 = 1 · 每次 +1 · 触顶强制收尾 · 收尾不住则 error 且不入队）
+- ✅ **有测试**：`app/tests/test_pending_approvals.py`（7 条 · **纯离线** ⇒ 进 CI）
+  · 🆕 丙段另有 `app/tests/test_approve_ownership.py`（归属校验 · 歧义拒绝）
+  · `app/tests/test_memory_chat_approval.py`（图名登记 + `/agent/approve` 按图路由）
+  · 🆕 **轮次上限**：`app/tests/test_approval_resume.py` §⑥（4 条：首次 = 1 · 每次 +1 · 触顶强制收尾 · 收尾不住则 error 且不入队）
 
 ## ⚠️ 看代码会误判的地方 ⭐
 
@@ -54,13 +54,13 @@
 | ⚠️ **「`list_pending` 随便什么顺序都行」** | ⛔ **有契约**：**按 `since` 升序 = 卡得最久的排最前**（最该先处理）。⚠️ 排错了**不会报错**，只会让人**从最不紧急的那条开始处理** |
 | ⚠️ **「返回的 dict 可以随便改」** | ⚠️ **浅拷贝** —— 改**顶层字段**不影响注册表，但 **`tool_calls` 那个 list 是共享的**，⛔ 别去改 |
 | ⚠️ **「`clear()` 是个重置接口」** | ⛔ **不是** —— **仅供测试隔离**。**生产代码里零调用点** |
-| 🔴 **「`/agent/approve` 按【调用方】拼键就行」** | ⛔ **不行** —— `/agent/pending` 是**跨用户队列**（硬门 D）：按调用方拼 ⇒ admin 会拼出 `admin:…`、属主是 `alice:…` ⇒ **admin 永远批不了别人的**。⇒ 必须**先 `find_by_raw_thread_id()` 查属主、再按属主拼**。🔴 **这条是 2026-10-03 的裁定**（业务方），守卫 ⇒ `api/test_approve_ownership.py` |
+| 🔴 **「`/agent/approve` 按【调用方】拼键就行」** | ⛔ **不行** —— `/agent/pending` 是**跨用户队列**（硬门 D）：按调用方拼 ⇒ admin 会拼出 `admin:…`、属主是 `alice:…` ⇒ **admin 永远批不了别人的**。⇒ 必须**先 `find_by_raw_thread_id()` 查属主、再按属主拼**。🔴 **这条是 2026-10-03 的裁定**（业务方），守卫 ⇒ `app/tests/test_approve_ownership.py` |
 | 🔴 **「`thread_id` 字段 = 调用方传的原值」** | ⛔ **不是** —— 它是**拼过的会话键**（`11:isolation_a:default` 这种）。**原值**在 **`raw_thread_id`** 里（丙段新增）。⚠️ 拿错一个，`approve` 就会去一个**不存在的桶**里找，然后答"没有待审批任务"（**不报错**） |
 | 🔴 **「`graph` 字段可以省，反正只有一张图」** | ⛔ **有两张**：`/agent/langgraph_chat` 走 `agent_graph`、`/agent/memory_chat` 走 **`checkpointer_agent`**（丙段给它加了审批门）。`/agent/approve` **按这个字段路由** ⇒ 写错/不写 ⇒ 会话**永远放行不了**。⚠️ 默认值 `"agent_graph"` 只是兼容老调用点 |
 | ⚠️ **「一个原 `thread_id` 只会有一条登记」** | ⚠️ **不保证** —— 两个人用同一个 `thread_id="default"` 就**有两条**。`find_by_raw_thread_id()` 因此返回 **list**；`/agent/approve` 遇到多条会**如实拒绝**（⛔ 不"挑第一条" —— 那是随机批一个人的会话） |
 | 🔴 **「`rounds` 只是个展示字段」** | ⛔ **不是** —— 它是**封顶的依据**（`DEC-062 §六·2`）：`/agent/approve` 放行后若模型**又**停在审批点，会拿 `candidates[0]["rounds"]` 与上限比，**到了就不再入队**。⚠️ **不传 `rounds` 的调用点会退回默认 1**（`register` 的形参默认值）⇒ 那个调用点**永远在第 1 轮**。老调用点（`langgraph_chat` 首登记）**本就该是 1**，故无碍；⚠️ **但将来若新增"非首次"的登记点，必须显式传 `rounds`** |
 | ⚠️ **「上限到了就报错」** | ⛔ **不是** —— 先**努力收尾**：注入一条"已达上限、请直接作答"的 `ToolMessage` 并**续跑**，收尾成功就**正常返回答案**（`forced_finish=True`）。只有"连收尾提示都拦不住"才 `status="error"`。**报错是最后一档，不是第一档** |
-| 🔴 **「`list_pending()` 返回的就是调用方能看的那批」** | ⛔ **不是**（`DEC-088` 缺口③，2026-10-06）—— 本函数**返回全部**，**可见性收窄在端点**（`api_v1_agent.py` 的 `list_pending_approvals`，本人默认 · admin 全量）。<br>⚠️ **为什么不在这一层收**：本模块是**纯数据层**、**拿不到调用方身份**（它的入参只有"找哪条"）⇒ 在这里过滤就得**把身份传进来**，那是把授权搬进存储。<br>📌 判据 ⇒ `api/test_pending_visibility.py`（**改的是端点，⛔ 不是本模块**）。 |
+| 🔴 **「`list_pending()` 返回的就是调用方能看的那批」** | ⛔ **不是**（`DEC-088` 缺口③，2026-10-06）—— 本函数**返回全部**，**可见性收窄在端点**（`api_v1_agent.py` 的 `list_pending_approvals`，本人默认 · admin 全量）。<br>⚠️ **为什么不在这一层收**：本模块是**纯数据层**、**拿不到调用方身份**（它的入参只有"找哪条"）⇒ 在这里过滤就得**把身份传进来**，那是把授权搬进存储。<br>📌 判据 ⇒ `app/tests/test_pending_visibility.py`（**改的是端点，⛔ 不是本模块**）。 |
 
 ## 关联
 

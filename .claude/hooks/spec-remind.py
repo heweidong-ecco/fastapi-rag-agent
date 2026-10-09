@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-PostToolUse hook —— **写完 `api/*.py` 之后，提醒更新它的 spec**。
+PostToolUse hook —— **写完 `app/*.py` 之后，提醒更新它的 spec**。
 
 ## 为什么要有它
 
@@ -10,11 +10,11 @@ PostToolUse hook —— **写完 `api/*.py` 之后，提醒更新它的 spec**�
 `pre-commit-gates.py` 的**第 ④ 道门**只能拦**"新增模块没 spec"**（能机械判）；
 **"改了已有模块要不要更新 spec"是【判断】，机械判不了** ⇒ **只能提醒**。
 
-⇒ **本 hook 就干这一件事：动完 `api/X.py`，提醒你 `docs/specs/X.md` 可能要更新。**
+⇒ **本 hook 就干这一件事：动完 `app/X.py`，提醒你 `docs/specs/X.md` 可能要更新。**
 
 ## 行为
 
-* 命中 `Edit` / `Write` / `NotebookEdit`，且 `file_path` 在 `api/` 下、是 `.py`、**不是测试** ⇒
+* 命中 `Edit` / `Write` / `NotebookEdit`，且 `file_path` 在 `app/` 下、是 `.py`、**不是测试** ⇒
   **打一行提醒**（**不阻止**，`exit 0`）
 * **已有 spec 的** ⇒ 「记得更新它」
 * **还没有 spec 的** ⇒ 「这个模块还没有 spec」（**比"记得更新"更值得说**）
@@ -24,7 +24,7 @@ PostToolUse hook —— **写完 `api/*.py` 之后，提醒更新它的 spec**�
 
 1. ⛔ **不阻止** —— `PostToolUse` 阻止不了已经发生的编辑；而且写代码过程中会频繁触发，
    真拦会把人烦死。
-2. **只在 `api/` 下、非测试的 `.py`** —— 改文档、改测试、改 `scripts/` 都不提醒。
+2. **只在 `app/` 下、非测试的 `.py`** —— 改文档、改测试、改 `scripts/` 都不提醒。
 3. **每次只打一行** —— 不写小作文。
 
 ## 📌 为什么不用 `$CLAUDE_PROJECT_DIR` 找仓根
@@ -62,7 +62,7 @@ def main() -> int:
         return 0
     rel = rel.replace(os.sep, "/")
 
-    if not (rel.startswith("api/") and rel.endswith(".py")):
+    if not (rel.startswith("app/") and rel.endswith(".py")):
         return 0
     base = os.path.basename(rel)
     if base.startswith(TEST_PREFIX) or base in SKIP_NAMES:

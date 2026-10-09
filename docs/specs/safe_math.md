@@ -1,4 +1,4 @@
-# `api/safe_math.py`
+# `app/tools/safe_math.py`
 
 | 项 | 内容 |
 |---|---|
@@ -18,7 +18,7 @@
 
 ## 🟡 做到哪 / 缺什么
 
-- ✅ **有测试**：`api/test_safe_math.py`（**55 条**，单元）+ `api/test_safe_math_wiring.py`（**23 条**，接线）⇒ 合计 **78 条，全离线进 CI**
+- ✅ **有测试**：`app/tests/test_safe_math.py`（**55 条**，单元）+ `app/tests/test_safe_math_wiring.py`（**23 条**，接线）⇒ 合计 **78 条，全离线进 CI**
 - ⚠️ **可接受的算式比 `eval` 窄**（**有意的**）：`'a'*3` / `len([1,2])` 这类**以前"能算"**，现在被拒
 - ⬜ **不支持具名函数**（`sqrt(2)` / `abs(-1)`）—— 要支持就得往 `ast.Call` 开一个**具名白名单**，
   ⛔ **不许直接放开 `ast.Call`**（那等于回到 `eval`）。见 `DEC-049 §反悔成本`
@@ -43,4 +43,4 @@
 `DEC-049`（**为什么换、为什么否掉另外三个方案** —— 含实测证据）·
 `DEC-048 §遗留 #1`（**是它记下来的**，本条把它结掉）·
 `docs/specs/agent_graph.md`（⚠️ 表里"`calculator` 不进白名单 ≠ 它安全"那条）·
-`api/test_safe_math.py` · `api/test_safe_math_wiring.py` · `api/test_impl_modules.py`（**既有契约**：`1/0` 文案）
+`app/tests/test_safe_math.py` · `app/tests/test_safe_math_wiring.py` · `app/tests/test_impl_modules.py`（**既有契约**：`1/0` 文案）

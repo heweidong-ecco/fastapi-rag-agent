@@ -8,7 +8,7 @@
 # 红的那条测试断言「兜底单价 >= 在用模型单价」—— 它**在两种合法部署下答案相反**：
 #
 #   · 本机：`.env` 里 `LLM_MODEL_CHAT=deepseek-v4-flash`（0.001/0.002）⇒ `0.003 >= 0.001` **过**
-#   · CI ：**没有 `.env`** ⇒ `api/config.py:55` 的代码默认值 `qwen-plus`（0.008/0.016）⇒ **红**
+#   · CI ：**没有 `.env`** ⇒ `app/core/config.py:55` 的代码默认值 `qwen-plus`（0.008/0.016）⇒ **红**
 #
 # ⇒ 根因**不是"CI 玄学"**，是**本地和 CI 是两套环境**。
 #   ⚠️ `docs/说明/测试.md` §五 原先只写「CI 跑的是本地命令的子集」——
@@ -65,7 +65,7 @@
 #
 # `python-dotenv` 默认**不覆盖**已存在的环境变量 ⇒ **你没法用 `export` 把 `.env` 里
 # 已经存在的键"取消"**。要真正模拟"没有 `.env`"，只能让**那个文件在那个路径上不存在**。
-# ⇒ `api/config.py:12` 读的是 `dirname(config.py)/../.env`（**写死的相对位置**）
+# ⇒ `app/core/config.py:12` 读的是 `dirname(config.py)/../.env`（**写死的相对位置**）
 #   ⇒ 把整棵树复制到别处、**唯独不带 `.env`**，是唯一忠实的做法。
 #
 # ## 设计说明
@@ -76,7 +76,7 @@
 #    而且 ci.yml 里那段"打印生效配置"（2026-10-01 加）**也被当场执行**，不用等推上去才发现写错。
 # 2. **环境变量也从 ci.yml 读**（同一块 step 的 `env:`）—— 不在本脚本里另抄一份。
 #    两份清单必然漂移（本仓已立此立场：「一份内容只在一处」）。
-# 3. **临时目录里没有 `.git`** —— 已核过 `api/` 不下调 git。
+# 3. **临时目录里没有 `.git`** —— 已核过 `app/` 不下调 git。
 #    ⚠️ **2026-10-05 起这条有了例外**：`DEC-076` 把**凭据门**接进了 ci.yml 的 run 块，
 #    而它要 `git diff <range>`。⇒ 见 §3.5：**显式**把 `GIT_DIR`/`GIT_WORK_TREE` 指回主检出，
 #    并按 `pull_request` 事件给出范围。⛔ 不加 `.git` 进来；也⛔ 不放过这条门。
@@ -300,7 +300,7 @@ echo "------------------------------------------------------------------"
 echo "  ⭐ 自证「.env 不在场」—— 看 ①（**②只是旁证，2026-10-02 起不再是判据**）："
 echo "     ① 【直接判据】临时副本里 .env 存在吗 = $([ -e "${TMP}/.env" ] && echo '🔴 在（不该发生）' || echo '✅ 不在')"
 ( cd "${TMP}" && env ${ENV_FLAT}"${PY}" -c \
-    "import sys; sys.path.insert(0,'api'); import config; print('     ② 【旁证】临时副本里生效的模型名：'); print('        LLM_MODEL_FAST =', config.LLM_MODEL_FAST); print('        LLM_MODEL_CHAT =', config.LLM_MODEL_CHAT)" \
+    "import sys; sys.path.insert(0, 'app'); import config; print('     ② 【旁证】临时副本里生效的模型名：'); print('        LLM_MODEL_FAST =', config.LLM_MODEL_FAST); print('        LLM_MODEL_CHAT =', config.LLM_MODEL_CHAT)" \
     ) || echo "    （打印失败，见上方报错）"
 if [ -f "${REPO_ROOT}/.env" ]; then
   echo "     ② 对照 · 主检出 .env 里写的："
@@ -318,8 +318,8 @@ cd "${TMP}"
 
 if [ "${RUN_SYNTAX}" = "1" ]; then
   # syntax job（另一个 job）也照抄 ci.yml —— 它跟 offline-tests 是并行的两个 job
-  echo "→ [syntax job] python -m compileall api/ -q"
-  "${PY}" -m compileall api/ -q
+  echo "→ [syntax job] python -m compileall app/ -q"
+  "${PY}" -m compileall app/ -q
   echo "  ✅ syntax 过"
   echo
 fi

@@ -1,11 +1,11 @@
-# `api/sse.py`
+# `app/routing/sse.py`
 
 | 项 | 内容 |
 |---|---|
 | **状态** | 🟢 **新建并已接上全部 6 条流式端点（2026-10-04 · `③` Task 4 · `B1` 剩余 4 条链）** —— 本仓**所有流式端点的骨架**<br>⚠️ **它收的不是"重复代码"，是 5 条实测出来的顺序约束**（`DEC-054` / `DEC-052` / `DEC-050`）<br>✅ 批 2 建层 + 单测 · 批 3 两条旧端点改用它（**逐帧等价**）· 批 5 的 4 条新链**一开始就建在它上面** |
 | **对外提供** | `SSE_HEADERS` · `DONE_FRAME` · `sse_frame(payload, *, ensure_ascii)` · `sse_response(source)`<br>· `graph_message_text(item, *, nodes)`（LangGraph `messages` 模式）· `llm_chunk_text(chunk)`（裸 LLM）<br>· `sse_stream(open_upstream, *, endpoint, extract, on_complete, on_incomplete, on_error, ensure_ascii, chunk_delay)` |
-| **谁在用** | **6 条，全部**（`grep -rn "sse_stream(" api/api_v1_*.py`）：<br>`api_v1_agent.py` —— `langgraph_chat_stream` · `advanced_agent_chat_stream` · `memory_chat_stream` · `mcp_agent_chat_stream` · `agent_plan_execute_stream`（**5 条**）<br>`api_v1_rag.py` —— `stream_search`（**1 条**） |
-| **用例** | `api/test_sse_layer.py`（**17 条**，⛔ 不碰端点 —— 端点的等价性由既有两份用例"全绿且不改"来证）<br>+ `api/test_agent_stream_chains.py`（**60 条**）用**同一个骨架**驱动 4 条新链 |
+| **谁在用** | **6 条，全部**（`grep -rn "sse_stream(" app/routing/api_v1_*.py`）：<br>`api_v1_agent.py` —— `langgraph_chat_stream` · `advanced_agent_chat_stream` · `memory_chat_stream` · `mcp_agent_chat_stream` · `agent_plan_execute_stream`（**5 条**）<br>`api_v1_rag.py` —— `stream_search`（**1 条**） |
+| **用例** | `app/tests/test_sse_layer.py`（**17 条**，⛔ 不碰端点 —— 端点的等价性由既有两份用例"全绿且不改"来证）<br>+ `app/tests/test_agent_stream_chains.py`（**60 条**）用**同一个骨架**驱动 4 条新链 |
 
 ## ✅ 做了什么
 
@@ -27,11 +27,11 @@
 
 | 批 | 事 | 状态 |
 |---|---|---|
-| 2 | 建 `api/sse.py` + 本 spec + `api/test_sse_layer.py` | ✅ |
-| 3 | 两条既有端点改用它（**行为逐帧等价**） | ✅ **改的那一刻两份文件一行未动** —— `api/test_agent_sse.py` / `api/test_cancel_propagation.py` **都不在 PR #78 的改动清单里**（`git show --stat 93eb2fb`）<br>⚠️ 本行原写 **44 passed** —— 那是把 `api/test_sse_layer.py` 的 **15** 条也算进去了（**当时**那两份文件 **29** 条：29 + 15 = 44）⇒ **命令与数字对不上**。2026-10-04 评审收口按**实测**更正：同一命令 **31 passed**（29 + 本批新增的 2 条） |
+| 2 | 建 `app/routing/sse.py` + 本 spec + `app/tests/test_sse_layer.py` | ✅ |
+| 3 | 两条既有端点改用它（**行为逐帧等价**） | ✅ **改的那一刻两份文件一行未动** —— `app/tests/test_agent_sse.py` / `app/tests/test_cancel_propagation.py` **都不在 PR #78 的改动清单里**（`git show --stat 93eb2fb`）<br>⚠️ 本行原写 **44 passed** —— 那是把 `app/tests/test_sse_layer.py` 的 **15** 条也算进去了（**当时**那两份文件 **29** 条：29 + 15 = 44）⇒ **命令与数字对不上**。2026-10-04 评审收口按**实测**更正：同一命令 **31 passed**（29 + 本批新增的 2 条） |
 | 4 | 改节点（A/B/C 三张图） | ✅ 见 `agent_graph.md` · `agent_checkpointer.md` · `agent_graph_advanced.md` · `agent_graph_advanced_learning.md` |
 | 5 | 4 条新 SSE 路由 | ✅ `advanced_chat` · `memory_chat` · `mcp_chat` · `plan_execute` |
-| 6 | `api/test_agent_stream_chains.py` | ✅ **39 条**（`B1` 收工时的数）<br>⚠️ 2026-10-04 评审收口后 **47 条**（本批补：白名单 × 图 4 · 链 C 碎片守卫 1 · 汇总帧 `requested_by` 3）<br>⚠️ **同一天 `DEC-055` 落地后 60 条**（留痕 13 条：完成 / 取消 / 异常 × 3 链 + 审批点不写 + 链 D 三条） |
+| 6 | `app/tests/test_agent_stream_chains.py` | ✅ **39 条**（`B1` 收工时的数）<br>⚠️ 2026-10-04 评审收口后 **47 条**（本批补：白名单 × 图 4 · 链 C 碎片守卫 1 · 汇总帧 `requested_by` 3）<br>⚠️ **同一天 `DEC-055` 落地后 60 条**（留痕 13 条：完成 / 取消 / 异常 × 3 链 + 审批点不写 + 链 D 三条） |
 | 7 | `on_cancel` ⇒ `on_incomplete`（`DEC-055`） | ✅ **异常出口也收尾了** —— 原来只有**取消**一条出口调同步钩子，`except` 那条**一个字都不留**。<br>泛化后两条出口**各调一次**（`status` = `"cancelled"` / `"error"`），`on_complete` 管正常出口。<br>⚠️ **`outcome == "error"` ⇒ `finally` 里那块不会再调一次**（一次出口只调一次） |
 
 - ✅ **链 D（`plan_execute`）的「线程 → 事件循环」桥接器按计划落在调用方** ——

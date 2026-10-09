@@ -121,7 +121,7 @@ t "T6 「X 不存在」且无命令 ⇒ 出话"       出话  claim-evidence-rem
   "$(mkjson "${CLAIM_FILE}" '`/rag/ask` 不存在，`/rag/search` 也不生成答案。')"
 
 t "T7 有全称否定 + 行内命令 ⇒ 静默"      静默  claim-evidence-remind.py \
-  "$(mkjson "${CLAIM_FILE}" '`/rag/ask` 不存在 —— 判据：`grep -n "rag/ask" api/*.py` ⇒ 0 行。')"
+  "$(mkjson "${CLAIM_FILE}" '`/rag/ask` 不存在 —— 判据：`grep -n "rag/ask" app/*.py` ⇒ 0 行。')"
 
 t "T8 「全称否定」旁路 ⇒ 静默"           静默  claim-evidence-remind.py \
   "$(mkjson "${CLAIM_FILE}" '复盘里那句「全称否定」（X 不存在）是我写错的。')"
@@ -135,7 +135,7 @@ t "T9 docs/复盘/ ⇒ 静默（历史不改写）"   静默  claim-evidence-rem
 # ═══════════════════════════════════════════════════════════════════════
 #
 # 🔴 **为什么补这一段**：`spec-remind` 与 `route-auth-remind` **此前从没有自测** ——
-#    而它们的判据**全部按路径**（`api/` 下 + 文件名 + `docs/specs/<名>.md`），
+#    而它们的判据**全部按路径**（`app/` 下 + 文件名 + `docs/specs/<名>.md`），
 #    正是模块化重构**最容易弄瞎**的那一类。
 #    本仓纪律：「**门必须能测出自己会红**」（`DEC-061` / `DEC-066`）——
 #    一个永远不出声的提醒，与"出声了但没问题"在机器痕迹上**完全一样**。
@@ -151,19 +151,19 @@ print(json.dumps({"tool_name": sys.argv[2], "cwd": sys.argv[3],
 ' "$1" "${2:-Edit}" "${REPO}"
 }
 
-t "T10 组目录里的模块（有 spec）⇒ 出话"   出话  spec-remind.py "$(mkjson_edit "${REPO}/api/core/config.py")"
-t "T11 另一个组 + 有 spec）⇒ 出话"       出话  spec-remind.py "$(mkjson_edit "${REPO}/api/rag/chunker.py")"
-t "T12 api/ 根的 main.py（有 spec）⇒ 出话" 出话 spec-remind.py "$(mkjson_edit "${REPO}/api/main.py")"
-t "T13 api/tests/ 下的测试 ⇒ 静默"        静默  spec-remind.py "$(mkjson_edit "${REPO}/api/tests/test_main.py")"
+t "T10 组目录里的模块（有 spec）⇒ 出话"   出话  spec-remind.py "$(mkjson_edit "${REPO}/app/core/config.py")"
+t "T11 另一个组 + 有 spec）⇒ 出话"       出话  spec-remind.py "$(mkjson_edit "${REPO}/app/rag/chunker.py")"
+t "T12 app/ 根的 main.py（有 spec）⇒ 出话" 出话 spec-remind.py "$(mkjson_edit "${REPO}/app/main.py")"
+t "T13 app/tests/ 下的测试 ⇒ 静默"        静默  spec-remind.py "$(mkjson_edit "${REPO}/app/tests/test_main.py")"
 t "T14 .md ⇒ 静默"                       静默  spec-remind.py "$(mkjson_edit "${REPO}/docs/待办总表.md")"
 # ⚠️ 用 `Read` 而不是空串：bash 的 `${2:-Edit}` 在**空串**时**也会**取默认值
 #    （`:-` 的语义是"未设**或为空**就用默认"）⇒ 传空串**根本测不到**这一支。2026-10-09 实测踩过。
-t "T14b 非 Edit/Write（Read）⇒ 静默"      静默  spec-remind.py "$(mkjson_edit "${REPO}/api/core/config.py" Read)"
-# 🔴 `T14c` 专测 `api/` **前缀**那一支 —— 2026-10-09 变异自证发现：
+t "T14b 非 Edit/Write（Read）⇒ 静默"      静默  spec-remind.py "$(mkjson_edit "${REPO}/app/core/config.py" Read)"
+# 🔴 `T14c` 专测 `app/` **前缀**那一支 —— 2026-10-09 变异自证发现：
 #    上面 T13 是被 `test_` 基线名挡下的、T14 是被 `.md` 挡下的，
-#    ⇒ **拿掉 `api/` 前缀判据后它们全绿**（用例对这个判据**没有牙齿**）。
+#    ⇒ **拿掉 `app/` 前缀判据后它们全绿**（用例对这个判据**没有牙齿**）。
 #    本仓原话：「**门的靶子要定准**」。
-t "T14c 仓外 .py（scripts/）⇒ 静默（只认 api/ 下）" 静默  spec-remind.py "$(mkjson_edit "${REPO}/scripts/issue_api_key.py")"
+t "T14c 仓外 .py（scripts/）⇒ 静默（只认 app/ 下）" 静默  spec-remind.py "$(mkjson_edit "${REPO}/scripts/issue_api_key.py")"
 
 # ── route-auth-remind：真正按路径判的是 `looks_like_route_file()` ──
 # ⚠️ **不测它的"出话"** —— 它只在「**新引入了没鉴权的路由**」时才出声，
@@ -185,11 +185,11 @@ t2() {  # <名> <期望 TRUE|FALSE> <相对仓根的路径>
     printf '  ❌ %s ⇒ %s（期望 %s）\n' "$1" "${got}" "$2"; FAIL=$((FAIL + 1))
   fi
 }
-t2 "T15 组目录里的路由文件（api_v1）"     TRUE  "api/routing/api_v1.py"
-t2 "T16 组目录里的路由文件（api_v1_rag）" TRUE  "api/routing/api_v1_rag.py"
-t2 "T17 非路由模块 ⇒ 不算"                FALSE "api/core/config.py"
-t2 "T18 tests/ 下的测试 ⇒ 不算"           FALSE "api/tests/test_api_v1.py"
-t2 "T19 仓根脚本 ⇒ 不算（不在 api/ 下）"   FALSE "scripts/check_route_auth.py"
+t2 "T15 组目录里的路由文件（api_v1）"     TRUE  "app/routing/api_v1.py"
+t2 "T16 组目录里的路由文件（api_v1_rag）" TRUE  "app/routing/api_v1_rag.py"
+t2 "T17 非路由模块 ⇒ 不算"                FALSE "app/core/config.py"
+t2 "T18 tests/ 下的测试 ⇒ 不算"           FALSE "app/tests/test_api_v1.py"
+t2 "T19 仓根脚本 ⇒ 不算（不在 app/ 下）"   FALSE "scripts/check_route_auth.py"
 
 echo
 if [ "${FAIL}" -eq 0 ]; then

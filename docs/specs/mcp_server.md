@@ -1,11 +1,11 @@
-# `api/mcp_server.py`
+# `app/tools/mcp_server.py`
 
 | 项 | 内容 |
 |---|---|
 | **状态** | 🟢 **可用 · 是四条执行路径的【唯一工具事实源】的产地** —— ⚠️ 但它自己**没有测试**（唯一入口是子进程） |
 | **对外提供** | `TOOLS`（**注册表**）· `TOOLS_DEFINITION` · `TOOL_HANDLERS` · `server`（MCP `Server` 实例）· `list_tools` / `call_tool`（**2.x 的构造器回调**，⛔ 不是装饰器函数）· `run_mcp_server()` |
 | **谁在用** | 🔴 **六处**，且**四条执行路径全派生自它的 `TOOLS`**：<br>`agent_graph.py`（`TOOLS`）· `agent_checkpointer.py`（`TOOLS`）· `agent_graph_advanced_learning.py`（`TOOLS` + `TOOL_HANDLERS`）· `plan_execute.py`（`TOOLS` + `TOOL_HANDLERS`）· `api_v1_rag.py`（`TOOLS`）· `api_v1_agent.py`（`TOOLS_DEFINITION`）<br>⚠️ `agent_graph_advanced.py` **不 import 它** —— 那条路**经 MCP client 动态取表**（这正是"改这里 = 改四条链"的原因） |
-| **测试** | 🔴 **无专属测试文件**。间接覆盖：`api/test_tool_registry_single_source.py`（**子进程** import 它验注册表与 DEMO_MODE 过滤）· `api/test_mcp_protocol_e2e.py`（🆕 批④：**真子进程 + 真协议**调它）· `api/test_agent_repairs.py`（`call_tool` 的 offload 守卫） |
+| **测试** | 🔴 **无专属测试文件**。间接覆盖：`app/tests/test_tool_registry_single_source.py`（**子进程** import 它验注册表与 DEMO_MODE 过滤）· `app/tests/test_mcp_protocol_e2e.py`（🆕 批④：**真子进程 + 真协议**调它）· `app/tests/test_agent_repairs.py`（`call_tool` 的 offload 守卫） |
 
 ## ✅ 做了什么
 
@@ -67,8 +67,8 @@ server = Server("agent-tools", on_list_tools=list_tools, on_call_tool=call_tool)
 | 列表 | `async def list_tools() -> list[Tool]` | `async def list_tools(ctx, params) -> ListToolsResult` |
 | 调用 | `async def call_tool(name, arguments)` | `async def call_tool(ctx, params) -> CallToolResult` |
 
-⚠️ **有代码直接调它俩**（`api/test_agent_repairs.py` 的 offload 守卫就调 `ms.call_tool(None, CallToolRequestParams(...))`）
-⇒ 改签名时**必须一起搜全仓**：`grep -rn "\.call_tool(\|\.list_tools(" api/`。
+⚠️ **有代码直接调它俩**（`app/tests/test_agent_repairs.py` 的 offload 守卫就调 `ms.call_tool(None, CallToolRequestParams(...))`）
+⇒ 改签名时**必须一起搜全仓**：`grep -rn "\.call_tool(\|\.list_tools(" app/`。
 
 ### 5. 🔴 「改这里」= 「改四条链」—— 不是比喻
 
@@ -95,7 +95,7 @@ ValidationError: Invalid JSON … input_value='MCP Server 启动中... 已注册
 ⚠️ **它不致命**（客户端记一条错就过去了，调用照常返回结果）—— **但那正是它危险的地方**：
 本仓立场：**一个每次都报的错，⛔ 不该因为它不影响结果就当没事**。
 
-✅ **两处已改 `sys.stderr`**。📌 守卫 ⇒ `api/test_mcp_stdout_is_clean.py`（3 条）：
+✅ **两处已改 `sys.stderr`**。📌 守卫 ⇒ `app/tests/test_mcp_stdout_is_clean.py`（3 条）：
 · **AST 扫**裸 `print` —— ⛔ **不能用 grep**：注释里也写着 `print(`（**就在本文件里**），
   grep 会把**说明文字**当成违规
 · **反向对照**（防「AST 出错 ⇒ 返空 ⇒ 永远绿」的空壳）
@@ -107,7 +107,7 @@ ValidationError: Invalid JSON … input_value='MCP Server 启动中... 已注册
 `tool_health.py` 里曾有一句注释称「`run_health_check` 是**按 `mcp_server.TOOLS` 遍历**的」
 —— 🔴 **那句是假的**（它遍历的是 `TEST_ARGS_MAP`）。**那个坑不在本文件**，但**从本文件读不出来的**是：
 **「工具在 `TOOLS` 里」≠「它会被体检」**（后者还要在 `tool_health.TEST_ARGS_MAP` 里登记）。
-📄 见 `docs/specs/tool_health.md` §⚠️ 第 1 条 · `api/test_tool_registration_completeness.py`（批③ 补的守卫）。
+📄 见 `docs/specs/tool_health.md` §⚠️ 第 1 条 · `app/tests/test_tool_registration_completeness.py`（批③ 补的守卫）。
 
 ## 关联
 

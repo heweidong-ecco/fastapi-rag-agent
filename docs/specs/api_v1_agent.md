@@ -1,10 +1,10 @@
-# `api/api_v1_agent.py`
+# `app/routing/api_v1_agent.py`
 
 | 项 | 内容 |
 |---|---|
-| **状态** | 🟢 **可用；流式【5 条 · 对话链全齐】**（`③` Task 4 · `B1` · 2026-10-03 第一条 ⇒ **2026-10-04 补足剩余 4 条**）—— 5 条"会逐字生成答案"的链**全部**有 SSE 版本<br>⚠️ **其余 29 条（查询 / 管理 / 记账类）仍全非流式** —— 它们产出的**不是逐字生成的文本**（token 用量 / 工具健康 / 预算 / 轨迹 / 记忆增删），**流式对它们没有意义**。⛔ **这一条是【本批的判断】，没走业务裁定**（硬门 A 要的是"**该流的流**"）<br>✅ **改造收口**：本文件下方有 **实施计划 ②**（人工接管 · **已完成**）与 **③**（流式与取消 · **已完成** —— `B1`/`B2`/`B3` 全部落地，`B1` 的最后 4 条链于 **2026-10-04** 补齐）<br>✅ **2026-10-03（`②` Task 2 · `B5`）**：新增 **`GET /agent/pending`** ⇒ 路由 **28 → 29**<br>✅ **2026-10-03（`②` Task 3 · `B6`）**：`POST /agent/approve` 增加可选参数 **`edited_answer`** ⇒ **硬门 D 三段齐了**<br>🔵 **2026-10-03（`③` Task 4 · `B1`）**：新增 **`POST /agent/langgraph_chat/stream`**（SSE）⇒ 路由 **29 → 30**。📄 `DEC-050`<br>✅ **2026-10-03（`③` Task 5 · `B2`）**：新加的这条流式路由**补上了 cancel 传播**（关图的流 + 记数）—— `DEC-050` §遗留·3 自己点的那个洞**已堵**。📄 `DEC-052`<br>🔴 **2026-10-03（`DEC-056` 丙段）· 三条口径变了**：<br>① **进图的 checkpoint 键**由裸 `thread_id` 改成 **`session_key(user_name, thread_id)`**（4 张图 · 7 处）；⚠️ **响应仍回显原值**<br>② **`/agent/approve` 加了归属校验**（**本人或 admin**）+ **按登记表里的 `graph` 字段路由**；⛔ 它**不再**直接吃 `agent_graph` 写死<br>③ **`/agent/memory_chat` 接上审批门**（`interrupt_before=["approval"]`）⇒ **`DEC-051` §遗留·2 关闭**<br>🔵 **2026-10-04（`B1` 剩余 4 条链）· 一次加 4 条流式路由** ⇒ 路由 **30 → 34**：`advanced_chat/stream`（`:889`）· `plan_execute/stream`（`:1128`）· `memory_chat/stream`（`:1311`）· `mcp_chat/stream`（`:1711`）。<br>· 同时**把原有的 `langgraph_chat/stream`（`:282`）一起改成走新共享层 `api/sse.py`** ⇒ 本文件里**不再有自己的 SSE 生成器**（逐帧等价，`test_agent_sse.py` + `test_cancel_propagation.py` 全绿且未改）。<br>· ⚠️ **每条都必须保留那两道前置闸**（`check_session_token_budget` `B8` + `circuit(global_key())` `B11`）—— 有两个 AST 守卫挖的是**端点函数体内部**（`api/test_session_budget_wiring.py:72` · `api/test_breaker_wiring.py:88`）⇒ **闸必须在函数体里，⛔ 不能挪进共享层**。<br>· 🔴 **链 D（`plan_execute/stream`）与 A/B/C **形态不同**：`plan_task` 是**同步函数**（跑在 `asyncio.to_thread` 里）⇒ 靠 **`_ThreadTokenBridge`**（`:1003`）把 token 从线程送回事件循环；且**它只流"规划段"**，之后是**一长段静默**（`execute_plan` 不流）—— ⛔ 别当成 bug。<br>🔵 **2026-10-04（`DEC-055`）· 5 条对话链全部接上 `chat_history` 留痕** —— 三条出口各写一个 `status`：`done` / `cancelled` / `error`。<br>· 🔴 **改前 5 条链【一条历史都不写】**（`grep -rn "append_chat_history" api/api_v1_agent.py` ⇒ **0**）—— 它们的"半路状态"由 **checkpointer** 持有，而 `chat_history` 是**另一套存储**（`DEC-055` §一 就查的这件事）。<br>· 🔴 **`done` 的答案取自【图的最终状态】（`aget_state` / `summary`），⛔ 不是 `on_complete` 收到的 `collected`**（`DEC-050` 真服务撞过的同一个坑：`calc_execute` 那种分支**一个字都不流**）。<br>· 🔴 **停在审批点（`status == "pending_approval"`）⇒ 本轮【不写】**（链 A 与链 B 各带这个 gate）—— 那时 `answer` 里是**模型已写的那半句（非空）**，不 gate 就会被写成 `status="done"`，正是本 DEC 要防的假信号。<br>📌 守卫 `api/test_agent_stream_chains.py`（**60 条** · 较评审收口时 **+13**，全是留痕那几条）· 骨架 ⇒ `docs/specs/sse.md`<br>🔴 **2026-10-04（`DEC-072`）· 6 个端点的初始 state 补上【身份】**：`user_name` / `thread_id` **必须进 state**（图里的记账节点靠它们才知道"这笔钱记给谁、记到哪个会话"）。<br>· 改动点：`langgraph_chat`（`:248`）· `langgraph_chat/stream`（`:414`）· `memory_chat`（`:1280`）· `memory_chat/stream`（`:1391`）—— 各加 `{"user_name": user_name, "thread_id": thread_id}`；<br>· 🔴 **`advanced_chat`（`:863`）/ `advanced_chat/stream`（`:973`）原先【只传了 `user_name`】，没有 `thread_id`** ⇒ 那两张图的账**只记得到人、记不到会话**。本批补齐。<br>· ⚠️ **传的是【原值】，⛔ 不是 `sess`（`session_key(...)` 那个）** —— `session_key` 是 **checkpoint 键**，与账目无关；写混了账会记到拼接后的键上。<br>· ⚠️ **缺身份不报错**：一律 `.get(…, "unknown")` 读 ⇒ 静默记成 `"unknown"`（⛔ 不是 500）。<br>📄 `DEC-072`；📌 判据 ⇒ `api/test_billing_wiring.py`（`ENDPOINTS` 6 条逐个查初始 state 有没有那两个键）<br>🔴 **2026-10-05（批 7 · `N11`）：9 条端点接上【图内拦截的出口形状】**（`DEC-083`）—— 4 条非流式 ⇒ **429**（判在 `summarize_agent_result()` 之前，⛔ 不许 `register`）· 4 条流式 ⇒ **error 帧 + `[DONE]` + `persist_turn(status="error")`**（⛔ 不发汇总帧）· `/agent/approve` ⇒ **补 `B8`+`B11` 两道门**（用调用方过门）+ **两个 `invoke` 都认标志**（命中先 `resolve` 再 429）。<br>⚠️ **改前这 8 条非-approve 端点会回 HTTP 200 + 一句"今日Token预算已用完"当答案** —— 调用方**看不出被拒了**。<br>⚠️ **`/agent/mcp_chat` 那条 429 的文案变了**（「本次**工具调用**未执行」→「**本轮**未继续执行」）—— 因为新增的软返回**根本没有工具调用**。📄 `DEC-083` §三<br>🔵 **2026-10-06（`DEC-088` · `F1` 接管页）· 一次加 2 条端点 ⇒ 路由 34 → 36**：<br>· 🆕 **`GET /agent/pending/context`（`:763`）** —— 待接管会话的**完整上下文**（`messages` 序列原样 + `owner`/`graph`/`rounds`/`next`）。可带**可选 `owner`**（裁定 6）收窄撞车的 `thread_id`；**多条候选 ⇒ 如实拒绝**，⛔ 不"挑第一条"。<br>· 🆕 **`GET /agent/approvals/history`（`:2021`）** —— 裁决历史（读 `api/approval_audit.py` 的 `approval_events` 表）。⚠️ **与 `/agent/pending` 同一条可见性口径**：本人默认、admin 全量。<br>· 🔴 **`GET /agent/pending`（`:702`）的可见性变了** —— 此前**跨用户全量**，现在**本人默认 · admin 全量**（`DEC-088` 缺口③）。⚠️ **收窄发生在【端点里】（两行过滤），`list_pending()` 一行没动** —— 见 `docs/specs/pending_approvals.md`。<br>· 🔴 **`POST /agent/approve`（`:439`）加了两样**：① 可选 **`owner`**（用来收窄撞车的 `thread_id`，**收窄 ≠ 授权**）② 每次**真裁决**写一条留痕（`record_decision`，fail-open）。⚠️ **留痕写在那道"队列登记陈了"的守卫【之后】** ⇒ 它是**第四条不记的出口**（见「看代码会误判」表）。<br>· 📄 设计 ⇒ `docs/decisions/DEC-088-接管页与硬门D的三个缺口.md` · 施工 ⇒ `fastapi-rag-agent-TODO待办/施工单-20261006-接管页.md` · ⚠️ **本批 ⛔ 不等于硬门 D 翻 ✅**（要照四硬门原文逐栏对）<br>🆕 **2026-10-06（`DEC-093` · `F2` Trace 页）· 加 1 条只读端点 ⇒ 路由 36 → 37**：<br>· 🆕 **`GET /agent/trace/{thread_id}/cost`** —— 成本轴（`token_usage_logs`）的逐笔明细 + 整条线程合计。⚠️ **它与 `/agent/trace/{thread_id}`（追踪轴 · 进程内存）是【两条轴】**，页面上并排画、**⛔ 不合并**（没有共同的步 id）。<br>· 🔴 **0 条回 200，⛔ 不是 404**（`thread_id` 是用户自己填的）；**取数⛔ 不复用 `get_thread_cost`**（它没有归属条件）。📄 `DEC-093` §三·A/§三·A' |
+| **状态** | 🟢 **可用；流式【5 条 · 对话链全齐】**（`③` Task 4 · `B1` · 2026-10-03 第一条 ⇒ **2026-10-04 补足剩余 4 条**）—— 5 条"会逐字生成答案"的链**全部**有 SSE 版本<br>⚠️ **其余 29 条（查询 / 管理 / 记账类）仍全非流式** —— 它们产出的**不是逐字生成的文本**（token 用量 / 工具健康 / 预算 / 轨迹 / 记忆增删），**流式对它们没有意义**。⛔ **这一条是【本批的判断】，没走业务裁定**（硬门 A 要的是"**该流的流**"）<br>✅ **改造收口**：本文件下方有 **实施计划 ②**（人工接管 · **已完成**）与 **③**（流式与取消 · **已完成** —— `B1`/`B2`/`B3` 全部落地，`B1` 的最后 4 条链于 **2026-10-04** 补齐）<br>✅ **2026-10-03（`②` Task 2 · `B5`）**：新增 **`GET /agent/pending`** ⇒ 路由 **28 → 29**<br>✅ **2026-10-03（`②` Task 3 · `B6`）**：`POST /agent/approve` 增加可选参数 **`edited_answer`** ⇒ **硬门 D 三段齐了**<br>🔵 **2026-10-03（`③` Task 4 · `B1`）**：新增 **`POST /agent/langgraph_chat/stream`**（SSE）⇒ 路由 **29 → 30**。📄 `DEC-050`<br>✅ **2026-10-03（`③` Task 5 · `B2`）**：新加的这条流式路由**补上了 cancel 传播**（关图的流 + 记数）—— `DEC-050` §遗留·3 自己点的那个洞**已堵**。📄 `DEC-052`<br>🔴 **2026-10-03（`DEC-056` 丙段）· 三条口径变了**：<br>① **进图的 checkpoint 键**由裸 `thread_id` 改成 **`session_key(user_name, thread_id)`**（4 张图 · 7 处）；⚠️ **响应仍回显原值**<br>② **`/agent/approve` 加了归属校验**（**本人或 admin**）+ **按登记表里的 `graph` 字段路由**；⛔ 它**不再**直接吃 `agent_graph` 写死<br>③ **`/agent/memory_chat` 接上审批门**（`interrupt_before=["approval"]`）⇒ **`DEC-051` §遗留·2 关闭**<br>🔵 **2026-10-04（`B1` 剩余 4 条链）· 一次加 4 条流式路由** ⇒ 路由 **30 → 34**：`advanced_chat/stream`（`:889`）· `plan_execute/stream`（`:1128`）· `memory_chat/stream`（`:1311`）· `mcp_chat/stream`（`:1711`）。<br>· 同时**把原有的 `langgraph_chat/stream`（`:282`）一起改成走新共享层 `app/routing/sse.py`** ⇒ 本文件里**不再有自己的 SSE 生成器**（逐帧等价，`test_agent_sse.py` + `test_cancel_propagation.py` 全绿且未改）。<br>· ⚠️ **每条都必须保留那两道前置闸**（`check_session_token_budget` `B8` + `circuit(global_key())` `B11`）—— 有两个 AST 守卫挖的是**端点函数体内部**（`app/tests/test_session_budget_wiring.py:72` · `app/tests/test_breaker_wiring.py:88`）⇒ **闸必须在函数体里，⛔ 不能挪进共享层**。<br>· 🔴 **链 D（`plan_execute/stream`）与 A/B/C **形态不同**：`plan_task` 是**同步函数**（跑在 `asyncio.to_thread` 里）⇒ 靠 **`_ThreadTokenBridge`**（`:1003`）把 token 从线程送回事件循环；且**它只流"规划段"**，之后是**一长段静默**（`execute_plan` 不流）—— ⛔ 别当成 bug。<br>🔵 **2026-10-04（`DEC-055`）· 5 条对话链全部接上 `chat_history` 留痕** —— 三条出口各写一个 `status`：`done` / `cancelled` / `error`。<br>· 🔴 **改前 5 条链【一条历史都不写】**（`grep -rn "append_chat_history" app/routing/api_v1_agent.py` ⇒ **0**）—— 它们的"半路状态"由 **checkpointer** 持有，而 `chat_history` 是**另一套存储**（`DEC-055` §一 就查的这件事）。<br>· 🔴 **`done` 的答案取自【图的最终状态】（`aget_state` / `summary`），⛔ 不是 `on_complete` 收到的 `collected`**（`DEC-050` 真服务撞过的同一个坑：`calc_execute` 那种分支**一个字都不流**）。<br>· 🔴 **停在审批点（`status == "pending_approval"`）⇒ 本轮【不写】**（链 A 与链 B 各带这个 gate）—— 那时 `answer` 里是**模型已写的那半句（非空）**，不 gate 就会被写成 `status="done"`，正是本 DEC 要防的假信号。<br>📌 守卫 `app/tests/test_agent_stream_chains.py`（**60 条** · 较评审收口时 **+13**，全是留痕那几条）· 骨架 ⇒ `docs/specs/sse.md`<br>🔴 **2026-10-04（`DEC-072`）· 6 个端点的初始 state 补上【身份】**：`user_name` / `thread_id` **必须进 state**（图里的记账节点靠它们才知道"这笔钱记给谁、记到哪个会话"）。<br>· 改动点：`langgraph_chat`（`:248`）· `langgraph_chat/stream`（`:414`）· `memory_chat`（`:1280`）· `memory_chat/stream`（`:1391`）—— 各加 `{"user_name": user_name, "thread_id": thread_id}`；<br>· 🔴 **`advanced_chat`（`:863`）/ `advanced_chat/stream`（`:973`）原先【只传了 `user_name`】，没有 `thread_id`** ⇒ 那两张图的账**只记得到人、记不到会话**。本批补齐。<br>· ⚠️ **传的是【原值】，⛔ 不是 `sess`（`session_key(...)` 那个）** —— `session_key` 是 **checkpoint 键**，与账目无关；写混了账会记到拼接后的键上。<br>· ⚠️ **缺身份不报错**：一律 `.get(…, "unknown")` 读 ⇒ 静默记成 `"unknown"`（⛔ 不是 500）。<br>📄 `DEC-072`；📌 判据 ⇒ `app/tests/test_billing_wiring.py`（`ENDPOINTS` 6 条逐个查初始 state 有没有那两个键）<br>🔴 **2026-10-05（批 7 · `N11`）：9 条端点接上【图内拦截的出口形状】**（`DEC-083`）—— 4 条非流式 ⇒ **429**（判在 `summarize_agent_result()` 之前，⛔ 不许 `register`）· 4 条流式 ⇒ **error 帧 + `[DONE]` + `persist_turn(status="error")`**（⛔ 不发汇总帧）· `/agent/approve` ⇒ **补 `B8`+`B11` 两道门**（用调用方过门）+ **两个 `invoke` 都认标志**（命中先 `resolve` 再 429）。<br>⚠️ **改前这 8 条非-approve 端点会回 HTTP 200 + 一句"今日Token预算已用完"当答案** —— 调用方**看不出被拒了**。<br>⚠️ **`/agent/mcp_chat` 那条 429 的文案变了**（「本次**工具调用**未执行」→「**本轮**未继续执行」）—— 因为新增的软返回**根本没有工具调用**。📄 `DEC-083` §三<br>🔵 **2026-10-06（`DEC-088` · `F1` 接管页）· 一次加 2 条端点 ⇒ 路由 34 → 36**：<br>· 🆕 **`GET /agent/pending/context`（`:763`）** —— 待接管会话的**完整上下文**（`messages` 序列原样 + `owner`/`graph`/`rounds`/`next`）。可带**可选 `owner`**（裁定 6）收窄撞车的 `thread_id`；**多条候选 ⇒ 如实拒绝**，⛔ 不"挑第一条"。<br>· 🆕 **`GET /agent/approvals/history`（`:2021`）** —— 裁决历史（读 `app/agent/approval_audit.py` 的 `approval_events` 表）。⚠️ **与 `/agent/pending` 同一条可见性口径**：本人默认、admin 全量。<br>· 🔴 **`GET /agent/pending`（`:702`）的可见性变了** —— 此前**跨用户全量**，现在**本人默认 · admin 全量**（`DEC-088` 缺口③）。⚠️ **收窄发生在【端点里】（两行过滤），`list_pending()` 一行没动** —— 见 `docs/specs/pending_approvals.md`。<br>· 🔴 **`POST /agent/approve`（`:439`）加了两样**：① 可选 **`owner`**（用来收窄撞车的 `thread_id`，**收窄 ≠ 授权**）② 每次**真裁决**写一条留痕（`record_decision`，fail-open）。⚠️ **留痕写在那道"队列登记陈了"的守卫【之后】** ⇒ 它是**第四条不记的出口**（见「看代码会误判」表）。<br>· 📄 设计 ⇒ `docs/decisions/DEC-088-接管页与硬门D的三个缺口.md` · 施工 ⇒ `fastapi-rag-agent-TODO待办/施工单-20261006-接管页.md` · ⚠️ **本批 ⛔ 不等于硬门 D 翻 ✅**（要照四硬门原文逐栏对）<br>🆕 **2026-10-06（`DEC-093` · `F2` Trace 页）· 加 1 条只读端点 ⇒ 路由 36 → 37**：<br>· 🆕 **`GET /agent/trace/{thread_id}/cost`** —— 成本轴（`token_usage_logs`）的逐笔明细 + 整条线程合计。⚠️ **它与 `/agent/trace/{thread_id}`（追踪轴 · 进程内存）是【两条轴】**，页面上并排画、**⛔ 不合并**（没有共同的步 id）。<br>· 🔴 **0 条回 200，⛔ 不是 404**（`thread_id` 是用户自己填的）；**取数⛔ 不复用 `get_thread_cost`**（它没有归属条件）。📄 `DEC-093` §三·A/§三·A' |
 | **对外提供** | **36 个路由**（含 **5 条 SSE**：`/agent/langgraph_chat/stream` · `/agent/advanced_chat/stream` · `/agent/plan_execute/stream` · `/agent/memory_chat/stream` · `/agent/mcp_chat/stream`；其余 `/agent/approve` · `/agent/pending` · `/agent/pending/context` · `/agent/approvals/history` · `/agent/token/*` · `/agent/cost/*` …）· `summarize_agent_result()`（`:131`） |
-| **谁在用** | 前端（🟡 **接管页已做** ⇒ `api/static/web/approvals.html` · `docs/decisions/DEC-088-接管页与硬门D的三个缺口.md`；对话页见 `docs/specs/static_frontend.md`）· `test_public_paths.py` 等 · `api/test_agent_stream_chains.py`（**60 条**，覆盖 4 条新链 + `DEC-055` 三条出口的留痕） |
+| **谁在用** | 前端（🟡 **接管页已做** ⇒ `app/static/web/approvals.html` · `docs/decisions/DEC-088-接管页与硬门D的三个缺口.md`；对话页见 `docs/specs/static_frontend.md`）· `test_public_paths.py` 等 · `app/tests/test_agent_stream_chains.py`（**60 条**，覆盖 4 条新链 + `DEC-055` 三条出口的留痕） |
 | **规模** | **2119 行**（`scripts/spec_status.sh` 口径 = **本仓口径**；`wc -l` 报 **2118** —— 本文件**末行没有换行符** ⇒ 少算 1，⛔ **不是笔误**，同 `agent_graph.py`）<br>⚠️ **别抄这个数** —— 它已被重取过**十次**：743 → 835 → 875 → 894 → 1006/1007 → 1552/1553（`B1` 4 条新端点）→ 1692（`DEC-055`/`060`/`062` 累计）→ 1713/1714（`DEC-072` 6 处身份注入 +22 行）→ **2118/2119**（`DEC-088` 接管页：两个新端点 + 留痕接线 + 可见性收窄，+405 行）。<br>🔴 **2026-10-04 更正**：上一版这里写的 **1553** 是 **`DEC-055`/`060`/`062` 之前**的值，**一直没跟上** ⇒ 本条所谓"当天重取六次"对后三批改动**失效**。<br>🔴 **2026-10-06 教训**：**这个数每批都会涨**，而上一版把它写进正文时**没有跟着重取行号**（同一个「抄了个会过期的数」的毛病）⇒ 见上方行号口径块。 |
 
 > ✅ **行号口径（2026-10-06 第二次全量重取 · 上一次 = 2026-10-04）**
@@ -24,8 +24,8 @@
 >
 > 📌 **要用行号请自己重取**（⛔ 别信任何一份文档里的数）：
 > ```bash
-> grep -n '^@router\.\(post\|get\)' api/api_v1_agent.py          # 路由当前行号
-> grep -n '"user_name": user_name' api/api_v1_agent.py          # 身份注入点
+> grep -n '^@router\.\(post\|get\)' app/routing/api_v1_agent.py          # 路由当前行号
+> grep -n '"user_name": user_name' app/routing/api_v1_agent.py          # 身份注入点
 > # ⭐ 最省事的那条：把本文件里每个 :NNN 都拿去 sed -n "${n}p" 对一眼（两次重取都用的它）
 > sed -n '1,173p' docs/specs/api_v1_agent.md | grep -o ':\([0-9]\{2,4\}\)'
 > ```
@@ -36,7 +36,7 @@
 - **对话链**：`langgraph_chat`(:212) · `advanced_chat`(:835) · `plan_execute`(:1074) · `memory_chat`(:1245) · `mcp_chat`(:1627)
   · 🔵 **B8（2026-10-01）**：这 5 条**全部接上会话级 token 上限**（`check_session_token_budget`），触顶抛 `QUOTA_EXCEEDED`
   · 🔵 **`B1` 剩余 4 条链（2026-10-04）**：同一批端点**各配一条 SSE 版** ⇒ `.../stream`（`:889` / `:1128` / `:1311` / `:1711`），
-    与 `langgraph_chat/stream`（`:282`）**共用 `api/sse.py`**。⚠️ **四条链的"可流节点名单"各不相同**，
+    与 `langgraph_chat/stream`（`:282`）**共用 `app/routing/sse.py`**。⚠️ **四条链的"可流节点名单"各不相同**，
     且**住在各自的图模块里**（`STREAMABLE_NODES`）—— ⛔ 端点不许抄字面量（`DEC-051` 的教训：一个名字两个来源必然**静默**漂移）
 - **人工审批**：`POST /agent/approve`（`:439`）—— 批准 / 拒绝 / **改写后提交**，靠 `agent_graph` 的 `interrupt_before`
   · 🔵 **改写后提交（`②` Task 3 · `B6` · 2026-10-03 · 🔴 口径 2026-10-04 由 `DEC-062` 修正）**：可选参数 **`edited_answer`（`:443`）**。
@@ -52,7 +52,7 @@
     · 收尾成功 ⇒ `status="approved"/"rejected"` + **`forced_finish=True`** + `rounds`
     · 收尾不住（模型仍要敏感工具）⇒ `status="error"` + `rounds`，该轮终止、⛔ **不入队**
     ⚠️ 没有它：模型可**无限**要求敏感工具、人工得无限批（实测 3 次收敛，但**没有机制阻止 30 次**）。
-  · ⭐ **续跑形状被测试钉住**：`api/test_approval_resume.py`（**16 条** · **纯离线 · 进 CI**）——
+  · ⭐ **续跑形状被测试钉住**：`app/tests/test_approval_resume.py`（**16 条** · **纯离线 · 进 CI**）——
     `invoke` 必须是 **`None`**（= 从 checkpoint 继续，⛔ 不是新开一轮）、`config` 必须是**请求里那个 thread_id**
     · §⑤ 六条是**真图 + 假 LLM**，钉「state 里没有孤儿 `tool_calls`」/「模型真的被叫醒」/「又停下就重新入队」
     · 🆕 §⑥ 四条钉**轮次上限**：首次 = 1 · 每次 +1 · 触顶强制收尾（`forced_finish`）· 收尾不住则 `error` 且不入队
@@ -60,14 +60,14 @@
     · **`owner`（`:444`）是【收窄】不是【授权】** —— 它在 `find_by_raw_thread_id(thread_id)` **之后**过滤候选（`:505`），
       解决"两个人用同一个 `thread_id`"的撞车；**授权仍是那条"本人或 admin"（`:527`）**。⚠️ **收了窄就批不了别人的**（本意）。
     · **每次真裁决写一条** `record_decision(...)`（`:578`）：`owner`（**会话属主**，取 `owner_name` `:522`）/ `actor`（**动手的人** —— admin 接管时**必然不同**）·
-      `decision` · `edited` · `rounds` · `reason`（工具摘要，`summarize_tool_calls`）。落到 **`approval_events`**（`api/approval_audit.py`）。
+      `decision` · `edited` · `rounds` · `reason`（工具摘要，`summarize_tool_calls`）。落到 **`approval_events`**（`app/agent/approval_audit.py`）。
       🔴 **两道 fail-open，⛔ 不是重复**：① `record_decision` **函数体内**兜住（写库失败不影响裁决）
       ② **调用点**再包一层 `try/except` —— 因为**参数绑定的失败发生在进函数之前**。
       📄 为什么：**"留痕写不进去"不许把"人已经批了"这件事一起弄丢**。
     · ⚠️ **它是【第四条不记的出口】**（见「看代码会误判」表那条"队列登记陈了"）。
-    · 📌 判据 ⇒ `api/test_approve_audit_wiring.py`（12 条，**假 `record_decision` 记下 `seen`** 再断言关键字）
+    · 📌 判据 ⇒ `app/tests/test_approve_audit_wiring.py`（12 条，**假 `record_decision` 记下 `seen`** 再断言关键字）
 - 🔵 **待接管队列（`②` Task 2 · `B5` · 2026-10-03）**：新增 **`GET /agent/pending`** —— 列出**当前在等接管的会话**
-  （事实来源 = 新模块 **`api/pending_approvals.py`**，⛔ **不是从 checkpoint 反查** —— `MemorySaver` **没有"列出全部 thread"的 API**）。
+  （事实来源 = 新模块 **`app/agent/pending_approvals.py`**，⛔ **不是从 checkpoint 反查** —— `MemorySaver` **没有"列出全部 thread"的 API**）。
   `langgraph_chat` 在拿到 `summary` 后**登记 / 注销**；⚠️ **`approve_agent_action` 改前【每条 return 前】都注销，`DEC-062`（2026-10-04）起不是了** ——
   **只有图真的走完才 `resolve()`**（又停下 ⇒ 重新登记；⛔ 无条件注销会造**孤儿会话**，见「看代码会误判」表）。
 - 🆕 **接管页的两个读端点（`DEC-088` · `F1` · 2026-10-06）**：
@@ -78,7 +78,7 @@
     · 🔴 **`len != 1` ⇒ 如实拒绝**（0 条 / 多条**都**拒）—— ⛔ **不"挑第一条"**：那等于**随机**给一个人看别人的会话；
     · 🔴 **越权与"真不存在"答同一个 `error`**（有意的，否则那句错误本身是"该 thread 存在"的 oracle —— 与 `/agent/trace/{id}` 同口径）；
     · ⚠️ **四类拒绝全是 HTTP 200 + `{"status": "error"}`** —— 前端必须**读 body**，⛔ 别只看 `r.ok`。
-  · **`GET /agent/approvals/history`（`:2021`）** —— 裁决历史（读 `api/approval_audit.py` 的 `list_decisions`）。
+  · **`GET /agent/approvals/history`（`:2021`）** —— 裁决历史（读 `app/agent/approval_audit.py` 的 `list_decisions`）。
 🔴 **2026-10-08：这条端点【分页了】（`limit` + `offset` + 响应回 `has_more`）** ——
 分页前它**硬写 `limit=50` 且界面不说明被截了**（静默截断）。
 ⚠️ **`has_more` 的判法是「多取一条」**：向 `list_decisions` 要 `limit+1`，多要的那条**只当探针、不返回**。
@@ -93,7 +93,7 @@
   · 🔴 **0 条回 200 + 空 `items`，⛔ 不是 404** —— `thread_id` 是**用户自己填的**，404 会把"这条线程没花过钱"说成"这条线程不存在"；而且它与 `/agent/trace/{id}`（**有** 404 语义）是**两条不同的轴**。
   · 🔴 **⛔ 别复用旁边的 `get_thread_cost(thread_id)`** —— 它没有归属条件，看着像能复用，实为越权。理由见 `docs/specs/token_tracker.md`「看代码会误判」。
   · ⚠️ **页面画它、但⛔ 不与上半页（追踪轴）合并** —— 两轴没有共同的步 id，见 `DEC-093` §二。
-  · 📌 判据 ⇒ `api/test_trace_cost.py`（15 · 假 pg）· `api/test_trace_cost_db.py`（9 · `needs_db`）· 页面侧 `api/test_trace_page.py`（7）
+  · 📌 判据 ⇒ `app/tests/test_trace_cost.py`（15 · 假 pg）· `app/tests/test_trace_cost_db.py`（9 · `needs_db`）· 页面侧 `app/tests/test_trace_page.py`（7）
 - **⭐ `summarize_agent_result()`（`:131`）** —— 把图的运行结果翻成 `{"status": "pending_approval"/"answered", …}`，
   并**把模型已写出的文字一并返回**（真实 LLM 常"先说一句再调工具"）
 - **预算**：`check_budget` 依赖（`:1583`，抛 `AppException(QUOTA_EXCEEDED)`）· 6 个 `/agent/token/*` 查询路由
@@ -109,7 +109,7 @@
     （它的**两个** `invoke` 都认标志；命中 ⇒ **先 `resolve(sess)` 再 429** —— 被拦那轮**图真跑完了**，
     不注销就留一条假待办）。⚠️ **门用【调用方】`user_name`**（⛔ 不是属主）—— 与其余端点一致（谁发请求谁被限）。
   · 文案由一个**模块级纯函数** `agent_budget_intercept_message(why)`（`:101`）统一拼 —— ⛔ 别在节点里拼整句。
-  · 📄 裁定 ⇒ `DEC-083`；📌 判据 ⇒ `api/test_budget_soft_return.py`（21 例，**变异自证 27/27**）
+  · 📄 裁定 ⇒ `DEC-083`；📌 判据 ⇒ `app/tests/test_budget_soft_return.py`（21 例，**变异自证 27/27**）
 - 🔵 **成本可见两处（`①b` Task 7 · `B13` · 2026-10-03 · `DEC-047`）**：
   · **`/agent/token/budget`（`:1596`）** 补上**全站日级**三个字段（`global_daily_limit` / `global_used_today` / `global_remaining`）——
   在此之前 `B10`/`B11` 的全站额度**只有入口没有出口**，超了所有人吃 429 却**界面上看不到逼近**；
@@ -128,15 +128,15 @@
     链 D **不是图**（同步函数 + `asyncio.to_thread`）⇒ 靠 `_ThreadTokenBridge`（`:1003`）。
   · ⚠️ **两条前置闸**（`check_session_token_budget` `B8` + `circuit(global_key())` `B11`）与各自**非流式版本同源**，
     且**必须在端点函数体里** —— 两个 AST 守卫挖的就是函数体内部（见 `sse.md`）。
-  · ⭐ **判据**（可打印 · 全离线 · 进 CI）：`api/test_agent_sse.py`（**15 例** —— 原 **12**，评审收口补了 3 条汇总帧 `requested_by`）· `api/test_cancel_propagation.py`（**22 例**，其中 Agent 段 **7** 条）·
-    🆕 `api/test_agent_stream_chains.py`（**60 例** · 覆盖 4 条新链：逐 token / `aget_state` 汇总 / 断连关上游 / A 链白名单 / `DEC-055` 留痕 13 条）
+  · ⭐ **判据**（可打印 · 全离线 · 进 CI）：`app/tests/test_agent_sse.py`（**15 例** —— 原 **12**，评审收口补了 3 条汇总帧 `requested_by`）· `app/tests/test_cancel_propagation.py`（**22 例**，其中 Agent 段 **7** 条）·
+    🆕 `app/tests/test_agent_stream_chains.py`（**60 例** · 覆盖 4 条新链：逐 token / `aget_state` 汇总 / 断连关上游 / A 链白名单 / `DEC-055` 留痕 13 条）
   · ⚠️ **`X-Accel-Buffering: no` 是必须的** —— 少了它，Nginx / Cloudflare 会把整段缓冲住 ⇒ **又变回假流式**（本仓要上 Cloudflare 隧道）。
-    ✅ 现在它在共享层 `api/sse.py` 的 `SSE_HEADERS` 里，**5 条一起有**
+    ✅ 现在它在共享层 `app/routing/sse.py` 的 `SSE_HEADERS` 里，**5 条一起有**
 - **工具**：`/agent/tool_health` · `/agent/tool_versions` · `/agent/available_tools` · `/agent/mcp_tools_dynamic`
 - 🔴 **身份注入（`DEC-072` · 2026-10-04）**：6 个对话端点的**初始 state**里补上 **`user_name` / `thread_id`** ——
   图里的记账节点靠这两个键才知道"钱记给谁、记到哪个会话"。⚠️ **传【原值】**，⛔ 不是 `sess`（见顶部状态栏）。
   ⚠️ **改前 `advanced_chat` 那两条只传了 `user_name`** ⇒ 账记不到会话。
-  📌 判据 ⇒ `api/test_billing_wiring.py`（AST 查 6 条端点的 `initial_state` 关键字）
+  📌 判据 ⇒ `app/tests/test_billing_wiring.py`（AST 查 6 条端点的 `initial_state` 关键字）
 
 ## 🟡 做到哪 / 缺什么
 
@@ -145,7 +145,7 @@
   其余 4 条于 2026-10-04）。⚠️ **剩下的 29 条是非流式，但它们不是"缺口"** ——
   它们是**查询 / 管理 / 记账类**（token 用量 · 工具健康 · 预算 · 轨迹 · 记忆增删），
   **产出的不是逐字生成的文本** ⇒ 流式无意义。⛔ **这句是【本批的判断】，没走业务裁定**（若业务方认为还有该流的，这条要改）。
-  ⚠️ **别只看条数**：`grep -c '^@router' api/api_v1_agent.py` ⇒ **36**，其中 **5** 条带 `/stream`。
+  ⚠️ **别只看条数**：`grep -c '^@router' app/routing/api_v1_agent.py` ⇒ **36**，其中 **5** 条带 `/stream`。
   硬门 A 要的是"**该流的流**"，⛔ **不是"流了几条算完"**。📄 `DEC-050`
   · ✅ ~~⚠️ **`B2`（cancel 传播到上游）**~~ ⇒ **2026-10-03（`③` Task 5）【已做】** ——
   客户端断开 ⇒ 关掉图的流（`aclose()`）+ 记 `stream_cancelled_total`。📄 `DEC-052`
@@ -156,7 +156,7 @@
       ⚠️ 但 **checkpointer 与 `chat_history` 是两套互不相通的存储** ⇒ 要求变成「**要一条人/脚本能读的对话历史**」时，
       Agent 链**一条都没有**。那是**另一件事**，`DEC-055` 已补：**5 条链全接 `chat_history`**。
 - ✅ ~~🔴 **没有「待接管队列」端点**~~ ⇒ **2026-10-03 起【有了】**（`②` Task 2 · `B5`）：`GET /agent/pending`。
-  ⚠️ **但队列背后是【进程内存】**（`api/pending_approvals.py`）⇒ **重启即空** —— 见其 spec 里那条"已知限制"
+  ⚠️ **但队列背后是【进程内存】**（`app/agent/pending_approvals.py`）⇒ **重启即空** —— 见其 spec 里那条"已知限制"
   · 🔴🔴 **2026-10-06（`DEC-088` 缺口③）· 可见性收窄** —— 它**此前是跨用户全量**（谁调都看到所有人的待办，
     连同 `user_name`），现改为 **本人默认 · admin 全量**（`get_user_role(...) == UserRole.ADMIN` 显式一行）。
     ⚠️ **收窄落在【端点里】，`list_pending()` 一行没动** —— 见 `docs/specs/pending_approvals.md`。
@@ -177,28 +177,28 @@
 
 | 看代码会以为 | 实际 |
 |---|---|
-| 🔴🔴 **「`/agent/langgraph_chat/stream` 的结尾那个 `summary`，把流过 `agent` 节点的块攒起来算就行」** | ⛔ **不行，会算错**（2026-10-03 **真服务**撞见，`③` Task 4）。<br>**攒块 = 跨多轮累积** —— 模型因工具返回"未找到工具"而**重试**时，`agent` 节点会进**多次** ⇒ 攒出来的东西带着**上一轮的** `tool_calls` ⇒ `summarize_agent_result` 报 **`pending_approval`，而图其实已经跑完**（前端会**永远等一个不会来的审批**）。<br>⚠️ 实测症状：`tool_calls` 的 name 被**拼接**成 `"date_todayduckduckgo_search"`。<br>🔴 **2026-10-03（`DEC-051`）**：那次"反复重试"的**根因已修**（`tool_execute` 原来是按字面量 `"search"` 分派、真名是 `duckduckgo_search`）⇒ ⚠️ **但本行仍照旧成立** —— 只要端点还在拿流式块猜，**任何**多轮场景都会重演。<br>✅ **正确做法：从图的最终状态取** —— `await agent_graph.aget_state(config)` ⇒ `summarize_agent_result(state.values)`，与 `/agent/langgraph_chat` **完全同一套语义**。<br>📌 判据（可打印）：`api/test_agent_sse.py::test_status_comes_from_final_state_not_from_streamed_chunks`（`_TwoRoundModel` 逼出第二轮） |
+| 🔴🔴 **「`/agent/langgraph_chat/stream` 的结尾那个 `summary`，把流过 `agent` 节点的块攒起来算就行」** | ⛔ **不行，会算错**（2026-10-03 **真服务**撞见，`③` Task 4）。<br>**攒块 = 跨多轮累积** —— 模型因工具返回"未找到工具"而**重试**时，`agent` 节点会进**多次** ⇒ 攒出来的东西带着**上一轮的** `tool_calls` ⇒ `summarize_agent_result` 报 **`pending_approval`，而图其实已经跑完**（前端会**永远等一个不会来的审批**）。<br>⚠️ 实测症状：`tool_calls` 的 name 被**拼接**成 `"date_todayduckduckgo_search"`。<br>🔴 **2026-10-03（`DEC-051`）**：那次"反复重试"的**根因已修**（`tool_execute` 原来是按字面量 `"search"` 分派、真名是 `duckduckgo_search`）⇒ ⚠️ **但本行仍照旧成立** —— 只要端点还在拿流式块猜，**任何**多轮场景都会重演。<br>✅ **正确做法：从图的最终状态取** —— `await agent_graph.aget_state(config)` ⇒ `summarize_agent_result(state.values)`，与 `/agent/langgraph_chat` **完全同一套语义**。<br>📌 判据（可打印）：`app/tests/test_agent_sse.py::test_status_comes_from_final_state_not_from_streamed_chunks`（`_TwoRoundModel` 逼出第二轮） |
 | 🔴 **「这条流式端点没有 cancel 处理」** | ✅ **2026-10-03（`③` Task 5 · `B2`）起【有了】** —— 客户端断开后**关掉图的流**（`finally` 里 `await stream.aclose()`），并记 `stream_cancelled_total{endpoint="agent_langgraph_chat_stream"}`。<br>⚠️ **不关的代价是"图继续跑完"** = 继续调模型 = **继续烧钱**，而前端看起来一切正常（它只是不显示了）。<br>⚠️ **本轮之前这里确实是空的** —— 而且 `DEC-050` §遗留·3 **自己点了名**。<br>🔴🔴 **2026-10-03 补（`DEC-054`）**：`finally` 里的**顺序**与**关流方式**当天下午被真服务推翻过一次 —— `await stream.aclose()` **会被二次投递的取消打断**，排在它后面的收尾**一件都不跑**（本端点症状：**计数不涨、`[cancel]` 日志没有**）。<br>✅ 现在：**同步收尾提到任何 `await` 之前** + 关流包 `anyio.CancelScope(shield=True)`。⛔ **别改回去**（"关流是收尾动作、放最前面才干净"正是那个坏改法）。<br>✅ **2026-10-04 更正（`DEC-055`）**：本行原写「本端点取消时**一条历史都不留**」—— **不再成立**，
 现在取消 / 异常两条出口**都会**往 `chat_history` 写一条带 `status` 的半截。⚠️ **它与 `/rag/stream_search` 的差别换了一条**：
-RAG 那条的骨架**没有图**，答案只能从 `collected` 取；Agent 这边 `done` 的答案**取自图的最终状态**（见顶部 🔵 块）。<br>📌 判据（可打印）：`api/test_cancel_propagation.py` ⇒ **22 passed**（RAG 段 15 · Agent 段 7）；真服务 = 计数 +1 且日志有 `[cancel]` 行 |
+RAG 那条的骨架**没有图**，答案只能从 `collected` 取；Agent 这边 `done` 的答案**取自图的最终状态**（见顶部 🔵 块）。<br>📌 判据（可打印）：`app/tests/test_cancel_propagation.py` ⇒ **22 passed**（RAG 段 15 · Agent 段 7）；真服务 = 计数 +1 且日志有 `[cancel]` 行 |
 | 🔴 **「客户端断开得靠 `request.is_disconnected()` 自己轮询」** | ⛔ **不用，那是框架给的**（uvicorn 报 `spec_version 2.3` ⇒ Starlette 监听 `http.disconnect` 后**取消生成器**）。<br>⇒ 真正的缺口只有「**停下并关掉上游**」这一件；**自己加轮询 = 多余，且会掩盖真缺口**（`DEC-052`） |
 | 🔴 **「中间件日志里那个秒数 = 这条流的生成耗时」** | ⛔ **不是** —— 它记到**响应开始返回**为止。实测：`(0.019s)` 的那条客户端收了 **27KB**、`(0.004s)` 的那条 **3 秒后**才 cancel。<br>⇒ ⛔ 别拿它当"生成提前停了"的证据（第一版就这么误读过 · `DEC-052`） |
 | 🔴 **「`status=answered` 就是拿到最终答案了」** | ⚠️ **要看 `status`** —— 返回 `pending_approval` 时 `answer` 里是**模型"先说的一句"**，**工具还没执行**。`summarize_agent_result` 的 docstring（`:132-157`）专门讲了这点：**不能加 `and not content`**，否则这种形态会被**误报成 `answered`**。⚠️ **该 docstring 还写了这条判据"依赖什么、什么时候会失效"**（B4 后理由变了）—— 改图的路由时**要回去重看** |
-| ⚠️ ~~🔴 **「审批已经能用了，硬门 D 算完成」**~~ | ✅ **2026-10-03（`②` Task 1 · `B4`）改了口径**：**触发条件不再是「任意 `tool_calls`」**，而是**工具白名单**（`agent_graph.py` 的 `SENSITIVE_TOOLS`）⇒ **问个日期不再进审批**。<br>🔴 **但白名单里的名字当时写错了**（`search_tool` 是**变量名**）⇒ **交集恒空 ⇒ 审批其实【永不触发】**，**直到 2026-10-03 才由 `DEC-051` 修掉**。⇒ ⚠️ **"改了口径"与"口径真的生效"是两件事** —— 前者当天就成立了，后者晚了三天。<br>✅ **2026-10-03（`②` Task 2/3）：`B5` 队列 与 `B6` 续跑都【已做】** ⇒ **三段（什么时候停 / 停在哪看得到 / 批了怎么接着跑）齐了**。<br>⚠️ **但"齐了"≠"验收过"**：`B6` 只钉了**接线与语义**（`invoke(None)` + `edited_answer` 进 state），<br>**"上下文真的连续"没有端到端跑过**（要真 LLM + 真 `MemorySaver`，**联网花钱**）⇒ 验收演示时**要补那一步**。<br>🔴 **2026-10-04 补上了 —— 一跑就【不通过】**：真服务跑三条出口，**证真① 过、证真② 不过**；三条出口（改写放行 / 原样放行 / 拒绝）**每一条都会把会话弄坏**（同 thread 再问 ⇒ **500**）。⚠️ **而当时单测 21 条全绿** —— 因为假图**不校验消息结构**、假 `invoke` **不会有"下一轮"**。<br>✅ **同已修**（`DEC-062`，A+B+C）⇒ 复跑 **22/22**。🔴 **教训写在 `DEC-062`**：**硬门 D 的证真② 只有真服务跑得出来**（与 `DEC-061` 的"幽灵判据"同源：**以为门上挂着锁**）。<br>⚠️ **硬门 D 仍不标 ✅** —— 它的演示/反例里含**界面**（「点开后能看到完整上下文」「界面上找不到」），前端未开工。<br>🔵 **2026-10-06 更新（`DEC-088` · `F1`）**：**界面那一块【做了】**（`api/static/web/approvals.html` + `GET /approvals` → 302），
+| ⚠️ ~~🔴 **「审批已经能用了，硬门 D 算完成」**~~ | ✅ **2026-10-03（`②` Task 1 · `B4`）改了口径**：**触发条件不再是「任意 `tool_calls`」**，而是**工具白名单**（`agent_graph.py` 的 `SENSITIVE_TOOLS`）⇒ **问个日期不再进审批**。<br>🔴 **但白名单里的名字当时写错了**（`search_tool` 是**变量名**）⇒ **交集恒空 ⇒ 审批其实【永不触发】**，**直到 2026-10-03 才由 `DEC-051` 修掉**。⇒ ⚠️ **"改了口径"与"口径真的生效"是两件事** —— 前者当天就成立了，后者晚了三天。<br>✅ **2026-10-03（`②` Task 2/3）：`B5` 队列 与 `B6` 续跑都【已做】** ⇒ **三段（什么时候停 / 停在哪看得到 / 批了怎么接着跑）齐了**。<br>⚠️ **但"齐了"≠"验收过"**：`B6` 只钉了**接线与语义**（`invoke(None)` + `edited_answer` 进 state），<br>**"上下文真的连续"没有端到端跑过**（要真 LLM + 真 `MemorySaver`，**联网花钱**）⇒ 验收演示时**要补那一步**。<br>🔴 **2026-10-04 补上了 —— 一跑就【不通过】**：真服务跑三条出口，**证真① 过、证真② 不过**；三条出口（改写放行 / 原样放行 / 拒绝）**每一条都会把会话弄坏**（同 thread 再问 ⇒ **500**）。⚠️ **而当时单测 21 条全绿** —— 因为假图**不校验消息结构**、假 `invoke` **不会有"下一轮"**。<br>✅ **同已修**（`DEC-062`，A+B+C）⇒ 复跑 **22/22**。🔴 **教训写在 `DEC-062`**：**硬门 D 的证真② 只有真服务跑得出来**（与 `DEC-061` 的"幽灵判据"同源：**以为门上挂着锁**）。<br>⚠️ **硬门 D 仍不标 ✅** —— 它的演示/反例里含**界面**（「点开后能看到完整上下文」「界面上找不到」），前端未开工。<br>🔵 **2026-10-06 更新（`DEC-088` · `F1`）**：**界面那一块【做了】**（`app/static/web/approvals.html` + `GET /approvals` → 302），
    且后端三个缺口（上下文端点 / 留痕 / 可见性）一并补上。<br>🔴 **但硬门 D 依然【不】因本批翻 ✅** —— `DEC-088` §六·6 明写：**验收要照
    `fastapi-rag-agent-TODO待办/通用/四硬门-定义与验收标准.md` 硬门 D 的四栏原文逐条对**，⛔ 不是"这单跑完就算"。
    （本 spec 里的行文只是**实现记录**，验收结论不在它这儿。）<br>⚠️ **本条 2026-10-03 之前写的是旧口径**，⛔ 别照旧理解 |
 | ⚠️ **「`/agent/approve` 收 JSON body」** | ⛔ **不是** —— `thread_id` / `approved` / **`edited_answer`** **都是 query 参数**（`:441-444`） |
-| 🔴🔴 **「`/agent/approve` 拿 `thread_id` 就能批」** | ⛔ **2026-10-03（丙段）起不能了** —— 它现在**先从待接管队列反查属主**，再判**本人或 admin**。<br>⚠️ **改之前它没有任何归属校验** —— 任何人拿一个 `thread_id` 就能**批准并续跑**那个会话。<br>🔴 **为什么不能"按调用方拼"**：`/agent/pending` 是**跨用户队列**（硬门 D）⇒ 按调用方拼，admin 会拼出 `admin:…`、属主是 `alice:…` ⇒ **admin 永远批不了别人的**。<br>⚠️ **代价（知道再选）**：**队列是唯一入口** ⇒ `AGENT_CHECKPOINT_BACKEND=sqlite` 重启后（图在盘上、队列在内存）会答"没有待审批任务"，而以前能批。📌 判据 ⇒ `api/test_approve_ownership.py` |
-| 🔴 **「`/agent/approve` 只认 `agent_graph`」** | ⛔ **两张图** —— `/agent/langgraph_chat` 走 `agent_graph`、**`/agent/memory_chat` 走 `checkpointer_agent`**（丙段给它加了审批门）⇒ approve **按登记表里的 `graph` 字段路由**。<br>⚠️ 写死 `agent_graph` 的后果：memory_chat 那条会话**永远放行不了**（**门关了却没有钥匙**，比不加门还糟）。业务方 2026-10-03 裁。📌 判据 ⇒ `api/test_memory_chat_approval.py::test_approve_routes_to_checkpointer_graph` |
+| 🔴🔴 **「`/agent/approve` 拿 `thread_id` 就能批」** | ⛔ **2026-10-03（丙段）起不能了** —— 它现在**先从待接管队列反查属主**，再判**本人或 admin**。<br>⚠️ **改之前它没有任何归属校验** —— 任何人拿一个 `thread_id` 就能**批准并续跑**那个会话。<br>🔴 **为什么不能"按调用方拼"**：`/agent/pending` 是**跨用户队列**（硬门 D）⇒ 按调用方拼，admin 会拼出 `admin:…`、属主是 `alice:…` ⇒ **admin 永远批不了别人的**。<br>⚠️ **代价（知道再选）**：**队列是唯一入口** ⇒ `AGENT_CHECKPOINT_BACKEND=sqlite` 重启后（图在盘上、队列在内存）会答"没有待审批任务"，而以前能批。📌 判据 ⇒ `app/tests/test_approve_ownership.py` |
+| 🔴 **「`/agent/approve` 只认 `agent_graph`」** | ⛔ **两张图** —— `/agent/langgraph_chat` 走 `agent_graph`、**`/agent/memory_chat` 走 `checkpointer_agent`**（丙段给它加了审批门）⇒ approve **按登记表里的 `graph` 字段路由**。<br>⚠️ 写死 `agent_graph` 的后果：memory_chat 那条会话**永远放行不了**（**门关了却没有钥匙**，比不加门还糟）。业务方 2026-10-03 裁。📌 判据 ⇒ `app/tests/test_memory_chat_approval.py::test_approve_routes_to_checkpointer_graph` |
 | 🔴 **「`memory_chat` 没有审批门」（2026-10-03 前的口径）** | ✅ **丙段起有了** —— `checkpointer_agent` 带 `interrupt_before=["approval"]`，敏感工具会停下。⚠️ **输出形状也变了**：新增 `status` / `pending_tool_calls`（与 `/agent/langgraph_chat` 一致，⛔ 不再返回 200 + 空答案） |
 | ⚠️ **「`thread_id` 拼身份 = 全仓统一拼法」** | ⛔ **不是** —— checkpoint 轴用 `session_key()`（**长度前缀**，无歧义）；而 **`:1416`（`add_memory`）与 `:1432`（`search_memory`）那两处 `f"{user_name}:{memory_space}"`** 仍是**朴素拼接**（含 `:` 会有歧义）。⚠️ 两条轴**各有各的拼法**，丙段**只动了 checkpoint 那条** |
 | 🔴 **「`edited_answer` 就是"把答案改一下再返回"」** | ⛔ **不止** —— 它**先写进 graph state**，**再从 checkpoint 续跑**。<br>⚠️ **差别在哪**：审批之后图**还要去 `agent`** ⇒ 只把改写当返回值吐出去，**后续节点看不到它**（改写等于没改） |
 | 🔴🔴 **「留痕字段 `edited=true` = 人工改写了一次回答」**（`DEC-088` · 2026-10-06） | ⛔ **不是** —— `edited` 的真实语义是「**代替模型给出了这次工具调用的结果**」（`DEC-088` §一 裁定 4 明写：界面上的原话是「**代替模型执行这次工具调用**」）。<br>⚠️ **为什么容易读歪**：字段名 `edited` 谁都认得，而它修饰的**不是答案**，是**那条 `ToolMessage`**。<br>⚠️ **它由 `bool(approved and edited_answer is not None)` 算出来**（`:582`）—— **拒绝时永远 `False`**，哪怕调用方**真的传了** `edited_answer`（拒绝的语义是"别做了"，传了也忽略）。⛔ 别把它当"用户改过答案没有"。 |
-| 🔴 **「每次调 `/agent/approve` 都会留一条痕」** | ⛔ **不会** —— 留痕**只记"真的落到图上的裁决"**，而它有**四条不记的出口**（前三条 `DEC-088` §3.2，第四条见下）：<br>① `thread_id` 对不上任何登记 ⇒「当前没有等待审批的任务」· ② **多条候选**（撞车）⇒ 如实拒绝 · ③ **归属校验不过**（不是本人也不是 admin）⇒「无权审批」·<br>④ 🔴 **队列登记陈了**（`:554` —— **归属校验已过**，但 `get_state().next != ("approval",)` ⇒ 顺手 `resolve` 并答"没有等待审批的任务"）。<br>⚠️ **第 ④ 条是本批（施工单具体化 C）才发现要补写的**：它**发生在归属校验之后**，所以最容易被当成"一次真裁决"记下来 —— 而那是一条**假留痕**（照它统计会得出"某人批了很多次，但其实现场什么都没发生"）。<br>⇒ **判据是位置**：`record_decision`（`:578`）**必须**排在那道 `return`（`:558`）**之后**。📌 守卫 ⇒ `api/test_approve_audit_wiring.py` 里那条"图没停在审批点 ⇒ 不写留痕"。 |
-| 🔴🔴 **「改写/拒绝时往 state 里塞 `AIMessage` 就行」**（**改前 spec 就是这么写的，2026-10-04 已推翻**） | ⛔ **`AIMessage` 是错的**，`HumanMessage` 也是错的 —— **必须是 `ToolMessage`（按 `tool_call_id` 配对）且显式传 `as_node="tools"`**。<br>🔴 **为什么**（`DEC-062`，全部真机实测）：`interrupt_before=["approval"]` 停在审批点时，state 末尾是**一条带 `tool_calls` 的 `AIMessage`**，它**必须**由每个 `tool_call_id` 各一条 `ToolMessage` 闭合。<br>· 塞 `AIMessage`/`HumanMessage` ⇒ 那个配对**永远不闭合** ⇒ 真模型**下一轮直接 400**（`must be followed by tool messages`）—— **而单测看不出来**（假图不校验结构、假 `invoke` 不会有"下一轮"）。<br>· 塞 `AIMessage` 还有第二重错：`update_state` 会**按消息类型推 `as_node`** ⇒ `AIMessage` 被认成 `agent` 的输出 ⇒ **条件边重算 ⇒ 图当场 END**（实测 `approve` **0.017s**、`answer` = 输入原文、`tools`/`agent` 一个都没跑）。<br>· ⚠️ **反直觉**：**只塞对 `ToolMessage` 也不够** —— 不传 `as_node` 时它被推成 `agent` ⇒ **照样 END**（实测 `next=()`）。⇒ **两件事都要做**。<br>📌 判据 ⇒ `api/test_approval_resume.py` §⑤（真图 + 假 LLM）· 端到端 **22/22**（`DEC-062`） |
+| 🔴 **「每次调 `/agent/approve` 都会留一条痕」** | ⛔ **不会** —— 留痕**只记"真的落到图上的裁决"**，而它有**四条不记的出口**（前三条 `DEC-088` §3.2，第四条见下）：<br>① `thread_id` 对不上任何登记 ⇒「当前没有等待审批的任务」· ② **多条候选**（撞车）⇒ 如实拒绝 · ③ **归属校验不过**（不是本人也不是 admin）⇒「无权审批」·<br>④ 🔴 **队列登记陈了**（`:554` —— **归属校验已过**，但 `get_state().next != ("approval",)` ⇒ 顺手 `resolve` 并答"没有等待审批的任务"）。<br>⚠️ **第 ④ 条是本批（施工单具体化 C）才发现要补写的**：它**发生在归属校验之后**，所以最容易被当成"一次真裁决"记下来 —— 而那是一条**假留痕**（照它统计会得出"某人批了很多次，但其实现场什么都没发生"）。<br>⇒ **判据是位置**：`record_decision`（`:578`）**必须**排在那道 `return`（`:558`）**之后**。📌 守卫 ⇒ `app/tests/test_approve_audit_wiring.py` 里那条"图没停在审批点 ⇒ 不写留痕"。 |
+| 🔴🔴 **「改写/拒绝时往 state 里塞 `AIMessage` 就行」**（**改前 spec 就是这么写的，2026-10-04 已推翻**） | ⛔ **`AIMessage` 是错的**，`HumanMessage` 也是错的 —— **必须是 `ToolMessage`（按 `tool_call_id` 配对）且显式传 `as_node="tools"`**。<br>🔴 **为什么**（`DEC-062`，全部真机实测）：`interrupt_before=["approval"]` 停在审批点时，state 末尾是**一条带 `tool_calls` 的 `AIMessage`**，它**必须**由每个 `tool_call_id` 各一条 `ToolMessage` 闭合。<br>· 塞 `AIMessage`/`HumanMessage` ⇒ 那个配对**永远不闭合** ⇒ 真模型**下一轮直接 400**（`must be followed by tool messages`）—— **而单测看不出来**（假图不校验结构、假 `invoke` 不会有"下一轮"）。<br>· 塞 `AIMessage` 还有第二重错：`update_state` 会**按消息类型推 `as_node`** ⇒ `AIMessage` 被认成 `agent` 的输出 ⇒ **条件边重算 ⇒ 图当场 END**（实测 `approve` **0.017s**、`answer` = 输入原文、`tools`/`agent` 一个都没跑）。<br>· ⚠️ **反直觉**：**只塞对 `ToolMessage` 也不够** —— 不传 `as_node` 时它被推成 `agent` ⇒ **照样 END**（实测 `next=()`）。⇒ **两件事都要做**。<br>📌 判据 ⇒ `app/tests/test_approval_resume.py` §⑤（真图 + 假 LLM）· 端到端 **22/22**（`DEC-062`） |
 | 🔴 **「批完就从待接管队列里注销了」** | ⚠️ **改前是这样的，`DEC-062` 起不是** —— 只有**图真的走完**（`get_state().next != ("approval",)`）才 `resolve()`。<br>⚠️ **为什么**：模型放行后**又要**一个敏感工具是**常见行为**（实测连续 3 次）⇒ 无条件注销 = 图还停着、队列已空 = 🔴 **孤儿会话**（`/agent/pending` 查不到、「再批」报"没有等待审批的任务"、同 thread 再问 **500**）。<br>📌 判据 ⇒ `test_resume_that_stops_again_is_re_registered` · `test_resume_that_finishes_clears_the_queue` |
-| 🔴 **「模型可以无限要求敏感工具，人工无限批」** | ⛔ **2026-10-05 起封顶**（`DEC-062 §六·2`）：`rounds` 到 **`approval_round_cap()`**（默认 3 · env `MAX_APPROVAL_ROUNDS`）就**不再登记**，改注入"请直接作答"的 `ToolMessage` 收尾。<br>⚠️ **别读成"一律报错"** —— **先努力收尾**（成功 ⇒ `forced_finish=True` + 正常答案）；只有"连提示都拦不住"才 `status="error"`。📌 判据 ⇒ `api/test_approval_resume.py` §⑥（4 条） |
+| 🔴 **「模型可以无限要求敏感工具，人工无限批」** | ⛔ **2026-10-05 起封顶**（`DEC-062 §六·2`）：`rounds` 到 **`approval_round_cap()`**（默认 3 · env `MAX_APPROVAL_ROUNDS`）就**不再登记**，改注入"请直接作答"的 `ToolMessage` 收尾。<br>⚠️ **别读成"一律报错"** —— **先努力收尾**（成功 ⇒ `forced_finish=True` + 正常答案）；只有"连提示都拦不住"才 `status="error"`。📌 判据 ⇒ `app/tests/test_approval_resume.py` §⑥（4 条） |
 | ⚠️ **「`rounds` 是给人看的」** | ⛔ **是封顶依据** —— `/agent/approve` 拿 `candidates[0]["rounds"]` 比上限。⚠️ **`register` 默认 `rounds=1`** ⇒ 只有"放行后又停"那条路会 `+1`（首登记本就该是 1）；**新登记点若不代表首次，必须显式传 `rounds`** |
 | ⚠️ **「审批状态是持久化的」** | ⚠️ **默认不是** —— `agent_graph.py:300` 用的是 `MemorySaver()`（**进程内存**）⇒ **重启即丢**。只有设了 `AGENT_CHECKPOINT_BACKEND=sqlite` 才落盘 |
 | 🔴 **「`check_budget` 就是会话上限」** | ⛔ **不是** —— `check_budget`（`:1583`）判的是**用户【每日】token 预算**。**会话级是另一个函数**（`check_session_token_budget`，B8 · 2026-10-01）。两者**并存**，⚠️ `/agent/mcp_chat` 上**两条都挂** |
@@ -207,20 +207,20 @@ RAG 那条的骨架**没有图**，答案只能从 `collected` 取；Agent 这�
 | 🔴 **「会话上限没拦住 = 没生效」** | ⚠️ **先看 `thread_id` 是不是默认值** —— 会话 key = **`user_name` + `thread_id`**（`DEC-041` 决策二）。<br>4 个端点的 `thread_id` 默认 `"default"` ⇒ **同一个人的**多次默认调用**共用**一个桶（**不同人不会互相踩** —— 这正是决策二加 `user_name` 的原因）。<br>⚠️ 但**换个 `thread_id` 就是换个桶** ⇒ 这是**设计如此**，不是漏拦<br>✅ **2026-10-03 起两条轴终于一致了** —— **checkpoint 那条轴**原先按**裸 `thread_id`** 走（`DEC-056` §二 根因），现在也拼 `user_name`（丙段）。⚠️ 但**拼法不同**（这条是 `f"{user}:{thread}"`，那条是长度前缀）⇒ ⛔ 别以为能互推 |
 | ⚠️ **「`/agent/plan_execute` 一直有 `thread_id`」** | 🔴 **2026-10-01 才补的**（B8）。此前它**没有**这个参数 ⇒ 老客户端不传也能跑（走默认值），**行为不变**；但**新加的这条上限**在它上面用的是 `"default"` 桶 |
 | ⚠️ **「额度是按人算的」** | ⚠️ **两者都是，但维度不同**：`check_budget` = 人 × 日；`check_session_token_budget` = **人 × 会话 × 日**。⛔ 别把其中一个当另一个 |
-| 🔴 **「`/agent/traces` 是管理员看板」** | ⛔ **默认只给你本人的**（2026-10-03 之前**是**给所有人的 —— 见下一条）。看全量要 admin，而那个开关在端点里**显式一行**（`include_all=get_user_role(...) == UserRole.ADMIN`）。📌 判据 ⇒ `api/test_trace_isolation.py` |
+| 🔴 **「`/agent/traces` 是管理员看板」** | ⛔ **默认只给你本人的**（2026-10-03 之前**是**给所有人的 —— 见下一条）。看全量要 admin，而那个开关在端点里**显式一行**（`include_all=get_user_role(...) == UserRole.ADMIN`）。📌 判据 ⇒ `app/tests/test_trace_isolation.py` |
 | 🔴 **「`/agent/trace/{thread_id}` 拿一个 id 就能查」** | ⛔ **2026-10-03 起要属主**（`DEC-056` **决策 9** / N4）。改之前它**不判属主**，且轨迹存储**只按裸 `thread_id`** 做键 ⇒ 而本文件 4 个端点的 `thread_id` **默认就是 `"default"`** ⇒ **不传的人共用一个槽、后问的盖先问的**（⚠️ 与上面「会话上限」那条的桶碰撞**是同一个形状，但在另一条轴上**）。<br>⚠️ **非属主与"真不存在"答同一个**（`未找到线程 …`）—— **有意的**，否则那句错误本身就是"该 thread 存在"的 oracle |
 | 🔴 **「`/agent/cost/overview` 答 0 ⇒ 没花过钱」** | ⛔ **先想想进程重启过没有** —— **2026-10-03 之前**它读 `get_user_summary` = **进程内存**，**重启即归零、且不报错**。<br>✅ 现在读 **`get_user_overview`（库）**，扛得住重启（`DEC-047`）。<br>⚠️ **但同族的三个仍然是内存**：`/agent/token/overview` · `/agent/thread/{id}/overview` · 看板第 2 格 —— **答 0 是真的 0，还是刚重启，看代码分辨不出来** |
-| 🔴 **「`/agent/cost/overview` 和 `/agent/token/budget` 在报同一件事」** | ⛔ **不是，窗口不同**（`DEC-047` 特意划清的）：<br>`/agent/token/budget` = **今天 + 还剩多少**（`R1.3` 额度口径，**跨天自愈**）<br>`/agent/cost/overview` = **全时累计 + 一共多少**（字段名 `total_*`）。<br>⚠️ 两个口径**方向相反** ⇒ 若把 `overview` 的 SQL 加上 `created_at >= CURRENT_DATE`，它会**静默退化成"今天"**（数值偏小、不报错）。<br>📌 判据（可打印）：`api/test_cost_visibility_db.py::test_overview_window_is_all_time_not_today` |
+| 🔴 **「`/agent/cost/overview` 和 `/agent/token/budget` 在报同一件事」** | ⛔ **不是，窗口不同**（`DEC-047` 特意划清的）：<br>`/agent/token/budget` = **今天 + 还剩多少**（`R1.3` 额度口径，**跨天自愈**）<br>`/agent/cost/overview` = **全时累计 + 一共多少**（字段名 `total_*`）。<br>⚠️ 两个口径**方向相反** ⇒ 若把 `overview` 的 SQL 加上 `created_at >= CURRENT_DATE`，它会**静默退化成"今天"**（数值偏小、不报错）。<br>📌 判据（可打印）：`app/tests/test_cost_visibility_db.py::test_overview_window_is_all_time_not_today` |
 | ⚠️ **「`/agent/token/budget` 的数是【本人】的，那就跟全站无关」** | ⚠️ **2026-10-03 起它同时答两层**（`DEC-047`）：本人（`daily_budget`/`used_today`/`remaining`）**和**全站（`global_daily_limit`/`global_used_today`/`global_remaining`）。<br>⚠️ **字段名不带 `global_` 前缀的那三个是本人的** —— ⛔ **别拿未加前缀的 `remaining` 当全站余量**。<br>📌 理由：**"还剩多少"必须能同时看到本人和全站**，否则看到 `999961` 也不知道那是谁的上限 |
 | ⚠️ **「全站额度快满了，接口会给个预警」** | ⛔ **不会** —— 全站额度超了是**所有人吃 429**（`B11` 熔断），**没有"快到阈值了"的软提示**。<br>✅ 现在能**看到逼近**（`global_remaining`），但**得自己去看** —— ⬜ 无主动告警，`DEC-047` §遗留未列，本行仅备查 |
-| 🔴 **「`/agent/trace/{id}` 与 `/agent/trace/{id}/cost` 是一条链的两段，能拼成一棵树」** | ⛔ **拼不成** —— 两条**不同的轴**：前者是**追踪轴**（`tool_visualizer._traces` · **进程内存** · 粒度 = **工具调用**），后者是**成本轴**（PG `token_usage_logs` · 粒度 = **模型调用**）。<br>🔴 **它们【没有共同的步 id】** ⇒ 一个 `agent_decision`（模型）与一个 `search`（工具）之间**没有可判定的对应**（`DEC-093` §二 实测）。<br>⚠️ **能对上的只有 `(user_name, raw thread_id)` 这一对游标** —— 再往下就只能靠"时间接近"猜，而**猜出来的层级不报错**。<br>⇒ 页面（`/trace`）**并排画两条轴、⛔ 不相加**。📌 判据 ⇒ `api/static/js/trace.test.js`（两轴各有各的 `summarize*`，且 `summarizeCost` **⛔ 不把 rows 加起来**） |
+| 🔴 **「`/agent/trace/{id}` 与 `/agent/trace/{id}/cost` 是一条链的两段，能拼成一棵树」** | ⛔ **拼不成** —— 两条**不同的轴**：前者是**追踪轴**（`tool_visualizer._traces` · **进程内存** · 粒度 = **工具调用**），后者是**成本轴**（PG `token_usage_logs` · 粒度 = **模型调用**）。<br>🔴 **它们【没有共同的步 id】** ⇒ 一个 `agent_decision`（模型）与一个 `search`（工具）之间**没有可判定的对应**（`DEC-093` §二 实测）。<br>⚠️ **能对上的只有 `(user_name, raw thread_id)` 这一对游标** —— 再往下就只能靠"时间接近"猜，而**猜出来的层级不报错**。<br>⇒ 页面（`/trace`）**并排画两条轴、⛔ 不相加**。📌 判据 ⇒ `app/static/js/trace.test.js`（两轴各有各的 `summarize*`，且 `summarizeCost` **⛔ 不把 rows 加起来**） |
 | ⚠️ **「`/agent/trace/{id}/cost` 查不到线程 ⇒ 该回 404」** | ⛔ **回 200 + 空 `items`** —— `thread_id` 是**用户自己填的**（页面 URL 上带），404 会把**"这条线程没花过钱"**说成**"这条线程不存在"**。<br>⚠️ **同理⛔ 别拿它跟 `/agent/trace/{id}` 对齐**：那条**确实**有"未找到"的语义（因为它的键是 `session_key`，查的是**建过没建过**）。<br>🔴 还有一层：读侧一旦报"不存在"，**那个错误本身就是 oracle**（与上一条"越权与真不存在答同一个"同族）。 |
 
-| ⚠️ **「流式端点与非流式兄弟返回的形状一样」** | ⚠️ **2026-10-04 之前【不是】** —— 5 条流式端点的**汇总帧都少一个 `requested_by`**，而各自的非流式兄弟（`:278` / `:885` / `:1124` / `:1306` / `:1706`）**全都有**，且**没有任何用例报错**（**静默的形状不一致**：两侧其余字段一模一样，只有它无声没了）。<br>✅ **`b0b1835` 起 5 条汇总帧都带它**（`DEC-060`）。⚠️ **注意落点**：在**汇总帧**上（终态），⛔ 不在逐 token 的 `{"content": …}` 帧上（增量）。<br>📌 判据（可打印）：`grep -c '"requested_by": user_name' api/api_v1_agent.py` ⇒ **33**（改前 27；⚠️ 这个数**随后续批次往上走**，别当固定值）· `pytest api/test_agent_sse.py api/test_agent_stream_chains.py -k "requested_by or plan_execute_summary_carries"` ⇒ **5 passed** |
+| ⚠️ **「流式端点与非流式兄弟返回的形状一样」** | ⚠️ **2026-10-04 之前【不是】** —— 5 条流式端点的**汇总帧都少一个 `requested_by`**，而各自的非流式兄弟（`:278` / `:885` / `:1124` / `:1306` / `:1706`）**全都有**，且**没有任何用例报错**（**静默的形状不一致**：两侧其余字段一模一样，只有它无声没了）。<br>✅ **`b0b1835` 起 5 条汇总帧都带它**（`DEC-060`）。⚠️ **注意落点**：在**汇总帧**上（终态），⛔ 不在逐 token 的 `{"content": …}` 帧上（增量）。<br>📌 判据（可打印）：`grep -c '"requested_by": user_name' app/routing/api_v1_agent.py` ⇒ **33**（改前 27；⚠️ 这个数**随后续批次往上走**，别当固定值）· `pytest app/tests/test_agent_sse.py app/tests/test_agent_stream_chains.py -k "requested_by or plan_execute_summary_carries"` ⇒ **5 passed** |
 
-| 🔴🔴 **「Agent 链有 checkpointer ⇒ 对话历史不用管」** | ⛔ **两回事，两套存储**（`DEC-055` §一 的核心发现）—— **checkpointer**（`MemorySaver`）存的是**图的运行状态**，只有**本文件自己**按 `session_key(user, thread_id)` 去读；**`chat_history`**（Redis）存的是**人/脚本能读的一问一答**，是**另一把键**。<br>⚠️ **改前 5 条 Agent 链一条 `chat_history` 都不写**（`grep -rn "append_chat_history" api/api_v1_agent.py` ⇒ **0**）⇒ 「下一轮 prompt 读得到」这件事，**RAG 读得到、Agent 读不到**（除非走 checkpoint）。<br>✅ **2026-10-04（`DEC-055`）起 5 条链都写**，每条轮次 `{role, content, status}`。<br>🔴 **由此多了一条【新行为】**：`/rag/stream_search` 在**前端没传历史时**读同一把键 ⇒ **Agent 链的轮次此后会进 RAG 的下一轮 prompt**。这是「统一会话」的意图，⛔ 但**它是一条行为变更**，别当无事发生。<br>📌 判据（可打印）：`grep -c "persist_turn" api/api_v1_agent.py` ⇒ **12**（= 5 处 `on_complete` + 5 处 `on_incomplete` + import 与注释）· `grep -c "on_incomplete=" api/api_v1_agent.py` ⇒ **5**（改前 0，那时只有 `on_complete` 有回调） |
+| 🔴🔴 **「Agent 链有 checkpointer ⇒ 对话历史不用管」** | ⛔ **两回事，两套存储**（`DEC-055` §一 的核心发现）—— **checkpointer**（`MemorySaver`）存的是**图的运行状态**，只有**本文件自己**按 `session_key(user, thread_id)` 去读；**`chat_history`**（Redis）存的是**人/脚本能读的一问一答**，是**另一把键**。<br>⚠️ **改前 5 条 Agent 链一条 `chat_history` 都不写**（`grep -rn "append_chat_history" app/routing/api_v1_agent.py` ⇒ **0**）⇒ 「下一轮 prompt 读得到」这件事，**RAG 读得到、Agent 读不到**（除非走 checkpoint）。<br>✅ **2026-10-04（`DEC-055`）起 5 条链都写**，每条轮次 `{role, content, status}`。<br>🔴 **由此多了一条【新行为】**：`/rag/stream_search` 在**前端没传历史时**读同一把键 ⇒ **Agent 链的轮次此后会进 RAG 的下一轮 prompt**。这是「统一会话」的意图，⛔ 但**它是一条行为变更**，别当无事发生。<br>📌 判据（可打印）：`grep -c "persist_turn" app/routing/api_v1_agent.py` ⇒ **12**（= 5 处 `on_complete` + 5 处 `on_incomplete` + import 与注释）· `grep -c "on_incomplete=" app/routing/api_v1_agent.py` ⇒ **5**（改前 0，那时只有 `on_complete` 有回调） |
 
-| 🔴🔴 **「端点上已经有 `thread_id` / `user_name` 参数了 ⇒ 图里当然拿得到」** | ⛔ **拿不到** —— 端点的参数**不会自动进图的 initial state**，必须**显式写进** `graph.invoke(...)` 的那个 dict。<br>⚠️ **漏写的后果是【静默】的**：图里 `.get("user_name", "unknown")` ⇒ 账记成 `"unknown"`，**接口一切正常**，只是额度**漏算**。<br>🔴 **本仓真的漏了**：`advanced_chat` / `advanced_chat/stream` 改前**只传 `user_name`、没传 `thread_id`**（`DEC-072`）。<br>📌 判据（可打印）：`api/test_billing_wiring.py` 按端点逐个查 initial state 的关键字集合。 |
+| 🔴🔴 **「端点上已经有 `thread_id` / `user_name` 参数了 ⇒ 图里当然拿得到」** | ⛔ **拿不到** —— 端点的参数**不会自动进图的 initial state**，必须**显式写进** `graph.invoke(...)` 的那个 dict。<br>⚠️ **漏写的后果是【静默】的**：图里 `.get("user_name", "unknown")` ⇒ 账记成 `"unknown"`，**接口一切正常**，只是额度**漏算**。<br>🔴 **本仓真的漏了**：`advanced_chat` / `advanced_chat/stream` 改前**只传 `user_name`、没传 `thread_id`**（`DEC-072`）。<br>📌 判据（可打印）：`app/tests/test_billing_wiring.py` 按端点逐个查 initial state 的关键字集合。 |
 
 ## 关联
 
@@ -244,7 +244,7 @@ RAG 那条的骨架**没有图**，答案只能从 `collected` 取；Agent 这�
 **`docs/specs/approval_audit.md`**（**留痕那张表的本尊** —— `approval_events` 的 `owner`/`actor` 两个身份）·
 🆕 **`DEC-093`**（**Trace 页两轴分屏** —— 2026-10-06 · `F2`：本文件**新增 `GET /agent/trace/{thread_id}/cost`**；
 🔴 同时定下**本文件里两条 trace 端点分属两条轴**（`/agent/trace/{id}` = 追踪轴 · `…/cost` = 成本轴，**⛔ 不合并**）·
-⚠️ 顺带核出 **`api/static/web/approvals.html` 的 4 条 URL 全少 `/api/v1`** ⇒ 页面 100% 不可用，**本批未修**）·
+⚠️ 顺带核出 **`app/static/web/approvals.html` 的 4 条 URL 全少 `/api/v1`** ⇒ 页面 100% 不可用，**本批未修**）·
 **`docs/specs/static_frontend.md`**（**接管页那一侧** —— `approvals.html` / `approvals.js`）·
 **`docs/specs/session_key.md`**（**键就是它拼的** —— 丙段新增模块）·
 `后端补齐清单` **B1 · B2 · B3 · B4 · B5 · B6 · B13**
@@ -258,9 +258,9 @@ RAG 那条的骨架**没有图**，答案只能从 `collected` 取；Agent 这�
 > | | Task | 状态 |
 > |---|---|---|
 > | ✅ | **Task 0** · 前置决策（白名单里放哪些工具） | **业务方 2026-10-03 已答** = ~~`{search_tool}`~~ → **`{web_search}`** · `.env SENSITIVE_TOOLS`（见 `DEC-048`；🔴 **标识符已由 `DEC-051` 勘误**） |
-> | ✅ | **Task 1** · `B4` 触发条件改工具白名单 | **已落地**（`DEC-048`）—— 判据：`pytest api/test_approval_trigger.py -q` ⇒ **7 passed** |
-> | ✅ | **Task 2** · `B5` 待接管队列（数据 + 端点） | **已落地** —— 判据：`pytest api/test_pending_approvals.py api/test_pending_approvals_wiring.py -q` ⇒ **13 passed** |
-> | ✅ | **Task 3** · `B6` 接管后续跑（含改写后提交） | **已落地**（🔴 **口径 2026-10-04 由 `DEC-062` 修正**）—— 判据：`pytest api/test_approval_resume.py -q` ⇒ **12 passed**（原 6 条接线/语义 **+ §⑤ 六条真图用例**） |
+> | ✅ | **Task 1** · `B4` 触发条件改工具白名单 | **已落地**（`DEC-048`）—— 判据：`pytest app/tests/test_approval_trigger.py -q` ⇒ **7 passed** |
+> | ✅ | **Task 2** · `B5` 待接管队列（数据 + 端点） | **已落地** —— 判据：`pytest app/tests/test_pending_approvals.py app/tests/test_pending_approvals_wiring.py -q` ⇒ **13 passed** |
+> | ✅ | **Task 3** · `B6` 接管后续跑（含改写后提交） | **已落地**（🔴 **口径 2026-10-04 由 `DEC-062` 修正**）—— 判据：`pytest app/tests/test_approval_resume.py -q` ⇒ **12 passed**（原 6 条接线/语义 **+ §⑤ 六条真图用例**） |
 > | ✅ | **Task 4** · `B6` **端到端验收**（2026-10-04 补） | **已跑 · 首跑不通过 · 已修** —— 业务方 2026-10-04 裁的「下一件事」。真服务（真 DeepSeek + 真 `MemorySaver`）跑三条出口 ⇒ **证真① 过、证真② 不过** ⇒ `DEC-062` 修（`ToolMessage` 回填 + `as_node="tools"` + 只在真走完时注销）⇒ **复跑 22/22** |
 >
 > ⇒ **`②` 的 5 个 Task（0–4）全部落地** ⇒ **硬门 D 三段齐了 + 后端侧端到端已验**。
@@ -277,7 +277,7 @@ RAG 那条的骨架**没有图**，答案只能从 `collected` 取；Agent 这�
 >
 > | 本节写的 | 现在的实际 |
 > |---|---|
-> | `SENSITIVE_TOOLS` 默认 `"search_tool"` | **`"web_search"`**（`api/agent_graph.py:71`） |
+> | `SENSITIVE_TOOLS` 默认 `"search_tool"` | **`"web_search"`**（`app/agent/agent_graph.py:71`） |
 > | `validate_approval_config()` **只查"非空"** | **两段** —— 空名单 **+ 名字不存在**，都 `raise`（`:92` / `:100`） |
 > | `tool_execute` 判 `if tool_name == "search"` | **查 `TOOLS_BY_NAME` 表**（`:202`），⛔ 不再有字面量 |
 > | 工具 = `DuckDuckGoSearchRun()` | **`search_tools.web_search`**（Bing 版） |
@@ -335,8 +335,8 @@ B5 新增一个**待接管注册表** + 一个查询端点；B6 给 `/agent/appr
 
 
 **Files:**
-- Modify: `api/agent_graph.py`（`should_continue` `:95-103` · 条件边 `:130-137`）
-- Test: `api/test_approval_trigger.py`（新建）
+- Modify: `app/agent/agent_graph.py`（`should_continue` `:95-103` · 条件边 `:130-137`）
+- Test: `app/tests/test_approval_trigger.py`（新建）
 - Modify: `CHANGELOG.md`
 
 **Interfaces:**
@@ -347,7 +347,7 @@ B5 新增一个**待接管注册表** + 一个查询端点；B6 给 `/agent/appr
 - [x] **Step 1: 写失败测试**
 
 ```python
-# api/test_approval_trigger.py
+# app/tests/test_approval_trigger.py
 """硬门 D 的触发条件（B4）。
 
 🔴 改前的现状：**只要产生任意 tool_calls 就进审批** ⇒ 问一句"今天几号"也会停下来等人批。
@@ -403,11 +403,11 @@ def test_unknown_tool_is_not_sensitive_by_default():
 - [x] **Step 2: 跑，确认失败**
 
 ```bash
-python -m pytest api/test_approval_trigger.py -q
+python -m pytest app/tests/test_approval_trigger.py -q
 ```
 预期：`ImportError: cannot import name 'needs_approval'`
 
-- [x] **Step 3: 实现（`api/agent_graph.py`）**
+- [x] **Step 3: 实现（`app/agent/agent_graph.py`）**
 
 在 `search_tool = DuckDuckGoSearchRun()` **之前**加：
 
@@ -498,11 +498,11 @@ def validate_approval_config():
 - [x] **Step 5: 跑测试**
 
 ```bash
-python -m pytest api/test_approval_trigger.py -q                        # → 5 passed
-python -m pytest api/ -m "not integration and not needs_db" -q            # → 全绿
+python -m pytest app/tests/test_approval_trigger.py -q                        # → 5 passed
+python -m pytest app/ -m "not integration and not needs_db" -q            # → 全绿
 ```
 
-⚠️ **可能红**：`api/test_agent_repairs.py` 里有关于审批语义的用例（`:55-64` 那段注释就是它留下的）。
+⚠️ **可能红**：`app/tests/test_agent_repairs.py` 里有关于审批语义的用例（`:55-64` 那段注释就是它留下的）。
 **红是预期的** —— 改的就是这个语义。**逐条看**：把"问日期会进审批"那类断言**改掉并写明新口径**，
 ⛔ **不要为了让测试过而回退实现**。
 
@@ -511,7 +511,7 @@ python -m pytest api/ -m "not integration and not needs_db" -q            # → 
 ```bash
 # .env.example 加一行（带注释说明它是干什么的）：
 #   SENSITIVE_TOOLS=search_tool    # 需要人工审批的工具（逗号分隔）
-git add api/agent_graph.py api/test_approval_trigger.py .env.example CHANGELOG.md
+git add app/agent/agent_graph.py app/tests/test_approval_trigger.py .env.example CHANGELOG.md
 git commit -m "feat(硬门D): B4 —— 审批触发改成敏感工具白名单，问日期不再进审批"
 ```
 
@@ -525,23 +525,23 @@ git commit -m "feat(硬门D): B4 —— 审批触发改成敏感工具白名单�
 > |---|---|---|
 > | 6 个 Step | **6 个全做了** | — |
 > | 4 条测试 | **7 条** | ➕ 3 条：**排序契约**（"卡得最久排最前"是 docstring 里写了却没人守的契约）· **启动警告的正反两条**（只测"设了会响"会误报） |
-> | （计划没提接线守卫） | **➕ 新增 `api/test_pending_approvals_wiring.py`（6 条）** | 🔴 **接线是这个模块最可能静默坏掉的地方**（漏一处 ⇒ 队列**永远空**或**永远有假待办**，且**都不报错**）⇒ 按本仓 `*_wiring.py` 既有做法补上 |
+> | （计划没提接线守卫） | **➕ 新增 `app/tests/test_pending_approvals_wiring.py`（6 条）** | 🔴 **接线是这个模块最可能静默坏掉的地方**（漏一处 ⇒ 队列**永远空**或**永远有假待办**，且**都不报错**）⇒ 按本仓 `*_wiring.py` 既有做法补上 |
 > | （计划没提） | **➕ 那 6 条守卫逐条自证** | ⚠️ 它们是**写在实现之后**的（"tests-after"）⇒ **绿了不证明测的是对的东西**。⇒ 逐条把接线拆掉、确认对应测试**真会红**、再还原（脚本见 verdict：6/6 红了，还原后 6 passed） |
 >
 > **判据（可打印）**：
 > ```bash
-> venv/bin/python -m pytest api/test_pending_approvals.py api/test_pending_approvals_wiring.py -q
+> venv/bin/python -m pytest app/tests/test_pending_approvals.py app/tests/test_pending_approvals_wiring.py -q
 > # ⇒ 13 passed
-> venv/bin/python -m pytest api/ -m "not integration and not needs_db" -q
+> venv/bin/python -m pytest app/ -m "not integration and not needs_db" -q
 > # ⇒ 237 passed, 3 skipped, 22 deselected, 0 failed   （本轮之前 224 ⇒ +13）
 > ```
 > **顺手改的口径**：路由 **28 → 29**（`ROADMAP` · `待办总表` · `后端补齐清单` 三处「28 个 agent 路由全部非流式」同步改）。
 
 
 **Files:**
-- Create: `api/pending_approvals.py` + `docs/specs/pending_approvals.md`（⛔ 新建模块必须同时建 spec）
-- Create: `api/test_pending_approvals.py`（无 marker）
-- Modify: `api/api_v1_agent.py`（新端点 + 在 `langgraph_chat` 里登记）
+- Create: `app/agent/pending_approvals.py` + `docs/specs/pending_approvals.md`（⛔ 新建模块必须同时建 spec）
+- Create: `app/tests/test_pending_approvals.py`（无 marker）
+- Modify: `app/routing/api_v1_agent.py`（新端点 + 在 `langgraph_chat` 里登记）
 
 **Interfaces:**
 - Produces: `register(thread_id, user_name, tool_calls) -> None` · `resolve(thread_id) -> None` · `list_pending() -> list[dict]`
@@ -561,7 +561,7 @@ git commit -m "feat(硬门D): B4 —— 审批触发改成敏感工具白名单�
 - [x] **Step 1: 写失败测试**
 
 ```python
-# api/test_pending_approvals.py
+# app/tests/test_pending_approvals.py
 """待接管队列（B5）。⚠️ 不碰 DB / Redis —— 纯内存注册表。"""
 import pending_approvals as pa
 
@@ -601,7 +601,7 @@ def test_register_twice_keeps_latest():
 
 - [x] **Step 2: 跑，确认失败**（`ModuleNotFoundError: pending_approvals`）
 
-- [x] **Step 3: 实现 `api/pending_approvals.py`**
+- [x] **Step 3: 实现 `app/agent/pending_approvals.py`**
 
 ```python
 """待接管会话的注册表（B5）。
@@ -662,7 +662,7 @@ def warn_if_backend_mismatch(logger=None) -> None:
 
 - [x] **Step 4: 建 `docs/specs/pending_approvals.md`**（把上面那段「已知限制」原样搬进去 —— 它正是"看代码会误判"的那类）
 
-- [x] **Step 5: 接端点（`api/api_v1_agent.py`）**
+- [x] **Step 5: 接端点（`app/routing/api_v1_agent.py`）**
 
 ```python
 from pending_approvals import list_pending, register, resolve
@@ -708,9 +708,9 @@ async def list_pending_approvals(
 >
 > **判据（可打印）**：
 > ```bash
-> venv/bin/python -m pytest api/test_approval_resume.py -q
+> venv/bin/python -m pytest app/tests/test_approval_resume.py -q
 > # ⇒ 6 passed
-> venv/bin/python -m pytest api/ -m "not integration and not needs_db" -q
+> venv/bin/python -m pytest app/ -m "not integration and not needs_db" -q
 > # ⇒ 243 passed, 3 skipped, 22 deselected, 0 failed   （本轮之前 237 ⇒ +6，⛔ 无回归）
 > ```
 > ⚠️ **本 Task 只到"接线与语义"** —— **"上下文真的连续"没有端到端跑过**（要真 LLM + 真 `MemorySaver`，**联网花钱**）。
@@ -718,8 +718,8 @@ async def list_pending_approvals(
 
 
 **Files:**
-- Modify: `api/api_v1_agent.py`（`/agent/approve`）
-- Test: `api/test_approval_resume.py`（**无 marker**，用假图）
+- Modify: `app/routing/api_v1_agent.py`（`/agent/approve`）
+- Test: `app/tests/test_approval_resume.py`（**无 marker**，用假图）
 
 **Interfaces:**
 - Produces: `POST /agent/approve` 增加可选参数 **`edited_answer: str | None`**
@@ -727,7 +727,7 @@ async def list_pending_approvals(
 - [x] **Step 1: 写失败测试**（用假图，⛔ 不真跑 LLM）
 
 ```python
-# api/test_approval_resume.py
+# app/tests/test_approval_resume.py
 """接管后续跑（B6）。
 
 🔴 判据（`通用/四硬门 §3-D`）：**接管后会话【上下文连续】** —— 不是重开一轮。
@@ -783,7 +783,7 @@ def test_edit_note_is_written_into_state(monkeypatch):
 - [x] **Step 2: 跑，确认失败**
 
 ```bash
-python -m pytest api/test_approval_resume.py -q
+python -m pytest app/tests/test_approval_resume.py -q
 ```
 预期：`TypeError: approve_agent_action() got an unexpected keyword argument 'edited_answer'`
 （⚠️ 若它**直接通过**，说明 `invoke(None, …)` 那半条测的是现状 —— 那就把该断言留着当**回归守卫**，
@@ -811,7 +811,7 @@ async def approve_agent_action(
 
     🔴 续跑用的是 `agent_graph.invoke(None, config)` —— **`None` 表示"从 checkpoint 继续"**，
        ⛔ **不是**新开一轮。改成传新消息 = 上下文断裂，而接口返回**看着一样**。
-       守卫见 `api/test_approval_resume.py`。
+       守卫见 `app/tests/test_approval_resume.py`。
 
     `edited_answer`：人工把答案改过之后再放行。**不给就按原样续跑。**
     """
@@ -843,9 +843,9 @@ async def approve_agent_action(
 - [x] **Step 4: 跑 + 提交**
 
 ```bash
-python -m pytest api/test_approval_resume.py -q                       # → passed
-python -m pytest api/ -m "not integration and not needs_db" -q          # → 全绿
-git add api/api_v1_agent.py api/test_approval_resume.py
+python -m pytest app/tests/test_approval_resume.py -q                       # → passed
+python -m pytest app/ -m "not integration and not needs_db" -q          # → 全绿
+git add app/routing/api_v1_agent.py app/tests/test_approval_resume.py
 git commit -m "feat(硬门D): B6 —— 接管后续跑可带人工改写，并用测试钉住'从 checkpoint 续跑'"
 ```
 
@@ -863,7 +863,7 @@ git commit -m "feat(硬门D): B6 —— 接管后续跑可带人工改写，并�
 
 ## Task 4 · **B1** · Agent 端 SSE（**范围：只 `/agent/langgraph_chat`**）· ✅ **2026-10-03 完成**
 
-**Files:** Modify `api/api_v1_agent.py`（导 `StreamingResponse`、新增流式路由）· Test `api/test_agent_sse.py`
+**Files:** Modify `app/routing/api_v1_agent.py`（导 `StreamingResponse`、新增流式路由）· Test `app/tests/test_agent_sse.py`
 
 **Interfaces:** `POST /agent/langgraph_chat/stream` —— `media_type="text/event-stream"`
 
@@ -873,7 +873,7 @@ git commit -m "feat(硬门D): B6 —— 接管后续跑可带人工改写，并�
 > ⇒ Agent 端要用 **`astream`** 之类的异步迭代。
 > 🔴 **2026-10-04 现状（`B1` 剩余 4 条链）**：RAG 那处**已换成 `get_llm_stream().astream(messages)`**
 > （`api_v1_rag.py:736`），**原 `:655-662` 那个反面例子已经不存在了** ——
-> ⚠️ 所以**这条注释现在指不到现场**，改指 `api/sse.py` 与 `docs/specs/sse.md` 的约束③。
+> ⚠️ 所以**这条注释现在指不到现场**，改指 `app/routing/sse.py` 与 `docs/specs/sse.md` 的约束③。
 > （`chunk_delay=0.01` 的限速**保留着**，⛔ 别删。）
 
 > ### 🔴🔴 **计划没覆盖的那一句（实际做的时候才发现它才是难点）**
@@ -881,11 +881,11 @@ git commit -m "feat(硬门D): B6 —— 接管后续跑可带人工改写，并�
 > `astream(stream_mode="messages")` 要出**真 token**，**节点必须声明 `config: RunnableConfig`
 > 并把它转发进模型的流式调用** —— 否则它只吐 **1 块**（整段），
 > ⚠️ **而接口长得一模一样**（照样 `text/event-stream`、照样 `data:` 帧）⇒ **计划里那条"契约测试"根本判不出来**。
-> ⇒ **两条改动**（本文件 + `api/agent_graph.py`），**裁定落 `DEC-050`**。
+> ⇒ **两条改动**（本文件 + `app/agent/agent_graph.py`），**裁定落 `DEC-050`**。
 
 - [x] Step 1 写失败测试（**测"是不是真流式"，不是"有没有这个路由"**）：
   ⚠️ **计划的写法（TestClient 断言 `data:` ≥ 2）【不够】** —— 它**假流式也能过**。
-  ✅ **实际做法**：把"真流式"拆成**可在离线测的机制**，钉在 `api/test_agent_sse.py`（12 例 · 纯离线 · 进 CI）：
+  ✅ **实际做法**：把"真流式"拆成**可在离线测的机制**，钉在 `app/tests/test_agent_sse.py`（12 例 · 纯离线 · 进 CI）：
   ① **块数**（`test_graph_streams_one_chunk_per_token` —— 数**块数**，⛔ 不看 header）
   ② **不重复**（`test_chunks_are_not_duplicated`）
   ③ **`tool_calls` 不丢**（`test_agent_decide_preserves_tool_calls`，B4 审批靠它）
@@ -918,8 +918,8 @@ curl -N -s -X POST "http://127.0.0.1:8000/api/v1/agent/langgraph_chat/stream?que
 
 ## Task 5 · **B2** · 服务端 cancel **传播到上游**（🔴🔴 自标「最容易假完成」）· ✅ **2026-10-03 已做**
 
-**Files:** `api/api_v1_rag.py`（`stream_search`）+ `api/api_v1_agent.py`（流式端点）+ `api/metrics.py` ·
-Test `api/test_cancel_propagation.py`（10 例 · 纯离线 · 进 CI）
+**Files:** `app/routing/api_v1_rag.py`（`stream_search`）+ `app/routing/api_v1_agent.py`（流式端点）+ `app/core/metrics.py` ·
+Test `app/tests/test_cancel_propagation.py`（10 例 · 纯离线 · 进 CI）
 
 **计划要补三件**：① 检测客户端断开（`request.is_disconnected()`）② **主动关上游 HTTP 流** ③ **`finally` 兜底**
 
@@ -930,7 +930,7 @@ Test `api/test_cancel_propagation.py`（10 例 · 纯离线 · 进 CI）
 > | ① `is_disconnected()` | ⛔ **不用写** —— uvicorn 报 `spec_version 2.3` ⇒ **Starlette 已经替我们监听 `http.disconnect` 并取消生成器**。真正的缺口**只有②**（`DEC-052` §①不用补） |
 > | ② 关上游 | ✅ 上游改 `astream`（同步 `for` 会**阻塞事件循环**，取消得等下一块）+ `finally: await stream.aclose()` |
 > | ③ `finally` 兜底 | ✅ 且**必须**放 `finally` —— Starlette 有**两条**关闭路径（2.3 抛 `CancelledError` / 2.4 抛 **`GeneratorExit`**），后者**不是** `CancelledError` 子类 ⇒ 只写 `except` 会**静默不记** |
-> | 🔴 判据 ③「**token 计数停止增长**」 | ⛔ **该计数在流式路径上不存在**（`grep -ci token api/metrics.py` = 0；PG 记账**只在生成结束后整笔写**）⇒ **判据无法证伪 = 任何实现都能通过**。<br>✅ 换成：① 日志有 `[cancel]` ② `stream_cancelled_total{endpoint}` **+1** ③ `outcome == "cancelled"`（**循环没跑完** ⇒ 比"计数涨了"更接近"上游真停了"） |
+> | 🔴 判据 ③「**token 计数停止增长**」 | ⛔ **该计数在流式路径上不存在**（`grep -ci token app/core/metrics.py` = 0；PG 记账**只在生成结束后整笔写**）⇒ **判据无法证伪 = 任何实现都能通过**。<br>✅ 换成：① 日志有 `[cancel]` ② `stream_cancelled_total{endpoint}` **+1** ③ `outcome == "cancelled"`（**循环没跑完** ⇒ 比"计数涨了"更接近"上游真停了"） |
 
 > ### ✅ 验收口径（**业务方 2026-09-30 已裁：先以本机证据为准**）
 > ⚠️ **已知代价仍然成立**：**证明不了"上游计费真的停"** —— 本机没有 DashScope 侧账单。
@@ -938,7 +938,7 @@ Test `api/test_cancel_propagation.py`（10 例 · 纯离线 · 进 CI）
 > ⛔ 因此本轮**不许**把"我们关了流"说成"账单停了"（`DEC-052` §遗留·2）。
 
 - [x] Step 1 写测试 —— ⛔ **⾏不通**：计划里的 `test_token_counter_stops_after_cancel` **写不出来**
-      （被测对象不存在，见上表）。改写为 `api/test_cancel_propagation.py`（10 例）——
+      （被测对象不存在，见上表）。改写为 `app/tests/test_cancel_propagation.py`（10 例）——
       **钉在 ASGI 层**：把 `StreamingResponse` 当 ASGI app 跑（`spec_version="2.3"`，与 uvicorn 实测一致），
       `receive` 在第 N 帧后回 `http.disconnect` ⇒ 与真服务器**走同一段取消代码**
 - [x] Step 2 跑 → **红**（⚠️ 第一版假上游写成 `async def` + `yield`，**假绿** —— `asyncio.run()` 收尾的
@@ -955,11 +955,11 @@ Test `api/test_cancel_propagation.py`（10 例 · 纯离线 · 进 CI）
 
 | 判据 | 核出来什么 |
 |---|---|
-| **①** cancel 后已产生的 token **有记账** | ❌ **落空，且不是"取消时没记"** —— `grep -c record_usage api/api_v1_rag.py` ⇒ **0**、`api/rag_pipeline.py` ⇒ **0** ⇒ **RAG 侧四条调 LLM 的路径从来不记账**（成功也不记）。真库佐证：非 embedding 行**全库只有 6 行**，全是 2026-09-20 的 agent graph 运行 |
+| **①** cancel 后已产生的 token **有记账** | ❌ **落空，且不是"取消时没记"** —— `grep -c record_usage app/routing/api_v1_rag.py` ⇒ **0**、`app/rag/rag_pipeline.py` ⇒ **0** ⇒ **RAG 侧四条调 LLM 的路径从来不记账**（成功也不记）。真库佐证：非 embedding 行**全库只有 6 行**，全是 2026-09-20 的 agent graph 运行 |
 | **②** 半截答案处理方式**明确** | ⚠️ 现状是**丢**，但**不是决定、是碰巧** —— `append_chat_history` 写在循环之后，取消在它之前 `raise`；⚠️ **用户那句提问跟着一起丢** |
 
 ⚠️ **还有一条技术上绕不过去的**：取消瞬间的 token 数**协议上拿不到** ——
-~~`api/llm_factory.py` 没开 `stream_usage`，~~ usage 只在**最后一帧**回来，而我们提前 `aclose()` ⇒
+~~`app/core/llm_factory.py` 没开 `stream_usage`，~~ usage 只在**最后一帧**回来，而我们提前 `aclose()` ⇒
 那一帧**永远不会到**。⇒ 硬补只能估算 = **往账本写假数**，比空着更坏。
 
 > 🔴 **2026-10-06 更正两条**（`DEC-084` · 复盘 `docs/复盘/2026-10-06-未核的推断被当成前提写进文档.md`）：
@@ -976,10 +976,10 @@ Test `api/test_cancel_propagation.py`（10 例 · 纯离线 · 进 CI）
 ④ 一块都没生成 ⇒ **什么都不写**。
 
 **Agent 端这边【不用改】** —— 它的"半路状态"由 langgraph 的 checkpointer（`MemorySaver`，
-`api/agent_graph.py:250`）持有，取消时**已经落在里面**了；RAG 端什么都没有 ⇒ 两端本来就不对称。
+`app/agent/agent_graph.py:250`）持有，取消时**已经落在里面**了；RAG 端什么都没有 ⇒ 两端本来就不对称。
 ⚠️ **`MemorySaver` 是【进程内存】** ⇒ 与我们自己的 `pending_approvals` 同一个限制：**重启即空**。
 
-- [x] Step 1~3 测试先红后绿（`api/test_cancel_propagation.py` 10 → **13 例**）
+- [x] Step 1~3 测试先红后绿（`app/tests/test_cancel_propagation.py` 10 → **13 例**）
       —— ⚠️ 第三条（"一块都没生成就不写"）**红不出来**（改动前它本来就过）⇒ 它是**反面守卫**，防"修过头"
 - [x] Step 4 ⛔ **没起 Docker 真服务**（用户本轮手动关了 `rag-api`）—— ⚠️ **这次是能省的**：
       本任务的判据落在**进程内**，而测试走的是**真 ASGI 断开**（与 `B2` 同一段取消代码），
@@ -991,14 +991,14 @@ Test `api/test_cancel_propagation.py`（10 例 · 纯离线 · 进 CI）
 
 ## Task 7 · **`B1` 剩余 4 条链** · ✅ **2026-10-04 完成**（业务方当天裁「本轮一起做」）
 
-**Files:** `api/api_v1_agent.py`（+4 路由 · 抽走自己的 SSE 生成器）· `api/api_v1_rag.py`（同改）·
-**新建** `api/sse.py` + `docs/specs/sse.md` · **新建** `api/test_agent_stream_chains.py` ·
-图侧 4 个模块（见下表）· `api/plan_execute.py`
+**Files:** `app/routing/api_v1_agent.py`（+4 路由 · 抽走自己的 SSE 生成器）· `app/routing/api_v1_rag.py`（同改）·
+**新建** `app/routing/sse.py` + `docs/specs/sse.md` · **新建** `app/tests/test_agent_stream_chains.py` ·
+图侧 4 个模块（见下表）· `app/agent/plan_execute.py`
 
 **Interfaces:** `POST /agent/{advanced_chat, plan_execute, memory_chat, mcp_chat}/stream` —— 均 `text/event-stream`
 
 > ### 🔴 **落地形状：抽共享层，⛔ 不是复制第 5、6 份内联生成器**（业务方 2026-10-04 裁）
-> `api/sse.py` 收的是 **5 条实测出来的顺序约束**（同步收尾排在 `await` 前 / shield 关上游 /
+> `app/routing/sse.py` 收的是 **5 条实测出来的顺序约束**（同步收尾排在 `await` 前 / shield 关上游 /
 > ⛔ 不吞 `CancelledError` / `X-Accel-Buffering: no` / 汇总只从图状态取），
 > **⛔ 不是"重复代码"** —— 判据见 `docs/specs/sse.md` 的 ①~⑨ 表。
 
@@ -1017,12 +1017,12 @@ Test `api/test_cancel_propagation.py`（10 例 · 纯离线 · 进 CI）
       🔴 **附带撞出一个既有 bug**（`agent_checkpointer.py:83` 的 `hasattr(response, "usage")` **恒为 False**
       ⇒ 链 B 的记账**从来没执行过**）—— ⛔ **本轮不修**（修了=开始拦人=行为变更，要单独裁）。
       ✅ **2026-10-04 当天晚些时候已修**（就是那次「单独裁」）⇒ `DEC-072`：判据换成 `record_from_response`，
-      现于 `api/agent_checkpointer.py:110`；那行 `hasattr` 作为**墓碑注释**留在 `:95`。
+      现于 `app/agent/agent_checkpointer.py:110`；那行 `hasattr` 作为**墓碑注释**留在 `:95`。
       勘察 ⇒ `fastapi-rag-agent-TODO待办/硬门A-Agent端流式勘察-20261003.md` §8.5
-- [x] Step 2 建 `api/sse.py` + spec + `api/test_sse_layer.py`（**15 例**）
+- [x] Step 2 建 `app/routing/sse.py` + spec + `app/tests/test_sse_layer.py`（**15 例**）
 - [x] Step 3 两条既有点端改用它 ⇒ ⭐ **判据 = 两份既有用例"全绿且 diff 为空"**
-      （`api/test_agent_sse.py` + `api/test_cancel_propagation.py` —— ⚠️ 原写 **44 passed**，**命令与数字对不上**
-      （44 = 当时那两份的 **29** + `api/test_sse_layer.py` 的 **15**）⇒ 2026-10-04 评审收口按**实测**更正为 **31 passed**）—— ⛔ **没有新加断言**
+      （`app/tests/test_agent_sse.py` + `app/tests/test_cancel_propagation.py` —— ⚠️ 原写 **44 passed**，**命令与数字对不上**
+      （44 = 当时那两份的 **29** + `app/tests/test_sse_layer.py` 的 **15**）⇒ 2026-10-04 评审收口按**实测**更正为 **31 passed**）—— ⛔ **没有新加断言**
 - [x] Step 4 改节点（A 4 个 · B 1 个 · C 2 个）—— **每个只加 `config` 形参 + 换流式 + `+` 聚合**
       ⚠️ **⛔ 没有把任何同步节点改成 `async def`**（`DEC-050`：同步 `graph.invoke()` 会当场 `TypeError`）
 - [x] Step 5 四条新路由（**两条前置闸照抄，⛔ 不挪进共享层** —— 两个 AST 守卫挖的是函数体内部）
@@ -1031,7 +1031,7 @@ Test `api/test_cancel_propagation.py`（10 例 · 纯离线 · 进 CI）
       （置标志 + 排空 + 取消任务），⛔ **不 `await thread.join()`**（线程杀不掉）。
       ⚠️ **它用 `extract=None`**（桥吐出来的**就是文本**）—— 同族的 `graph_message_text` 会 `ValueError`。
       ⚠️ **链 D 只流「规划段」** ⇒ 之后是**一长段静默**（`execute_plan` 不流），然后才是末帧 —— ⛔ **不是 bug**。
-- [x] Step 6 新测试 `api/test_agent_stream_chains.py`（**39 例** —— `B1` 收工时的数；⚠️ 2026-10-04 评审收口后 **47 例**，夹具**复用**既有两份，⛔ 不新造一套）
+- [x] Step 6 新测试 `app/tests/test_agent_stream_chains.py`（**39 例** —— `B1` 收工时的数；⚠️ 2026-10-04 评审收口后 **47 例**，夹具**复用**既有两份，⛔ 不新造一套）
       四条链各测：①**逐 token 出帧** ②**汇总来自 `aget_state`**（⛔ 不是攒块）③**断连 ⇒ 关上游 + 计数 + 日志**
       + A 链**额外**：`supervisor`/`calc_execute` 的字**一帧都不许漏**（那条 ⭐ 表的红线）
       + D 链**额外**：`_invoke_llm` 换流式后**仍然记账**（⛔ 不能拿"接口正常"代替）

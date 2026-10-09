@@ -1,4 +1,4 @@
-# `api/agent_graph_advanced_learning.py`
+# `app/agent/agent_graph_advanced_learning.py`
 
 > 🆕 **本 spec 建于 2026-10-04** —— 此前本模块**没有 spec**（`bash scripts/spec_status.sh --missing` 里一直有它）。
 > 建它的直接起因：`B1` 剩余 4 条链要做真流式，而**「这条链里哪些节点该流、哪些绝不能流」这个判断
@@ -6,7 +6,7 @@
 
 | 项 | 内容 |
 |---|---|
-| **状态** | 🟡 **可用，且是生产链** —— ✅ **记账于 2026-10-04 补齐**（见下 `DEC-072`），⚠️ **两个分支本来就无字可流**（见下）<br>🔴 **2026-10-04（`DEC-072`）：6 个 LLM 调用点全部接上【预算拦 + 记账】** —— 改前本文件 `record_usage` / `check_token_budget` **0 命中** ⇒ 走 `/agent/advanced_chat` 的花销在 `token_usage_logs` 里**完全看不见**。450 → **540 行**。每个节点都是 **`.stream()`/`.invoke()` 之前**查 `check_token_budget(user_name, estimated_tokens=500)`、**之后**调 `record_from_response(…)`；`AgentState` 新增 `thread_id`（`user_name` 已有）—— **由端点注入**，子图与父图共用 `AgentState` ⇒ 身份自动流入子图。<br>⚠️ **`purpose` 五处取值**（`answer_generation` ×3 · `query_rewrite` ×1 · `agent_decision` ×2 —— 见「看代码会误判」表末行）<br>⚠️ **超预算的返回形状【按节点出口不同】** —— 见下方 ⚠️⑦：`supervisor` 那处**必须给 `intent`**，⛔ 否则 `route_by_intent` 读 `state["intent"]` 当场 `KeyError`。<br>📄 裁定 ⇒ `DEC-072`；📌 判据 ⇒ `api/test_billing_wiring.py`（AST 精确点名**本文件 6 条** + `-k behavior` 那条断言恰好 **2 笔**）<br>🔵 **2026-10-04（`B1` 剩余 4 条链）：4 个该流的节点改成【真流式】** —— `search_summarize`（`:143`）· `translate_execute`（`:237`）· `agent_decide`（`:279`）· `chat_node`（`:463`）都声明 `config: RunnableConfig` + 换 `.stream(…, config=config)` 逐块 `+` 聚合 ⇒ **本图 388 → 450 行**（多出的行是"为什么这 4 个流、那 2 个不流"的注释 + 白名单常量 + 每个节点的改法说明）。<br>⚠️ **本图 4 个节点【全是同步的】** ⇒ 走**同步** `.stream(config=config)`；⛔ **别照抄链 C**（`agent_graph_advanced.py` 那两个是 `async` ⇒ 用 `astream`），⛔ **也别把本图节点改成 `async def`** —— 同步的 `graph.invoke()` 会当场 `TypeError: No synchronous function provided to "agent"`（`DEC-050` 实测）。<br>新增模块级 `STREAMABLE_NODES`（`:399`）；**为什么必须放模块级**（放进 `build_advanced_agent()` 就是局部名 ⇒ 端点 `AttributeError`）写在 `:376-398` 的注释里。<br>🔴 **链 A 走 `astream` 时必须开 `subgraphs=True`** —— 本图 5 个子图，**不开它一个字都流不出来**（⚠️ 且 `meta["langgraph_node"]` 报的是**子图内层**名，见 ⚠️④）。⚠️ **`+` 聚合在本图同样【必须】**：`tool_calls` 碎片化到达，只拼 `content` ⇒ react 子图拿不到 `tool_calls` ⇒ **工具永远不执行**，而接口一切正常。<br>📌 守卫 `api/test_agent_stream_chains.py`（含 `test_real_chain_a_node_streams_one_chunk_per_token` · `test_chain_a_filters_out_supervisor_and_calc_execute`）<br>🔴 **2026-10-05（批 7 · `N11`）：6 处预算软返回全部收口**（`DEC-083`）—— 540 → **599 行**：每处**同时写 `budget_intercept`**；`supervisor` 的**软返回出口**由 `**cleared` 翻转成"写本轮原因"、**正常出口**（`:512`）写 `None`。<br>⚠️ **顺带堵掉"钱花在闸之前"**：`supervisor` 的记忆检索（`search_user_memory`）**下移到预算门之后**——改前被拒的那一轮照样花一次 embedding。📄 `DEC-083` §四·`🅕` |
+| **状态** | 🟡 **可用，且是生产链** —— ✅ **记账于 2026-10-04 补齐**（见下 `DEC-072`），⚠️ **两个分支本来就无字可流**（见下）<br>🔴 **2026-10-04（`DEC-072`）：6 个 LLM 调用点全部接上【预算拦 + 记账】** —— 改前本文件 `record_usage` / `check_token_budget` **0 命中** ⇒ 走 `/agent/advanced_chat` 的花销在 `token_usage_logs` 里**完全看不见**。450 → **540 行**。每个节点都是 **`.stream()`/`.invoke()` 之前**查 `check_token_budget(user_name, estimated_tokens=500)`、**之后**调 `record_from_response(…)`；`AgentState` 新增 `thread_id`（`user_name` 已有）—— **由端点注入**，子图与父图共用 `AgentState` ⇒ 身份自动流入子图。<br>⚠️ **`purpose` 五处取值**（`answer_generation` ×3 · `query_rewrite` ×1 · `agent_decision` ×2 —— 见「看代码会误判」表末行）<br>⚠️ **超预算的返回形状【按节点出口不同】** —— 见下方 ⚠️⑦：`supervisor` 那处**必须给 `intent`**，⛔ 否则 `route_by_intent` 读 `state["intent"]` 当场 `KeyError`。<br>📄 裁定 ⇒ `DEC-072`；📌 判据 ⇒ `app/tests/test_billing_wiring.py`（AST 精确点名**本文件 6 条** + `-k behavior` 那条断言恰好 **2 笔**）<br>🔵 **2026-10-04（`B1` 剩余 4 条链）：4 个该流的节点改成【真流式】** —— `search_summarize`（`:143`）· `translate_execute`（`:237`）· `agent_decide`（`:279`）· `chat_node`（`:463`）都声明 `config: RunnableConfig` + 换 `.stream(…, config=config)` 逐块 `+` 聚合 ⇒ **本图 388 → 450 行**（多出的行是"为什么这 4 个流、那 2 个不流"的注释 + 白名单常量 + 每个节点的改法说明）。<br>⚠️ **本图 4 个节点【全是同步的】** ⇒ 走**同步** `.stream(config=config)`；⛔ **别照抄链 C**（`agent_graph_advanced.py` 那两个是 `async` ⇒ 用 `astream`），⛔ **也别把本图节点改成 `async def`** —— 同步的 `graph.invoke()` 会当场 `TypeError: No synchronous function provided to "agent"`（`DEC-050` 实测）。<br>新增模块级 `STREAMABLE_NODES`（`:399`）；**为什么必须放模块级**（放进 `build_advanced_agent()` 就是局部名 ⇒ 端点 `AttributeError`）写在 `:376-398` 的注释里。<br>🔴 **链 A 走 `astream` 时必须开 `subgraphs=True`** —— 本图 5 个子图，**不开它一个字都流不出来**（⚠️ 且 `meta["langgraph_node"]` 报的是**子图内层**名，见 ⚠️④）。⚠️ **`+` 聚合在本图同样【必须】**：`tool_calls` 碎片化到达，只拼 `content` ⇒ react 子图拿不到 `tool_calls` ⇒ **工具永远不执行**，而接口一切正常。<br>📌 守卫 `app/tests/test_agent_stream_chains.py`（含 `test_real_chain_a_node_streams_one_chunk_per_token` · `test_chain_a_filters_out_supervisor_and_calc_execute`）<br>🔴 **2026-10-05（批 7 · `N11`）：6 处预算软返回全部收口**（`DEC-083`）—— 540 → **599 行**：每处**同时写 `budget_intercept`**；`supervisor` 的**软返回出口**由 `**cleared` 翻转成"写本轮原因"、**正常出口**（`:512`）写 `None`。<br>⚠️ **顺带堵掉"钱花在闸之前"**：`supervisor` 的记忆检索（`search_user_memory`）**下移到预算门之后**——改前被拒的那一轮照样花一次 embedding。📄 `DEC-083` §四·`🅕` |
 | **对外提供** | `build_advanced_agent()`（`:409`，返回**编译好的图**，带 `MemorySaver`）<br>· 5 个 `create_*_subgraph()`（`:130` / `:181` / `:214` / `:230` / `:267`）<br>· 模块级 `llm`（`:26`）· `llm_search`（`:85`）· `llm_calc`（`:86`）· `llm_date`（`:87`）· `llm_with_tools`（`:79`）<br>· 工具 `tools`（**从 `mcp_server.TOOLS` 派生**）· `TOOLS_BY_NAME`（按名字取**共享对象**，🔴 2026-10-08 加）<br>⚠️ **本文件自带的 `calculator` / `date_today` 已于 2026-10-08 删除**（`DEC-107`）<br>· `inject_memories_to_prompt()`（`:107`）· `AgentState`（`:90`）· 🆕 `STREAMABLE_NODES`（`:399`） |
 | **谁在用** | `api_v1_agent.py:34` import → `:538` **模块级建图**（`advanced_agent = build_advanced_agent()`）→ `POST /agent/advanced_chat`（`:540` 定义 · `:563` `advanced_agent.invoke(...)`）<br>🆕 **`POST /agent/advanced_chat/stream`**（`:585`，`B1` · 2026-10-04）—— 同一张图，走 `astream(..., subgraphs=True)`（`:653`/`:669`），汇总取自 `aget_state`（`:636`） |
 | **规模** | **540 行**（`bash scripts/spec_status.sh` 的口径 = 真实行数；⚠️ 本文件用 `wc -l` 会得 539 —— **末行没有换行符**，⛔ 差 1 不是笔误） |
@@ -29,14 +29,14 @@
   每个节点 **调用之前** 查 `check_token_budget(user_name, estimated_tokens=500)`、**之后** 调
   `record_from_response(…)`。`AgentState` 新增 `thread_id`（`user_name` 已有）⇒ 子图与父图共用同一 `AgentState`，
   身份自动流入。⚠️ **超预算的返回形状按节点出口不同**（见 ⚠️⑦）。
-  📄 裁定 ⇒ `DEC-072`；📌 判据 ⇒ `api/test_billing_wiring.py`
+  📄 裁定 ⇒ `DEC-072`；📌 判据 ⇒ `app/tests/test_billing_wiring.py`
 - 🔴 **被拦那一轮改【写进 state】（`N11` · 批 7 · 2026-10-05 · `DEC-083`）**：本图 **6 处软返回全部**改成
   **同时写 `budget_intercept`**（`search_summarize:176` · `calc_execute:217` · `translate_execute:275` ·
   react 的 `agent_decide:330` · **`supervisor:470`（入口）** · `chat_node:534`）⇒ 端点回 **429 / error 帧**。
   · **入口 `supervisor` 的正常出口（`:512`）必须写 `state["budget_intercept"] = None`** —— 它是
     **原地改 state 再整个返回**（⛔ 不是返回增量）⇒ 清零写成赋值。（`DEC-078 §四`：不清零 ⇒ 上轮被拦会让下轮正常提问也 429）
   · ⚠️ **`supervisor` 的软返回【必须】继续给 `intent="CHAT"`** —— `route_by_intent` 读 `state["intent"]`，少了当场 `KeyError` = **500**（见 ⚠️⑦）
-  · 📄 裁定 ⇒ `DEC-083`；📌 判据 ⇒ `api/test_budget_soft_return.py`（21 例，**变异自证 27/27**）
+  · 📄 裁定 ⇒ `DEC-083`；📌 判据 ⇒ `app/tests/test_budget_soft_return.py`（21 例，**变异自证 27/27**）
 - 🔵 **真流式（`B1` · 2026-10-04）**：4 个节点（`:143` / `:237` / `:279` / `:463`）声明 `config: RunnableConfig`
   并用 `.stream(…, config=config)` 逐块聚合 ⇒ `/agent/advanced_chat/stream` 的
   `astream(…, subgraphs=True)` 才拿得到 **token 级**的块。📄 裁定 ⇒ `DEC-050` · 白名单 ⇒ `STREAMABLE_NODES`（`:399`）
@@ -46,11 +46,11 @@
 
 - ✅ ~~🔴 **本模块的 LLM 调用【一处都不记账】**~~
   ⇒ **2026-10-04 起【已修】**（`DEC-072`）：6 个调用点全部接上 `check_token_budget` + `record_from_response`。
-  ⚠️ **改前判据（可打印，已作废）**：`grep -c record_usage api/agent_graph_advanced_learning.py` ⇒ **0**；
+  ⚠️ **改前判据（可打印，已作废）**：`grep -c record_usage app/agent/agent_graph_advanced_learning.py` ⇒ **0**；
   **改后**同一个 grep 仍可能 **0** —— 因为实现走的是 `record_from_response`（**三张图共用的唯一入口**），
   ⛔ **别拿 `grep -c record_usage` 当"记没记账"的判据**（这条本身就是"两个名字"的病根）。
-  正确的可打印判据 ⇒ `python -m pytest api/test_billing_wiring.py -q`。
-  📌 **同族**：`api/api_v1_rag.py` 仍是 0（那个已在它的 spec 里登记，⛔ 本轮未动）。
+  正确的可打印判据 ⇒ `python -m pytest app/tests/test_billing_wiring.py -q`。
+  📌 **同族**：`app/routing/api_v1_rag.py` 仍是 0（那个已在它的 spec 里登记，⛔ 本轮未动）。
   ⚠️ **端点上那两道闸**（`check_session_token_budget` / `circuit(global_key())`，`api_v1_agent.py` 的 `advanced_agent_chat`）
   **只是"拦"，不是"记"** —— 别把两者读成一回事。**这次补的是"记"**（以及每个节点自己的"拦"）。
 - ⚠️ **`MemorySaver()`**（`:450`）是**进程内存** ⇒ 重启即丢（与 `/agent/langgraph_chat`·`/agent/mcp_chat` 同）。
@@ -59,7 +59,7 @@
   **`TOOLS_BY_NAME["calculator"]` / `["date_today"]`**（`TOOLS_BY_NAME` 在 `:67` 附近，
   取的是 `mcp_server.TOOLS` 里那**同一批对象**）。
   ⭐ **判据（对象同一，⛔ 不是"名字一样"）**：
-  `api/test_tool_registry_single_source.py::test_all_graphs_share_the_same_tool_objects`（用 `is` 断言）。
+  `app/tests/test_tool_registry_single_source.py::test_all_graphs_share_the_same_tool_objects`（用 `is` 断言）。
   ⚠️ **子图形状没动** —— 只换了 `.invoke()` 的目标。
 - ⚠️ **`supervisor` 直接改 `state` 再整个返回**（`:381-382`）——
   与本仓别处的 `return {...}` 风格不同，读的时候容易看漏它**确实**写了 `intent`。
@@ -76,8 +76,8 @@
 | ⚠️ **⑥ 路由是"容错"的** | ⛔ **是【精确匹配】的**（`:513`）：`intent.content.strip()` 与 `"SEARCH"` 等**逐字相等**才命中，<br>**否则一律落 `chat`**（兜底）。⇒ 模型多吐一个句号（`REACT。`）就**静默走错分支**、且**不报错**。<br>⚠️ 这是**真实风险**，不是理论 —— 提示词（`:430`）只写「只返回一个单词」，**没有输出约束**。<br>🔵 **`B1` 之后这条更值得注意**：`chat_node` 是兜底 ⇒ **大多数请求走的其实是这条分支**（其 docstring 已写明） |
 | 🔴 **⑦ 「超预算了，6 个节点都 `return {"final_output": …}` 就完事」** | ⛔ **`supervisor` 那处必须【同时】返回 `intent`**（`:469`：`{"intent": "CHAT", "final_output": BUDGET_EXCEEDED_MSG, "budget_intercept": BUDGET_EXCEEDED_MSG}`）—— <br>因为它的下游是 `route_by_intent`（`:513`），**读 `state["intent"]`**：只给 `final_output` ⇒ 当场 `KeyError`。<br>⚠️ **其余 5 处出口不同**：`chat_node` / `search_summarize` / `calc_execute` / `translate_execute` 的出口是 `final_output`；<br>REACT 的 `agent_decide`（`:311`）出口是 `messages`（`{"messages": [AIMessage(...)]}`）—— 它的下游 `should_continue` 读 `messages[-1].tool_calls`。<br>⇒ **同一件事（拦），返回形状按【节点在图里的位置】定，⛔ 不能一刀切。**<br>🔴 **批 7 追加**：**6 处都还要加 `budget_intercept`**（`DEC-083`）—— 但 **`intent` 照样一个都不能少**。 |
 | 🔴 **⑦b 「被拦那轮 `supervisor` 写 `None` 就对了」** | ⛔ **反了** —— `supervisor` 是**入口节点**，**它自己就是拦截点** ⇒ 被拦那一轮必须写**本轮原因**。写 `None` 等于**把这次拦截藏起来**（那正是本批要治的病）。<br>✅ **`None` 只该出现在【正常出口】**（`:512`，原地改 state 再返回）。⚠️ 改前它写的是 `**cleared`（显式清零）—— 那个写法在"拦截只有 `tool_execute` 一种"的年代是对的，**本批语义翻转**。 |
-| 🔴 **⑦c 「被拒那轮反正要返回预算话术，记忆检索放前面无所谓」** | ⛔ **钱已经花了** —— `search_user_memory`（`:479`）/ `inject_memories_to_prompt` 会**真打一次 DashScope embedding**，而取回的记忆**当场被丢弃**（走不到 `messages`）。<br>✅ 批 7 已把两条都**下移到预算门之后**。📌 判据 `api/test_budget_soft_return.py::_no_memory`（**一调就炸**，⛔ 不是挡成 passthrough）。 |
-| 🔴 **⑧ 「记账就是 `record_usage`，grep 它就能查有没有记账」** | ⛔ **本模块走的是 `record_from_response`**（三张图共用的**唯一入口**，`token_tracker.py`）—— <br>`grep -c record_usage` 在本文件**仍然是 0**（改前改后都是）⇒ **拿它当判据会得出"还是没记"的错误结论**。<br>✅ 正确判据：`python -m pytest api/test_billing_wiring.py -q`（它按**最内层函数**逐个点数）。 |
+| 🔴 **⑦c 「被拒那轮反正要返回预算话术，记忆检索放前面无所谓」** | ⛔ **钱已经花了** —— `search_user_memory`（`:479`）/ `inject_memories_to_prompt` 会**真打一次 DashScope embedding**，而取回的记忆**当场被丢弃**（走不到 `messages`）。<br>✅ 批 7 已把两条都**下移到预算门之后**。📌 判据 `app/tests/test_budget_soft_return.py::_no_memory`（**一调就炸**，⛔ 不是挡成 passthrough）。 |
+| 🔴 **⑧ 「记账就是 `record_usage`，grep 它就能查有没有记账」** | ⛔ **本模块走的是 `record_from_response`**（三张图共用的**唯一入口**，`token_tracker.py`）—— <br>`grep -c record_usage` 在本文件**仍然是 0**（改前改后都是）⇒ **拿它当判据会得出"还是没记"的错误结论**。<br>✅ 正确判据：`python -m pytest app/tests/test_billing_wiring.py -q`（它按**最内层函数**逐个点数）。 |
 
 ### 🔴 ⭐ 节点表：**6 个调 LLM 的节点，只有 4 个该流**
 
@@ -107,7 +107,7 @@
 {"chat", "search_summarize", "translate_execute", "agent"}
 ```
 ⚠️ **`supervisor` 的字必须在过滤时丢掉** —— 而它会**真的出现在流里**（它也是个调 LLM 的节点），
-实测见 `api/test_agent_stream_chains.py::test_chain_a_filters_out_supervisor_and_calc_execute`。
+实测见 `app/tests/test_agent_stream_chains.py::test_chain_a_filters_out_supervisor_and_calc_execute`。
 
 ## 关联
 

@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Eval 评测</title>
+<link rel="stylesheet" href="/static/app.css">
+<style>
+  /* 本页只写【页面专属】规则；token 与通用组件在 `/static/app.css`。
+     🔴 2026-10-08：删掉本页自带的 `:root`，硬编码色（#222/#1a73e8/#e8f0fe）换成 token。 */
+  .wrap { max-width: 680px; margin: 10vh auto; padding: 0 var(--sp-4); }
+  .hint { color: var(--fg-dim); font-size: var(--fs-body); margin: 0 0 var(--sp-5); }
+
+  /* 🔴 它就是业务方要的那个「按钮」（`DEC-097`）：**一个 <a>**，样式做成按钮。
+     ⚠️ 用 <a href> 而不是 <button onclick="location=…">：
+        ① 它是**跳转**，不是动作 —— 语义上就是链接；
+        ② 中键 / 右键"在新标签页打开"照常可用（`<button>` 上做不到）；
+        ③ `app/tests/test_eval_page.py` 直接扫 `href` 就能钉住目标 ⇒ **判据是个字面量**。
+     ⚠️ 样式走 app.css 的 `.btn`（⛔ 不再本页自造一套）—— 一句话：**它得和全站按钮长得一样**。 */
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Eval 评测</h1>
+  <p class="hint">
+    这是评测结果的展示入口。<br>
+    ⚠️ 目前<strong>只有占位</strong>：后端还没有评测相关的接口（<code>B14</code> 仍是未做），
+    所以这里没有任何分数、也没有与上一版的对比箭头 —— 点开是一句实话。
+  </p>
+  <p><a class="btn" href="/static/web/eval_gate.html">打开评测门</a></p>
+</div>
+</body>
+</html>

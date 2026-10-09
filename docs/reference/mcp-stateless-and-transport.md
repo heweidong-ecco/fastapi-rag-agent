@@ -207,7 +207,7 @@ curl -sSL --max-time 20 https://modelcontextprotocol.io/specification/2025-06-18
 ## 八 · 本项目当前处在哪（🔵 实测 · 随代码变，**用命令核对别抄**）
 
 > 🔴 **2026-10-08（批④-A）更正：下表前两行【已过时】** —— SDK 上界已解到 `mcp>=2.3.0,<3`、
-> 实装 **2.3.0**，`api/mcp_server.py` 也已从装饰器迁到 **2.x 的构造器回调**。
+> 实装 **2.3.0**，`app/tools/mcp_server.py` 也已从装饰器迁到 **2.x 的构造器回调**。
 > ⚠️ **下表是 2026-10-08 上午的快照，⛔ 不改写**；**现行值一律跑右边那列命令**。
 > ⚠️ **"上锁的理由"那一行仍然是【真的】** —— 解包 mcp 2.3.0 实测，
 > `Server` **确实没有** `list_tools()`（`grep -n "def list_tools" mcp/server/lowlevel/server.py` ⇒ 0 命中）。
@@ -215,12 +215,12 @@ curl -sSL --max-time 20 https://modelcontextprotocol.io/specification/2025-06-18
 
 | 项 | 现状 | 判据（可打印） |
 |---|---|---|
-| SDK 版本要求 | **`mcp>=1.0.0,<2`**（**上了锁**） | `grep -n '^mcp' api/requirements.txt` |
-| 上锁的理由 | `mcp` 2.x 的 `Server` 去掉了 `list_tools()`，而 `api/mcp_server.py` 用 `@server.list_tools()` ⇒ `AttributeError` | 同上（:93-94 注释） |
+| SDK 版本要求 | **`mcp>=1.0.0,<2`**（**上了锁**） | `grep -n '^mcp' app/requirements.txt` |
+| 上锁的理由 | `mcp` 2.x 的 `Server` 去掉了 `list_tools()`，而 `app/tools/mcp_server.py` 用 `@server.list_tools()` ⇒ `AttributeError` | 同上（:93-94 注释） |
 | 实装版本 | 🔵 **mcp 1.30.0** | `./venv/bin/python -c "import importlib.metadata as m; print(m.version('mcp'))"` |
-| **服务端**是不是握手形态 | **是** —— 用了 `create_initialization_options()` | `grep -n 'create_initialization_options' api/mcp_server.py` |
-| **客户端**在哪 | **只有一条路**走 MCP client：`api/agent_graph_advanced.py` | `grep -rn 'stdio_client\|ClientSession' api/*.py` |
-| 会话怎么起的 | **每次调用** `async with stdio_client(...)` → `async with ClientSession(...)`（**短会话**） | `grep -n 'async with stdio_client' api/agent_graph_advanced.py` |
+| **服务端**是不是握手形态 | **是** —— 用了 `create_initialization_options()` | `grep -n 'create_initialization_options' app/tools/mcp_server.py` |
+| **客户端**在哪 | **只有一条路**走 MCP client：`app/agent/agent_graph_advanced.py` | `grep -rn 'stdio_client\|ClientSession' app/*.py` |
+| 会话怎么起的 | **每次调用** `async with stdio_client(...)` → `async with ClientSession(...)`（**短会话**） | `grep -n 'async with stdio_client' app/agent/agent_graph_advanced.py` |
 
 🔴 **⇒ 本项目现在同时处在两个"旧"上**：
 ① **SDK 版本旧**（`<2` 锁着）· ② **会话模型旧**（每次调用起一次子进程，且服务端还是握手形态）。

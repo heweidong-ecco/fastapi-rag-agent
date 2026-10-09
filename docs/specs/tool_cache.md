@@ -1,11 +1,11 @@
-# `api/tool_cache.py`
+# `app/tools/tool_cache.py`
 
 | 项 | 内容 |
 |---|---|
 | **状态** | ✅ **已接进产品路径（2026-10-08 · 批①）** —— 🔴 **此前它是"没接上的模块"**（整块死代码，见下） |
 | **对外提供** | `cached_tool()`（装饰器）· `get_ttl()` · `TTL_BY_TOOL`（**唯一**的 TTL 事实源）<br>底层：`get_tool_cache_key()` · `get_cached_tool_result()` · `set_cached_tool_result()` |
 | **谁在用** | `simple_tools.py`（`calculator` / `date_today` / **`date_calc`** / **`json_extract`** / **`stats`** —— 🔴 后三个 2026-10-08 批③ 新增）· `search_tools.py`（`web_search`）· `code_executor.py`（`execute_python`）<br>⇒ ⭐ **缓存包在 `@tool` 那一层**，不是调用点、不是 handler<br>⚠️ **本行原带 `:11` / `:42` / `:17` 三个行号，已删** —— 本仓 `N8`：行号锚点**系统性漂移**（批③ 一加行就全错）⇒ 一律改用**模块名 / 函数名** |
-| **测试** | `api/test_tool_cache.py`（**8**）· `api/test_tool_cache_wiring.py`（**5**）<br>⚠️ 数字会变，判据：`cd api && ../venv/bin/python -m pytest test_tool_cache.py test_tool_cache_wiring.py --collect-only -q \| tail -1` |
+| **测试** | `app/tests/test_tool_cache.py`（**8**）· `app/tests/test_tool_cache_wiring.py`（**5**）<br>⚠️ 数字会变，判据：`cd app && ../venv/bin/python -m pytest test_tool_cache.py test_tool_cache_wiring.py --collect-only -q \| tail -1` |
 
 ## ✅ 做了什么
 
@@ -35,7 +35,7 @@
 | 「命中缓存时会返回 `[缓存命中]` 后缀」 | ⛔ **不会了** —— 那是 `agent_graph_advanced` 那份内联缓存的产物，2026-10-08 已并掉（`DEC-106`）。⚠️ **别把这读成"缓存没了"**：缓存还在，只是**不再往结果里写字** |
 | 「`should_cache` 是个通用的失败判定」 | 🔴 它是**逐工具给的谓词**（现在只有 `web_search` 用）。⛔ **别改成"含『失败』就跳过"那种猜法** —— 每条工具失败的形状不同，猜出来的规则是**静默**的 |
 | 「Redis 挂了 ⇒ 工具会 500」 | ⛔ **不会** —— fail-open（`DEC-105`）。⚠️ 但**降级是静默的**：「缓存从不命中」与「根本没在缓存」在机器痕迹上**长得一样**（本仓原话：**「『从不命中』与『没人违规』在机器痕迹上完全一样」**）⇒ **只能靠那条 ERROR 日志与健康检查发现** |
-| 「这是个内部工具模块，改动随便」 | 🔴 **它是 `calculator` 唯一的安全落点** —— `calculator` 的实现（`safe_math.calculate`）现在**全仓只有一处定义**（`simple_tools_impl`），`api/test_safe_math_wiring.py` 守着它 |
+| 「这是个内部工具模块，改动随便」 | 🔴 **它是 `calculator` 唯一的安全落点** —— `calculator` 的实现（`safe_math.calculate`）现在**全仓只有一处定义**（`simple_tools_impl`），`app/tests/test_safe_math_wiring.py` 守着它 |
 
 ## ⚠️ 看代码【真的】会误判的一条（历史）
 
@@ -49,10 +49,10 @@
 
 - **决策** ⇒ `DEC-105`（Redis 不通 fail-open）· `DEC-106`（缓存的唯一落点）·
   `DEC-107`（工具清单收口到一处）
-- **守卫** ⇒ `api/test_tool_cache_wiring.py`（"四条工具**真的**带缓存"—— 调的是
+- **守卫** ⇒ `app/tests/test_tool_cache_wiring.py`（"四条工具**真的**带缓存"—— 调的是
   `mcp_server.TOOLS` 里那个 `@tool` 对象，与 Agent 拿到的是同一个）·
-  `api/test_tool_cache.py::test_every_mcp_registered_tool_has_a_ttl`（**新工具忘了登记 TTL 的唯一拦网**）
+  `app/tests/test_tool_cache.py::test_every_mcp_registered_tool_has_a_ttl`（**新工具忘了登记 TTL 的唯一拦网**）
 - **邻居** ⇒ `docs/specs/safe_math.md`（`calculator` 的安全实现）
-- ⚠️ **`api/simple_tools.py` / `api/search_tools.py` / `api/code_executor.py` 目前【没有 spec】**
+- ⚠️ **`app/tools/simple_tools.py` / `app/tools/search_tools.py` / `app/tools/code_executor.py` 目前【没有 spec】**
   （=`spec_status.sh` 的「没 spec」名单里）—— 本批**没给它们建**，⛔ 别以为这里漏写了路径
-- ⚠️ **`api/rate_limiter.py` 的 `S8`** —— fail-open 的**同形先例**，本文件的捕获范围照抄它的形状
+- ⚠️ **`app/access/rate_limiter.py` 的 `S8`** —— fail-open 的**同形先例**，本文件的捕获范围照抄它的形状

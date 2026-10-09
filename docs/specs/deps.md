@@ -1,10 +1,10 @@
-# `api/deps.py`
+# `app/routing/deps.py`
 
 | 项 | 内容 |
 |---|---|
 | **状态** | 🟡 部分可用 —— **HTTP 侧完整**；**WebSocket 侧 2026-10-05 才补上**（此前 WS 整条裸奔） |
 | **对外提供** | **HTTP 认证**：`get_current_user`（API Key）· `get_current_user_jwt`（JWT）· `get_current_user_hybrid`（两者皆可）· `require_admin`（管理员）· `verify_jwt_token`（纯函数）· `oauth2_scheme`<br>**WebSocket 认证**（🆕 `DEC-075`）：`require_ws_user`（依赖）· `resolve_ws_identity`（**纯函数**）· 常量 `WS_AUTH_TIMEOUT_SECONDS` / `WS_CLOSE_POLICY_VIOLATION`(1008) / `WS_CLOSE_INTERNAL_ERROR`(1011) |
-| **谁在用** | `api/api_v1.py` · `api/api_v1_agent.py` · `api/api_v1_rag.py`（含 WS 那两条路由）· `api/main.py` —— ⚠️ 见 `scripts/check_route_auth.py` 的 `AUTH_NAMES`**就是靠本文件的函数名认人的** |
+| **谁在用** | `app/routing/api_v1.py` · `app/routing/api_v1_agent.py` · `app/routing/api_v1_rag.py`（含 WS 那两条路由）· `app/main.py` —— ⚠️ 见 `scripts/check_route_auth.py` 的 `AUTH_NAMES`**就是靠本文件的函数名认人的** |
 
 ## ✅ 做了什么
 
@@ -37,12 +37,12 @@
 | 🔴 **「先 `close()` 再 `accept()` 也一样，反正都是关」** | ⛔ **两回事**：`accept()` **之前**关 ⇒ 浏览器只看到**握手失败**，**拿不到关闭码**（实测）；`accept()` 之后关 ⇒ 前端 `onclose` 能读到 `code=1008` 与 `reason`。<br>⇒ 顺序是**用户可见行为**的一部分，⛔ 不是实现细节。 |
 | 🔴 **「1008 和 1011 都是失败，随便报一个」** | ⛔ **对客户端是相反的处置**：1008 = 你的凭据不行（**换 key**）；1011 = 我这边不行（**重试，别换 key**）。<br>把库抖动报成 1008，等于**告诉用户去换一把没问题的 key** —— 他换了还是连不上，且**永远查不到原因**。 |
 | 🔴 **「`deps.py` 里鉴权 fail-closed，那 `token_tracker` 怎么 fail-open，统一一下」** | ⛔ **故意相反，别统一**：这里是**安全边界**（放错了 = 匿名进门）；那边是**成本控制**（挡错了 = 全站停摆）。`token_tracker.get_session_token_usage` 的 docstring 里写着同一条。 |
-| 🔴 **「中间件不是已经挡过了吗」** | ⛔ **挡不到 WS** —— `api/main.py` 那两个是 `BaseHTTPMiddleware`，**只看 `scope["type"] == "http"`**。⇒ WS 的鉴权**只能挂在路由自己的依赖上**，这也是它曾经整条裸奔的原因。 |
+| 🔴 **「中间件不是已经挡过了吗」** | ⛔ **挡不到 WS** —— `app/main.py` 那两个是 `BaseHTTPMiddleware`，**只看 `scope["type"] == "http"`**。⇒ WS 的鉴权**只能挂在路由自己的依赖上**，这也是它曾经整条裸奔的原因。 |
 | 🔴 **「改了个鉴权函数名而已，跑一下测试就行」** | ⛔ **还要改 `scripts/check_route_auth.py` 的 `AUTH_NAMES`** —— 那个门是靠**函数名字符串**认人的，**名单漂了它会静默放过**（实测：把 `require_ws_user` 从名单里拿掉，两条 WS 立刻被判为"无鉴权"）。 |
 
 # ✅ 实施计划 · 批 3 · `N9`（2026-10-05 立 · **同日做完**）
 
-> **结果**：`api/test_auth_db_unavailable.py` **22 条全绿** · 全量 **654 passed** · **变异自证 17/17**
+> **结果**：`app/tests/test_auth_db_unavailable.py` **22 条全绿** · 全量 **654 passed** · **变异自证 17/17**
 > （`N9` 相关 **7 条**；含"**把捕获写宽**"与"**中间件不再照 `None` 办事**"两类）。
 > 📄 **决策（503 的来历 + 四个落点的分工 + 反悔成本）** ⇒ `docs/decisions/DEC-079-依赖不可用时端点答什么.md`
 
@@ -56,7 +56,7 @@
 
 库连不上时，**我们并不知道那把 key 是真是假** ⇒ 报 401 = **替用户断言「你的 key 坏了」**，
 而那正是 1008/1011 那条禁止的**归错因**（他去换一把没问题的 key，然后照样连不上）。
-⇒ **HTTP 侧的对应值是 `503 SERVICE_UNAVAILABLE`** —— `api/exceptions.py` 里**早就有这个码，
+⇒ **HTTP 侧的对应值是 `503 SERVICE_UNAVAILABLE`** —— `app/core/exceptions.py` 里**早就有这个码，
 只是从来没被用过**。
 
 ## 落点：**异常在【源头】抛一次，往哪倒由调用点各自决定**
@@ -79,16 +79,16 @@
 这正是 1008/1011 那条禁止的**归错因**的限流版。
 
 ⇒ `resolve_rate_limit_identity` 的返回值**多一个 `None`**：「**识别不了**」≠「**确实匿名**」。
-✅ **原有 8 条用例（`api/test_rate_limit_identity.py`）一条都不用改，`git status` 干净、8 passed**
+✅ **原有 8 条用例（`app/tests/test_rate_limit_identity.py`）一条都不用改，`git status` 干净、8 passed**
 —— 它们用的是 `_no_db`（**库正常**）那条路径
 ⇒ `None`（判不了）与 `"anonymous"`（判了就是匿名）**没有互相污染**。
 
 ⚠️ **捕获必须【按类型】**（⛔ 不是 `except Exception`）——
-`api/test_rate_limit_identity.py` 的 `_no_db` fixture **靠抛 `AssertionError` 抓「谁碰了库」**；
+`app/tests/test_rate_limit_identity.py` 的 `_no_db` fixture **靠抛 `AssertionError` 抓「谁碰了库」**；
 写宽了会把它一起吞掉 ⇒ **那道守卫静默失效**（`S8` 那边同理）。
 📌 **实测**：把 `auth` 那处改成 `except Exception` ⇒ `test_非数据库异常必须照样冒泡` 转红（变异 `N9-b`）。
 
-## 用例（🆕 `api/test_auth_db_unavailable.py` · 22 条 · 离线 · ⛔ 不连库/Redis）
+## 用例（🆕 `app/tests/test_auth_db_unavailable.py` · 22 条 · 离线 · ⛔ 不连库/Redis）
 
 **第一组 · 源头与安全边界**
 

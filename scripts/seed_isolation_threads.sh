@@ -41,7 +41,7 @@
 #
 #   1. **对话正文不落库** —— `mcp_chat` 的记账只存 `user_name/thread_id/purpose/token`，
 #      **不存问题与回答**。追踪轴（`/agent/trace/{thread_id}`）有正文，但那是
-#      `api/tool_visualizer.py` 的**进程内字典** `_traces` ⇒ **不 durable**。
+#      `app/tools/tool_visualizer.py` 的**进程内字典** `_traces` ⇒ **不 durable**。
 #      ⇒ 正文由本脚本**打印出来**，落库的是「谁 / 哪个会话 / 花了多少」。
 #   2. **`thread_id` 不落 Redis 的对话历史** —— `persist_turn` 只在**流式**端点被调
 #      （`api_v1_agent.py:1396` 属 `mcp_chat/stream`）⇒ 本脚本走非流式，`chat_history:{用户}` 里没有。

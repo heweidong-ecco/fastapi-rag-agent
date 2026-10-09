@@ -17,8 +17,8 @@
 
 | # | 约束 | 为什么 |
 |---|---|---|
-| 1 | ⛔ **不进 `api/test_*.py`、不进 pytest** | 裁定原话 |
-| 2 | ⛔ **不写进 `api/requirements.txt`** | 那份清单会进 **demo 镜像** ⇒ 塞个压测工具 = 给交付物增肥（本仓对 `ruff` 用的是同一条理由） |
+| 1 | ⛔ **不进 `app/test_*.py`、不进 pytest** | 裁定原话 |
+| 2 | ⛔ **不写进 `app/requirements.txt`** | 那份清单会进 **demo 镜像** ⇒ 塞个压测工具 = 给交付物增肥（本仓对 `ruff` 用的是同一条理由） |
 | 3 | ⛔ **别压太大** | 这台机器 **8 GB**，Docker 只分到 **3.84 GB**（`DEC-033`） |
 | 4 | 🔴 **跑之前先核实本机状态** | 裁定原话；且本仓有「**有评测在跑时不许 `docker compose up`**」那条 |
 
@@ -46,7 +46,7 @@ PY
 # 或者新发一把：venv/bin/python scripts/issue_api_key.py bench --days 7
 ```
 
-⚠️ **鉴权头是 `X-API-Key`**（见 `api/main.py`）。
+⚠️ **鉴权头是 `X-API-Key`**（见 `app/main.py`）。
 🔴 **⛔ 不用 `Authorization`** —— 魔搭创空间那边**平台会往每个请求注入它**，
 本仓的取向是"绝不读它、绝不回显它"（`docs/说明/魔搭创空间-部署与平台约束.md`）。
 
@@ -127,7 +127,7 @@ BENCH_PAID=1 locust -f bench/locustfile.py --headless -u 5 -r 1 -t 60s
 
 | 不做 | 为什么 |
 |---|---|
-| 写进 `api/requirements.txt` | 会进 demo 镜像（见 §一 约束 2） |
+| 写进 `app/requirements.txt` | 会进 demo 镜像（见 §一 约束 2） |
 | 进 pytest / CI | 裁定原话 |
 | 压**付费档**当默认 | 每次请求花钱，且不可反复跑 |
 | 拿旧基线当对比基准 | 它的错误率 77–97%，**不是基线**（见 §四） |

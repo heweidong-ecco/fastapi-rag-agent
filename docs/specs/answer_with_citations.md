@@ -1,4 +1,4 @@
-# `api/answer_with_citations.py`
+# `app/rag/answer_with_citations.py`
 
 | 项 | 内容 |
 |---|---|
@@ -21,15 +21,15 @@
 ## 🟡 做到哪 / 缺什么
 
 - 🔴 **零测试覆盖**（`docs/说明/测试.md` §六 **#6**）
-  ⚠️ **2026-10-05 澄清**：`api/test_rag_billing_wiring.py` 里那两条测的是**记账**，
+  ⚠️ **2026-10-05 澄清**：`app/tests/test_rag_billing_wiring.py` 里那两条测的是**记账**，
   ⛔ **不是**引用格式 / 无据拒答 ⇒ **上面这条欠账依然成立**。
 - 🔵 **2026-10-06：引用点不开这件事【在流式那条链上已经解决】** ——
-  `GET /chat` → `api/static/web/chat.html` 能点开引用、卡片里是**全文**（手工验过，`DEC-085` 段 1）。
+  `GET /chat` → `app/static/web/chat.html` 能点开引用、卡片里是**全文**（手工验过，`DEC-085` 段 1）。
   ⚠️ **但本文件走的是【非流式】链**（`rag_pipeline.py:182` ⇒ `/rag/search`）——
   那条链**没有前端**。⇒ 准确表述是「**流式那半 ✅ · 非流式这半仍是后端有、界面没有**」。
 - ⚠️ **它是硬门 B 的【后端】主体** —— 硬门 B 的界面那半 2026-10-06 在**流式链**上打通了，
   **非流式链**（= 本文件）仍是 ⬜。
-- ⬜ **`index` 与 `content` 那两条字段没有用例** —— `api/test_frontend_contract.py` 打的是
+- ⬜ **`index` 与 `content` 那两条字段没有用例** —— `app/tests/test_frontend_contract.py` 打的是
   **流式**出口（`/rag/stream_search` 的 `sources` 帧），**本文件的 `sources` 不在其中**。
 
 ## ⚠️ 看代码会误判的地方 ⭐
@@ -37,11 +37,11 @@
 | 看代码会以为 | 实际 |
 |---|---|
 | 「引用溯源做完了」 | ⚠️ **2026-10-06 起要分链说**：**流式**那半（`/rag/stream_search` + 对话页）✅ 已通；**本文件这条非流式链** ❌ 仍没有界面。⚠️ 本文件**不是**对话页消费的那一份 —— 看到这里的 `sources` 被改好，⛔ **别推断"对话页引用的就是它"** |
-| 「调用它就会有引用」 | 🔴 **不会** —— **`citations` 默认 `False`**（`api/schemas.py:16`），**`generate_answer` 默认也 `False`**（`:14`）⇒ **两个都不显式打开 ⇒ 连 `answer` 字段都没有，更不会有引用** |
+| 「调用它就会有引用」 | 🔴 **不会** —— **`citations` 默认 `False`**（`app/routing/schemas.py:16`），**`generate_answer` 默认也 `False`**（`:14`）⇒ **两个都不显式打开 ⇒ 连 `answer` 字段都没有，更不会有引用** |
 | 「README 说的点击溯源是真的」 | 🔴 **那句已在 2026-09-29 更正** —— 原文写「支持点击溯源到原始文档块」，**"点击"不成立** |
-| 「`llm \| StrOutputParser()` 是常规写法，无妨」 | 🔴 **在本文件里它是个坑** —— `StrOutputParser` 把 `AIMessage` **剥成 `str`**，`usage_metadata` **随之丢光** ⇒ 记账**拿不到数**、且**静默跳过**（不抛错）。<br>⇒ 本文件**直调 `llm.invoke(messages)`** 取消息本体（`:62`）。⛔ **别"顺手统一成链式写法"** —— 那等于把记账再关掉一次。<br>📌 守卫：`api/test_rag_billing_wiring.py::test_no_llm_usage_is_swallowed_by_string_output_parser`（**全文件扫描**，不依赖任何前置识别） |
+| 「`llm \| StrOutputParser()` 是常规写法，无妨」 | 🔴 **在本文件里它是个坑** —— `StrOutputParser` 把 `AIMessage` **剥成 `str`**，`usage_metadata` **随之丢光** ⇒ 记账**拿不到数**、且**静默跳过**（不抛错）。<br>⇒ 本文件**直调 `llm.invoke(messages)`** 取消息本体（`:62`）。⛔ **别"顺手统一成链式写法"** —— 那等于把记账再关掉一次。<br>📌 守卫：`app/tests/test_rag_billing_wiring.py::test_no_llm_usage_is_swallowed_by_string_output_parser`（**全文件扫描**，不依赖任何前置识别） |
 | 「`user_name` 可以不传」 | 🔴 **它是必填 keyword**（`:35`）—— 漏传 = `TypeError`。⛔ 不是"静默记成 `unknown`"（`DEC-072` 明文反例）。 |
-| 🔴 **「流式的 `sources` 帧和这里的 `sources` 是同一段代码产出的」** | ⛔ **不是** —— 是**两段**代码（本文件 `:53` · `api_v1_rag.py:744`），只是**手工写成了同一个形状**。⚠️ **没有任何东西钉住这个同构**：改一边忘另一边 ⇒ 两个出口**悄悄分叉**，而两边各自的用例**都还是绿的**。⇒ 要动其中一个，**必须同时核另一个**（`grep -n '"index"' api/answer_with_citations.py api/api_v1_rag.py`）。 |
+| 🔴 **「流式的 `sources` 帧和这里的 `sources` 是同一段代码产出的」** | ⛔ **不是** —— 是**两段**代码（本文件 `:53` · `api_v1_rag.py:744`），只是**手工写成了同一个形状**。⚠️ **没有任何东西钉住这个同构**：改一边忘另一边 ⇒ 两个出口**悄悄分叉**，而两边各自的用例**都还是绿的**。⇒ 要动其中一个，**必须同时核另一个**（`grep -n '"index"' app/rag/answer_with_citations.py app/routing/api_v1_rag.py`）。 |
 | ⚠️ **「前端拿 `content_preview` 显示卡片」** | ⛔ 对话页拿的是 **`content`（全文）** —— 硬门 B 的判定是"点开能展开原文"（`通用/四硬门-定义与验收标准.md`），**摘要过不了**。`content_preview` 是给**老前端/别处**留的，⛔ 别以为它是卡片那条路。 |
 
 > 📌 **这是硬门 B 的典型"看着有、实际缺一半"** ——

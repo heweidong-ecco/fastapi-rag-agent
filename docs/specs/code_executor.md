@@ -1,11 +1,11 @@
-# `api/code_executor.py` + `api/code_executor_impl.py`
+# `app/tools/code_executor.py` + `app/tools/code_executor_impl.py`
 
 | 项 | 内容 |
 |---|---|
 | **状态** | ✅ **可用 · 已进容器（2026-10-08 · 批②）** —— 改前是「宿主同权限的子进程 + 白名单」 |
 | **对外提供** | `code_executor.execute_python`（**`@tool`，给 LLM 的那一层**）<br>内核（`_impl`，**纯 stdlib**）：`execute_python_impl` · `run_in_sandbox_subprocess` · `create_safe_globals` · `ALLOWED_BUILTINS` · `ALLOWED_MODULES` · `MAX_EXEC_TIME` · `MAX_OUTPUT_LENGTH` |
 | **谁在用** | `mcp_server.TOOLS`（⇒ 各图按派生表拿到它）· `api_v1_agent.py` 的 `/agent/execute_code` 直接 `.invoke()`<br>⚠️ **`agent_graph` / `agent_checkpointer` 显式排除它**（见下方 🟡） |
-| **测试** | `api/test_impl_modules.py` · `api/test_code_executor_remote.py`（**4**）· `api/test_plan_execute_tools.py` · `api/test_tool_registry_single_source.py`（demo 那 2 条） |
+| **测试** | `app/tests/test_impl_modules.py` · `app/tests/test_code_executor_remote.py`（**4**）· `app/tests/test_plan_execute_tools.py` · `app/tests/test_tool_registry_single_source.py`（demo 那 2 条） |
 
 **两个文件的分工**（⛔ 别合并）：
 

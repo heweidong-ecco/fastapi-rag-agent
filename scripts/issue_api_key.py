@@ -20,7 +20,7 @@
 
 ## 🔴 为什么 `--revoke` 写 `0` 而**不是** `NULL`
 
-`api/auth.py` 的判据是 `COALESCE(is_active, 1) = 1`（**NULL 当激活**）。
+`app/access/auth.py` 的判据是 `COALESCE(is_active, 1) = 1`（**NULL 当激活**）。
 ⇒ 撤销时把列写成 NULL = **没撤销**，而屏幕上会打一句"已撤销"。
    这正是本仓记了一路的「闸是装饰」—— ⇒ 这里**只写 0/1**。
 """
@@ -29,7 +29,7 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO / "api"))
+sys.path.insert(0, str(REPO / "app"))
 
 from auth import create_user_api_key, hash_api_key          # noqa: E402,F401
 from db import get_db                                       # noqa: E402

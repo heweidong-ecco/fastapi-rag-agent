@@ -1,4 +1,4 @@
-# `api/session_key.py`
+# `app/access/session_key.py`
 
 | 项 | 内容 |
 |---|---|
@@ -41,18 +41,18 @@
 | 看代码会以为 | 实际 |
 |---|---|
 | 🔴 **「`f"{user}:{thread}"` 就够了」** | ⛔ **不够，有歧义**：`("a","b:c")` 与 `("a:b","c")` **都拼成 `"a:b:c"`** ⇒ **两个不同的人共用一个桶**。而用户名由 `create_user_api_key()` 创建、**没有字符校验** ⇒ 含 `:` 是可能的。⚠️ 在一个**专门修隔离**的改动里留一条歧义拼法 = 没修。**长度前缀**让"用户名到哪儿结束"**写死** ⇒ 切分点唯一 |
-| 🔴 **「响应里的 `thread_id` 就是图里用的那个键」** | ⛔ **不是** —— 响应回显的是**调用方传进来的原值**（对内对外**两套**）。⚠️ 这个区分是**故意的**：调用方后续要拿它去 `/agent/approve`，契约一变**所有调用方都得改**。守卫 ⇒ `api/test_session_isolation.py::test_response_echoes_the_raw_thread_id` |
+| 🔴 **「响应里的 `thread_id` 就是图里用的那个键」** | ⛔ **不是** —— 响应回显的是**调用方传进来的原值**（对内对外**两套**）。⚠️ 这个区分是**故意的**：调用方后续要拿它去 `/agent/approve`，契约一变**所有调用方都得改**。守卫 ⇒ `app/tests/test_session_isolation.py::test_response_echoes_the_raw_thread_id` |
 | 🔴 **「4 张图就是 4 处 config」** | ⛔ **7 处** —— `langgraph_chat_stream` 一条端点就占 **3 处**（`astream` :234 · `aget_state` :294，两处必须用**同一个**键，否则「流到一半」和「收尾判定」看的是**两个桶**） |
 | 🔴 **「`mcp_agent_chat` 里那个 `"thread_id": thread_id` 也应该一起改成 `sess`」** | ⛔ **别改** —— 那是喂给 **state** 的，走的是**追踪/花费轴**（`agent_graph_advanced.py:239/334/359` → `record_tool_*`），而它的**读**端点 `/agent/trace/{thread_id}`（`:1029`）用的**也是原值**。⚠️ **两条轴，别合并**：合并就得连追踪的读写一起改（那是另一件事） |
-| ⚠️ **「传空就当匿名，别抛错」** | ⛔ **抛错**（`ValueError`）—— 本仓已裁定 **fail-open 是根因**（`DEC-056` §二）⇒ 与 `db._require_identity` / `bm25_index._require_identity` **同一条约定**。守卫 ⇒ `api/test_session_key.py::test_missing_identity_raises` |
+| ⚠️ **「传空就当匿名，别抛错」** | ⛔ **抛错**（`ValueError`）—— 本仓已裁定 **fail-open 是根因**（`DEC-056` §二）⇒ 与 `db._require_identity` / `bm25_index._require_identity` **同一条约定**。守卫 ⇒ `app/tests/test_session_key.py::test_missing_identity_raises` |
 | ⚠️ **「两个形参给个默认值方便些」** | ⛔ **不给** —— 有默认值 = "可以忘记传" = **还是 fail-open**（漏传即 `TypeError`，⛔ 不是静默串号）。同 `hybrid_search(..., *, user_id)` 的约定 |
 
 ## 判据（可打印）
 
 ```
-venv/bin/python -m pytest api/test_session_key.py api/test_session_isolation.py -q -p no:warnings
-grep -c 'thread_id": sess' api/api_v1_agent.py        # ⇒ 7（= 该文件里 config 的处数；实测）
-grep -c 'session_key(user_name, thread_id)' api/api_v1_agent.py   # ⇒ 5（sess 的赋值点）
+venv/bin/python -m pytest app/tests/test_session_key.py app/tests/test_session_isolation.py -q -p no:warnings
+grep -c 'thread_id": sess' app/routing/api_v1_agent.py        # ⇒ 7（= 该文件里 config 的处数；实测）
+grep -c 'session_key(user_name, thread_id)' app/routing/api_v1_agent.py   # ⇒ 5（sess 的赋值点）
 ```
 
 ## 关联

@@ -5,21 +5,21 @@ name: CI
 #   offline-tests —— **M6 接进来的离线测试闭环**（2026-09-17）。见 ROADMAP.md「⑦ M6」与 docs/decisions/DEC-013。
 #
 # ⚠️ offline-tests 为什么是现在这个样子：
-#   · 跑 **`api/` 全套**，用两个 marker 挡掉跑不了的：
+#   · 跑 **`app/` 全套**，用两个 marker 挡掉跑不了的：
 #       `-m "not integration and not needs_db"` —— 实测 **48 passed / 1 skipped**。
 #   · 🔴 **必须给 redis service** —— 不是可选项。
 #     ⚠️ **理由 2026-10-05 变了（批 3 · `S8`）**：原先写的是「`rate_limiter.py` 没有
 #     `except RedisError` ⇒ Redis 不通时全站 500」。**那句现在是假的** —— `S8` 已加兜底，
 #     Redis 不通改成 **fail-open**（放行 + 一条 ERROR 日志）。
-#     现在这条 service 由**另一件事**撑着：`api/test_rate_limiter_resilience.py` 里
+#     现在这条 service 由**另一件事**撑着：`app/tests/test_rate_limiter_resilience.py` 里
 #     **有一条用例必须问真 Redis 要 `TTL`** —— 那是 `S7`（桶永不过期）唯一的真凭证。
-#     实测（`REDIS_PORT=6399 python -m pytest api/test_rate_limiter_resilience.py`）：
+#     实测（`REDIS_PORT=6399 python -m pytest app/tests/test_rate_limiter_resilience.py`）：
 #     **1 failed, 12 passed** —— 红的正是那条，其余全走替身。
 #     ⛔ **别因为"兜底之后不会 500 了"就把这个 service 删掉** ⇒ 那条用例会红。
 #   · **不需要 postgres** —— 带库的那几处已按 marker 标记（实测：把 `POSTGRES_PORT` 指向死端口，被挡掉后全绿）。
 #   · 环境变量给的是 **dummy 值**：`import main` 在导入期就会构造 OpenAI 客户端，
 #     空 key 会直接抛 OpenAIError（实测）。这些路径在离线用例里**永远不会被真正调用**。
-#   · `GRADIO_ANALYTICS_ENABLED=False` 是**双保险**：`api/conftest.py` 里已设，
+#   · `GRADIO_ANALYTICS_ENABLED=False` 是**双保险**：`app/conftest.py` 里已设，
 #     但那边一旦被绕过，Gradio 的遥测非 daemon 线程会**卡住进程退出**（详见 conftest 注释）。
 #   · `timeout-minutes` 是**兜底**：2026-09-17 实测过一个"测试全过但进程不退出"的缺陷
 #     —— 没有超时上限时，那种卡住会一直耗；有上限，"卡住"才是一个**显式状态**。
@@ -50,12 +50,12 @@ jobs:
       - name: 安装 Python
         uses: actions/setup-python@v5
         with:
-          # 与 api/Dockerfile 的基础镜像（python:3.10-slim）保持一致，
+          # 与 app/Dockerfile 的基础镜像（python:3.10-slim）保持一致，
           # 否则本机能跑通、容器里报 SyntaxError 的写法拦不住。
           python-version: "3.10"
 
-      - name: 编译检查 api/ 下全部 Python 文件
-        run: python -m compileall api/ -q
+      - name: 编译检查 app/ 下全部 Python 文件
+        run: python -m compileall app/ -q
 
       # ⚠️ **只跑 `--self-test`，⛔ 不跑真正的三方比对** —— 本步【不连网、不需凭据】。
       # 为什么真正的比对不能在这里跑：CI 里"本地"就是刚 checkout 的那份 ⇒ 三方恒等 ⇒ 跑了等于没跑
@@ -73,7 +73,7 @@ jobs:
       # 🔴 **版本必须钉死，且与 `scripts/ruff-baseline.txt` 头部记的那个一致** ——
       #    ruff 各版本的规则集并不相同 ⇒ 换版本会让基线**静默失真**。
       #    脚本自己会核版本，对不上直接红（实测过：把基线头改成 9.9.9 ⇒ 立刻红）。
-      # ⚠️ 装在这里（⛔ **不写进 `api/requirements.txt`**）—— 那份清单会进 demo 镜像，
+      # ⚠️ 装在这里（⛔ **不写进 `app/requirements.txt`**）—— 那份清单会进 demo 镜像，
       #    往里塞一个 linter 等于给交付物增肥。业务方也已裁「不用双 requirements.txt」。
       - name: 装 ruff（钉住版本 —— 基线是按这个版本记的）
         run: python -m pip install "ruff==0.16.10"
@@ -90,7 +90,7 @@ jobs:
         run: bash scripts/check_lint_baseline.sh
 
   offline-tests:
-    name: 离线测试（api/ 全套 · 减 integration/needs_db · redis）
+    name: 离线测试（app/ 全套 · 减 integration/needs_db · redis）
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -121,19 +121,19 @@ jobs:
         with:
           python-version: "3.10"
           cache: pip
-          cache-dependency-path: api/requirements.txt
+          cache-dependency-path: app/requirements.txt
 
       - name: 安装测试依赖
-        # 🔴 2026-09-20 改：此前装的是 `api/requirements-test.txt`（一份"只做减法"的平行清单）。
+        # 🔴 2026-09-20 改：此前装的是 `app/requirements-test.txt`（一份"只做减法"的平行清单）。
         # 业务方裁决：「**不用双 requirements.txt，这样会混**」⇒ 删掉那份，CI 装**同一份**。
         # 安全性已核：实测 `-test` 是 `requirements.txt` 的**真子集**
         #   （含版本约束在内比对整行 ⇒ 只在 `-test` 里的行 = 空），切过去**不丢任何包**。
         # 🔴 2026-10-01 改：**装的时候按 `DEC-034 §🅱️` 那套裁法过滤**
         #   （业务方指令：「不要给 GitHub 的 CI 的 requirements 拉 torch」）。
-        #   `api/requirements.txt:59` 的 sentence-transformers 在 pip 眼里会连带拉
+        #   `app/requirements.txt:59` 的 sentence-transformers 在 pip 眼里会连带拉
         #   **torch 554.6 MB** —— 而它只是 `reranker.get_reranker()` 的懒加载依赖，
         #   **离线用例一条都不碰它**（判据见下，是实测的不是读代码的）。
-        #   ⚠️ 与 `api/Dockerfile:73` 是**同一套正则**（同一件事的两个落点）⇒ ⛔ 改一处要两处一起改。
+        #   ⚠️ 与 `app/Dockerfile:73` 是**同一套正则**（同一件事的两个落点）⇒ ⛔ 改一处要两处一起改。
         #   ⛔ **不动 `requirements.txt` 本身** —— 仓里仍只有一份清单（DEC-019 不破）。
         #
         #   📊 **改前的实测（2026-09-20）**：稳态 **2m50s**（缓存热）/ 3m35s（缓存冷）；
@@ -146,9 +146,9 @@ jobs:
         #        实验组 `139 passed, 3 skipped, 11 deselected`   ← **逐字相同，零 ImportError**
         run: |
           FILTER='^(sentence-transformers|transformers|locust|ragas|datasets)'
-          grep -vE "$FILTER" api/requirements.txt > /tmp/req-light.txt
+          grep -vE "$FILTER" app/requirements.txt > /tmp/req-light.txt
           echo "--- 被裁掉的（应 5 行）---"
-          grep -cE "$FILTER" api/requirements.txt || echo "(0 —— ⚠️ 与预期 5 不符：先看 requirements.txt 是不是改名了)"
+          grep -cE "$FILTER" app/requirements.txt || echo "(0 —— ⚠️ 与预期 5 不符：先看 requirements.txt 是不是改名了)"
           echo "--- 剩余行数 ---"
           wc -l < /tmp/req-light.txt
           pip install -r /tmp/req-light.txt
@@ -180,13 +180,13 @@ jobs:
         run: |
           # ⭐ 先打印【本次实际生效的配置】。
           #   2026-10-01 那次 CI 红（`assert 0.003 >= 0.008`），我是靠反推
-          #   `api/config.py:55` 才知道「CI 没有 .env ⇒ 落到代码默认值 qwen-plus」。
+          #   `app/core/config.py:55` 才知道「CI 没有 .env ⇒ 落到代码默认值 qwen-plus」。
           #   ⇒ 把它打到日志里，下次一眼看得出"这次是在哪套配置下红的"。
           # ⚠️ 本块与下面的 pytest **共用同一个 env:** —— 打印的就是 pytest 用的那套。
           python - <<'PY'
           import os, socket, sys
-          sys.path.insert(0, "api")
-          # 🔴 2026-10-09（模块化重构）：`config` 已挪进 `api/core/` ⇒ 裸名 `import config`
+          sys.path.insert(0, "app")
+          # 🔴 2026-10-09（模块化重构）：`config` 已挪进 `app/core/` ⇒ 裸名 `import config`
           #    会 `ModuleNotFoundError`（**本门自己抓到过一次** —— 见 ci-local 的报错）。
           import core.config as config
           print(f"[ci-config] LLM_MODEL_FAST = {config.LLM_MODEL_FAST}")
@@ -272,7 +272,7 @@ jobs:
           #   现状两个 job 都配了（`syntax` 5 · `offline-tests` 15），但**靠人记得**。
           #   🔴 退出码：`0` 全带 · `1` 有点名的 job 缺/值非法 · **`2` = 没能判定（⛔ 不是通过）**。
           #   🔴 **纯标准库**，⛔ 不 `import yaml` —— `PyYAML` 本机 `venv` 里有，
-          #      但**不在 `api/requirements.txt`** ⇒ CI 里没有；⛔ 不为一道门给 demo 镜像加依赖
+          #      但**不在 `app/requirements.txt`** ⇒ CI 里没有；⛔ 不为一道门给 demo 镜像加依赖
           #      （同「`ruff` 不进 requirements」那条理由）。
           #   ⚠️ 自测是 `.sh`（8 条），必须用 `bash` 跑 —— ⛔ 不能用 `"$PY_ROUTE"`。
           "$PY_ROUTE" scripts/check_ci_job_timeouts.py
@@ -286,7 +286,7 @@ jobs:
           #      那是**静默假通过**（`pre-commit-gates.py` 的前科）⇒ 自测**每条都喂真 JSON**。
           bash scripts/test_remind_hooks.sh
 
-          pytest api/ -m "not integration and not needs_db" -v
+          pytest app/ -m "not integration and not needs_db" -v
 
           # ⭐ 前端纯逻辑（2026-10-06 加，`DEC-085` 裁定 #9）—— `node:test`，⛔ 零 npm 依赖。
           #   🔴 **必须留在本 run 块里**，⛔ 不许新开 step：`scripts/ci-local.sh` 只跑
@@ -300,12 +300,12 @@ jobs:
           # 🔴 **一条 glob，不是逐行列名**（`N18`）：逐行列名时，新加一份 `.test.js`
           #    而忘了在这儿加一行 ⇒ **那份用例永不跑，而且没有任何门会红**。
           # 🔴 但 glob 自带一个新坑，**本机实测过**（node v26）：把模式改成匹配不到任何文件
-          #    （`node --test api/static/js/*.nope.js`）⇒ **`tests 0` 且退出码 0 = 静默假通过**。
+          #    （`node --test app/static/js/*.nope.js`）⇒ **`tests 0` 且退出码 0 = 静默假通过**。
           #    对照：原先逐行列名时，文件不在了会 `Could not find …` ⇒ 退出码 1（响亮）。
           #    ⇒ **换 glob 必须连同这条防空跑一起写**，否则是拿一种静默失败换另一种。
-          test_files=(api/static/js/*.test.js)
+          test_files=(app/static/js/*.test.js)
           if [ ! -e "${test_files[0]}" ]; then
-            echo "🔴 一个 .test.js 都没匹配到：api/static/js/*.test.js"; exit 1
+            echo "🔴 一个 .test.js 都没匹配到：app/static/js/*.test.js"; exit 1
           fi
           echo "    匹配到 ${#test_files[@]} 份"
           node --test "${test_files[@]}"

@@ -1,4 +1,4 @@
-# `api/embedding_client.py`
+# `app/rag/embedding_client.py`
 
 | 项 | 内容 |
 |---|---|
@@ -12,7 +12,7 @@
 - 内嵌 Redis 缓存查询（`cache.get_cached_embedding`）· 调完记 `token_tracker.record_usage`
 - ✅ **客户端惰性构造**（`_client = None` + `_get_client()`）—— **`import` 期不再碰凭据**；
   缺 `DASHSCOPE_API_KEY` 时抛**点名那个变量**的 `EnvironmentError`（与 `config.validate_config` 同族）
-- ✅ **有测试了**（原先零覆盖）：`api/test_embedding_client_lazy.py`（3 条 · 全离线 · 进 CI）
+- ✅ **有测试了**（原先零覆盖）：`app/tests/test_embedding_client_lazy.py`（3 条 · 全离线 · 进 CI）
 
 ## ⚠️ 看代码会误判的地方 ⭐
 
@@ -28,4 +28,4 @@
 ## 关联
 
 `docs/decisions/DEC-082-缺key时点名而不是抛SDK通用话.md`（本批）· `docs/待办总表.md` §三 `T1`（**已销账**）·
-`docs/契约/环境变量.md` §4（Embedding 与 LLM 不是同一家）· `api/llm_factory.py`（LLM 侧同族，只改了报错）
+`docs/契约/环境变量.md` §4（Embedding 与 LLM 不是同一家）· `app/core/llm_factory.py`（LLM 侧同族，只改了报错）

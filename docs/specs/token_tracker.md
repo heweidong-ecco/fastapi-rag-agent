@@ -1,10 +1,10 @@
-# `api/token_tracker.py`
+# `app/billing/token_tracker.py`
 
 | 项 | 内容 |
 |---|---|
-| **状态** | 🟡 **可用** —— ⚠️ **2026-10-03 起它不再是"三套口径"之一**（次数那套已删，`DEC-046`）<br>🟢 **①a 已落地（2026-10-01）**：额度常量已收口到 `api/token_config.py`（本文件**只剩同名别名**）· 本文件下方 **实施计划 ①a** 已执行完<br>🔵 **①b（2026-10-02）**：Task 0 ✅ / Task 1 ✅（B7 接线）/ **Task 2 ✅（B8 会话级 · 已接 7 条链）** / **Task 3 ✅（B10 全局日级 · 判定函数）** / **Task 4 ✅（B11 熔断 · 已接 8 处，`B10` 由此生效）** / **Task 5 🟡 部分（`L2`）**（改写后只做构造收口，⛔ 自动兜底【推迟】—— 见该 Task 的修订块） / **Task 6 ✅（`决策一` 落地 · `DEC-046` —— 撤次数配额、原位换 token 口径 = `R1.3`）** / **Task 7 ✅（`B13` 实跑核成本可见 · `DEC-047` —— `①b` 收尾）**<br>⚠️ **`B10` 曾一度"有函数没接线"（2026-10-01 当天）—— 那句话已作废**，2026-10-02 Task 4 接上了<br>🔴 **2026-10-04（`DEC-072`）：新增 `record_from_response()` —— 【取用量的唯一实现】** —— 962 → **1027 行**。改前"从响应取 usage"这件小事**在每条链里各写一遍**，于是三条链里有的**写错了属性名**（`.usage` 恒假）⇒ **静默不记账**。现在**三张图 9 个调用点**统一调它，⛔ 不许再各写各的。<br>⚠️ **它只做「取+记」，⛔ 不做「拦」** —— 拦是 `check_token_budget` 的事，由**调用方在 `.stream()` 之前**自己调 |
+| **状态** | 🟡 **可用** —— ⚠️ **2026-10-03 起它不再是"三套口径"之一**（次数那套已删，`DEC-046`）<br>🟢 **①a 已落地（2026-10-01）**：额度常量已收口到 `app/billing/token_config.py`（本文件**只剩同名别名**）· 本文件下方 **实施计划 ①a** 已执行完<br>🔵 **①b（2026-10-02）**：Task 0 ✅ / Task 1 ✅（B7 接线）/ **Task 2 ✅（B8 会话级 · 已接 7 条链）** / **Task 3 ✅（B10 全局日级 · 判定函数）** / **Task 4 ✅（B11 熔断 · 已接 8 处，`B10` 由此生效）** / **Task 5 🟡 部分（`L2`）**（改写后只做构造收口，⛔ 自动兜底【推迟】—— 见该 Task 的修订块） / **Task 6 ✅（`决策一` 落地 · `DEC-046` —— 撤次数配额、原位换 token 口径 = `R1.3`）** / **Task 7 ✅（`B13` 实跑核成本可见 · `DEC-047` —— `①b` 收尾）**<br>⚠️ **`B10` 曾一度"有函数没接线"（2026-10-01 当天）—— 那句话已作废**，2026-10-02 Task 4 接上了<br>🔴 **2026-10-04（`DEC-072`）：新增 `record_from_response()` —— 【取用量的唯一实现】** —— 962 → **1027 行**。改前"从响应取 usage"这件小事**在每条链里各写一遍**，于是三条链里有的**写错了属性名**（`.usage` 恒假）⇒ **静默不记账**。现在**三张图 9 个调用点**统一调它，⛔ 不许再各写各的。<br>⚠️ **它只做「取+记」，⛔ 不做「拦」** —— 拦是 `check_token_budget` 的事，由**调用方在 `.stream()` 之前**自己调 |
 | **对外提供** | `record_usage()`（`:71`）· 🆕 **`record_from_response()`（`:159`）** · `record_cost()`（`:216`）· `check_multilevel_budget()`（`:789`）· `check_token_budget_detail()`（`:440`）· `get_token_budget_info()`（`:477`）· **10 个汇总函数**（2026-10-03 起 +`get_user_overview`）· 🆕 常量 `BUDGET_EXCEEDED_MSG`（`:156`）<br>🔵 **2026-10-03 起**：`get_token_budget_info()` 还被 **`main.QuotaMiddleware`** 消费（全路径按用户日级 = `R1.3`）—— **它不再只是"记账/看板"用的** |
-| **谁在用** | `permission`（取角色）· `agent_graph_advanced.py:239`（唯一调多级预算的地方）· `cost_dashboard.py` · 各 `api_v1_*.py`<br>🔴 **2026-10-04 起新增 3 个图模块**：`agent_graph.py` · `agent_checkpointer.py` · `agent_graph_advanced_learning.py`（都是 `check_token_budget` + `record_from_response` 成对，`DEC-072`）<br>✅ **2026-10-05 又 +3**：`rag_pipeline.py` · `answer_with_citations.py` · `query_rewriter.py`（**`query_rewriter` 用 `record_usage`** —— 它是裸 `openai.OpenAI`，响应只有 `.usage`，`DEC-073`）<br>✅ **2026-10-06 再 +1**：**`api_v1_rag.py`**（`/rag/stream_search` 的流式答案 —— `_StreamUsageTap` 在收尾出口调 `record_from_response`，`DEC-084`）<br>⚠️ **判据**：`grep -rn "record_from_response" api/*.py \| grep -v "^api/test_"` ⇒ **9 个文件**（⚠️ **含注释里的提及** —— `query_rewriter.py` 是**反面**那个：它**必须**用 `record_usage`，注释里写着"⛔ 不能用 `record_from_response`"，⛔ 别把它读成记账点） |
+| **谁在用** | `permission`（取角色）· `agent_graph_advanced.py:239`（唯一调多级预算的地方）· `cost_dashboard.py` · 各 `api_v1_*.py`<br>🔴 **2026-10-04 起新增 3 个图模块**：`agent_graph.py` · `agent_checkpointer.py` · `agent_graph_advanced_learning.py`（都是 `check_token_budget` + `record_from_response` 成对，`DEC-072`）<br>✅ **2026-10-05 又 +3**：`rag_pipeline.py` · `answer_with_citations.py` · `query_rewriter.py`（**`query_rewriter` 用 `record_usage`** —— 它是裸 `openai.OpenAI`，响应只有 `.usage`，`DEC-073`）<br>✅ **2026-10-06 再 +1**：**`api_v1_rag.py`**（`/rag/stream_search` 的流式答案 —— `_StreamUsageTap` 在收尾出口调 `record_from_response`，`DEC-084`）<br>⚠️ **判据**：`grep -rn "record_from_response" app/*.py \| grep -v "^app/test_"` ⇒ **9 个文件**（⚠️ **含注释里的提及** —— `query_rewriter.py` 是**反面**那个：它**必须**用 `record_usage`，注释里写着"⛔ 不能用 `record_from_response`"，⛔ 别把它读成记账点） |
 | **规模** | **1027 行**（2026-10-04 `DEC-072` 重取；此前 962） |
 
 ## ✅ 做了什么
@@ -21,9 +21,9 @@
     （⚠️ 改前**同一个算式在本文件里就有两份**：`record_usage` 与 `record_cost`）
   · **`usage_summary(llm_obj, response)`（`:190`）** —— 把响应整理成 `usage` 帧的载荷，
     键固定 `{model, prompt_tokens, completion_tokens, cost_usd}`；**没带用量 ⇒ `None`**。
-  📌 判据：`api/test_token_tracker_cost_helpers.py`（**5 例**）
+  📌 判据：`app/tests/test_token_tracker_cost_helpers.py`（**5 例**）
   ⚠️ **`usage_summary` 返回 `None` 时调用方必须【不出帧】** —— 「记账了才出帧」是一条判据，
-  它保证**帧里报的钱与账本里的钱同一时刻、同一来源**（守 ⇒ `api/test_frontend_contract.py`）。
+  它保证**帧里报的钱与账本里的钱同一时刻、同一来源**（守 ⇒ `app/tests/test_frontend_contract.py`）。
 - **多级预算**（`:789` `check_multilevel_budget`）—— **自标「3 级」**：
   ① 单次上限（**元**，`MAX_SINGLE_CALL_COST=0.5`，`:787` 从 `token_config` import）
   ② 单线程上限（**元**，`MAX_THREAD_COST=5.0`，`:787`）
@@ -38,8 +38,8 @@
   🔴 **它带 `user_name`**（`WHERE user_name = %s AND thread_id = %s`）；
   `include_all=True`（admin 例外）把条件换成 `1 = 1`，**⛔ 走同一条 SQL 不写第二份**。
   · 同批加**私有**辅助 **`_iso_utc(dt)`** —— 把库里的**无时区**时间戳标成 `+00:00`（见下方「看代码会误判」）。
-  📌 判据：`api/test_trace_cost.py`（**15 例** · 假 pg · **进 CI**）·
-  `api/test_trace_cost_db.py`（**9 例** · `needs_db` · **不进 CI**）
+  📌 判据：`app/tests/test_trace_cost.py`（**15 例** · 假 pg · **进 CI**）·
+  `app/tests/test_trace_cost_db.py`（**9 例** · `needs_db` · **不进 CI**）
 - 🔴 **工具级的两张预估表** —— `TOOL_ESTIMATED_COST`（**元** · 供**对外展示**）与
   `TOOL_ESTIMATED_TOKENS`（**token** · 供**预算判定**）· 取用函数
   `estimate_tool_cost()` / `estimate_tool_tokens()`。
@@ -47,7 +47,7 @@
   ⇒ 三处闸门恒放行 —— 见文件下方「两套表」那段）。
   🔴 **2026-10-08（批③）：各 6 → 9 条**（+`date_calc` / `json_extract` / `stats`，**全是 0**）。
   🔴 **它是「加一个工具要登记在五处」的其中一处**，且**改前零守卫** ⇒ 已由
-  `api/test_tool_registration_completeness.py` 补成**会红的断言**（见下方 ⚠️ 表）。
+  `app/tests/test_tool_registration_completeness.py` 补成**会红的断言**（见下方 ⚠️ 表）。
 
 ## 🟡 做到哪 / 缺什么
 
@@ -63,7 +63,7 @@
   超了所有人吃 429，**界面上却看不到逼近**（`DEC-047`）。
   现在 `/agent/token/budget` 与看板第 5 格都报了 `global_used_today` / `global_remaining`
 - 🟡 **测试覆盖【2026-10-04 起不再为零】**（原先 `docs/说明/测试.md` §六 **#8** 记"零覆盖"）：
-  新增 `api/test_token_budget_hookup.py`（**5 例**，钉新函数 `record_from_response`：正常路径 · **旧错属性墓碑** · 无 usage 静默跳过 · 模型名兜底 · 多模态只取 `input/output_tokens`）。
+  新增 `app/tests/test_token_budget_hookup.py`（**5 例**，钉新函数 `record_from_response`：正常路径 · **旧错属性墓碑** · 无 usage 静默跳过 · 模型名兜底 · 多模态只取 `input/output_tokens`）。
   ⚠️ **覆盖的是新函数那一小块** —— 本文件的**其余部分（10 个汇总函数 / 多级预算 / 熔断计数）仍无测试**。
 - ⬜ **R2.2 恢复条件未核** —— `EXPIRE 86400` 是首次 INCR 时设的（滚动），**没人实测过 TTL**
 
@@ -73,21 +73,21 @@
 |---|---|
 | 🔴 **「多级预算是硬拦截」** | ⛔ **不是** —— `agent_graph_advanced.py:239` 超预算时是往图里**塞一条 `ToolMessage` 文本提示**，**HTTP 仍是 200**。**前端看不出"被拒了"** |
 | 🔴 **「这个文件管所有配额」** | ⚠️ **2026-10-03 起：是的**（原先"不是"）。<br>**原先**另有 `permission.ROLE_QUOTA` + `quota_limiter.py` 那套「每日**请求次数**」，**与 token 互不知情**（`DEC-029` 实测**差 35 倍**）。<br>⇒ `DEC-046` 把那套**整张删掉**，配额**只剩 token 一套**（金额那套是同一物不同单位，经 `PRICING` 换算）。<br>⚠️ **但它仍不是"所有路径"** —— 挂多级预算的只有 `/agent/mcp_chat` 一条；<br>**全路径那层在 `main.QuotaMiddleware`**（消费本文件的 `get_token_budget_info`）。 |
-| 🔴🔴 **「那三个 `get_*_summary` 是通用查询，哪儿都能用」** | ⛔ **不能当对外展示的数据源** —— `get_user_summary` / `get_purpose_summary` / `get_thread_summary`（`:252/:259/:264`）读的是**进程内存**（`_user_summary` 等三个 `defaultdict`，只在 `record_usage` 里累加、**从不回读 DB**）⇒ **重启归零**。<br>⚠️ 它们**不是坏的** —— 语义本来就是"**本进程**这段时间花了多少"，`:148` 的即时花费告警**正需要**这个。<br>🔴 **坏的是拿它们当展示口径**：`/agent/cost/overview` 原来就这么干，实测 admin 在库里有 **4216 tokens**、它答 **`0`** —— **不报错、界面照常出数**（`DEC-047` · `①b` Task 7 核出来）。<br>✅ 展示走 **`get_user_overview`**（读库）；⚠️ **另一个坑**：`get_purpose_summary()` 还**不收 `user_name`** ⇒ 它一直是**全站**口径。<br>📌 判据（可打印）：`api/test_cost_visibility.py` |
+| 🔴🔴 **「那三个 `get_*_summary` 是通用查询，哪儿都能用」** | ⛔ **不能当对外展示的数据源** —— `get_user_summary` / `get_purpose_summary` / `get_thread_summary`（`:252/:259/:264`）读的是**进程内存**（`_user_summary` 等三个 `defaultdict`，只在 `record_usage` 里累加、**从不回读 DB**）⇒ **重启归零**。<br>⚠️ 它们**不是坏的** —— 语义本来就是"**本进程**这段时间花了多少"，`:148` 的即时花费告警**正需要**这个。<br>🔴 **坏的是拿它们当展示口径**：`/agent/cost/overview` 原来就这么干，实测 admin 在库里有 **4216 tokens**、它答 **`0`** —— **不报错、界面照常出数**（`DEC-047` · `①b` Task 7 核出来）。<br>✅ 展示走 **`get_user_overview`**（读库）；⚠️ **另一个坑**：`get_purpose_summary()` 还**不收 `user_name`** ⇒ 它一直是**全站**口径。<br>📌 判据（可打印）：`app/tests/test_cost_visibility.py` |
 | ⚠️ **「两个单位混着 ⇒ 是 bug」** | 🟢 **不是** —— 第一二级（元）与第三级（token）**量纲本来就不同**，代码注释 `:665` 明说「**别统一掉**」 |
-| 🔴 **「工具估算表漏登记一个也没人会发现」** | ⚠️ **改前确实如此** —— `estimate_tool_tokens` 的兜底是 **`DEFAULT_ESTIMATED_TOKENS = 500`**，所以**漏登记不报错**，只会让一个**本地免费**工具被当**花 500 token** 算（可能误触预算门）。<br>🔴 **2026-10-08（批③）起有守卫**：`api/test_tool_registration_completeness.py` 逐个已注册工具查**两张**表（本仓立场：**「从不命中」与「没人违规」在机器痕迹上完全一样**）。 |
+| 🔴 **「工具估算表漏登记一个也没人会发现」** | ⚠️ **改前确实如此** —— `estimate_tool_tokens` 的兜底是 **`DEFAULT_ESTIMATED_TOKENS = 500`**，所以**漏登记不报错**，只会让一个**本地免费**工具被当**花 500 token** 算（可能误触预算门）。<br>🔴 **2026-10-08（批③）起有守卫**：`app/tests/test_tool_registration_completeness.py` 逐个已注册工具查**两张**表（本仓立场：**「从不命中」与「没人违规」在机器痕迹上完全一样**）。 |
 | ⚠️ **「`ROLE_TOKEN_BUDGET` 就是最终日限额」** | ⚠️ **只对 `_invoke_llm` 那条链**。**挂多级预算的只有 `/agent/mcp_chat` 一条**（`check_multilevel_budget` 全仓唯一调用点在 `agent_graph_advanced.py:239`）⇒ **其他链全无预算** |
-| ⚠️ **「本文件定义着 `PRICING` / `ROLE_TOKEN_BUDGET` / `MAX_*_COST`」** | 🔴 **2026-10-01 起【只是别名】** —— 真值在 `api/token_config.py`，本文件**顶部 import 进来**（`PRICING is token_config.MODEL_PRICING` → `True`）。⇒ **改价改额度请去 `token_config.py`**，改这里没用（会被 import 覆盖） |
-| ✅ ~~🔴 **「`check_global_daily_budget` 存在 ⇒ 全站额度在管着」**~~ | ✅ **2026-10-02 起【是的】—— 这句话已经翻面，⛔ 别照旧理解。**<br>**2026-10-01 当天**确实如原文所说「**没有任何调用点**」（Task 3 只出函数）；**Task 4（`B11`）把它接进了 `breaker.py:75`** ⇒ 现在**真的在管着**。<br>**判据（可打印）**：`grep -rn "check_global_daily_budget" api/ --include="*.py"` ⇒ 应命中 `breaker.py` 的 `:74/:75`（接线）**与** `token_tracker.py:907`（定义）。<br>📌 **保留这一行的理由**：它是「**常量/函数建好没接上**」（本仓第三次：`B7` 前、`B8` 前）的标本 —— 但**标本的意思是"当时没接"，不是"现在没接"**。⚠️ **这类行的有效期很短，读到请先跑判据。** |
-| 🔴 **「`get_global_daily_token_usage` 与 `get_daily_token_usage` 差不多」** | 差的正是**全部**：前者 SQL **⛔ 不许有 `user_name`**（全站），后者**必须有**（单用户）。<br>⚠️ 抄后者改前者时**漏删** `WHERE user_name` ⇒ 函数名还叫「全局」、**返回值正常、只是偏小**、**没有任何报错** ⇒ 本仓**永远不会有全局额度**。<br>⇒ 已用 **AST 静态守卫**钉死（`api/test_global_daily_budget_offline.py` 的**配对**测试：一边必须有、一边必须没有） |
+| ⚠️ **「本文件定义着 `PRICING` / `ROLE_TOKEN_BUDGET` / `MAX_*_COST`」** | 🔴 **2026-10-01 起【只是别名】** —— 真值在 `app/billing/token_config.py`，本文件**顶部 import 进来**（`PRICING is token_config.MODEL_PRICING` → `True`）。⇒ **改价改额度请去 `token_config.py`**，改这里没用（会被 import 覆盖） |
+| ✅ ~~🔴 **「`check_global_daily_budget` 存在 ⇒ 全站额度在管着」**~~ | ✅ **2026-10-02 起【是的】—— 这句话已经翻面，⛔ 别照旧理解。**<br>**2026-10-01 当天**确实如原文所说「**没有任何调用点**」（Task 3 只出函数）；**Task 4（`B11`）把它接进了 `breaker.py:75`** ⇒ 现在**真的在管着**。<br>**判据（可打印）**：`grep -rn "check_global_daily_budget" app/ --include="*.py"` ⇒ 应命中 `breaker.py` 的 `:74/:75`（接线）**与** `token_tracker.py:907`（定义）。<br>📌 **保留这一行的理由**：它是「**常量/函数建好没接上**」（本仓第三次：`B7` 前、`B8` 前）的标本 —— 但**标本的意思是"当时没接"，不是"现在没接"**。⚠️ **这类行的有效期很短，读到请先跑判据。** |
+| 🔴 **「`get_global_daily_token_usage` 与 `get_daily_token_usage` 差不多」** | 差的正是**全部**：前者 SQL **⛔ 不许有 `user_name`**（全站），后者**必须有**（单用户）。<br>⚠️ 抄后者改前者时**漏删** `WHERE user_name` ⇒ 函数名还叫「全局」、**返回值正常、只是偏小**、**没有任何报错** ⇒ 本仓**永远不会有全局额度**。<br>⇒ 已用 **AST 静态守卫**钉死（`app/tests/test_global_daily_budget_offline.py` 的**配对**测试：一边必须有、一边必须没有） |
 | ⚠️ **「`GLOBAL_DAILY_TOKEN_LIMIT` = 1,000,000 是个随手写的默认值」** | 🟡 **2026-10-01 起它变成了【裁定值】**（`DEC-042`）—— 业务方在源文档 B10 那个空上填的。⚠️ 但**它仍不在环境变量契约里**（`.env.example` / `docs/契约/环境变量.md` 都无此项），想不改代码调它**得先补契约** |
 | 🔴 **「从响应取用量，`getattr(response, "usage", None)` 就行」** | ⛔ **属性名是 `usage_metadata`** —— `AIMessage` / `AIMessageChunk` 上**没有 `.usage`**，`hasattr` **恒为 False**。写错的后果是**静默不记账**（接口一切正常，只是没账）。本仓**真的栽过**：`agent_checkpointer.py` 那条链**从建立起就一笔都没记**（`DEC-072`）。<br>✅ **统一走 `record_from_response`**（`:159`）—— ⛔ 别在各链里自己 `getattr`。 |
 | 🔴 **「`record_from_response` 是全能的：取用量 + 拦预算」** | ⛔ **它只做「取+记」，⛔ 不做「拦」** —— 拦是 `check_token_budget` 的事，**必须由调用方在 `.stream()`/`.invoke()` 之【前】**自己调。<br>⚠️ 顺序反了（先调用后检查）⇒ 钱**已经花了**，只能丢结果、拦不住。 |
-| 🔴 **「成本/模型名随便在哪算都行，反正同一个算式」** | ⛔ **2026-10-06 起不行了** —— 算式**只有一份**（`compute_cost` `:179` · `resolve_model_name` `:166`），**账本与 `usage` 帧共用**。<br>⚠️ 再在别处 `getattr(llm, "model_name", ...)` 或手写 `prompt/1000*pricing` **就是造第二份实现** —— 两处一旦漂移，**帧里报的钱与账本里的钱会对不上，而两边都不报错**（本仓因"模型名有两个来源"按错单价记过两次账，`DEC-072`）。<br>📌 判据：`api/test_token_tracker_cost_helpers.py` |
+| 🔴 **「成本/模型名随便在哪算都行，反正同一个算式」** | ⛔ **2026-10-06 起不行了** —— 算式**只有一份**（`compute_cost` `:179` · `resolve_model_name` `:166`），**账本与 `usage` 帧共用**。<br>⚠️ 再在别处 `getattr(llm, "model_name", ...)` 或手写 `prompt/1000*pricing` **就是造第二份实现** —— 两处一旦漂移，**帧里报的钱与账本里的钱会对不上，而两边都不报错**（本仓因"模型名有两个来源"按错单价记过两次账，`DEC-072`）。<br>📌 判据：`app/tests/test_token_tracker_cost_helpers.py` |
 | ⚠️ **「`usage_summary` 返回 `None` ⇒ 那就出个空帧/零值帧」** | ⛔ **必须【不出帧】** —— `None` 的含义是「这次响应里没有用量」（被拦下 / provider 没回），不是"花费为 0"。<br>⚠️ 出零值帧会让前端显示 **`$0.000000`**，而那是在说"这轮不要钱"。⇒ 「**记账了才出帧**」是判据，不是建议。 |
 | 🔴 **「`record_from_response` 返回 `False` = 出错」** | ⛔ **`False` = 「这次响应里没有 usage」**（如被拦下、或 provider 没回 usage）⇒ **有意跳过、不写 0 行** —— 写 0 会污染 `token_usage_logs` 的计数（它是额度权威源）。<br>⚠️ 想看"到底记没记"，**别只看返回值** ⇒ 查库（`T8` 端到端实测就是这么核的）。 |
-| 🔴 **「`get_thread_cost(thread_id)` —— 签名上没有 `user_name` ⇒ 越权洞」** | ⚠️ **看起来像，实测不是**（`DEC-093` §三·A 核过）。**全仓唯一调用点是本文件 `:888` 的线程预算检查**，传的正是**调用者自己的** thread_id（调用方在更上层按身份取）。⇒ **它只是一个"只给本人线程用"的内部函数**。<br>⛔ **别顺手给它加 `user_name`** —— 改它要动预算逻辑、有回归风险，且**加了也不会更安全**（上层本来就没法传别人的 id）。<br>⚠️ **但也⛔ 别把它当通用取数函数复用** —— 它没有归属条件，**换一个能把别人的 thread_id 传进来的调用点，它当场就变成真洞**。要对外展示线程花费，走 🆕 **`thread_cost_breakdown(user_name, thread_id)`**（带归属条件，见「✅ 做了什么」）。<br>📌 判据：`grep -rn "get_thread_cost" api/ --include="*.py"` ⇒ 只应命中定义 + `:888` 那一处 |
-| 🔴 **「`created_at` 跟 `approval_audit` 一样是带时区的，直接 `.isoformat()` 就行」** | ⛔ **两条轴的时间列类型不同**：`token_usage_logs.created_at` 是 **`TIMESTAMP`（无时区）**，而 PG 容器 `SHOW timezone` = **`Etc/UTC`** ⇒ 里面存的是**裸 UTC 数字**。`approval_audit` 那侧是 **`TIMESTAMPTZ`**、天生带区。<br>⚠️ 原样 `.isoformat()` 会回 `2026-10-06T13:14:21`（**不带区**），JS `new Date()` 把它当**浏览器本地时间**解析 ⇒ 东八区用户看到的时刻**静默早 8 小时**，**不报错**。<br>✅ 出口一律过 **`_iso_utc()`**（补 `+00:00`）；前端 `trace.js::parseWhen()` **主动拒绝**不带区的时间戳（回 `--`）—— 两层都拦。<br>📌 判据：`api/test_trace_cost.py::test_created_at_carries_utc_offset` · `api/test_trace_cost_db.py` 里那条"是绝对时刻"的用例<br>⚠️ 同族前科：`logs/api_*.log` 混了两套时区 |
+| 🔴 **「`get_thread_cost(thread_id)` —— 签名上没有 `user_name` ⇒ 越权洞」** | ⚠️ **看起来像，实测不是**（`DEC-093` §三·A 核过）。**全仓唯一调用点是本文件 `:888` 的线程预算检查**，传的正是**调用者自己的** thread_id（调用方在更上层按身份取）。⇒ **它只是一个"只给本人线程用"的内部函数**。<br>⛔ **别顺手给它加 `user_name`** —— 改它要动预算逻辑、有回归风险，且**加了也不会更安全**（上层本来就没法传别人的 id）。<br>⚠️ **但也⛔ 别把它当通用取数函数复用** —— 它没有归属条件，**换一个能把别人的 thread_id 传进来的调用点，它当场就变成真洞**。要对外展示线程花费，走 🆕 **`thread_cost_breakdown(user_name, thread_id)`**（带归属条件，见「✅ 做了什么」）。<br>📌 判据：`grep -rn "get_thread_cost" app/ --include="*.py"` ⇒ 只应命中定义 + `:888` 那一处 |
+| 🔴 **「`created_at` 跟 `approval_audit` 一样是带时区的，直接 `.isoformat()` 就行」** | ⛔ **两条轴的时间列类型不同**：`token_usage_logs.created_at` 是 **`TIMESTAMP`（无时区）**，而 PG 容器 `SHOW timezone` = **`Etc/UTC`** ⇒ 里面存的是**裸 UTC 数字**。`approval_audit` 那侧是 **`TIMESTAMPTZ`**、天生带区。<br>⚠️ 原样 `.isoformat()` 会回 `2026-10-06T13:14:21`（**不带区**），JS `new Date()` 把它当**浏览器本地时间**解析 ⇒ 东八区用户看到的时刻**静默早 8 小时**，**不报错**。<br>✅ 出口一律过 **`_iso_utc()`**（补 `+00:00`）；前端 `trace.js::parseWhen()` **主动拒绝**不带区的时间戳（回 `--`）—— 两层都拦。<br>📌 判据：`app/tests/test_trace_cost.py::test_created_at_carries_utc_offset` · `app/tests/test_trace_cost_db.py` 里那条"是绝对时刻"的用例<br>⚠️ 同族前科：`logs/api_*.log` 混了两套时区 |
 
 ## 关联
 
@@ -114,10 +114,10 @@
 > **为什么先做这批**：业务方定的开工序是「**B12 第一**」（全清单最便宜），
 > 且 **`决策一`（统一 token）是结构改动** —— 它一落地，B8/B10 才知道挂在哪。
 
-**目标**：把散在 4 个文件的额度常量收到 `api/token_config.py` 一处；
+**目标**：把散在 4 个文件的额度常量收到 `app/billing/token_config.py` 一处；
 让错误响应带**恢复时间**；把「请求次数」那套配额**降级**（`决策一` = 统一到 token）。
 
-**架构**：新建 `api/token_config.py` 作为**唯一常量来源**（**只读 env，⛔ 不做热加载** ——
+**架构**：新建 `app/billing/token_config.py` 作为**唯一常量来源**（**只读 env，⛔ 不做热加载** ——
 `ChatOpenAI(max_tokens=…)` 是 **import 时求值**，17 个构造点都是，改了本来就要重启）。
 `token_tracker` 与 `permission` 改为从它取值。
 
@@ -128,9 +128,9 @@
 
 ## 全局约束（**每个任务都适用**）
 
-- 🔴 **跑测试必须用 CI 的同一条命令**：`python -m pytest api/ -m "not integration and not needs_db" -q`
+- 🔴 **跑测试必须用 CI 的同一条命令**：`python -m pytest app/ -m "not integration and not needs_db" -q`
   （⛔ 别拿"全量"顶替 —— 全量含 `needs_db` 用例，会掩盖"偷偷依赖库"，**2026-09-30 栽过**，见 `docs/复盘/2026-09-30-本地绿当成了不依赖.md`）
-- 🔴 **新增/修改的测试不许碰 DB 或 Redis**，除非标了 marker。做法参照 `api/test_rate_limit_identity.py` 的 `_no_db` fixture
+- 🔴 **新增/修改的测试不许碰 DB 或 Redis**，除非标了 marker。做法参照 `app/tests/test_rate_limit_identity.py` 的 `_no_db` fixture
 - 🔴 **提交信息里要答两问**：① 有无决策（有 ⇒ 建 DEC）② CHANGELOG 写没写（见 `docs/规范/开发规范.md` §2.2）
 - 🔴 **命令里写中文用「」『』，不用 ASCII 引号**（会被 shell 吃掉 —— 2026-09-30 栽过）
 - ⛔ **`admin` 的日上限 = `premium` = 100000**（业务方 2026-09-30 裁）
@@ -141,15 +141,15 @@
 
 | 动作 | 文件 | 职责 |
 |---|---|---|
-| **新建** | `api/token_config.py` | **额度常量的唯一来源**（只读 env） |
+| **新建** | `app/billing/token_config.py` | **额度常量的唯一来源**（只读 env） |
 | **新建** | `docs/specs/token_config.md` | 它的 spec（⛔ 新建模块**必须**同时建 spec —— `pre-commit-gates.py` 会硬拦） |
-| **新建** | `api/test_token_config.py` | 常量来源与取值的回归测试 |
+| **新建** | `app/tests/test_token_config.py` | 常量来源与取值的回归测试 |
 | **新建** | `docs/decisions/DEC-040-额度统一到token一套.md` | `决策一` 的决策记录 |
-| **修改** | `api/exceptions.py` | `AppException` 加 `retry_after` |
-| **修改** | `api/main.py` | 异常处理器带上 `retry_after`；**修 4 处错误文案** |
-| **修改** | `api/token_tracker.py` | 常量改为从 `token_config` 取；`admin` 去 `inf` |
-| **修改** | `api/permission.py` | `ROLE_QUOTA` 降级为「接口权重」（`决策一`） |
-| **修改** | `api/test_plan_execute_tools.py` | **那条钉住"两套口径差 35 倍"的用例要改**（见 Task 3） |
+| **修改** | `app/core/exceptions.py` | `AppException` 加 `retry_after` |
+| **修改** | `app/main.py` | 异常处理器带上 `retry_after`；**修 4 处错误文案** |
+| **修改** | `app/billing/token_tracker.py` | 常量改为从 `token_config` 取；`admin` 去 `inf` |
+| **修改** | `app/access/permission.py` | `ROLE_QUOTA` 降级为「接口权重」（`决策一`） |
+| **修改** | `app/tests/test_plan_execute_tools.py` | **那条钉住"两套口径差 35 倍"的用例要改**（见 Task 3） |
 | **修改** | `CHANGELOG.md` | 本次有行为改动 |
 
 ---
@@ -200,9 +200,9 @@ git commit -m "docs(DEC-040): 决策一裁定落地 —— 额度统一到 token
 ## Task 1 · **B12** · 错误响应带恢复时间 + 修 4 处文案
 
 **Files:**
-- Modify: `api/exceptions.py`（`AppException.__init__`）
-- Modify: `api/main.py`（异常处理器 `:345` 附近；4 处文案 `:158` `:460` `:481` `:496`）
-- Test: `api/test_error_contract.py`（新建）
+- Modify: `app/core/exceptions.py`（`AppException.__init__`）
+- Modify: `app/main.py`（异常处理器 `:345` 附近；4 处文案 `:158` `:460` `:481` `:496`）
+- Test: `app/tests/test_error_contract.py`（新建）
 - Modify: `CHANGELOG.md`
 
 **Interfaces:**
@@ -214,11 +214,11 @@ git commit -m "docs(DEC-040): 决策一裁定落地 —— 额度统一到 token
 - [ ] **Step 1: 写失败测试**
 
 ```python
-# api/test_error_contract.py
+# app/tests/test_error_contract.py
 """错误响应的契约（对应 B12）。
 
 🔴 为什么要有这个文件：本仓**有一条文案是说反的** ——
-   `api/main.py` 全局限流触发时返回 429，`error` 字段却写着 "Internal server error"。
+   `app/main.py` 全局限流触发时返回 429，`error` 字段却写着 "Internal server error"。
    那正是 `通用方法 §7.1` 的 R3.3 要防的：「❌ 熔断时静默/白屏/500 → 对方以为你的系统坏了」。
 
 本文件**不需要 DB / Redis** —— 只测异常对象与处理器产出的契约。
@@ -241,11 +241,11 @@ def test_app_exception_retry_after_defaults_to_none():
 - [ ] **Step 2: 跑测试，确认失败**
 
 ```bash
-python -m pytest api/test_error_contract.py -q
+python -m pytest app/tests/test_error_contract.py -q
 ```
 预期：`TypeError: AppException.__init__() got an unexpected keyword argument 'retry_after'`
 
-- [ ] **Step 3: 改 `api/exceptions.py`**
+- [ ] **Step 3: 改 `app/core/exceptions.py`**
 
 ```python
 class AppException(Exception):
@@ -263,7 +263,7 @@ class AppException(Exception):
 - [ ] **Step 4: 跑测试，确认通过**
 
 ```bash
-python -m pytest api/test_error_contract.py -q        # → 2 passed
+python -m pytest app/tests/test_error_contract.py -q        # → 2 passed
 ```
 
 - [ ] **Step 5: 写失败测试（响应契约）**
@@ -275,13 +275,13 @@ from fastapi.testclient import TestClient
 
 
 def _client():
-    # 惰性导入：`main` 导入期会建 Gradio Blocks（见 api/conftest.py 的注释）
+    # 惰性导入：`main` 导入期会建 Gradio Blocks（见 app/conftest.py 的注释）
     from main import app
     return TestClient(app)
 
 
 def test_rate_limited_response_is_not_internal_server_error():
-    """🔴 本条钉的是那条【说反了的文案】（`api/main.py` 全局限流分支）。
+    """🔴 本条钉的是那条【说反了的文案】（`app/main.py` 全局限流分支）。
 
     改前：`{"error": "Internal server error", "code": "RATE_LIMITED", "status_code": 429}`
     改后：文案必须说清"是限流"，⛔ 不许出现 "Internal server error"。
@@ -300,11 +300,11 @@ def test_rate_limited_response_is_not_internal_server_error():
 - [ ] **Step 6: 跑测试，确认失败**
 
 ```bash
-python -m pytest api/test_error_contract.py -q
+python -m pytest app/tests/test_error_contract.py -q
 ```
 预期：`ImportError: cannot import name '_rate_limited_payload'`
 
-- [ ] **Step 7: 抽出纯函数并改文案（`api/main.py`）**
+- [ ] **Step 7: 抽出纯函数并改文案（`app/main.py`）**
 
 在 `RateLimitMiddleware` **之前**加：
 
@@ -359,20 +359,20 @@ def test_service_unavailable_copy_is_not_internal_error():
 - [ ] **Step 9: 跑全量 + CI 同款命令**
 
 ```bash
-python -m pytest api/test_error_contract.py -q                                        # → 4 passed
-python -m pytest api/ -m "not integration and not needs_db" -q                         # → 全绿
+python -m pytest app/tests/test_error_contract.py -q                                        # → 4 passed
+python -m pytest app/ -m "not integration and not needs_db" -q                         # → 全绿
 ```
 
 - [ ] **Step 10: 补 CHANGELOG 并提交**
 
 ```bash
-git add api/exceptions.py api/main.py api/test_error_contract.py CHANGELOG.md
+git add app/core/exceptions.py app/main.py app/tests/test_error_contract.py CHANGELOG.md
 git commit -m "fix(错误契约): B12 —— 429/503 文案不再说'内部错误'，并加 retry_after"
 ```
 
 ---
 
-## Task 2 · **B7** · 新建 `api/token_config.py`，把额度常量收口
+## Task 2 · **B7** · 新建 `app/billing/token_config.py`，把额度常量收口
 
 > ### ⚠️ **2026-09-30 追加 / 10-01 已做：本 Task 顺带并入 3 条**（`/specs` 核账挖出的 · 见 `待办总表` 🅗 的 `S4`–`S6`）
 >
@@ -388,10 +388,10 @@ git commit -m "fix(错误契约): B12 —— 429/503 文案不再说'内部错�
 > 并**新增一个 Step** 改那 3 处 `model=`。
 
 **Files:**
-- Create: `api/token_config.py`
+- Create: `app/billing/token_config.py`
 - Create: `docs/specs/token_config.md` ← ⛔ **必须同时建**，否则 `pre-commit-gates.py` 硬拦
-- Create: `api/test_token_config.py`
-- Modify: `api/token_tracker.py`（常量改为从 `token_config` 取）
+- Create: `app/tests/test_token_config.py`
+- Modify: `app/billing/token_tracker.py`（常量改为从 `token_config` 取）
 
 **Interfaces:**
 - Produces: `MAX_TOKENS_ANSWER` · `MAX_TOKENS_AGENT` · `SESSION_TOKEN_LIMIT` · `GLOBAL_DAILY_TOKEN_LIMIT` · `ROLE_DAILY_TOKEN` · `MODEL_PRICING` · `DEFAULT_MODEL_PRICING`
@@ -399,7 +399,7 @@ git commit -m "fix(错误契约): B12 —— 429/503 文案不再说'内部错�
 - [ ] **Step 1: 写失败测试**
 
 ```python
-# api/test_token_config.py
+# app/tests/test_token_config.py
 """额度常量的【唯一来源】的回归测试（对应 B7）。"""
 import token_config
 
@@ -424,10 +424,10 @@ def test_single_call_cap_does_not_depend_on_role():
 - [ ] **Step 2: 跑测试，确认失败**
 
 ```bash
-python -m pytest api/test_token_config.py -q     # → ModuleNotFoundError: token_config
+python -m pytest app/tests/test_token_config.py -q     # → ModuleNotFoundError: token_config
 ```
 
-- [ ] **Step 3: 建 `api/token_config.py`**
+- [ ] **Step 3: 建 `app/billing/token_config.py`**
 
 > ⚠️ **下面的清单是【2026-10-01 建文件当时】的实况** —— 现在 `permission.ROLE_QUOTA` **已删**
 > （`DEC-046` · 2026-10-03）⇒ 现值是 **3 个文件 5 处**。实际文件里已补了这条更正说明。
@@ -498,14 +498,14 @@ MAX_THREAD_COST = _float("MAX_THREAD_COST", 5.0)
 > 🔴 **2026-10-01 更正（实施后回写）**：上面那段是**计划草稿**，其中
 > `# 未登记模型的兜底单价 —— 取偏保守的一组（不低报花费）` **这句是错的** ——
 > 0.003/0.006 只对**比 qwen-turbo 便宜**的模型保守，**对 `qwen-plus`（0.008/0.016）是低报**。
-> 实际落地的 `api/token_config.py` **已把这句改掉**（含"兜底价不是上界"的说明）。
+> 实际落地的 `app/billing/token_config.py` **已把这句改掉**（含"兜底价不是上界"的说明）。
 > 📄 为什么值得单记一笔：我**先信了这句旧注释**，又**把它写成测试** ⇒ **CI 直接红**。
-> 见 `docs/specs/token_config.md` 的 ⚠️ 表 + `api/test_token_config.py`。
+> 见 `docs/specs/token_config.md` 的 ⚠️ 表 + `app/tests/test_token_config.py`。
 
 - [ ] **Step 4: 跑测试，确认通过**
 
 ```bash
-python -m pytest api/test_token_config.py -q     # 计划时估计 3 条；实际落地 10 条（含后加的守卫）
+python -m pytest app/tests/test_token_config.py -q     # 计划时估计 3 条；实际落地 10 条（含后加的守卫）
 ```
 
 - [ ] **Step 5: 写 `docs/specs/token_config.md`**
@@ -540,15 +540,15 @@ from token_config import (
 - [ ] **Step 7: 跑全量，确认行为没变**
 
 ```bash
-python -m pytest api/ -m "not integration and not needs_db" -q     # → 应仍是 124 passed
+python -m pytest app/ -m "not integration and not needs_db" -q     # → 应仍是 124 passed
 ```
 
 - [ ] **Step 8: 更新模块表并提交**
 
 ```bash
 bash scripts/spec_status.sh --write
-git add api/token_config.py api/test_token_config.py docs/specs/token_config.md \
-        docs/specs/README.md api/token_tracker.py
+git add app/billing/token_config.py app/tests/test_token_config.py docs/specs/token_config.md \
+        docs/specs/README.md app/billing/token_tracker.py
 git commit -m "feat(额度): B7 —— 建 token_config.py 把散在 4 文件的额度常量收口（行为不变）"
 ```
 
@@ -593,15 +593,15 @@ git commit -m "feat(额度): B7 —— 建 token_config.py 把散在 4 文件的
 ### 原 Task 3 · **`决策一` 落地** · 次数配额降级 + admin 去 `inf`
 
 **Files:**
-- Modify: `api/permission.py`（`ROLE_QUOTA` → 权限权重）
-- Modify: `api/test_plan_execute_tools.py`（**那条钉住"两套口径"的用例要改**）
+- Modify: `app/access/permission.py`（`ROLE_QUOTA` → 权限权重）
+- Modify: `app/tests/test_plan_execute_tools.py`（**那条钉住"两套口径"的用例要改**）
 - Modify: `CHANGELOG.md`
 
 **⚠️ 本任务是【唯一会改行为】的一个** —— 前两个是加字段和搬家。
 
 - [ ] **Step 0: 先读那条会红的测试**
 
-`api/test_plan_execute_tools.py:498` 的 `test_free_users_real_daily_limit_on_plan_execute_is_known`。
+`app/tests/test_plan_execute_tools.py:498` 的 `test_free_users_real_daily_limit_on_plan_execute_is_known`。
 它断言 `by_tokens < by_requests`，**并直接 `from permission import ROLE_QUOTA`**。
 ⇒ **`决策一` 一落地它必红** —— **这不是意外，是它本来就想提醒的事**（它的 docstring 写着
 「📌 谁改了 `ROLE_TOKEN_BUDGET`…这条会红 —— ⭐ 这不是"防改动"，是"防不知情"」）。
@@ -609,7 +609,7 @@ git commit -m "feat(额度): B7 —— 建 token_config.py 把散在 4 文件的
 - [ ] **Step 1: 写失败测试**
 
 ```python
-# 加到 api/test_token_config.py
+# 加到 app/tests/test_token_config.py
 def test_request_quota_is_no_longer_a_second_accounting_system():
     """决策一：**统一到 token 一套** ⇒ 「请求次数」不再是一套独立配额。
 
@@ -624,10 +624,10 @@ def test_request_quota_is_no_longer_a_second_accounting_system():
 - [ ] **Step 2: 跑，确认失败**
 
 ```bash
-python -m pytest api/test_token_config.py::test_request_quota_is_no_longer_a_second_accounting_system -q
+python -m pytest app/tests/test_token_config.py::test_request_quota_is_no_longer_a_second_accounting_system -q
 ```
 
-- [ ] **Step 3: 改 `api/permission.py`**
+- [ ] **Step 3: 改 `app/access/permission.py`**
 
 ```python
 from enum import Enum
@@ -676,13 +676,13 @@ def get_user_quota(user_name: str):
 
 | 位置 | 怎么改 |
 |---|---|
-| `api/main.py:245`（`QuotaMiddleware`） | **整段撤掉计数**，只保留"身份解析 + 响应头"。⚠️ **注意**：`_rate_limited_payload` 里那句"调用次数已用完"要改成 token 口径 |
-| `api/api_v1.py:221` | 改走 `token_tracker.get_token_budget_info(user_name)`（它已能答"已用/剩余/预算"） |
-| `api/api_v1_rag.py:25` | 只删 import（**实测未使用**） |
+| `app/main.py:245`（`QuotaMiddleware`） | **整段撤掉计数**，只保留"身份解析 + 响应头"。⚠️ **注意**：`_rate_limited_payload` 里那句"调用次数已用完"要改成 token 口径 |
+| `app/routing/api_v1.py:221` | 改走 `token_tracker.get_token_budget_info(user_name)`（它已能答"已用/剩余/预算"） |
+| `app/routing/api_v1_rag.py:25` | 只删 import（**实测未使用**） |
 
 - [ ] **Step 5: 改那条会红的测试**
 
-`api/test_plan_execute_tools.py::test_free_users_real_daily_limit_on_plan_execute_is_known`
+`app/tests/test_plan_execute_tools.py::test_free_users_real_daily_limit_on_plan_execute_is_known`
 → **重写成"只剩一套口径"的版本**：删掉 `ROLE_QUOTA` 的比较，
 **保留**「FREE 用户对 `plan_execute` 的真实每日次数 ≈ 3」这个**实测数**（它本身是宝贵事实），
 并把它**改挂到 token 口径**上。**别整条删掉** —— 那会丢掉 `DEC-029` 的唯一量化证据。
@@ -690,7 +690,7 @@ def get_user_quota(user_name: str):
 - [ ] **Step 6: 跑全量**
 
 ```bash
-python -m pytest api/ -m "not integration and not needs_db" -q
+python -m pytest app/ -m "not integration and not needs_db" -q
 ```
 预期：全绿。**如果有红，先看是不是"还有地方在读次数配额"** —— 那正是这个任务要清干净的东西。
 
@@ -771,9 +771,9 @@ git commit -m "refactor(配额): 决策一落地 —— 次数配额降级，统
 ## Task 1 · **B7 接线** · ✅ **2026-10-01 做完** —— 让【15】个构造点用上 `token_config.MAX_TOKENS_*`
 
 > 🔴 **2026-10-01 落盘时更正两处【我自己写错的计划】**（原写「17 个」）：
-> 1. ⚠️ **「17」是我没数就写下的数。** 实测（AST 扫 `api/*.py` 的 `ChatOpenAI(`）= **15 处**。
+> 1. ⚠️ **「17」是我没数就写下的数。** 实测（AST 扫 `app/*.py` 的 `ChatOpenAI(`）= **15 处**。
 >    计划里那张 Files 清单逐条数出来是 **14** —— 连清单本身也对不上 17。
->    ⇒ **本 Task 的权威清单不是这张表，是 `api/test_max_tokens_wiring.py` 的
+>    ⇒ **本 Task 的权威清单不是这张表，是 `app/tests/test_max_tokens_wiring.py` 的
 >    `EXPECTED_MAX_TOKENS`**（它**同时**是守卫：漏一个就红）。
 >    🔴 **2026-10-02（Task 5）该常量改名为 `EXPECTED_ROLES`** —— 门禁改写成「钉 `make_llm` 的角色」，见下方 Task 5 的修订块。
 > 2. 🔴 **`evaluate_with_ragas.py` 的 `eval_llm` 计划里【一次都没提】**（落盘时在 `:50`） —— 它也是个 `ChatOpenAI` 构造点，
@@ -791,8 +791,8 @@ git commit -m "refactor(配额): 决策一落地 —— 次数配额降级，统
 > ⬜ **具体秒数待定** —— 这是**多轮对话**，比 `plan_execute` 的单步长，**别直接抄 30/20/15**。
 
 **Files:**
-- Modify: `api/api_v1_rag.py`（`:563` `:726`）· `api/rag_pipeline.py`（`:48`）· `api/agent_graph.py`（`:20`）· `api/agent_checkpointer.py`（`:20`）· `api/agent_graph_advanced.py`（`:39`）· `api/plan_execute.py`（`:92` `:249` `:458`）· `api/agent_graph_advanced_learning.py`（`:20` `:85-87` `:221`）
-- Test: `api/test_max_tokens_wiring.py`（新建）
+- Modify: `app/routing/api_v1_rag.py`（`:563` `:726`）· `app/rag/rag_pipeline.py`（`:48`）· `app/agent/agent_graph.py`（`:20`）· `app/agent/agent_checkpointer.py`（`:20`）· `app/agent/agent_graph_advanced.py`（`:39`）· `app/agent/plan_execute.py`（`:92` `:249` `:458`）· `app/agent/agent_graph_advanced_learning.py`（`:20` `:85-87` `:221`）
+- Test: `app/tests/test_max_tokens_wiring.py`（新建）
 
 **Interfaces:**
 - Consumes: `token_config.MAX_TOKENS_ANSWER` / `MAX_TOKENS_AGENT`
@@ -804,7 +804,7 @@ git commit -m "refactor(配额): 决策一落地 —— 次数配额降级，统
 - [ ] **Step 1: 写失败测试**
 
 ```python
-# api/test_max_tokens_wiring.py
+# app/tests/test_max_tokens_wiring.py
 """单次上限的接线回归（B7）。
 
 🔴 为什么不能只测常量值：常量对了、**没接上**，等于没有上限。
@@ -844,20 +844,20 @@ def test_no_chat_openai_without_max_tokens():
 - [x] **Step 2: 跑，确认失败** —— ✅ 2026-10-01，**列出 15 处**（原计划写"17 处"，实测 15）
 
 ```bash
-python -m pytest api/test_max_tokens_wiring.py -q
+python -m pytest app/tests/test_max_tokens_wiring.py -q
 ```
 预期：FAIL，并**列出**那 15 处（**这条失败信息本身就是待办清单**）。
 📌 **实测**：`2 failed, 1 passed` —— 两条红各列一遍那 15 行（含计划漏掉的 `evaluate_with_ragas.py` 那处）。
 
 > ⚠️ **本 Task 的 Step 1 最终落地**是 **3 条测试**（计划只写了 1 条）—— 多出来的两条见
-> `api/test_max_tokens_wiring.py` 顶部：
+> `app/tests/test_max_tokens_wiring.py` 顶部：
 > * `test_each_site_uses_the_agreed_budget` —— 钉**分类**（只钉"有没有"的话，全接成 1024 也能过，
 >   而那会把**答案截断**；这正对应本 Task 顶部那条 ⚠️「一致性陷阱」）
 > * `test_the_two_budgets_are_distinct_and_answer_is_larger`
 
 - [x] **Step 3: 逐处接上** —— ✅ 2026-10-01，**15 处全接完**
 
-模式（以 `api/agent_checkpointer.py:20` 为例）：
+模式（以 `app/agent/agent_checkpointer.py:20` 为例）：
 
 ```python
 from token_config import MAX_TOKENS_AGENT          # 新增
@@ -877,14 +877,14 @@ llm = ChatOpenAI(
 | `agent_checkpointer.py:21` · `agent_graph.py:21` · `agent_graph_advanced.py:50` · `agent_graph_advanced_learning.py:21/87/88/89/223` · `plan_execute.py:93/251/461` | **`MAX_TOKENS_AGENT`** |
 
 > ⚠️ **行号是 2026-10-01 接线【之后】的**（接线本身让每处 +1~2 行）。
-> ⛔ **别拿这张表当清单用** —— 权威清单是 `api/test_max_tokens_wiring.py` 的 `EXPECTED_MAX_TOKENS`。
+> ⛔ **别拿这张表当清单用** —— 权威清单是 `app/tests/test_max_tokens_wiring.py` 的 `EXPECTED_MAX_TOKENS`。
 > 🔴 **2026-10-02（Task 5）该常量改名为 `EXPECTED_ROLES`**。
 
 - [x] **Step 4: 跑测试，确认通过** —— ✅ **2026-10-01**
 
 ```bash
-python -m pytest api/test_max_tokens_wiring.py -q         # → 3 passed
-python -m pytest api/ -m "not integration and not needs_db" -q   # → 15 failed / 127 passed（红的仍是 Redis/MCP）
+python -m pytest app/tests/test_max_tokens_wiring.py -q         # → 3 passed
+python -m pytest app/ -m "not integration and not needs_db" -q   # → 15 failed / 127 passed（红的仍是 Redis/MCP）
 ```
 
 > 📌 **实测记录**（⚠️ 本机无 Redis ⇒ 那 15 条红是**本机固有问题**，CI 上绿）：
@@ -898,7 +898,7 @@ python -m pytest api/ -m "not integration and not needs_db" -q   # → 15 failed
   📌 **不是本 Task 的改动有问题** —— 红线全落在那个 worktree 的副本里。详见 `ROADMAP.md` ①b 段的「一处副作用」。
 
 ```bash
-git add api/*.py api/test_max_tokens_wiring.py
+git add app/*.py app/tests/test_max_tokens_wiring.py
 git commit -m "feat(额度): B7 接线 —— 15 个 ChatOpenAI 构造点带上单次上限（2000/1024）+ S12"
 ```
 
@@ -935,10 +935,10 @@ git commit -m "feat(额度): B7 接线 —— 15 个 ChatOpenAI 构造点带上�
 >    —— 两个方向都会错，⇒ **清单必须逐条对着代码核**。
 
 **Files:**
-- Modify: `api/token_tracker.py`（新增 2 个函数）· `api/api_v1_agent.py`（5 处接线 + 1 个新参数）·
-  `api/api_v1_rag.py`（2 处接线 + 1 个新参数 + 1 个 WS 会话 id）
-- Create: `api/test_session_budget_offline.py`（**无 marker ⇒ 进 CI**）·
-  `api/test_session_budget.py`（`needs_db`）· `api/test_session_budget_wiring.py`（**接线守卫**）
+- Modify: `app/billing/token_tracker.py`（新增 2 个函数）· `app/routing/api_v1_agent.py`（5 处接线 + 1 个新参数）·
+  `app/routing/api_v1_rag.py`（2 处接线 + 1 个新参数 + 1 个 WS 会话 id）
+- Create: `app/tests/test_session_budget_offline.py`（**无 marker ⇒ 进 CI**）·
+  `app/tests/test_session_budget.py`（`needs_db`）· `app/tests/test_session_budget_wiring.py`（**接线守卫**）
 
 **Interfaces（⚠️ 与计划原名不同 —— 见上方更正 ②）：**
 - Produces: `get_session_token_usage(user_name: str, thread_id: str) -> float`
@@ -959,9 +959,9 @@ git commit -m "feat(额度): B7 接线 —— 15 个 ChatOpenAI 构造点带上�
 ### 判据（可打印）
 
 ```bash
-venv/bin/python -m pytest api/test_session_budget_offline.py -q     # 11 passed
-venv/bin/python -m pytest api/test_session_budget_wiring.py -q      # 8 passed
-venv/bin/python -m pytest api/ -m "not integration and not needs_db" -q
+venv/bin/python -m pytest app/tests/test_session_budget_offline.py -q     # 11 passed
+venv/bin/python -m pytest app/tests/test_session_budget_wiring.py -q      # 8 passed
+venv/bin/python -m pytest app/ -m "not integration and not needs_db" -q
 #   ⇒ 15 failed / 138 passed / 3 skipped
 #      接线前是 15 failed / 127 passed / 3 skipped ⇒ +11 = 本次新增的离线判据
 #      `15 failed` 与接线前 FAILED 清单同为「本地无 Redis」，**逐条同类 ⇒ 无回归**
@@ -990,8 +990,8 @@ venv/bin/python -m pytest api/ -m "not integration and not needs_db" -q
 ## Task 3 · **B10** · 全局日级 token 总额 · ✅ **2026-10-01 做完**
 
 **Files:**
-- Modify: `api/token_tracker.py`
-- Test: `api/test_global_daily_budget_offline.py`（无 marker，进 CI）
+- Modify: `app/billing/token_tracker.py`
+- Test: `app/tests/test_global_daily_budget_offline.py`（无 marker，进 CI）
 
 **Interfaces:**
 - Produces: `get_global_daily_token_usage() -> float`
@@ -1001,10 +1001,10 @@ venv/bin/python -m pytest api/ -m "not integration and not needs_db" -q
 
 | 项 | 落点 |
 |---|---|
-| `get_global_daily_token_usage()` | `api/token_tracker.py` —— `SUM(total_tokens) WHERE created_at >= CURRENT_DATE`，**⛔ 无 `user_name`** |
+| `get_global_daily_token_usage()` | `app/billing/token_tracker.py` —— `SUM(total_tokens) WHERE created_at >= CURRENT_DATE`，**⛔ 无 `user_name`** |
 | `check_global_daily_budget(estimated_tokens=0)` | 同上；阈值取 `token_config.GLOBAL_DAILY_TOKEN_LIMIT` |
 | 阈值 | **`1_000_000` /天** —— 值没变，但**从"没人读的默认值"变成了裁定值** |
-| 测试 | `api/test_global_daily_budget_offline.py` —— **12 passed**（无 marker ⇒ 进 CI） |
+| 测试 | `app/tests/test_global_daily_budget_offline.py` —— **12 passed**（无 marker ⇒ 进 CI） |
 | 决策 | `docs/decisions/DEC-042-B10全局日级阈值与fail-open.md` |
 
 ### 🔴 三处与计划原样不同的地方（都已落地）
@@ -1025,16 +1025,16 @@ venv/bin/python -m pytest api/ -m "not integration and not needs_db" -q
 
 `check_global_daily_budget` **当时没有任何调用点**。接线在 **`Task 4`（`B11`）**。
 
-> ✅ **2026-10-02 更新：已经接上了** —— 落在 **`api/breaker.py`**（`circuit()` / `global_key()`），
+> ✅ **2026-10-02 更新：已经接上了** —— 落在 **`app/billing/breaker.py`**（`circuit()` / `global_key()`），
 > 接在 **8 处**（`api_v1_agent.py` ×5 · `api_v1_rag.py` ×2 · `api_v1.py` ×1）。
-> ⚠️ **落点不是 `api/main.py`**（原计划写的）—— 理由是 `QuotaMiddleware` 整段包在
+> ⚠️ **落点不是 `app/main.py`**（原计划写的）—— 理由是 `QuotaMiddleware` 整段包在
 > `if user_name:` 里 ⇒ **匿名请求完全绕过**，而 `benchmark-embedding` **恰恰是匿名能打且真花钱的**。
 > 🔴 **2026-10-04（`DEC-065`）更正**：`benchmark-embedding` **已不再是匿名的**
 > （补上 `Depends(require_admin)` ⇒ 见 `api_v1.py` 该函数的注释）。
 > ⚠️ **但这不改变「落点为什么选它」** —— 那条理由写的是**当时**的实况；
 > 而且**中间件绕过这件事本身仍在**（`QuotaMiddleware` 依然整段在 `if user_name:` 里）。
 > ⇒ ⛔ **别读成"既然加了鉴权，落点可以搬回 `main.py` 了"**。
-> **判据（可打印）**：`grep -rn "circuit(global_key())" api/ --include="*.py" | grep -v test_` ⇒ **13 处**
+> **判据（可打印）**：`grep -rn "circuit(global_key())" app/ --include="*.py" | grep -v test_` ⇒ **13 处**
 > （`api_v1_agent.py` ×10 · `api_v1_rag.py` ×2 · `api_v1.py` ×1）
 > ⚠️ **2026-10-04 实测更正：原写「8 处」（`agent` ×5 · `rag` ×2 · `api_v1` ×1）** ——
 > 之后 `api_v1_agent.py` 又接了 5 处（与 `DEC-065` **无关**，是更早的漂移）。
@@ -1045,22 +1045,22 @@ venv/bin/python -m pytest api/ -m "not integration and not needs_db" -q
 > · `B8` 之前 —— 有 `SESSION_TOKEN_LIMIT`，**没有判定函数**；
 > · `B10` —— 有判定函数，**曾一度没有调用点**（2026-10-01 当天）。
 > ⇒ 📌 **判据（已从"命中不了 api_v1_*.py"改成下面这条）**：
-> `grep -rn "circuit(global_key())" api/ --include="*.py" | grep -v test_` ⇒ **8 处**；
+> `grep -rn "circuit(global_key())" app/ --include="*.py" | grep -v test_` ⇒ **8 处**；
 > ⛔ **只 grep `check_global_daily_budget` 已经不够了** —— 现在它本来就该只出现在
 > **定义处 + `breaker.py` + 测试** 里（调用方走的是 `circuit()` 那一层）。
-> 📌 接线本身由 **`api/test_breaker_wiring.py`** 静态钉住（AST 查 8 个函数体）。
+> 📌 接线本身由 **`app/tests/test_breaker_wiring.py`** 静态钉住（AST 查 8 个函数体）。
 
 ### 证据（可打印）
 
 ```bash
-pytest api/test_global_daily_budget_offline.py -q    # 12 passed
-pytest api/ -m "not integration and not needs_db" -q # 15 failed / 158 passed / 3 skipped
+pytest app/tests/test_global_daily_budget_offline.py -q    # 12 passed
+pytest app/ -m "not integration and not needs_db" -q # 15 failed / 158 passed / 3 skipped
 ```
 
 全量里 15 条失败**全是** `redis.ConnectionError`（本机没起 Redis），与改动前同集合。
 📌 **条数对账**（别只看"通过数涨了"）：无 `B8`/`B10` 三个文件时收集 **145** 条
 ⇒ `+11 +8`（B8 两份）⇒ 164 ⇒ `+12`（本任务）⇒ **176** = 实跑 `158 + 15 + 3`。
-（⚠️ 另有一份 `api/test_global_daily_budget.py` 带 `needs_db` ⇒ **被 CI 命令 deselect**，不计入 176。）
+（⚠️ 另有一份 `app/tests/test_global_daily_budget.py` 带 `needs_db` ⇒ **被 CI 命令 deselect**，不计入 176。）
 
 ### 🔴 那条 SQL **真的被执行过** —— 但这一步有个坑，记下来
 
@@ -1070,7 +1070,7 @@ pytest api/ -m "not integration and not needs_db" -q # 15 failed / 158 passed / 
 **当时本机 PG 没起**（`nc -z localhost 5432` 不通；`docker ps` 空）⇒ `needs_db` 那类跑不了。
 （✅ **2026-10-01 当天已补跑** —— 结果见本节末。）
 ⇒ 改用 **stdlib `sqlite3`**：把**从函数里 AST 取出的那条真 SQL 字符串**（⛔ 不是我重打的）
-配上 `api/schema.sql` 里那三列的真实 DDL 执行一遍（这条 SQL 无 PG 专有构造）：
+配上 `app/schema.sql` 里那三列的真实 DDL 执行一遍（这条 SQL 无 PG 专有构造）：
 
 ```bash
 # 一次性验证（未提交成测试 —— sqlite ≠ postgres，提交它会造成"验过了"的错觉）
@@ -1083,8 +1083,8 @@ sqlite> CURRENT_DATE = 2026-10-01
 ✅ **证明了**：SQL 真的可解析可执行 · **跨用户求和**（含 `admin`）· **日期窗口真的在生效**
 （昨天那条 9999 **没被算进今日**）。
 ⛔ **没证明**：PostgreSQL 下的行为（方言/类型/时区）· 真库上的列名是否 100% 一致
-（列名是对着 `api/schema.sql` 与 `api/db.py:109` 的建表语句核的，**不是**对着真库核的）。
-⇒ **补洞口的是 `api/test_global_daily_budget.py`**（`needs_db`）—— 本机起 PG 后跑它。
+（列名是对着 `app/schema.sql` 与 `app/core/db.py:109` 的建表语句核的，**不是**对着真库核的）。
+⇒ **补洞口的是 `app/tests/test_global_daily_budget.py`**（`needs_db`）—— 本机起 PG 后跑它。
 
 #### ✅ 2026-10-01 已补跑（那 7 条 `needs_db` 真过了一遍）
 
@@ -1093,12 +1093,12 @@ sqlite> CURRENT_DATE = 2026-10-01
 
 ```bash
 POSTGRES_DB=rag_test POSTGRES_HOST=localhost POSTGRES_PORT=5432 \
-  ./venv/bin/python -m pytest api/test_session_budget.py api/test_global_daily_budget.py -m needs_db
+  ./venv/bin/python -m pytest app/tests/test_session_budget.py app/tests/test_global_daily_budget.py -m needs_db
 # ⇒ 7 passed
 ```
 
 > ⚠️ `POSTGRES_HOST` / `POSTGRES_DB` **必须显式覆盖**：`.env` 里 `POSTGRES_HOST=postgres`
-> 是 **compose 网络内的服务名**，在宿主上解析不了。`api/config.py` 的 `load_dotenv()` 没传
+> 是 **compose 网络内的服务名**，在宿主上解析不了。`app/core/config.py` 的 `load_dotenv()` 没传
 > `override=True` ⇒ 默认 `override=False` ⇒ **导出的环境变量会赢**（这是本命令能生效的前提）。
 
 🔴 **库名隔离对账**（本仓有前科：R2 冒烟忘带库名，`record_usage` 往**真库**写了 4 行 ——
@@ -1113,7 +1113,7 @@ POSTGRES_DB=rag_test POSTGRES_HOST=localhost POSTGRES_PORT=5432 \
 ⚠️ 本次补跑**只覆盖「能跑通 + 跨用户求和为真」**，不构成别的结论 ——
 PG 方言/时区下的**边界**行为、生产数据量下的表现，**都没验**。
 
-⛔ 且 `api/test_global_daily_budget.py` **不进 CI**（CI 无 postgres service）——
+⛔ 且 `app/tests/test_global_daily_budget.py` **不进 CI**（CI 无 postgres service）——
 所以 `B10` 的核心判据（SQL 里没有 `user_name`）**依然只在离线那份里**，
 别因为「7 条绿了」就以为离线那份可以省。
 
@@ -1151,9 +1151,9 @@ PG 方言/时区下的**边界**行为、生产数据量下的表现，**都没�
 
 **Files:**（⬇️ **原计划**的落点 —— ⛔ 与实际的差异见右栏）
 
-- Create: `api/breaker.py` + `docs/specs/breaker.md`（⛔ 新建模块**必须**同时建 spec，否则 `pre-commit-gates.py` 硬拦）⇒ ✅ **都建了**
-- Create: `api/test_breaker.py`（无 marker）⇒ ✅ 建了（**外加** `api/test_breaker_wiring.py` —— **双向接线守卫**）
-- Modify: `api/token_tracker.py`（触顶时开断路器）· `api/main.py`（放行前先问断路器）
+- Create: `app/billing/breaker.py` + `docs/specs/breaker.md`（⛔ 新建模块**必须**同时建 spec，否则 `pre-commit-gates.py` 硬拦）⇒ ✅ **都建了**
+- Create: `app/tests/test_breaker.py`（无 marker）⇒ ✅ 建了（**外加** `app/tests/test_breaker_wiring.py` —— **双向接线守卫**）
+- Modify: `app/billing/token_tracker.py`（触顶时开断路器）· `app/main.py`（放行前先问断路器）
   ⇒ 🔴 **两个都没改**：判定函数本来就在 `token_tracker.py` 里；接线在 **8 个端点**、**不在中间件**。
 
 **Interfaces:**（⬇️ **原计划**的接口 —— ⛔ **这三个都没实现**）
@@ -1167,8 +1167,8 @@ PG 方言/时区下的**边界**行为、生产数据量下的表现，**都没�
 > ⛔ 不为 `L2` 先建任何东西。
 
 - ⛔ **Step 1（旧形状）：写失败测试（mock Redis，⛔ 不连真 Redis）** —— **没按这个做**。
-  ✅ 实际是 `api/test_breaker.py` **9 条**，**里面没有一行 mock Redis**（因为**不用 Redis**）；
-  另有 **`api/test_breaker_wiring.py` 9 条**专钉接线（旧计划里没有这一层）。
+  ✅ 实际是 `app/tests/test_breaker.py` **9 条**，**里面没有一行 mock Redis**（因为**不用 Redis**）；
+  另有 **`app/tests/test_breaker_wiring.py` 9 条**专钉接线（旧计划里没有这一层）。
 
   <details><summary>旧计划里那段（⛔ 已作废，留档）</summary>
 
@@ -1189,14 +1189,14 @@ PG 方言/时区下的**边界**行为、生产数据量下的表现，**都没�
 
   </details>
 
-- ⛔ **Step 2–3（旧形状）：先跑失败 → 再实现 `api/breaker.py`（用 `rate_limiter.py` 同一个 `redis.Redis` 连接方式；`trip` 用 `SETEX`）**
-  —— ✅ **文件建了**，但**形状不是这个**：实际 `api/breaker.py` 是**PG 分派器**，**不建 Redis 连接**、**没有 `SETEX`**。
+- ⛔ **Step 2–3（旧形状）：先跑失败 → 再实现 `app/billing/breaker.py`（用 `rate_limiter.py` 同一个 `redis.Redis` 连接方式；`trip` 用 `SETEX`）**
+  —— ✅ **文件建了**，但**形状不是这个**：实际 `app/billing/breaker.py` 是**PG 分派器**，**不建 Redis 连接**、**没有 `SETEX`**。
   📌 TDD 的「先看着它失败」这一步**仍然做了** —— 只是对象换了（见 `CHANGELOG.md` 那条「判据纪律的一处自我更正」）。
 
 - ⛔ **Step 4（旧形状）：接线（`token_tracker` 触顶 ⇒ `trip`；`main.py` 中间件先 `is_open` ⇒ 抛 `AppException`）**
   —— ✅ **接上了，但位置不同**：接在 **8 个端点函数**里（**不是中间件**），
   `token_tracker.py` / `main.py` **两个都没改**。
-  **判据（可打印）**：`grep -rn "circuit(global_key())" api/ --include="*.py" | grep -v test_` ⇒ **8 行**。
+  **判据（可打印）**：`grep -rn "circuit(global_key())" app/ --include="*.py" | grep -v test_` ⇒ **8 行**。
 
 - ⛔ **Step 5（旧形状）：⭐ 要素④ 的【实测】—— 开一个 5 秒断路器，证明 TTL 到点会恢复**
   —— 🔴 **没有 TTL 可核**：日级用量在 **PG**（`token_usage_logs`），恢复靠 SQL 自己翻页，
@@ -1223,9 +1223,9 @@ PG 方言/时区下的**边界**行为、生产数据量下的表现，**都没�
 
 > 📄 **设计裁定（含备选与反悔成本）⇒ `docs/decisions/DEC-044-Task5只做构造收口不做自动兜底.md`**
 
-**实际做的（形态 `甲`）**：把 15 个 LLM 构造点收进**一个** `api/llm_factory.py` 的 `make_llm()`。
+**实际做的（形态 `甲`）**：把 15 个 LLM 构造点收进**一个** `app/core/llm_factory.py` 的 `make_llm()`。
 ⇒ 效果：`model` / `max_tokens` / `api_key` / `base_url` **各自只剩一个落点**；
-**行为零变化**（角色按改动前的取值原样固化，见 `api/test_max_tokens_wiring.py::EXPECTED_ROLES`）。
+**行为零变化**（角色按改动前的取值原样固化，见 `app/tests/test_max_tokens_wiring.py::EXPECTED_ROLES`）。
 
 **⛔ 没做的：自动兜底。** 这**不是忘了**，是**评估后故意推迟** —— 理由表见 `docs/specs/llm_factory.md`。
 
@@ -1241,7 +1241,7 @@ PG 方言/时区下的**边界**行为、生产数据量下的表现，**都没�
 >
 > ⇒ **包上去不会炸**，**真正的缺陷是静默的**：**备用模型烧掉的 token 会被那 4 处记账记到主模型头上**。
 > ⇒ 收益只在**额度耗尽那一刻**兑现，代价是**账目静默失真** ⇒ 这一轮**不值得**。
-> 📌 反证测试钉在 `api/test_llm_factory.py::test_wrapping_would_silently_break_cost_attribution`。
+> 📌 反证测试钉在 `app/tests/test_llm_factory.py::test_wrapping_would_silently_break_cost_attribution`。
 
 **⇒ 本轮的兜底方式仍是【手动】的**：额度耗尽 ⇒ 请求报错，人工改 `.env` 的
 `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL_*` 并**重建容器**
@@ -1249,8 +1249,8 @@ PG 方言/时区下的**边界**行为、生产数据量下的表现，**都没�
 
 **下面的原始计划【保留】**，因为 `L3` / `L4` / `L5` 的裁定仍然有效，将来做真兜底时直接用：
 
-**Files:** Modify `api/breaker.py` 接线处（**复用 Task 4 的断路器，不新建文件**）
-（⚠️ **本轮实际改的**是 `api/llm_factory.py`（新建） + 15 个调用点 + `api/test_max_tokens_wiring.py`（改写））
+**Files:** Modify `app/billing/breaker.py` 接线处（**复用 Task 4 的断路器，不新建文件**）
+（⚠️ **本轮实际改的**是 `app/core/llm_factory.py`（新建） + 15 个调用点 + `app/tests/test_max_tokens_wiring.py`（改写））
 
 - [x] ⛔ **开工前必须已有 `L3` / `L4` / `L5` 的裁定**（Task 0）。—— ✅ 2026-10-01 已裁
 - [ ] 判据（`LLM模型路由与额度策略` 坑②）：**只对 `403` + `AllocationQuota.FreeTierOnly` 开断路器**，
@@ -1260,11 +1260,11 @@ PG 方言/时区下的**边界**行为、生产数据量下的表现，**都没�
 - [ ] key 用 `model:<名>:<日期>`；动作按 `L4`/`L5` 裁的结果（换哪个、要不要对用户可见）。
   📌 ⬜ **本轮没做**（`breaker.py` 的 `model:` 那一类仍是空的，见 `docs/specs/breaker.md`）。
 
-**落点已经收敛**：将来要做，**只需改 `api/llm_factory.py` + 处理那 5 个 `bind_tools` 点**，
+**落点已经收敛**：将来要做，**只需改 `app/core/llm_factory.py` + 处理那 5 个 `bind_tools` 点**，
 **15 个调用点一行都不用再动**。
 
-- [x] **本轮落地的东西**：`api/llm_factory.py`（新建）· 15 个调用点改走 `make_llm()` ·
-  `api/test_llm_factory.py`（新建 · 12 条）· `api/test_max_tokens_wiring.py`（改写：**工厂以外零 `ChatOpenAI(`**）·
+- [x] **本轮落地的东西**：`app/core/llm_factory.py`（新建）· 15 个调用点改走 `make_llm()` ·
+  `app/tests/test_llm_factory.py`（新建 · 12 条）· `app/tests/test_max_tokens_wiring.py`（改写：**工厂以外零 `ChatOpenAI(`**）·
   `docs/specs/llm_factory.md`（新建）
 - [x] **顺带修掉**：`evaluate_with_ragas.py` 的 `os.getenv("LLM_MODEL_CHAT", "deepseek-chat")`
   兜底值与 `config.py` 的 `qwen-plus` **不一致** —— 现在两边同源。
@@ -1291,14 +1291,14 @@ PG 方言/时区下的**边界**行为、生产数据量下的表现，**都没�
 
 | # | 做了什么 | 落点 |
 |---|---|---|
-| ① | **删** `ROLE_QUOTA` + `get_user_quota()`（`UserRole` / `get_user_role` **保留**） | `api/permission.py` |
-| ② | `QuotaMiddleware` 改判 **token 日预算**（数据源 `token_tracker.get_token_budget_info`） | `api/main.py:287` |
+| ① | **删** `ROLE_QUOTA` + `get_user_quota()`（`UserRole` / `get_user_role` **保留**） | `app/access/permission.py` |
+| ② | `QuotaMiddleware` 改判 **token 日预算**（数据源 `token_tracker.get_token_budget_info`） | `app/main.py:287` |
 | ③ | 抽两个**纯函数** `quota_reject_payload(info)` / `quota_headers(info)` + `_next_day_reset_ts()` | 同上 `:238` / `:245` / `:273` |
-| ④ | `/debug/quota/{user_name}` 改走同一套（字段名不变、**单位变**） | `api/api_v1.py:220` |
-| ⑤ | 删未使用的 `get_user_quota` / `UserRole` import | `api/api_v1_rag.py:39` · `api/api_v1.py` |
-| ⑥ | **删模块** `api/quota_limiter.py`（撤点后零调用者）+ **归档 spec** | `api/` · `docs/specs/归档/quota_limiter.md` |
-| ⑦ | 重写那条会红的测试（**保留** `_MEASURED_PLAN_EXECUTE_TOKENS = 3346` 这个实测数） | `api/test_plan_execute_tools.py` |
-| ⑧ | **新增** `api/test_quota_middleware.py`（9 条 · **不连 DB/Redis**） | `api/` |
+| ④ | `/debug/quota/{user_name}` 改走同一套（字段名不变、**单位变**） | `app/routing/api_v1.py:220` |
+| ⑤ | 删未使用的 `get_user_quota` / `UserRole` import | `app/routing/api_v1_rag.py:39` · `app/routing/api_v1.py` |
+| ⑥ | **删模块** `app/quota_limiter.py`（撤点后零调用者）+ **归档 spec** | `app/` · `docs/specs/归档/quota_limiter.md` |
+| ⑦ | 重写那条会红的测试（**保留** `_MEASURED_PLAN_EXECUTE_TOKENS = 3346` 这个实测数） | `app/tests/test_plan_execute_tools.py` |
+| ⑧ | **新增** `app/tests/test_quota_middleware.py`（9 条 · **不连 DB/Redis**） | `app/` |
 
 ⛔ **原计划里的两条描述【作废】**：
 * 「`ROLE_QUOTA` **降级为接口权重**」—— `DEC-046` 裁**直接删**（全仓没有任何代码读"权重"）；
@@ -1312,9 +1312,9 @@ PG 方言/时区下的**边界**行为、生产数据量下的表现，**都没�
 **判据（可打印）**：
 
 ```bash
-venv/bin/python -m pytest api/test_quota_middleware.py -q      # ⇒ 9 passed
-grep -rn "ROLE_QUOTA" api/*.py | grep -v "^api/test_"          # ⇒ 只应命中【注释/历史说明】
-venv/bin/python -m pytest api/ -m "not integration and not needs_db" -q
+venv/bin/python -m pytest app/tests/test_quota_middleware.py -q      # ⇒ 9 passed
+grep -rn "ROLE_QUOTA" app/*.py | grep -v "^app/test_"          # ⇒ 只应命中【注释/历史说明】
+venv/bin/python -m pytest app/ -m "not integration and not needs_db" -q
 # ⇒ 15 failed / 198 passed；与改动前基线（189 passed）**逐条 diff 红的清单 = 完全一致** ⇒ 无回归
 ```
 
@@ -1326,8 +1326,8 @@ venv/bin/python -m pytest api/ -m "not integration and not needs_db" -q
 > ② 自证用例抓出扫描器**漏了 `ast.alias`** —— `import` 走的**不是 `ast.Name`**，
 > 漏掉这一支 ⇒ **最典型的引用形态完全测不出来**。
 
-**Files（实际）:** `api/permission.py` · `api/main.py` · `api/api_v1.py` · `api/api_v1_rag.py` ·
-`api/quota_limiter.py`（删）· `api/test_plan_execute_tools.py` · `api/test_quota_middleware.py`（新建）
+**Files（实际）:** `app/access/permission.py` · `app/main.py` · `app/routing/api_v1.py` · `app/routing/api_v1_rag.py` ·
+`app/quota_limiter.py`（删）· `app/tests/test_plan_execute_tools.py` · `app/tests/test_quota_middleware.py`（新建）
 
 ---
 
@@ -1371,10 +1371,10 @@ venv/bin/python -m pytest api/ -m "not integration and not needs_db" -q
 **判据（可打印）**：
 
 ```bash
-venv/bin/python -m pytest api/test_cost_visibility.py -q          # ⇒ 4 passed（进 CI）
-POSTGRES_DB=rag_test venv/bin/python -m pytest api/test_cost_visibility_db.py -q
+venv/bin/python -m pytest app/tests/test_cost_visibility.py -q          # ⇒ 4 passed（进 CI）
+POSTGRES_DB=rag_test venv/bin/python -m pytest app/tests/test_cost_visibility_db.py -q
 # ⇒ 3 passed（@needs_db · 本机需先停掉占用 qdrant 锁的 uvicorn）
-venv/bin/python -m pytest api/ -m "not integration and not needs_db" -q
+venv/bin/python -m pytest app/ -m "not integration and not needs_db" -q
 # ⇒ 217 passed, 3 skipped, 22 deselected —— 【0 failed】
 ```
 
@@ -1382,9 +1382,9 @@ venv/bin/python -m pytest api/ -m "not integration and not needs_db" -q
 **表名/列名打错、SQL 语法错，CI 永远绿**。DB 那份让这条 SQL **至少有一条路径真的执行它**。
 📌 与本仓前科呼应：`docs/复盘/2026-09-17-只读冒烟其实会写库.md` —— **跑它必须带 `POSTGRES_DB=rag_test`**。
 
-**Files（实际）:** `api/token_tracker.py`（+`get_user_overview`）· `api/api_v1_agent.py` ·
-`api/cost_dashboard.py` · `api/test_cost_visibility.py`（新建）·
-`api/test_cost_visibility_db.py`（新建）· `docs/decisions/DEC-047-成本可见两处口径修正.md`（新建）
+**Files（实际）:** `app/billing/token_tracker.py`（+`get_user_overview`）· `app/routing/api_v1_agent.py` ·
+`app/billing/cost_dashboard.py` · `app/tests/test_cost_visibility.py`（新建）·
+`app/tests/test_cost_visibility_db.py`（新建）· `docs/decisions/DEC-047-成本可见两处口径修正.md`（新建）
 
 ---
 

@@ -1,11 +1,11 @@
-# `api/executor_server.py`
+# `app/tools/executor_server.py`
 
 | 项 | 内容 |
 |---|---|
 | **状态** | ✅ **上线（2026-10-08 · 批②）** —— 服务本体 + compose 硬化 + 应用接线 + 并发上限，**全部已实测** |
 | **对外提供** | `POST /execute` —— 入 `{"code": str}`，出 `{"ok": bool, "out": str}`；<br>⚠️ **排队超时 ⇒ `503`**（形状**故意不同**：`{ok,out}` 表示"代码跑完了"，`503` 表示"忙不过来"）<br>`GET /health` —— 容器的 `healthcheck` 用<br>⚠️ **⛔ 不提供 `/docs`**（`docs_url=None`）：内部机制，少一个面就少一个面 |
 | **谁在用** | 🔴 **应用侧**（`code_executor_impl` 的远端路径，走 `EXECUTOR_URL`）—— 2026-10-08 Task 4 接上<br>· `docker-compose.yml` 的 `executor` 服务起它 |
-| **测试** | `api/test_executor_server.py`（**7**）· ⚠️ 数字会变，判据：`cd api && ../venv/bin/python -m pytest test_executor_server.py --collect-only -q \| tail -1` |
+| **测试** | `app/tests/test_executor_server.py`（**7**）· ⚠️ 数字会变，判据：`cd app && ../venv/bin/python -m pytest test_executor_server.py --collect-only -q \| tail -1` |
 
 ## ✅ 做了什么
 
@@ -13,7 +13,7 @@
 - 🔴 **执行逻辑一行都不在本文件** —— 全部调 `code_executor_impl.run_in_sandbox_subprocess`
   （白名单 / 超时 / 报错文案**只有那一份**）
 - 🔴 **每次请求起一个【新】子进程** ⇒ `exec` 的 `globals` **不跨请求**
-- 镜像 `api/executor.Dockerfile` —— ⚠️ **只装 `fastapi` + `uvicorn`**，⛔ 不 `-r requirements.txt`
+- 镜像 `app/executor.Dockerfile` —— ⚠️ **只装 `fastapi` + `uvicorn`**，⛔ 不 `-r requirements.txt`
 
 ## 🟡 做到哪 / 缺什么
 
@@ -43,6 +43,6 @@
   （✅ 2026-10-08 起**已在主干** —— PR `#114` 合了之后才敢写全路径；
   ⚠️ 在那之前写它会**被断链门判红**，我踩过）· `DEC-104` §三
 - **复用的唯一实现** ⇒ `docs/specs/code_executor.md`
-- **守卫** ⇒ `api/test_executor_server.py`（**7** 条：响应形状 ×3 · **不串状态** · **超时硬杀且服务存活** ·
+- **守卫** ⇒ `app/tests/test_executor_server.py`（**7** 条：响应形状 ×3 · **不串状态** · **超时硬杀且服务存活** ·
   健康检查 · **并发上限**）
 - ⚠️ **不要**在这里 import `tool_cache` / `langchain` / 任何数据库驱动 —— 见上表第一条

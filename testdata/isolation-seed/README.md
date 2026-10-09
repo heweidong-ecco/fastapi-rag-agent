@@ -23,7 +23,7 @@
 | `isolation_b` | `FREE` | 10000 token | 宠物寄养 |
 | `isolation_c` | `PREMIUM` | 100000 token | 工业阀门 |
 
-⚠️ **角色不是平均分配的** —— `api/permission.py` 目前**硬编码**：`isolation_c` → PREMIUM，其余 FREE。
+⚠️ **角色不是平均分配的** —— `app/access/permission.py` 目前**硬编码**：`isolation_c` → PREMIUM，其余 FREE。
 ⛔ **这不是脚本造的，是既有实现**；要打印判据见 §五·④。
 
 ## 三 · 语料清单（9 篇 · 每篇约 1000 字 · 切成 2–3 个 chunk）
@@ -103,7 +103,7 @@ docker exec postgres-rag psql -U postgres -d rag_db -c \
 
 ### 1 · 它与 `DEC-056` 的口径**相反，但两者并存**
 
-`api/test_isolation.py::probe_docs` 的探针文档（`source='isolation-probe-test'`）**每次跑完就删**，
+`app/tests/test_isolation.py::probe_docs` 的探针文档（`source='isolation-probe-test'`）**每次跑完就删**，
 且**只在 `POSTGRES_DB=rag_test` 时才会跑**（防误写真库）。那是**测试卫生**。
 **本份要的恰好是留下来的那一类。**
 ⇒ ⛔ **不是把探针那条改掉**，是两件事各管各的。
@@ -119,11 +119,11 @@ docker exec postgres-rag psql -U postgres -d rag_db -c \
 
 | 链路 | 记账情况 | 实测 |
 |---|---|---|
-| `/rag/upload_document` | ⛔ 写死 `user_name="system"`, `thread_id="system"` | `api/embedding_client.py:36-37` |
-| `/agent/memory_chat` | ⛔ 记账判据 `hasattr(response,"usage")` **恒为假** | `api/agent_checkpointer.py:78-83`（源码自己写着「本端点的记账从来没执行过」） |
+| `/rag/upload_document` | ⛔ 写死 `user_name="system"`, `thread_id="system"` | `app/rag/embedding_client.py:36-37` |
+| `/agent/memory_chat` | ⛔ 记账判据 `hasattr(response,"usage")` **恒为假** | `app/agent/agent_checkpointer.py:78-83`（源码自己写着「本端点的记账从来没执行过」） |
 | `/agent/advanced_chat` | ⛔ 实测 HTTP 200，真库**新增 0 条** | 它走的是 `agent_graph_advanced_learning`，不是会记账的 `agent_graph_advanced` |
 | ✅ **`/agent/mcp_chat`** | ✅ **记**：`user_name` 真实 + **`thread_id` = 调用方传的原值** | 端点 `api_v1_agent.py:1306` 注入 state → `agent_graph_advanced.py:360` 记账。实测 `?thread_id=A-thread-001` 落库原值 |
-| `/agent/plan_execute` | 🟡 记 `user_name`（真实）+ `thread_id="plan_execute"`（**常量**） | `api/plan_execute.py:172-179` |
+| `/agent/plan_execute` | 🟡 记 `user_name`（真实）+ `thread_id="plan_execute"`（**常量**） | `app/agent/plan_execute.py:172-179` |
 
 🔴 **别用 `plan_execute`**：一次大约吃掉 **9,800 token** —— **接近 `FREE` 档一整天的额度（10,000）**。
 2026-10-04 那一次探针就把 `isolation_a` 的当日额度用光了（第二次调用直接 429）。
@@ -181,5 +181,5 @@ docker exec postgres-rag psql -U postgres -d rag_db -c \
 | `docs/decisions/DEC-071-三家隔离语料常驻真库.md` | 口径裁定（含与 `DEC-056` 的关系 · 五条链路对照 · ⚠️ 那个计费口子） |
 | `scripts/seed_isolation_docs.sh` | ① documents 轴 |
 | `scripts/seed_isolation_threads.sh` | ② thread_id 轴（⚠️ 花真钱） |
-| `api/test_isolation.py` | 另一条轴：跑完就删的探针（`DEC-056`） |
+| `app/tests/test_isolation.py` | 另一条轴：跑完就删的探针（`DEC-056`） |
 | `docs/契约/环境变量.md` | 三个 `ISOLATION_*_API_KEY` 在哪 |

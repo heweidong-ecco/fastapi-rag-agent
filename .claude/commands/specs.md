@@ -48,13 +48,13 @@ bash scripts/spec_status.sh
 ### 3.1 先读代码（**别照抄别的文档**）
 
 ```
-api/<模块名>.py      ← 主文件，逐行读
+app/<模块名>.py      ← 主文件，逐行读
 ```
 
 **同时查这几处**（它们常有"看代码看不出来"的信息）：
 
 ```bash
-grep -rn "<模块名>" --include="*.py" api/ | grep -v "^api/<模块名>.py"   # 谁在用它
+grep -rn "<模块名>" --include="*.py" app/ | grep -v "^app/<模块名>.py"   # 谁在用它
 grep -rn "<模块名>" --include="*.md" . | grep -v 归档                     # 文档里怎么说的
 bash scripts/check_doc_orphans.sh --quiet >/dev/null 2>&1               # （顺带核引用）
 ```

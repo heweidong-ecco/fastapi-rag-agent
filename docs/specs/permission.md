@@ -1,11 +1,11 @@
-# `api/permission.py`
+# `app/access/permission.py`
 
 | 项 | 内容 |
 |---|---|
 | **状态** | 🟡 **可用 —— 但它是【硬编码】的**：`admin` 特判 + 探针身份特判，其余一律 `FREE`。⛔ **接 DB 这件事仍挂起** |
 | **对外提供** | `UserRole`（`str, Enum`：`FREE` / `PREMIUM` / `ADMIN`）· `get_user_role(user_name) -> UserRole` |
 | **谁在用** | **8 处**：`deps.py:76`（`require_admin`）· `api_v1.py:220` · `api_v1_rag.py:362` · `api_v1_agent.py` **5 处**（`:525 :725 :802 :2035 :2098 :2133 :2146`）· `token_tracker.py:495`（按角色取日额度） |
-| **测试** | `api/test_isolation.py` · `api/test_pending_visibility.py` · `api/test_approve_ownership.py` · `api/test_trace_isolation.py` · `api/test_quota_middleware.py` · `api/test_token_config.py`（**都是间接测**，⛔ 没有"角色判定"自己的用例） |
+| **测试** | `app/tests/test_isolation.py` · `app/tests/test_pending_visibility.py` · `app/tests/test_approve_ownership.py` · `app/tests/test_trace_isolation.py` · `app/tests/test_quota_middleware.py` · `app/tests/test_token_config.py`（**都是间接测**，⛔ 没有"角色判定"自己的用例） |
 
 ## ✅ 做了什么
 
@@ -41,7 +41,7 @@ def get_user_role(user_name: str) -> UserRole:
 ⇒ **拼错一个用户名不会失败，只会降级成 free** —— 而 `FREE` 是有额度上限的，
 所以症状是**"这个人莫名其妙被限额了"**，⛔ **不是**一条报错。
 
-⚠️ 与 `api/deps.py` 的鉴权**方向相反**：那里未知凭据是 **fail-closed**（401）。
+⚠️ 与 `app/routing/deps.py` 的鉴权**方向相反**：那里未知凭据是 **fail-closed**（401）。
 ⇒ **别把两处的取向记混**：**"你是谁"必须 fail-closed；"你是什么档"允许 fail-open。**
 
 ### 2. 🔴 `isolation_a` / `isolation_b` **不在本文件的表里** —— ⛔ 别去补

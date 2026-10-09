@@ -1,4 +1,4 @@
-# `api/reranker.py`
+# `app/rag/reranker.py`
 
 | 项 | 内容 |
 |---|---|
@@ -23,11 +23,11 @@
 
 | 看代码会以为 | 实际 |
 |---|---|
-| 「重排序做完了，代码完整」 | 🔴 **只在开发机能跑** —— `api/Dockerfile:73` 构建期用 `grep -vE` **裁掉了 torch 系** ⇒ **容器里 `ImportError`** |
+| 「重排序做完了，代码完整」 | 🔴 **只在开发机能跑** —— `app/Dockerfile:73` 构建期用 `grep -vE` **裁掉了 torch 系** ⇒ **容器里 `ImportError`** |
 | 「`.env` 里有 `RERANKER_MODEL_NAME` 就能配模型名」 | 🔴 **那是死键** —— 全仓 **0 引用**；模型名**硬编码**在 `:17` |
 | 「镜像里没装是因为 `requirements.txt` 裁了」 | 🔴 **不是** —— `requirements.txt` **一个字没动**（`sentence-transformers` 等 5 个包**都在**）；**是 Dockerfile 构建期过滤的** |
 
-⇒ **要在容器里用重排序，得改 `api/Dockerfile` 那行** —— ⚠️ **但镜像会从 1.28 GB 涨回 6+ GB**。
+⇒ **要在容器里用重排序，得改 `app/Dockerfile` 那行** —— ⚠️ **但镜像会从 1.28 GB 涨回 6+ GB**。
 
 ## 关联
 

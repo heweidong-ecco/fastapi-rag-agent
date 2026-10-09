@@ -10,7 +10,7 @@
 #    且是真实模拟用户传入，这样有记录，能验证用户隔离，安全，role thread_id tag 等等相关的关键信息。」
 #
 # 🔴 **它与本仓既有的一条口径【相反】**（`DEC-056` 乙段）：那边裁的是
-#   「探针文档（`api/test_isolation.py::probe_docs`）每次跑完就删」—— 理由是测试卫生 + 防误写真库。
+#   「探针文档（`app/tests/test_isolation.py::probe_docs`）每次跑完就删」—— 理由是测试卫生 + 防误写真库。
 #   本脚本要的恰好是**留下来的那一种**。⇒ 两件事并存，**⛔ 不是把探针那条改掉**。
 #   📄 口径变化记在 `docs/decisions/DEC-071-三家隔离语料常驻真库.md`
 #
@@ -170,7 +170,7 @@ echo "   共 ${total} 篇"
 
 echo
 echo "──── ③ 会话痕迹（thread_id 轴）—— ⛔ 本脚本【不】自动跑它 ────"
-echo "   上传路径的记账写死 user_name='system'（api/embedding_client.py:36-37），"
+echo "   上传路径的记账写死 user_name='system'（app/rag/embedding_client.py:36-37），"
 echo "   ⇒ 拿不到按人的 thread_id。那条轴要单独跑，**而且它花真钱**："
 echo "       bash scripts/seed_isolation_threads.sh        # 三家各 2 轮 ≈ 3,200–3,800 token/家（合计 10,374）"
 echo "   ⛔ 故意不在这里自动触发 —— 灌文档不该有「顺手烧额度」这个副作用。"

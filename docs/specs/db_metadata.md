@@ -1,11 +1,11 @@
-# `api/db_metadata.py`
+# `app/core/db_metadata.py`
 
 | 项 | 内容 |
 |---|---|
 | **状态** | ⚰️ **不是运行时模块** —— 它是 **Alembic autogenerate 用的声明式镜像**，**⛔ 不是表结构的真值** |
 | **对外提供** | `metadata` · `documents_table` · `api_keys_table` · `cost_records_table` · `cost_records_archive_table` |
-| **谁在用** | 🔴 **全仓只有 1 处**：`api/alembic/env.py:39` 的 `from db_metadata import metadata`（`target_metadata = metadata`）。⛔ **零运行时调用点** |
-| **测试** | ⛔ **无**（`api/test_auth_api_key_active.py` 只是**注释里引用**它的行号） |
+| **谁在用** | 🔴 **全仓只有 1 处**：`app/alembic/env.py:39` 的 `from db_metadata import metadata`（`target_metadata = metadata`）。⛔ **零运行时调用点** |
+| **测试** | ⛔ **无**（`app/tests/test_auth_api_key_active.py` 只是**注释里引用**它的行号） |
 
 ## ✅ 做了什么
 
@@ -38,10 +38,10 @@
 
 🔴 **判据（可打印）**：
 ```bash
-grep -rn 'from db_metadata import\|import db_metadata' api/ scripts/ main.py
-grep -rn 'CREATE TABLE\|create_table' api/db.py | head
+grep -rn 'from db_metadata import\|import db_metadata' app/ scripts/ main.py
+grep -rn 'CREATE TABLE\|create_table' app/core/db.py | head
 ```
-⇒ 第一条**只应命中 `api/alembic/env.py`**；第二条才是真正建表的地方。
+⇒ 第一条**只应命中 `app/alembic/env.py`**；第二条才是真正建表的地方。
 
 ⇒ **改这个文件不会改任何运行行为**；反过来，**照着它改库结构会改错**。
 
@@ -51,7 +51,7 @@ grep -rn 'CREATE TABLE\|create_table' api/db.py | head
 `is_active` 已补进 `db.py:create_table()` 的建表语句**与**老库补列那句 `ALTER TABLE api_keys ADD COLUMN`（`DEC-086`）。
 
 ⇒ **这一列两边一致了**，⛔ **别再把「多一个 `is_active`」当成既有差异**去"修"。
-（本 spec 是**顺着 docstring 读会读到旧事实**的第二个现场 —— 第一个在 `api/db.py:88`。）
+（本 spec 是**顺着 docstring 读会读到旧事实**的第二个现场 —— 第一个在 `app/core/db.py:88`。）
 
 ### 3. ⚠️ `cost_records` 与 `cost_records_archive` **在这里是两张完整的表** —— 但**归档这件事的落点不在这**
 
@@ -67,7 +67,7 @@ grep -rn 'CREATE TABLE\|create_table' api/db.py | head
 
 | 来源 | 是不是真值 |
 |---|---|
-| `api/db.py` 的 `create_table()` | ✅ **是**（运行时执行） |
+| `app/core/db.py` 的 `create_table()` | ✅ **是**（运行时执行） |
 | 本文件 | ⛔ **不是**（给 autogenerate 看的） |
 
 ⇒ 这与本仓反复强调的「**一个名字两个来源必然漂移，而漂移是静默的**」（`DEC-051`）**是同一族问题**。
@@ -78,6 +78,6 @@ grep -rn 'CREATE TABLE\|create_table' api/db.py | head
 | 文档 | 说明 |
 |---|---|
 | `docs/specs/db.md` | ⭐ **真正建表/连接/检索的那个模块** —— 找表结构以它为准 |
-| `docs/契约/数据模型.md` · `api/schema.sql` | 表结构的**契约文档**与**导出快照** |
-| `api/alembic/env.py` | 全仓唯一使用者 |
+| `docs/契约/数据模型.md` · `app/schema.sql` | 表结构的**契约文档**与**导出快照** |
+| `app/alembic/env.py` | 全仓唯一使用者 |
 | `docs/decisions/DEC-086-api-keys-is-active-列由本仓DDL保证.md` | `is_active` 归 DDL 保证 ⇒ §⚠️ 第 2 条的来由 |

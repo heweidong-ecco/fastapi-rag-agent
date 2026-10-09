@@ -1,11 +1,11 @@
-# `api/tool_health.py`
+# `app/tools/tool_health.py`
 
 | 项 | 内容 |
 |---|---|
 | **状态** | 🟡 **可用 —— 但它只【记录】健康状态，⛔ 不做降级** |
 | **对外提供** | `HEALTHY` / `UNHEALTHY` / `UNKNOWN` · `TEST_ARGS_MAP` · `update_tool_health(tool_name)` · `get_tool_health(tool_name)` · `run_health_check()` · 🔴 `_tool_health`（**私有名，但被外部 import**） |
-| **谁在用** | `api/main.py:700/705/719`（**启动自检**）· `api/mcp_server.py:61/71`（⭐ **降级在这里**）· `api/api_v1_agent.py:46`（import 了 `run_health_check` / `get_tool_health` / `UNHEALTHY` / **`_tool_health`**）⇒ 两个端点 `:1518` `GET /agent/tool_health` · `:1525` 刷新 |
-| **测试** | 🔴 **专属用例零条** —— `api/test_tool_health.py` **不存在**。只有 `api/test_pending_approvals.py` 等**顺带提过工具名** |
+| **谁在用** | `app/main.py:700/705/719`（**启动自检**）· `app/tools/mcp_server.py:61/71`（⭐ **降级在这里**）· `app/routing/api_v1_agent.py:46`（import 了 `run_health_check` / `get_tool_health` / `UNHEALTHY` / **`_tool_health`**）⇒ 两个端点 `:1518` `GET /agent/tool_health` · `:1525` 刷新 |
+| **测试** | 🔴 **专属用例零条** —— `app/test_tool_health.py` **不存在**。只有 `app/tests/test_pending_approvals.py` 等**顺带提过工具名** |
 
 ## ✅ 做了什么
 
@@ -23,7 +23,7 @@ async def run_health_check():        # 启动时调一次
 按 `TEST_ARGS_MAP` 给的安全参数执行 —— 例如 `calculator` 用 `{"expression": "1+1"}`、
 `web_search` 用 `{"query": "test"}`（⇒ **会真发一次外网请求**）。
 
-**降级不在这里** —— `api/mcp_server.py` 的 `list_tools()`（`:63-73`）把 `UNHEALTHY` 的工具**移出工具清单**。
+**降级不在这里** —— `app/tools/mcp_server.py` 的 `list_tools()`（`:63-73`）把 `UNHEALTHY` 的工具**移出工具清单**。
 那才是当前实际生效的降级机制。
 
 ## 🟡 做到哪 / 缺什么
@@ -31,7 +31,7 @@ async def run_health_check():        # 启动时调一次
 | 缺口 | 说明 |
 |---|---|
 | 🔴 **`_tool_health` 是模块级进程内存** | **重启即清空** · 每个进程**各有一份** ⇒ 多进程部署下**不共享**。⚠️ 且没有落盘、没有 TTL —— `last_checked` 写了但**全仓没有一处读它** |
-| ⚠️ **探测表与注册表要【手动对齐】** | 🔴 2026-10-08 批③ 起：`TEST_ARGS_MAP` 有 **7** 项（`calculator` / `date_today` / `date_calc` / `json_extract` / `stats` / `web_search` / `execute_python`），另两项**注释着**。⚠️ 与 `mcp_server.TOOLS` 的 7 项**逐名一致**。<br>🔴 **不在表里 ⇒ 该工具【永远不被探测】（静默）** —— 已由 `api/test_tool_registration_completeness.py` 补成**会红的断言**（改前**零守卫**） |
+| ⚠️ **探测表与注册表要【手动对齐】** | 🔴 2026-10-08 批③ 起：`TEST_ARGS_MAP` 有 **7** 项（`calculator` / `date_today` / `date_calc` / `json_extract` / `stats` / `web_search` / `execute_python`），另两项**注释着**。⚠️ 与 `mcp_server.TOOLS` 的 7 项**逐名一致**。<br>🔴 **不在表里 ⇒ 该工具【永远不被探测】（静默）** —— 已由 `app/tests/test_tool_registration_completeness.py` 补成**会红的断言**（改前**零守卫**） |
 | ⚠️ **没有任何"健康度随时间衰减"** | 探过就是探过了，`last_checked` 不再被用 ⇒ 一个工具坏掉后**只有等下次手动刷新**才知道 |
 | ⚠️ **零专属测试** | 探测失败 / 字符串误判 / 表外工具 —— 都没有用例 |
 
@@ -41,7 +41,7 @@ async def run_health_check():        # 启动时调一次
 
 ### 1. ✅ 【已修】注释与代码互相矛盾那条（2026-10-08 · 批③）
 
-**改前**，`api/tool_health.py` 的 `TEST_ARGS_MAP` 上方那句注释写着：
+**改前**，`app/tools/tool_health.py` 的 `TEST_ARGS_MAP` 上方那句注释写着：
 > 「`run_health_check` 是**按 `mcp_server.TOOLS` 遍历**的，表里多两项不会被查到。」
 
 🔴 **那句是假的** —— 实际代码是 `for tool_name in TEST_ARGS_MAP`，**遍历的是本表**。
@@ -55,8 +55,8 @@ async def run_health_check():        # 启动时调一次
 
 🔴 **判据（可打印）**：
 ```bash
-grep -n 'for tool_name in' api/tool_health.py
-grep -n 'mcp_server.TOOLS' api/tool_health.py      # ⇒ 只应命中注释行，⛔ 不应命中代码
+grep -n 'for tool_name in' app/tools/tool_health.py
+grep -n 'mcp_server.TOOLS' app/tools/tool_health.py      # ⇒ 只应命中注释行，⛔ 不应命中代码
 ```
 ⇒ **两处口径不一致时，跑得起来的那句才算数。**
 
@@ -71,7 +71,7 @@ grep -n 'mcp_server.TOOLS' api/tool_health.py      # ⇒ 只应命中注释行�
 
 ### 3. 🔴 `GET /agent/tool_health` 返回的是**原始 dict**，⛔ 不是 `get_tool_health()` 归一化过的
 
-`api/api_v1_agent.py:1522` 直接 `return {"tools": _tool_health, ...}`。
+`app/routing/api_v1_agent.py:1522` 直接 `return {"tools": _tool_health, ...}`。
 
 ⇒ **从未被探测的工具在那个 JSON 里是「键不存在」，而不是 `"unknown"`**。
 ⚠️ **同一件事（不知道）在两个接口上长得不一样**：
@@ -101,7 +101,7 @@ if result and "工具调用失败" not in result and "未找到工具" not in re
 
 ### 6. ⚠️ `update_tool_health` **没有外部调用者**
 
-全仓只有 `run_health_check` 调它（判据：`grep -rn 'update_tool_health' api/ | grep -v tool_health.py` ⇒ 空）。
+全仓只有 `run_health_check` 调它（判据：`grep -rn 'update_tool_health' app/ | grep -v tool_health.py` ⇒ 空）。
 ⇒ 它是**内部步骤**，⛔ 别当"可以单独探一个工具"的公开入口用。
 
 ### 7. ⚠️ 已删的 `FALLBACK_MAP` / `get_fallback_tool()` —— 看 git 历史会看到
@@ -114,7 +114,7 @@ if result and "工具调用失败" not in result and "未找到工具" not in re
 
 | 文档 | 说明 |
 |---|---|
-| MCP Server 模块（`api/mcp_server.py`） | ⭐ **降级真正发生的地方**（`list_tools()` `:63-73`）。⛔ **它还没有 spec** ⇒ 本表不给路径 |
+| MCP Server 模块（`app/tools/mcp_server.py`） | ⭐ **降级真正发生的地方**（`list_tools()` `:63-73`）。⛔ **它还没有 spec** ⇒ 本表不给路径 |
 | `docs/specs/search_tools.md` | 探测表里唯一会**打外网**的那个工具 |
 | `docs/specs/api_v1_agent.md` | 两个健康端点（含 `_tool_health` 直出） |
 | `docs/decisions/DEC-051-工具名分派与审批白名单的标识符勘误.md` | 工具名口径的历史勘误（本模块的探测键也受它影响） |

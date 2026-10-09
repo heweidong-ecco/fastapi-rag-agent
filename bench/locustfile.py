@@ -7,8 +7,8 @@
 > 「用途：**放在 GitHub 仓库给来仓库看代码和内容的人看的，固定环境下的压测负载数据**」
 
 ⇒ 三条硬约束：
-1. ⛔ **不进 pytest**（`api/test_*.py` 一条都不许引它）；
-2. ⛔ **不写进 `api/requirements.txt`** —— 那份清单会进 **demo 镜像**，塞个压测工具等于给交付物增肥
+1. ⛔ **不进 pytest**（`app/test_*.py` 一条都不许引它）；
+2. ⛔ **不写进 `app/requirements.txt`** —— 那份清单会进 **demo 镜像**，塞个压测工具等于给交付物增肥
    （⛔ 直接 `./venv/bin/pip install locust` 或另开 venv）；
 3. ⛔ **别压太大** —— 这台机器 **8 GB 内存，Docker 只分到 3.84 GB**（`DEC-033`）。
 
@@ -40,7 +40,7 @@ BASE_URL = os.getenv("RAG_BASE_URL", "http://localhost:8000")
 API_KEY = os.getenv("RAG_API_KEY", "").strip()
 PAID = os.getenv("BENCH_PAID", "").strip() == "1"
 
-#: 鉴权头名 —— 🔴 **必须是 `X-API-Key`**（见 `api/main.py`）。
+#: 鉴权头名 —— 🔴 **必须是 `X-API-Key`**（见 `app/main.py`）。
 #: ⚠️ 魔搭创空间那边**平台会往每个请求注入 `Authorization`**，所以本仓**不用** `Authorization`；
 #:    本机 docker 那套与它保持一致，⛔ 别在这里换成 Bearer。
 AUTH_HEADERS = {"X-API-Key": API_KEY} if API_KEY else {}

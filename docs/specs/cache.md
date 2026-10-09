@@ -1,11 +1,11 @@
-# `api/cache.py`
+# `app/core/cache.py`
 
 | 项 | 内容 |
 |---|---|
 | **状态** | ✅ **可用（生产）** —— 🔴 **两类完全不同的东西住在同一份文件里**（embedding 缓存 + 对话历史） |
 | **对外提供** | `redis_client` · `get_cache_key` · `get_cached_embedding` · `set_cached_embedding` · `INTERRUPTED_SUFFIX` · `get_chat_history` · `append_chat_history` · `persist_turn` · `HOT_QUERIES` · `warmup_cache` |
-| **谁在用** | **embedding 一路**：`api/embedding_client.py:5`（`:48` `get_cached_embedding` · `:71` `set_cached_embedding`）<br>**历史一路**：`api/api_v1_rag.py:70`（`:721` `get_chat_history` · `:853`/`:890` `persist_turn`）· `api/api_v1_agent.py:80`（`persist_turn` **9 处**）<br>**预热**：`api/main.py:29 → :713` |
-| **测试** | ✅ `api/test_cache_chat_history.py`（**14 条** · 含 `thread_id`/`status` 必填的守卫）· `api/test_cancel_propagation.py` |
+| **谁在用** | **embedding 一路**：`app/rag/embedding_client.py:5`（`:48` `get_cached_embedding` · `:71` `set_cached_embedding`）<br>**历史一路**：`app/routing/api_v1_rag.py:70`（`:721` `get_chat_history` · `:853`/`:890` `persist_turn`）· `app/routing/api_v1_agent.py:80`（`persist_turn` **9 处**）<br>**预热**：`app/main.py:29 → :713` |
+| **测试** | ✅ `app/tests/test_cache_chat_history.py`（**14 条** · 含 `thread_id`/`status` 必填的守卫）· `app/tests/test_cancel_propagation.py` |
 
 ## ✅ 做了什么
 
@@ -39,7 +39,7 @@ data = redis_client.lrange(key, -10, -1)  # 只取最近10条（5轮问答）
 ```
 
 ⚠️ **Python 的 `lst[-10:-1]` 会少一个元素**（右端**不含**），Redis 的 `-1` **是含**的。
-⇒ 两处都写 `-10` / `-1`，**语义不同** —— 本仓 `api/conftest.py:30` 专门为这一点留了注释
+⇒ 两处都写 `-10` / `-1`，**语义不同** —— 本仓 `app/conftest.py:30` 专门为这一点留了注释
 （说明有人在这里绕过一次）。
 
 ⇒ **判据**：读 **Redis 的** `LRANGE` 定义，⛔ 别按 Python 切片推。
@@ -58,9 +58,9 @@ data = redis_client.lrange(key, -10, -1)  # 只取最近10条（5轮问答）
 | `status`（`DEC-055` 决策 3） | 留痕字段一旦有默认值，「忘了传」会**静默**变成假信号 —— 而这条 DEC 的**全部意义**就是「读的人能分辨这一轮说完了没有」 |
 | `thread_id`（`DEC-085` 契约 C） | 有默认值 ⇒「忘了传」**静默**变成"都写进同一个桶" ⇒ 同一人开两个会话**互相串上下文** |
 
-⚠️ **"关键字"这一半也有理由**：位置参数会让 `api/test_cancel_propagation.py` 里
+⚠️ **"关键字"这一半也有理由**：位置参数会让 `app/tests/test_cancel_propagation.py` 里
 `for _, r, c in store` 式的解包 **`ValueError`**（那是**测试夹具**，⛔ 不该被产品签名牵动）。
-🔒 守卫 ⇒ `api/test_cache_chat_history.py`（`:120-124` `TypeError` 那三条 · `:132-136` 分桶 · `:149-153` 跨用户）。
+🔒 守卫 ⇒ `app/tests/test_cache_chat_history.py`（`:120-124` `TypeError` 那三条 · `:132-136` 分桶 · `:149-153` 跨用户）。
 
 ### 4. 🔴 历史键**复用 `session_key`**，⛔ 不是新拼一种
 
@@ -69,7 +69,7 @@ data = redis_client.lrange(key, -10, -1)  # 只取最近10条（5轮问答）
 **再造一套 = 造第二个可能漂的实现。**
 
 ⚠️ **`from session_key import session_key` 放在【函数内】** —— 理由写在 docstring 里：
-`api/cache.py` 在 **import 期**就建 `redis.Redis`，本仓多处（`conftest` / `check_route_auth`）
+`app/core/cache.py` 在 **import 期**就建 `redis.Redis`，本仓多处（`conftest` / `check_route_auth`）
 会**以各种 cwd 导入**它 ⇒ 顶层再拉一个模块会**扩大 import 期面积**。
 ⇒ ⛔ **别把它挪到文件头"整理一下"** —— 那是**有意的**（`warmup_cache` 里那句 `from embedding_client import get_embedding` 同一个写法）。
 

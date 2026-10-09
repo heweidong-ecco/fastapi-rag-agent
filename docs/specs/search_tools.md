@@ -1,11 +1,11 @@
-# `api/search_tools.py`
+# `app/tools/search_tools.py`
 
 | 项 | 内容 |
 |---|---|
 | **状态** | ✅ **可用** —— 但它是**抓网页**的做法：**必应一改版就坏**，⚠️ **坏得响**（如实报失败，⛔ 不退回"让模型编"） |
 | **对外提供** | `web_search(query)` —— 一个 LangChain `@tool` |
-| **谁在用** | **5 个导入点**：`api/mcp_server.py:11`（⇒ 进 `TOOLS` ⇒ 进 LLM 工具表）· `api/agent_graph.py:16` · `api/agent_checkpointer.py:18` · `api/agent_graph_advanced_learning.py:10` · `api/api_v1_rag.py:933`（**函数内**导入） |
-| **测试** | ✅ `api/test_search_tools.py`（**6 条**）—— ⭐ 含一条**结构判据**：「本文件不许出现 LLM 客户端」 |
+| **谁在用** | **5 个导入点**：`app/tools/mcp_server.py:11`（⇒ 进 `TOOLS` ⇒ 进 LLM 工具表）· `app/agent/agent_graph.py:16` · `app/agent/agent_checkpointer.py:18` · `app/agent/agent_graph_advanced_learning.py:10` · `app/routing/api_v1_rag.py:933`（**函数内**导入） |
+| **测试** | ✅ `app/tests/test_search_tools.py`（**6 条**）—— ⭐ 含一条**结构判据**：「本文件不许出现 LLM 客户端」 |
 
 ## ✅ 做了什么
 
@@ -51,7 +51,7 @@ MAX_RESULTS = 8                                  # 只截【给 LLM 的条数】
 ⚠️ **三条里最危险的是天气那条**：格式漂亮、语气笃定、**日期全错** —— 调用方会直接采信。
 
 🔴 **⇒ 谁想在这里加"搜不到就让模型先答一个"的兜底 —— 那正是这次重写要根除的病。**
-`api/test_search_tools.py` 有一条**结构判据**守着（本文件不许出现 LLM 客户端），不是靠自觉。
+`app/tests/test_search_tools.py` 有一条**结构判据**守着（本文件不许出现 LLM 客户端），不是靠自觉。
 
 ### 2. 🔴 "搜不到"是**返回值**，⛔ 不是异常 —— 判据是**前缀**
 
@@ -107,7 +107,7 @@ soup = BeautifulSoup(html, "lxml")
 
 | 文档 | 说明 |
 |---|---|
-| MCP Server 模块（`api/mcp_server.py:11`） | 它把 `web_search` 装进 `TOOLS` ⇒ 进 LLM 的工具表。⛔ **它还没有 spec** ⇒ 本表不给路径 |
+| MCP Server 模块（`app/tools/mcp_server.py:11`） | 它把 `web_search` 装进 `TOOLS` ⇒ 进 LLM 的工具表。⛔ **它还没有 spec** ⇒ 本表不给路径 |
 | `docs/specs/tool_health.md` | 自检会**真调**它一次（20 秒超时那件事） |
 | `docs/specs/agent_graph.md` | 五个导入点中最主要的那个（Agent 的工具链） |
 | `docs/decisions/DEC-051-工具名分派与审批白名单的标识符勘误.md` | 「搜索工具换成 Bing 版」的裁定（旧的 DuckDuckGo 本机不可达） |

@@ -1,11 +1,11 @@
-# `api/rag_pipeline.py`
+# `app/rag/rag_pipeline.py`
 
 | 项 | 内容 |
 |---|---|
 | **状态** | ✅ **可用（生产）** —— `/rag/search` 的**唯一**检索管线。⚠️ 但里面有**一段死代码**和**一条没有过滤的档位** |
 | **对外提供** | `RAGPipeline`（`__init__` · `search_async` · `_rrf_fusion`）· 4 个工厂：`create_fast_pipeline` · `create_accurate_pipeline` · `create_accurate_norerank_pipeline` · `create_full_pipeline` |
-| **谁在用** | 🔴 **1 处**：`api/api_v1_rag.py` 的 `PIPELINE_FACTORIES`（`:558` 建实例 → `:561` `search_async(...)`，`:575` **整个返回体就是它的返回值**） |
-| **测试** | ⛔ **专属用例零条**（`api/test_rag_pipeline.py` **不存在**）。间接：`api/test_rag_billing_wiring.py`（`:291`/`:317` **直接调 `search_async`**）· `api/test_rag_search.py`（走端点） |
+| **谁在用** | 🔴 **1 处**：`app/routing/api_v1_rag.py` 的 `PIPELINE_FACTORIES`（`:558` 建实例 → `:561` `search_async(...)`，`:575` **整个返回体就是它的返回值**） |
+| **测试** | ⛔ **专属用例零条**（`app/test_rag_pipeline.py` **不存在**）。间接：`app/tests/test_rag_billing_wiring.py`（`:291`/`:317` **直接调 `search_async`**）· `app/tests/test_rag_search.py`（走端点） |
 
 ## ✅ 做了什么
 
@@ -55,10 +55,10 @@ timing["total_ms"] = round(...)                  # :165 —— 只有走到这�
 
 🔴 **消费端写 `body["timing"]["total_ms"]` 会在"什么都搜不到"时 `KeyError`** ——
 而那正是**最需要看耗时**的场景（"为什么没结果"）。
-⚠️ `api/test_rag_search.py:281` 那条断言（`>= {rewrite_ms, search_ms, rerank_ms, total_ms}`）
+⚠️ `app/tests/test_rag_search.py:281` 那条断言（`>= {rewrite_ms, search_ms, rerank_ms, total_ms}`）
 **只在有结果的路径上跑** ⇒ **钉不住这个**。
 
-🔴 **判据**：`grep -n 'total_ms' api/rag_pipeline.py` ⇒ 只有**一处**赋值，且在 `:156` 那个 `return` **之后**。
+🔴 **判据**：`grep -n 'total_ms' app/rag/rag_pipeline.py` ⇒ 只有**一处**赋值，且在 `:156` 那个 `return` **之后**。
 
 ### 2. 🔴 `:212` 那个 `elif` 是**死代码** —— 那句"无法回答"**从未执行过**
 
@@ -80,13 +80,13 @@ elif generate_answer and not candidates:   # :212 ← 🔴 【永远为假】
 
 | 处 | 字面量 | 活/死 |
 |---|---|---|
-| `api/rag_pipeline.py:213` | `根据现有资料，无法回答。` | ⚰️ **死** |
-| `api/api_v1_rag.py:702` | `REFUSAL_SENTENCE = "根据现有资料，无法回答"` | ✅ **活**（流式拒答的判据） |
-| `api/answer_with_citations.py:17` | 「…请直接说"根据现有资料，无法回答"」 | ✅ **活**（**写给模型的 prompt**） |
+| `app/rag/rag_pipeline.py:213` | `根据现有资料，无法回答。` | ⚰️ **死** |
+| `app/routing/api_v1_rag.py:702` | `REFUSAL_SENTENCE = "根据现有资料，无法回答"` | ✅ **活**（流式拒答的判据） |
+| `app/rag/answer_with_citations.py:17` | 「…请直接说"根据现有资料，无法回答"」 | ✅ **活**（**写给模型的 prompt**） |
 
 ⇒ ⛔ **别以为改一处就都改了。**
 
-🔴 **判据（可打印）**：`grep -rn '根据现有资料，无法回答' --include='*.py' api/`
+🔴 **判据（可打印）**：`grep -rn '根据现有资料，无法回答' --include='*.py' app/`
 
 ### 3. 🔴 `accurate_norerank` ⛔ **不是"少了一层排序"** —— 是**少了挡不相关文档的那一层**
 
@@ -100,7 +100,7 @@ if self.enable_rerank and candidates:
 ⇒ 🔴 **`enable_rerank=False` ⇒ 这一步【整个不执行】** ⇒ 一个候选都不会被丢
 ⇒ 那一档把 **RRF 排出来的前 N 篇**（**不问相关度**）**直接交给模型**。
 
-⚠️ 而 `api/bad_cases.md:191` 里「设一个向量相似度最低阈值（比如 0.7）」那条建议
+⚠️ 而 `app/eval/bad_cases.md:191` 里「设一个向量相似度最低阈值（比如 0.7）」那条建议
 **与本文件的做法不是同一件事** —— RRF 分数 ≈ `1/(k+rank)`（k=60）**很小**，
 **不能用 0.7 那种余弦阈值判**（这一点文件里 `:148` 写明了）。
 ⇒ 重排分是 **Cross-Encoder logits**，`>= 0` 视为可接受 —— **⛔ 别把这两个分数混着用。**
@@ -110,14 +110,14 @@ if self.enable_rerank and candidates:
 | 分支 | 记账点 |
 |---|---|
 | `citations=False` | **本文件** `:205` `record_from_response(self.answer_llm, response, "answer_generation", …)` |
-| `citations=True` | **`api/answer_with_citations.py` 内部**（靠 `user_name=user_id` 传进去，`:182`） |
+| `citations=True` | **`app/rag/answer_with_citations.py` 内部**（靠 `user_name=user_id` 传进去，`:182`） |
 
 ⇒ ⛔ **别以为"记账在 `rag_pipeline`"** —— 它**只管一半**。
 ⚠️ 这正是 `DEC-073` 那轮"零记账"的形态：**账没记，而测试全绿。**
 
 ⚠️ **还一个坑**：`StrOutputParser` **⛔ 不能接回来**（`:199` 有明文）——
 它把 `AIMessage` **剥成 `str`**，`usage_metadata` 随之丢光 ⇒ **记账拿不到数**。
-🔒 守卫 ⇒ `api/test_rag_billing_wiring.py`（`:304` 那条钉的是 `generate_answer=False` ⇒ **不该记一笔**）。
+🔒 守卫 ⇒ `app/tests/test_rag_billing_wiring.py`（`:304` 那条钉的是 `generate_answer=False` ⇒ **不该记一笔**）。
 
 ### 5. 🔴 记账的 `thread_id` 是**硬编码 `"default"`**
 

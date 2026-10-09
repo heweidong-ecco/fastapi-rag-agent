@@ -1,4 +1,4 @@
-# `api/bm25_index.py`
+# `app/rag/bm25_index.py`
 
 | 项 | 内容 |
 |---|---|
@@ -46,7 +46,7 @@
   **1 处漏了**：`/rag/upload_document`。详解见 `db.md` 的同名条目。
 - ⚠️ **缓存是进程内的** ⇒ 多 worker 部署时**每个 worker 各一份**，
   A worker 插入后清不到 B worker 的缓存。**单 worker 下不成问题，多 worker 下是真问题。**
-- ⚠️ **零测试覆盖本模块直接行为** —— `api/test_isolation.py` 有 2 条**间接**打到
+- ⚠️ **零测试覆盖本模块直接行为** —— `app/tests/test_isolation.py` 有 2 条**间接**打到
   `bm25_search` 的隔离性（`test_bm25_search_only_returns_own_documents` ·
   `test_bm25_still_finds_own_document`），**但打分质量 / 排序正确性无测试**。
 - ⚠️ **`_meaningful_tokens` 只用于入选判定**，⛔ **不参与打分** ——
@@ -56,7 +56,7 @@
 
 | 看代码会以为 | 实际 |
 |---|---|
-| 🔴 **「`scores` 是正的 ⇒ 命中」** | ⛔ **判据已经不是分数了**（2026-10-03 起）—— `scores` **只用来排序**，入选靠 `query_tokens & token_sets[idx]`。<br>⇒ 会看到"分数为负还挺在结果里"而以为坏了 —— **那是有意的**（决策 7）。<br>📌 判据：`grep -n "query_tokens & token_sets" api/bm25_index.py` ⇒ `:135` |
+| 🔴 **「`scores` 是正的 ⇒ 命中」** | ⛔ **判据已经不是分数了**（2026-10-03 起）—— `scores` **只用来排序**，入选靠 `query_tokens & token_sets[idx]`。<br>⇒ 会看到"分数为负还挺在结果里"而以为坏了 —— **那是有意的**（决策 7）。<br>📌 判据：`grep -n "query_tokens & token_sets" app/rag/bm25_index.py` ⇒ `:135` |
 | 🔴 **「`_bm25_cache` 是一份全局索引」** | ⛔ **2026-10-03 起按 `user_id` 分桶**（`:44`）。<br>⚠️ 且 **`invalidate_bm25_cache()` 清【所有】桶**（`:96` `_bm25_cache.clear()`）—— **不是只清某人**。<br>⇒ 插入/删除时**不知道影响谁**，全清是**安全侧**（宁可多重建，⛔ 不可留旧语料）。**代价是重建变频繁** |
 | 🔴 **「BM25 在 `hybrid_search.py` 里」** | ⛔ **不在** —— 那是 **RRF 融合**层。BM25 本体**只在本文件**；`hybrid_search.py` 经 `db` 转发层调它 |
 | 🔴 **「`jieba` 分出来的词都参与"是否重合"判定」** | ⛔ **不是** —— `jieba.cut` 会吐出 `' '` / `'·'` / `'-'` 这类**每篇都有**的词元，拿它们判定 ⇒ **任意两篇都算重合**，判定就废了。<br>⇒ `_NON_WORD`（`:23`）专门剔掉它们，**只用于入选判定** |

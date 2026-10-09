@@ -1,10 +1,10 @@
-# `api/plan_execute.py`
+# `app/agent/plan_execute.py`
 
 | 项 | 内容 |
 |---|---|
 | **状态** | 🟡 **可用** —— 规划 + 逐步**真调用工具**；有超时、有总预算、有重规划、有降级<br>✅ **2026-10-05（批 1 · `S9`/`S10`）**：`⚠️①`（重规划漏传 `user_name`）与 `⚠️②`（成败判定读中文文案）**均已修** ⇒ **`⚠️` 表 6 行里还剩 ③④⑤⑥ 共 4 行**（⚠️ 都是**说明**不是缺陷）<br>⛔ **原「1 处真缺陷 + 5 处会误判」的账已销**（`S11` 见 `🟡 做到哪`）<br>🔵 **2026-10-04（`B1` 剩余 4 条链）：`_invoke_llm` / `plan_task` 各加一个 `on_token` 形参** —— 给 `/agent/plan_execute/stream` 用。<br>· ⚠️ **默认 `None` ⇒ 行为一字符不变**（`on_token is None` 时仍走 `llm.invoke`，`:155`）。<br>· ⚠️ **⛔ 它只让「规划段」能流** —— `execute_plan` / `generate_dynamic_input` / 质量检查**都还是非流式**（业务方 2026-10-04 裁「只流规划段」）⇒ **规划段之后是一长段静默**。<br>· 🔴 **流出的是【正在生成的 JSON 片段】**（提示词要求严格 JSON）⇒ ⛔ 前端别把流到的文本直接渲染成计划，只当"规划中"指示器。<br>· ⭐ **一条实现约束**：聚合循环**必须遍历【所有】块**（含 `content` 为空的）—— provider 把 `usage_metadata` 挂在**最后一块**上，跳过它**账就没了**（实测，探针 `探针-流式与记账.py`）。<br>· 📄 端点在 `docs/specs/api_v1_agent.md` Task 7 · 桥在 `_ThreadTokenBridge`<br>✅ 2026-10-01：三个 `_llm` 接上 `MAX_TOKENS_AGENT`（`B7`）<br>✅ 2026-10-02（`①b` Task 5）：三个 `_llm` **改走 `llm_factory.make_llm("chat", "agent")`**（现于 `:92` / `:279` / `:486`）—— `model`/`api_key`/`base_url`/`max_tokens` 不再写在本地。<br>⚠️ **超时/重试没丢**：`timeout` / `max_retries` 走 `make_llm` 的 `**extra` **逐点透传**，**值一字符未变**（30/20/15 + `LLM_MAX_RETRIES`）。<br>⚠️ `executor_llm` 的 `temperature=0.1` 是**本文件特有的**逐点调参，仍写在调用点上<br>⚠️ **行号口径**：本 spec 的行号为 **2026-10-04 之后**的实测值（`grep -n` 复核）；批 4 之后**执行段整体下移 ~28 行**，⛔ 别拿旧行号去找 |
 | **对外提供** | `plan_task(goal, user_name=…, on_token=None)` · `execute_plan` · `execute_plan_with_replan` · `BudgetExceededError` · 🆕 **`StepResult(ok, text, error)`**（2026-10-05 · `S10`）· 四个模块级常量（`PLANNER_LLM_TIMEOUT` 等三个超时 + 🆕 **`MAX_REPLANS`**） |
-| **谁在用** | `api_v1_agent.py` 的 `POST /agent/plan_execute`（`:633` · **唯一生产入口**）· 🆕 `POST /agent/plan_execute/stream`（`:685`，经 `_ThreadTokenBridge`）· `api/test_plan_execute_tools.py`（**26 条**，2026-10-05 由 22 增）· 🆕 `api/test_agent_stream_chains.py` · 🆕 **`api/test_plan_task_user_name_wiring.py`**（AST 守卫） |
+| **谁在用** | `api_v1_agent.py` 的 `POST /agent/plan_execute`（`:633` · **唯一生产入口**）· 🆕 `POST /agent/plan_execute/stream`（`:685`，经 `_ThreadTokenBridge`）· `app/tests/test_plan_execute_tools.py`（**26 条**，2026-10-05 由 22 增）· 🆕 `app/tests/test_agent_stream_chains.py` · 🆕 **`app/tests/test_plan_task_user_name_wiring.py`**（AST 守卫） |
 | **规模** | **696 行**（`wc -l`；⚠️ 2026-10-05 由 620 增到 696 —— 批 1 的 `S9`/`S10`/`S11` 在**代码与注释**上都加了量）· ⚠️ **文件内注释极厚**（绝大部分"为什么"已写在里面） |
 
 > ⚠️ **本 spec 不复述文件里已有的注释** —— 那会变成"两处真相"。**这里只写【代码与注释里都没有的】**。
@@ -24,7 +24,7 @@
 
 - ✅ **`:383` 的重规划调用漏传 `user_name`** —— **2026-10-05（`S9`）已修**（现于 `:428`，`plan_task(replan_context, user_name)`）。见 ⚠️①
 - ✅ **重规划那条路的 `user_name` 没有测试覆盖** —— **2026-10-05 已补两条**：
-  `test_重规划把真实发起人传下去`（行为侧）+ **`api/test_plan_task_user_name_wiring.py`**（AST 守卫）。
+  `test_重规划把真实发起人传下去`（行为侧）+ **`app/tests/test_plan_task_user_name_wiring.py`**（AST 守卫）。
   ⚠️ **旧 stub 是 `lambda ctx: [...]`（只接一个参数）⇒ 发现不了漏传** —— 这个形状本身就是那个洞的旁证；
   现已改成收 `user_name`。
 - ✅ **`max_replans` 已提成模块级常量 `MAX_REPLANS = 5`**（**2026-10-05 · `S11`**，现于 `:96`，与三个超时放一起）
@@ -37,7 +37,7 @@
 
 | 看代码会以为 | 实际 |
 |---|---|
-| ✅ **① 「重规划也会算到发起人头上」** | **2026-10-05（`S9`）已修** —— 原先是 `:383` 的 **`plan_task(replan_context)`，漏传了 `user_name`** ⇒ 走默认 `"unknown"`。<br>**后果两条**：<br>· `check_budget_before_call("unknown")` ⇒ **不受该用户的预算约束**<br>· `record_usage(user_name="unknown")` ⇒ **算不到他头上**（`token_usage_logs` 里是 `unknown`）<br>⚠️ **最多 5 次重规划** ⇒ **最多 5 次"白跑且不记账"的规划调用**。<br>🔴 **它和 `:600` 附近记录的是同一类缺陷** —— 那里（`dynamic_input`）漏传已修，**并在注释里写了教训「改完要按行号核，别只看替换成功了几处」**。<br>📌 **教训写了（是文字），但这个文件里的另一处照样漏了 9 天。** ⇒ 本仓立场「**只有文字就漏，结构才执行**」<br>⇒ 现由 **`api/test_plan_task_user_name_wiring.py`**（**从 AST 推出来**的门，覆盖直接调用 + `asyncio.to_thread` 回调两种写法）兜底。<br>⚠️ **`plan_task(` 全仓 3 处**（2026-10-05 实测）：`:428` · `api_v1_agent.py:836` · `api_v1_agent.py:912` —— **后两处本来就没漏**。 |
+| ✅ **① 「重规划也会算到发起人头上」** | **2026-10-05（`S9`）已修** —— 原先是 `:383` 的 **`plan_task(replan_context)`，漏传了 `user_name`** ⇒ 走默认 `"unknown"`。<br>**后果两条**：<br>· `check_budget_before_call("unknown")` ⇒ **不受该用户的预算约束**<br>· `record_usage(user_name="unknown")` ⇒ **算不到他头上**（`token_usage_logs` 里是 `unknown`）<br>⚠️ **最多 5 次重规划** ⇒ **最多 5 次"白跑且不记账"的规划调用**。<br>🔴 **它和 `:600` 附近记录的是同一类缺陷** —— 那里（`dynamic_input`）漏传已修，**并在注释里写了教训「改完要按行号核，别只看替换成功了几处」**。<br>📌 **教训写了（是文字），但这个文件里的另一处照样漏了 9 天。** ⇒ 本仓立场「**只有文字就漏，结构才执行**」<br>⇒ 现由 **`app/tests/test_plan_task_user_name_wiring.py`**（**从 AST 推出来**的门，覆盖直接调用 + `asyncio.to_thread` 回调两种写法）兜底。<br>⚠️ **`plan_task(` 全仓 3 处**（2026-10-05 实测）：`:428` · `api_v1_agent.py:836` · `api_v1_agent.py:912` —— **后两处本来就没漏**。 |
 | ✅ **② 「成败判定靠返回值/异常」** | **2026-10-05（`S10`）已修** —— 原先**靠【中文子串匹配】**（`:362` `if "执行失败（已重试" in step_result` · `:557` `if "执行失败" in step_result`）。<br>⚠️ 那条判据与 `:587` 那句**格式化文案**是**耦合**的：改一个字的措辞 ⇒ **失败判定静默失效**；<br>⚠️ 更险的是：**工具的返回内容里恰好出现「执行失败」四个字**，正常结果也会被判成失败、**凭空触发一次重规划**。<br>📌 与文件自己强调的「失败一律**抛异常**不吞成字符串」**方向相反**。<br>⇒ 现在 `execute_step_with_retry` / `execute_step_with_quality_check` **返回 `StepResult(ok, text, error)`**，调用方看 `.ok` 字段。<br>🔴 **`text`（用户可见文案）一字未改** —— `S10` 换的是**判定依据**，⛔ 不是措辞。<br>⚠️ **`ok` 与 `text` 不总是同向**：质量不达标那条出口仍是 `ok=True`（改前也不触发重规划）。<br>📄 回归用例 3 条：`test_工具正常返回里恰好含那句失败文案时不许触发重规划`（决定性）· `test_真失败仍然会触发重规划`（反向守卫）· `test_重试耗尽返回结构化结果且文案逐字不变`（契约） |
 | ⚠️ **③ 「`failed_tools` 把这个工具拉黑了」** | ⛔ **只在【这一次】计划里** —— `failed_tools` / `tool_failure_counts` 都是 `execute_plan_with_replan` 的**局部变量**（`:298-299`）⇒ **不跨请求、不过期**。<br>📌 **这正是 `B11` / `L2` 要做的"模型级黑名单"缺的那一半**（那个需要**跨请求**的状态）。 |
 | ⚠️ **④ 「注册表里 4 个工具都能被执行层用」** | ⚠️ **要看入参是不是单一字段** —— `_tool_arg_field` 只认**恰好一个**字段的工具；否则 `execute_single_step` 抛 `ValueError`（`:611` / `:615`）。<br>⇒ **执行层的可用工具 ⊆ 注册表**。 |
@@ -50,7 +50,7 @@
 |---|---|
 | `docs/specs/api_v1_agent.md` | **唯一生产入口** `POST /agent/plan_execute`（`:633`，含 `asyncio.to_thread` 与 `BudgetExceededError` 的接法）· 🆕 **流式版** `POST /agent/plan_execute/stream`（`:685`）—— 见该 spec 的 **Task 7** |
 | `docs/specs/sse.md` | 🆕 **本链流的骨架** —— ⚠️ 但本链的用法有个**独有之处**：`extract=None`（桥吐出来的**就是文本**，⛔ 不是图的消息块） |
-| `docs/specs/token_tracker.md` | `check_budget_before_call` / `record_usage` 的本尊；✅ **`B7` 的 3 处已在 2026-10-01 接完**（现于 `:92` / `:279` / `:486`），2026-10-02 起**又收进 `api/llm_factory.py`** |
+| `docs/specs/token_tracker.md` | `check_budget_before_call` / `record_usage` 的本尊；✅ **`B7` 的 3 处已在 2026-10-01 接完**（现于 `:92` / `:279` / `:486`），2026-10-02 起**又收进 `app/core/llm_factory.py`** |
 | `docs/specs/main.md` | ⚠️ **中间件抛的异常接不住**（`:186` 那条警告）—— 本文件在**路由层**抛，安全 |
 | `后端补齐清单` **B7** | ✅ 三个 `ChatOpenAI` **已接 `MAX_TOKENS_AGENT`**（2026-10-01）· **2026-10-02 起收进 `llm_factory`** |
 | `fastapi-rag-agent-TODO待办/探针-流式与记账.py` | 🆕 ⚠️ **`B1` 的依据**：链路改 `.stream()` 后 `usage_metadata` **还在不在**（🔴 会花钱）—— 结论：在，但**挂在最后一块**上 |
@@ -81,7 +81,7 @@
 
 ## 目标
 
-把 `api/plan_execute.py` 上**已核实的**三条收掉：**成败判定读中文文案**（`S10`）· **重规划漏传 `user_name`**（`S9`）· **`max_replans` 是函数里的魔法数**（`S11`）。
+把 `app/agent/plan_execute.py` 上**已核实的**三条收掉：**成败判定读中文文案**（`S10`）· **重规划漏传 `user_name`**（`S9`）· **`max_replans` 是函数里的魔法数**（`S11`）。
 
 **验收 = 三条各有一条【会真的红】的用例** —— 跑 `bash scripts/ci-local.sh` 全绿，且**把修复回退掉时它会红**（见每个 Task 的「变异自证」）。
 
@@ -92,13 +92,13 @@
 
 ## Tech Stack
 
-Python 3.10 · `pytest` · `monkeypatch` · 全**离线**（⛔ 不连真 LLM、不连库 —— 这是 `api/test_plan_execute_tools.py` 现有的测法，照它）
+Python 3.10 · `pytest` · `monkeypatch` · 全**离线**（⛔ 不连真 LLM、不连库 —— 这是 `app/tests/test_plan_execute_tools.py` 现有的测法，照它）
 
 ## Global Constraints
 
 | # | 约束 | 出处 / 判据 |
 |---|---|---|
-| **C1** | **测试一律 `bash scripts/ci-local.sh`** —— ⛔ 不许拿裸 `pytest api/ -m "not integration and not needs_db" -q` 顶替 | `scripts/ci-local.sh` 文件头；**同款命令 ≠ 同款环境**（`.env` / Redis 两轴） |
+| **C1** | **测试一律 `bash scripts/ci-local.sh`** —— ⛔ 不许拿裸 `pytest app/ -m "not integration and not needs_db" -q` 顶替 | `scripts/ci-local.sh` 文件头；**同款命令 ≠ 同款环境**（`.env` / Redis 两轴） |
 | **C2** | 🔴 **⛔ 不改任何用户可见文案** —— `S10` **只换判定依据**，`:587` 那句 `执行失败（已重试{N}次）：…` **必须逐字不动** | 本仓「一份内容只在一处」+ `S10` 的定义就是**换依据不换话**；Task 1 有专门一条用例钉它 |
 | **C3** | **⛔ 不碰 `.claude/worktrees/`** —— 扫描类判据要把它排除 | 业务方 2026-10-01：「worktree 在做的事情，不要动它」 |
 | **C4** | **本计划的 `:NNN` 行号是 2026-10-05 实测** —— 动手前用 `grep -n` **复核**，⛔ 别照着行号直接跳 | 本仓「拿动作成功当结果正确」族；`spec` 顶部那条「行号口径」已预警 |
@@ -109,18 +109,18 @@ Python 3.10 · `pytest` · `monkeypatch` · 全**离线**（⛔ 不连真 LLM、
 
 | 位置 | 现在长什么样 | `S10` 之后 |
 |---|---|---|
-| `api/test_plan_execute_tools.py:217-221` | `lambda step, context, goal, name: "执行失败（已重试1次）：假装失败"` | 要返回 `P.StepResult(ok=False, …)`；**顺带补上能收 `user_name` 的位置**（`S9`） |
-| `api/test_plan_execute_tools.py:393` | `lambda *a, **k: called.append(1) or "不该被调用"` | **不用改** —— 它**从不被调用**（那条用例是「预算超了 ⇒ 一步都不许执行」），字符串值不会被读 |
-| `api/test_plan_execute_tools.py:433` | `lambda *a, **k: "假结果"`（替身 `execute_step_with_retry`） | 🔴 **会炸** —— 改完 `"假结果".ok` 是 `AttributeError`；要改成 `P.StepResult(ok=True, text="假结果")` |
+| `app/tests/test_plan_execute_tools.py:217-221` | `lambda step, context, goal, name: "执行失败（已重试1次）：假装失败"` | 要返回 `P.StepResult(ok=False, …)`；**顺带补上能收 `user_name` 的位置**（`S9`） |
+| `app/tests/test_plan_execute_tools.py:393` | `lambda *a, **k: called.append(1) or "不该被调用"` | **不用改** —— 它**从不被调用**（那条用例是「预算超了 ⇒ 一步都不许执行」），字符串值不会被读 |
+| `app/tests/test_plan_execute_tools.py:433` | `lambda *a, **k: "假结果"`（替身 `execute_step_with_retry`） | 🔴 **会炸** —— 改完 `"假结果".ok` 是 `AttributeError`；要改成 `P.StepResult(ok=True, text="假结果")` |
 
 ---
 
 ## Task 1 · `S10` · 成败判定：**中文子串 → 结构化返回**
 
 **Files:**
-- Modify: `api/plan_execute.py` —— ① 新增 `StepResult`（放 `:127` `BudgetExceededError` 旁边）② `execute_step_with_retry`（`:571`）③ `execute_step_with_quality_check`（`:533`）④ `execute_plan_with_replan` 的**两处判定**（`:362` `:557`）与**取值处**（`:378` `:392` `:400`）
-- Modify: `api/test_plan_execute_tools.py` —— 上面 C6 表里的 **两处**替身（`:217` / `:433`）
-- Test: `api/test_plan_execute_tools.py` —— 新增 3 条
+- Modify: `app/agent/plan_execute.py` —— ① 新增 `StepResult`（放 `:127` `BudgetExceededError` 旁边）② `execute_step_with_retry`（`:571`）③ `execute_step_with_quality_check`（`:533`）④ `execute_plan_with_replan` 的**两处判定**（`:362` `:557`）与**取值处**（`:378` `:392` `:400`）
+- Modify: `app/tests/test_plan_execute_tools.py` —— 上面 C6 表里的 **两处**替身（`:217` / `:433`）
+- Test: `app/tests/test_plan_execute_tools.py` —— 新增 3 条
 
 **Interfaces:**
 - **Produces（给 Task 2 / 3 用）**：`plan_execute.StepResult` —— `@dataclass(frozen=True)`，字段 `ok: bool` · `text: str` · `error: Optional[str] = None`
@@ -134,7 +134,7 @@ Python 3.10 · `pytest` · `monkeypatch` · 全**离线**（⛔ 不连真 LLM、
 > **「质量差」不等于「这一步失败了」**（改前也没触发重规划，行为一致）。
 > ⛔ 别顺手把它改成 `ok=False` —— 那是**改行为**，不在 `S10` 范围内。
 
-- [ ] **Step 1: 写会红的用例（3 条）** —— 追加到 `api/test_plan_execute_tools.py` 末尾
+- [ ] **Step 1: 写会红的用例（3 条）** —— 追加到 `app/tests/test_plan_execute_tools.py` 末尾
 
 > ⚠️ 三条是**一组**，各管一件事，⛔ 一条都别省：
 > · **①** 决定性判据（改前**因为这个理由**红）
@@ -236,7 +236,7 @@ def test_重试耗尽返回结构化结果且文案逐字不变(monkeypatch):
 
 - [ ] **Step 1b: 改【旧测试替身】两处**（⛔ 不改就是一堆 `TypeError` 假红）
 
-`api/test_plan_execute_tools.py:217-221`（`test_downgraded_step_keeps_the_real_reason`）：
+`app/tests/test_plan_execute_tools.py:217-221`（`test_downgraded_step_keeps_the_real_reason`）：
 
 ```python
     # ⚠️ `S10` 起要返回 `StepResult`；`*a, **k` 让它同时兼容 `S9` 之后多传的 `user_name`
@@ -245,7 +245,7 @@ def test_重试耗尽返回结构化结果且文案逐字不变(monkeypatch):
                                                      error="假装失败"))
 ```
 
-`api/test_plan_execute_tools.py:433`（`test_dynamic_input_receives_the_real_user_name`）：
+`app/tests/test_plan_execute_tools.py:433`（`test_dynamic_input_receives_the_real_user_name`）：
 
 ```python
     monkeypatch.setattr(P, "execute_step_with_retry", lambda *a, **k: P.StepResult(ok=True, text="假结果"))
@@ -264,7 +264,7 @@ Expected: **红**，且**摘要**必须是 `1 failed, 1 passed, …` 里那 1 �
 ⚠️ **判据**：看到 `TypeError: argument of type 'str' is not iterable` 之类**别的**错 ⇒ **停**，
 说明 RED 的理由不对 —— 先查 `Step 1b` 的替身有没有改全。
 
-- [ ] **Step 3: 实现（`api/plan_execute.py`）**
+- [ ] **Step 3: 实现（`app/agent/plan_execute.py`）**
 
 **(a)** `:27` 那行 typing 导入加 `Optional`；文件顶部 import 区加 `dataclass`：
 
@@ -379,7 +379,7 @@ Expected: **绿**。⚠️ **判据是条数**：`plan_execute` 相关用例 `+3
 
 ```bash
 cd /Users/heweidong/Desktop/Product/agent-projects/projects/fastapi-rag-agent
-git add api/plan_execute.py api/test_plan_execute_tools.py docs/specs/plan_execute.md
+git add app/agent/plan_execute.py app/tests/test_plan_execute_tools.py docs/specs/plan_execute.md
 git commit -m "fix(plan_execute) 成败判定从中文子串换成结构化返回（S10）"
 ```
 
@@ -388,9 +388,9 @@ git commit -m "fix(plan_execute) 成败判定从中文子串换成结构化返�
 ## Task 2 · `S9` · 重规划漏传 `user_name`
 
 **Files:**
-- Modify: `api/plan_execute.py:383` —— `plan_task(replan_context)` → `plan_task(replan_context, user_name)`
-- Create: `api/test_plan_task_user_name_wiring.py` —— AST 守卫（⚠️ `test_*` 前缀 ⇒ **不触发**模块 spec 门，`.claude/hooks/pre-commit-gates.py:86`）
-- Test: `api/test_plan_execute_tools.py` —— 新增 1 条
+- Modify: `app/agent/plan_execute.py:383` —— `plan_task(replan_context)` → `plan_task(replan_context, user_name)`
+- Create: `app/tests/test_plan_task_user_name_wiring.py` —— AST 守卫（⚠️ `test_*` 前缀 ⇒ **不触发**模块 spec 门，`.claude/hooks/pre-commit-gates.py:86`）
+- Test: `app/tests/test_plan_execute_tools.py` —— 新增 1 条
 
 **Interfaces:**
 - **Consumes**：`plan_task(user_goal: str, user_name: str = "unknown", on_token=None) -> List[Dict]`（`:208`，**签名不变**，本 Task 只是「调用它时把 `user_name` 传上」）
@@ -398,7 +398,7 @@ git commit -m "fix(plan_execute) 成败判定从中文子串换成结构化返�
 
 > ### 🔴 **执行记录：计划漏了一处**（2026-10-05 实际做的时候才发现）
 >
-> 本计划**只列了 `api/test_plan_execute_tools.py` 的两处替身**（`S10` 那两处）。
+> 本计划**只列了 `app/tests/test_plan_execute_tools.py` 的两处替身**（`S10` 那两处）。
 > 实际一跑，**`test_downgraded_step_keeps_the_real_reason` 的 `plan_task` 替身也红了** ——
 > 它是 `lambda ctx: [_step("calculator") for _ in range(5)]`，**只收一个参数**
 > ⇒ 调用点改成传两个之后 `TypeError`。
@@ -419,9 +419,9 @@ git commit -m "fix(plan_execute) 成败判定从中文子串换成结构化返�
 > **而重规划那处照样漏着**，一直到 2026-09-30 `/specs` 核账才被挖出来（就是本文件 ⚠️①）。
 >
 > ⇒ **教训写在注释里不管用** ⇒ 把它变成一道**从代码里推出来的**门。
-> 📌 同型判据的先例：`api/test_bm25_cache_invalidation_wiring.py`（DEC-063）。
+> 📌 同型判据的先例：`app/tests/test_bm25_cache_invalidation_wiring.py`（DEC-063）。
 
-- [ ] **Step 1: 写会红的用例（`api/test_plan_execute_tools.py` 末尾追加）**
+- [ ] **Step 1: 写会红的用例（`app/tests/test_plan_execute_tools.py` 末尾追加）**
 
 ```python
 def test_重规划把真实发起人传下去(monkeypatch):
@@ -466,17 +466,17 @@ Expected: **红**，且失败的是 `test_重规划把真实发起人传下去`�
 
 - [ ] **Step 3: 实现 —— 一行**
 
-`api/plan_execute.py:383`：
+`app/agent/plan_execute.py:383`：
 
 ```python
             # ⚠️ `user_name` 必须传下去 —— 否则这次规划走 `"unknown"`：
             #    `check_budget_before_call("unknown")` 不受该用户预算约束，
             #    `record_usage(user_name="unknown")` 也不记在他头上（`S9`）。
-            # 📌 同族的漏传在本文件已犯过两次；现由 `api/test_plan_task_user_name_wiring.py` 兜。
+            # 📌 同族的漏传在本文件已犯过两次；现由 `app/tests/test_plan_task_user_name_wiring.py` 兜。
             new_plan = plan_task(replan_context, user_name)
 ```
 
-- [ ] **Step 4: 写【AST 守卫】——新文件 `api/test_plan_task_user_name_wiring.py`**
+- [ ] **Step 4: 写【AST 守卫】——新文件 `app/tests/test_plan_task_user_name_wiring.py`**
 
 ```python
 """守卫：**每一个 `plan_task` 调用点都必须把 `user_name` 传下去**。
@@ -489,7 +489,7 @@ Expected: **红**，且失败的是 `test_重规划把真实发起人传下去`�
 直到 2026-09-30 `/specs` 核账才挖出来（`docs/specs/plan_execute.md` ⚠️①）。
 
 ⇒ **教训写在注释里不管用**（本仓原话：**只有文字就漏，结构才执行**）
-⇒ 把它变成一道**从代码里推出来的**门。📌 先例：`api/test_bm25_cache_invalidation_wiring.py`（DEC-063）。
+⇒ 把它变成一道**从代码里推出来的**门。📌 先例：`app/tests/test_bm25_cache_invalidation_wiring.py`（DEC-063）。
 
 ## 判据：`plan_task` 出现在实参位置上时，那一组实参里必须带 `user_name`
 
@@ -572,7 +572,7 @@ Expected: **两条同时红** —— `test_重规划把真实发起人传下去`
 
 ```bash
 cd /Users/heweidong/Desktop/Product/agent-projects/projects/fastapi-rag-agent
-git add api/plan_execute.py api/test_plan_execute_tools.py api/test_plan_task_user_name_wiring.py docs/specs/plan_execute.md
+git add app/agent/plan_execute.py app/tests/test_plan_execute_tools.py app/tests/test_plan_task_user_name_wiring.py docs/specs/plan_execute.md
 git commit -m "fix(plan_execute) 重规划补传 user_name，并加一道从 AST 推出来的守卫（S9）"
 ```
 
@@ -581,8 +581,8 @@ git commit -m "fix(plan_execute) 重规划补传 user_name，并加一道从 AST
 ## Task 3 · `S11` · `max_replans` → 模块级 `MAX_REPLANS`
 
 **Files:**
-- Modify: `api/plan_execute.py` —— ① `:87` 附近加常量 ② `:301` 删局部变量 ③ `:312` `:407` `:408` 三处引用
-- Test: `api/test_plan_execute_tools.py` —— 新增 1 条
+- Modify: `app/agent/plan_execute.py` —— ① `:87` 附近加常量 ② `:301` 删局部变量 ③ `:312` `:407` `:408` 三处引用
+- Test: `app/tests/test_plan_execute_tools.py` —— 新增 1 条
 
 **Interfaces:**
 - **Consumes**：`P.StepResult`（Task 1）、`plan_task(ctx, user_name)` 调用形式（Task 2）
@@ -681,7 +681,7 @@ Run: `bash scripts/ci-local.sh`
 
 **① 按位置核，⛔ 别只数「改了几处」**（本仓前科：盲替换命中注释、真行没改到 —— `:546-549` 那段注释记的就是这个）：
 
-Run: `grep -n 'max_replans\|MAX_REPLANS' api/plan_execute.py`
+Run: `grep -n 'max_replans\|MAX_REPLANS' app/agent/plan_execute.py`
 Expected: **4 行** —— 定义 1 行 + 引用 3 行，**全部是大写** `MAX_REPLANS`，
 **小写 `max_replans` 零命中**。⚠️ 还剩小写 ⇒ 漏改了一处。
 
@@ -700,7 +700,7 @@ Expected: **4 行** —— 定义 1 行 + 引用 3 行，**全部是大写** `MA
 
 ```bash
 cd /Users/heweidong/Desktop/Product/agent-projects/projects/fastapi-rag-agent
-git add api/plan_execute.py docs/specs/plan_execute.md
+git add app/agent/plan_execute.py docs/specs/plan_execute.md
 git commit -m "refactor(plan_execute) max_replans 提成模块级 MAX_REPLANS（S11）"
 ```
 

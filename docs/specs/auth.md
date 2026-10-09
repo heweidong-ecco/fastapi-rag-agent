@@ -1,11 +1,11 @@
-# `api/auth.py`
+# `app/access/auth.py`
 
 | 项 | 内容 |
 |---|---|
 | **状态** | ✅ **可用（生产）** —— 两条并行的认证：**API Key**（查库）与**登录口令**（比环境变量） |
 | **对外提供** | `generate_api_key()` · `hash_api_key(k)` · `ACTIVE_PREDICATE` · `create_user_api_key(user_name, expire_days=30)` · `ensure_admin_exists(logger=None)` · `verify_api_key(api_key)` · `authenticate_user(user_name, password)` · `_get_users_db()` · `_is_expired()` |
-| **谁在用** | 🔴 **`verify_api_key` 有 3 个消费口**：`api/deps.py:13` · **`api/main.py:163`** · **`api/main.py:204`**。另：`api/api_v1.py:21`（`:71` `authenticate_user` 登录 · `:156` `create_user_api_key`）· `api/main.py:16 → :712` `ensure_admin_exists` · `scripts/issue_api_key.py:34/39` |
-| **测试** | ✅ `api/test_auth.py`（5）· `api/test_auth_db_unavailable.py`（**22**）· `api/test_auth_api_key_active.py`（5）· `api/test_auth_ensure_admin_exists.py`（8） |
+| **谁在用** | 🔴 **`verify_api_key` 有 3 个消费口**：`app/routing/deps.py:13` · **`app/main.py:163`** · **`app/main.py:204`**。另：`app/routing/api_v1.py:21`（`:71` `authenticate_user` 登录 · `:156` `create_user_api_key`）· `app/main.py:16 → :712` `ensure_admin_exists` · `scripts/issue_api_key.py:34/39` |
+| **测试** | ✅ `app/tests/test_auth.py`（5）· `app/tests/test_auth_db_unavailable.py`（**22**）· `app/tests/test_auth_api_key_active.py`（5）· `app/tests/test_auth_ensure_admin_exists.py`（8） |
 
 ## ✅ 做了什么
 
@@ -38,7 +38,7 @@
 自检只 `COUNT(*)` **数行数**、不看 `is_active` ⇒ `issue_api_key.py admin --revoke` 之后，
 **自检照样报「管理员账户已存在」，而认证侧一把都过不去** ⇒ **admin 锁死，而日志说一切正常。**
 
-🔴 **判据**：`grep -n 'ACTIVE_PREDICATE\|_is_expired' api/auth.py` ⇒ 两个定义 + 各自的**两个**使用点。
+🔴 **判据**：`grep -n 'ACTIVE_PREDICATE\|_is_expired' app/access/auth.py` ⇒ 两个定义 + 各自的**两个**使用点。
 
 > ⚠️ **必须带 `COALESCE`**：迁移建列时是 `nullable=True`，`is_active IS NULL` 的老行会被 `is_active = 1`
 > **静默排除**（`DEC-085` 契约 D）⇒ 老 key 集体失效，而用户只看到一句"凭据无效"。
@@ -59,9 +59,9 @@
 ⇒ 取向：**凭据不行 ⇒ 换 key；认证服务不行 ⇒ 重试、⛔ 别换 key。**
 
 ⚠️ **捕获范围是 `psycopg2.Error`**，⛔ **不是 `except Exception`** ——
-宽捕获会把**代码 bug** 伪装成"库挂了"，而且会**吞掉** `api/test_rate_limit_identity.py` 的 `_no_db` 守卫
+宽捕获会把**代码 bug** 伪装成"库挂了"，而且会**吞掉** `app/tests/test_rate_limit_identity.py` 的 `_no_db` 守卫
 （它靠抛 `AssertionError` 抓"谁碰了库"）⇒ **那道门静默失效**。
-🔒 守卫 ⇒ `api/test_auth_db_unavailable.py::test_非数据库异常必须照样冒泡`。
+🔒 守卫 ⇒ `app/tests/test_auth_db_unavailable.py::test_非数据库异常必须照样冒泡`。
 
 🔴 **这个约定有 3 个消费口**（`deps.py:13` + `main.py:163` + `main.py:204`）——
 ⇒ ⛔ **改它要三处一起看**；只看 `deps.py` 会漏掉中间件那两处。
@@ -70,7 +70,7 @@
 
 它要读的 `is_active` 列，在**老库**里是靠 `create_table()` 里那句 `ALTER TABLE api_keys ADD COLUMN` 补上的（`DEC-086`）
 ⇒ **顺序反了就是 `UndefinedColumn`，应用直接起不来。**
-🔒 守卫 ⇒ `api/test_auth_ensure_admin_exists.py::test_自检在建表之后调用`（调用点在 `api/main.py:712`）。
+🔒 守卫 ⇒ `app/tests/test_auth_ensure_admin_exists.py::test_自检在建表之后调用`（调用点在 `app/main.py:712`）。
 
 ### 5. 🔴 `ensure_admin_exists` 的**第 3 种情形不自动补发** —— 这是**决定**，⛔ 不是遗漏
 

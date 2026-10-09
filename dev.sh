@@ -18,7 +18,7 @@ done
 echo "PostgreSQL 已就绪。"
 
 echo "启动 FastAPI 服务（本地 venv + 热重载）..."
-cd api
+cd app
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 # =============================================
 # 运行前执行 chmod +x dev.sh，然后 bash dev.sh。

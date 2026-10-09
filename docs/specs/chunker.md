@@ -1,11 +1,11 @@
-# `api/chunker.py`
+# `app/rag/chunker.py`
 
 | 项 | 内容 |
 |---|---|
 | **状态** | 🟢 **可用（2026-10-08 起）** —— **六档**（新增 `faq`）· 有测试了<br>⚠️ **但"能选"≠"被选了"**：默认路径仍只走两档，后四档**只有显式传 `doc_type` 才用得上** |
 | **对外提供** | `get_text_splitter(doc_type)` · `split_text(text, doc_type)` · `split_text_with_filter(text, doc_type, min_length=20)` · `CHUNK_CONFIGS` · `DEFAULT_SEPARATORS` |
-| **谁在用** | 🔴 **生产调用点只有 1 处**：`api/api_v1_rag.py` 的 `upload_document`（文档上传时切块）。⛔ 别处没有 |
-| **测试** | ✅ **2026-10-08 起**：`api/test_rag_upload_doc_type.py`（**10 条** —— 在本模块与上传端点之间钉「分档」契约：不传/传了/空白/未知 四种情形 + 档位表本身）<br>⚠️ **它测的是"档位选对了没有"，⛔ 不是"切出来的块好不好"** —— 后者**没有自动尺子** |
+| **谁在用** | 🔴 **生产调用点只有 1 处**：`app/routing/api_v1_rag.py` 的 `upload_document`（文档上传时切块）。⛔ 别处没有 |
+| **测试** | ✅ **2026-10-08 起**：`app/tests/test_rag_upload_doc_type.py`（**10 条** —— 在本模块与上传端点之间钉「分档」契约：不传/传了/空白/未知 四种情形 + 档位表本身）<br>⚠️ **它测的是"档位选对了没有"，⛔ 不是"切出来的块好不好"** —— 后者**没有自动尺子** |
 
 ## ✅ 做了什么
 
@@ -48,7 +48,7 @@
 🔴 **2026-10-08 之前**，全仓唯一调用点写的是（**只有两个取值**）：
 
 ```python
-# api/api_v1_rag.py（旧）
+# app/routing/api_v1_rag.py（旧）
 doc_type = "legal" if ext == "pdf" else "technical"
 ```
 
@@ -66,7 +66,7 @@ if doc_type not in CHUNK_CONFIGS:
 
 🔴 **判据（可打印）**：
 ```bash
-grep -rn 'doc_type' api/ | grep -v '^api/chunker.py'
+grep -rn 'doc_type' app/ | grep -v '^app/rag/chunker.py'
 ```
 ⇒ `api_v1_rag.py` 的形参 + 那两句 + `import`；⛔ 别处没有。
 
@@ -113,6 +113,6 @@ DEFAULT_SEPARATORS = ["\n\n", "\n", "。", "！", "？", "，", " ", ""]
 | 文档 | 说明 |
 |---|---|
 | `docs/specs/api_v1_rag.md` | 唯一调用点所在的模块（文档上传链） |
-| 预处理模块（`api/document_preprocessor.py`） | ⛔ **它还没有 spec**（221 行）⇒ 本表**不给路径**（给了就是断链）。它在本链的**上游**：切块前先过它 |
+| 预处理模块（`app/rag/document_preprocessor.py`） | ⛔ **它还没有 spec**（221 行）⇒ 本表**不给路径**（给了就是断链）。它在本链的**上游**：切块前先过它 |
 | `docs/specs/embedding_client.md` | 切出来的块**下一步去哪**（逐块算向量 = 真花钱） |
 | `docs/decisions/DEC-013-M6测试分层与CI接法.md` | 同仓对"非法取值该 422 而不是静默兜底"的裁定（本文件是**反例**） |

@@ -1,11 +1,11 @@
-# `api/config.py`
+# `app/core/config.py`
 
 | 项 | 内容 |
 |---|---|
 | **状态** | ✅ **可用** —— **全仓环境变量的唯一入口**（规范要求⛔ 不许别处 `os.getenv`）。⚠️ 但它有**两处 import 期副作用** |
 | **对外提供** | 22 个常量（PG / Redis / JWT / 登录 / LLM 四组）· `IS_DOCKER` · `validate_config()` |
-| **谁在用** | 几乎所有模块。已核的：`api/db.py:4` · `api/cache.py:4` · `api/auth.py:9` · `api/alembic/env.py:13`。⚠️ `docs/契约/环境变量.md:145` 记了一处**例外**：`api/memory_store.py:33` 直读 `os.getenv` |
-| **测试** | 🔴 **专属用例零条** —— `api/test_config.py` **不存在** |
+| **谁在用** | 几乎所有模块。已核的：`app/core/db.py:4` · `app/core/cache.py:4` · `app/access/auth.py:9` · `app/alembic/env.py:13`。⚠️ `docs/契约/环境变量.md:145` 记了一处**例外**：`app/agent/memory_store.py:33` 直读 `os.getenv` |
+| **测试** | 🔴 **专属用例零条** —— `app/test_config.py` **不存在** |
 
 ## ✅ 做了什么
 
@@ -64,7 +64,7 @@ if not IS_DOCKER:
 ⚠️ **别把它读成 bug** —— 有意的（本地开发连本机 PG/Redis）。但它是一条**静默覆盖**，
 所以 `docs/契约/环境变量.md:83` 专门写明了它。
 
-🔴 **判据**：`grep -n 'if not IS_DOCKER' api/config.py` ⇒ 命中；读它后面那两行。
+🔴 **判据**：`grep -n 'if not IS_DOCKER' app/core/config.py` ⇒ 命中；读它后面那两行。
 
 ### 3. 🔴 `LLM_API_KEY` **没有 `DASHSCOPE_API_KEY` 兜底** —— 旧写法是个**静默错配**
 
@@ -79,7 +79,7 @@ if not IS_DOCKER:
 
 ### 4. 🔴 「启动时校验」这句话**比实际时机晚** —— 先炸的往往是 **import 期**
 
-`validate_config()` 在 `api/main.py:709`（startup）被调。
+`validate_config()` 在 `app/main.py:709`（startup）被调。
 ⚠️ **但**：`make_llm()` 在 **import 期**就判 `LLM_API_KEY`，拿不到就抛
 **点名它**的 `EnvironmentError`（`DEC-082`，2026-10-05 改的；改前是把 `None` 递给 `ChatOpenAI`
 ⇒ SDK 那句通用话提的是 **`OPENAI_API_KEY`**，而本仓根本不用那个变量）。
@@ -87,14 +87,14 @@ if not IS_DOCKER:
 ⇒ **不是"更安全"，是"更难定位"**：错误发生在「导入某个模块」时，堆栈指向 **import 那一行**，
 看着像"这个模块坏了"，实际是**环境变量缺了**。
 
-🔴 **判据**：`grep -n 'validate_config' api/main.py` ⇒ `:709`；`grep -n 'LLM_API_KEY' api/llm_factory.py` ⇒ 报错点名处。
+🔴 **判据**：`grep -n 'validate_config' app/main.py` ⇒ `:709`；`grep -n 'LLM_API_KEY' app/core/llm_factory.py` ⇒ 报错点名处。
 
 ### 5. ⚠️ `LOGIN_USER_NAME` 默认 `"admin"` —— 与 `permission.py` 的特判**是同一个字面量，但两处各写一遍**
 
 | 处 | 写法 |
 |---|---|
-| `api/config.py:35` | `LOGIN_USER_NAME = os.getenv("LOGIN_USER_NAME", "admin")` |
-| `api/permission.py` | `if user_name == "admin":` ← **硬编码字面量** |
+| `app/core/config.py:35` | `LOGIN_USER_NAME = os.getenv("LOGIN_USER_NAME", "admin")` |
+| `app/access/permission.py` | `if user_name == "admin":` ← **硬编码字面量** |
 
 ⇒ ⛔ **别把 `LOGIN_USER_NAME` 改成别的值**：登录用户名会变，而**管理员判定不会变**
 ⇒ 出现"登录的是 `root`，但系统里没有 `root` 这个管理员"，且**两边都不报错**。
@@ -125,7 +125,7 @@ load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))   # ⇒ 仓�
 | 文档 | 说明 |
 |---|---|
 | `docs/契约/环境变量.md` | ⭐ **逐个变量的契约**（含 `DOCKER_ENV` 覆盖 · `memory_store.py` 那处例外） |
-| `docs/规范/开发规范.md` | 「环境变量从 `api/config.py` 导入」那条规矩 |
+| `docs/规范/开发规范.md` | 「环境变量从 `app/core/config.py` 导入」那条规矩 |
 | `docs/specs/auth.md` | `LOGIN_USER_NAME` / `LOGIN_PASSWORD` / `TEST_USER_PASSWORD` 的**三个消费口** |
 | `docs/specs/permission.md` | §⚠️ 第 5 条的另一半（`"admin"` 那个硬编码字面量） |
 | `docs/specs/llm_factory.md` | `LLM_API_KEY` 的**报错点**与两条轴 |
