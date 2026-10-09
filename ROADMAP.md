@@ -408,7 +408,56 @@ bash scripts/list_endpoints.sh          # 默认 http://127.0.0.1:8000
 > ③ **长驻会话不会自愈**（真杀子进程验证照出 · `DEC-111` §八 ⇒ ✅ **已随 PR `#119` 进主干**）。
 > ⚠️ **仍未验**：真杀子进程的恢复**已验**；**高并发压力 / 创空间那台机器 / 长跑内存漂移** ⇒ **未做**。
 
+> 🔵 **工程支线 · 模块化重构（2026-10-09 起 · 与前端并行）** —— 🔴 **在分支 `refactor/modular-layout`，已推、⛔ 还没开 PR**
+>     ✅ **段 1：`app/` 拆成 7 个模块组 + `eval/` + `tests/`** ← 60 个平铺模块归位；154 个 `.py` 走 `git mv`、**导入改写 537 处**。📄 `DEC-125`
+>        · **判据**：`pytest` **913 passed / 2 skipped**（基线 909/2）· `bash scripts/ci-local.sh` ⇒ **退出码 0**
+>        · 🔴 **顺带修掉 6 类「静默坏」**（这类**不报错、只出错**）：① **10 个测试用 `glob("*.py")` 扫 `api/`**
+>          ⇒ 挪走后**扫到 0 个文件**、而**空集合断言恒为真**（已改递归 + **防空跑断言**）
+>          ② `mcp_server.py` **被当脚本跑** ⇒ `sys.path[0]` 变了 ③ `config.py` 的 `.env` 推算
+>          ④ `logs/` / `screenshots/` 同型 ⑤ `__import__("a.b")` 返回**顶层包** ⑥ `with_name()` 找同目录
+>     ✅ **容器改名：`app/` ← 原 `api/`** ← 🔴 **`api/` 这个目录【已不存在】**（任何写 `api/` 的旧记忆/文档都过期了）
+>        · **纯改名**：196 个 `git mv` + 105 个文件的路径引用 · **导入【一个字没动】**（`app/` 仍当容器，⛔ 不是包）· 📄 `DEC-126`
+>        · ⛔ **否决了**「做成 `app.` 包」与「把 `routing/` 改成 `api/`」—— 理由与代价见该 DEC
+>     ✅ **两个路径型 hook 补了自测**（`test_remind_hooks.sh` **10 → 22 条**，含变异自证）
+>     ✅ 新增 **`.claude/agents/subagent-lifecycle.md`**（subagent 生命周期与授权规范）
+>     ⬜ **段 2**（44 份 spec 拆进 `app/<组>/specs/` · 补 17 份缺失 · 拆掉 `docs/文档地图.md` · 删 `preprocess.py`/`prompt/`/`bench/`）
+>     ⬜ **段 3**（**53 份目录级 `CLAUDE.md`** —— 它是**该层的索引表 + 主要内容**，渐进式披露；根 `CLAUDE.md` 248 → ≤120 行）
+>     ⚠️ **段 2 有一个【会咬人】的连带**：`spec-remind.py` 与 `pre-commit-gates.py` **硬编码 `docs/specs/`**
+>        ⇒ **搬 spec 时必须同步改这两处**，否则**门就瞎了**（已写进 `DEC-125 §六` 与 commit message）
+
 ### ⑤ 下一步 + 阻塞项
+
+> ## 🔴🔴 **2026-10-09 · 接续块（模块化重构 · 最新）**（⛔ 下面所有更早的块原文保留，勿照旧读）
+>
+> ### ✅ 本轮做完 = **段 1（`app/` 拆模块组）+ 容器改名（`api/` → `app/`）**
+>
+> **分支**：`refactor/modular-layout`（从 `feat/frontend-draft` 的 HEAD 起）—— ✅ **已推**
+> · ⛔ **还没开 PR**（本仓规矩：**PR 按【类型】攒，别做一笔开一个**）。
+> 📄 裁定：**`DEC-125`**（拆组的 6 条决策）· **`DEC-126`**（改名的 3 条，含**反悔成本 = 低**）。
+> 📌 判据：`venv/bin/python -m pytest app/ -m "not integration and not needs_db" -q` ⇒ **913 passed / 2 skipped** ·
+> `bash scripts/ci-local.sh` ⇒ **退出码 0** · 6 道门全绿 · `docker compose config` ⇒ OK。
+>
+> ### ⬜ 下一步 = **段 2**（等你发话）
+>
+> ① **44 份 spec 拆进 `app/<组>/specs/`**（你已定「拆进模块」）· ② 补 **17 份缺失 spec**
+> ③ 拆掉 **`docs/文档地图.md`**（它已被「每层 `CLAUDE.md` 都是索引表」取代）
+> ④ 删 **`preprocess.py`** / **`prompt/`** / **`bench/`**（都已裁「删」/「并进 `locust/`」）
+> ⑤ **同步改那 2 处硬编码 `docs/specs/` 的门** ← ⚠️ **⛔ 忘了这步，模块 spec 门与 `spec-remind` 就瞎了**
+> 之后 **段 3**：**53 份目录级 `CLAUDE.md`**（业务方定义：**该层的索引表 + 主要内容**，agent 进来先读它）。
+>
+> ### ⚠️ 两条【等一句话】
+>
+> · **`bench/locustfile.py`（第 4 个压测件）要不要并进 `locust/`** —— 不并 ⇒ 压测有**两个家**（`§3.5 ⓓ`）
+> · **本分支什么时候收 PR** —— 段 1 + 改名是一个完整可验证单元，但段 2/3 还没做；收早了后面要再开
+>
+> ### ⚠️ 一条【本轮踩到、值得防重犯】的坑（已记进 commit message，**复盘见 `docs/复盘/`**）
+>
+> **批量替换会制造「语法正确、语义错误」的句子，而 grep 查不出来。**
+> 实例：`app/agent/agent_graph_advanced.py` 与 `app/tests/test_agent_repairs.py` 里那两条
+> **反例注释**（原意「写相对路径会解析成 `api/api/mcp_server.py`（不存在）」）
+> 被逐字替换后**整段失去意义** ⇒ 已整句重写。
+> ⚠️ 另两处同族：**dry-run 没 `--apply`**（34 处功能性修改漏做，靠测试兜住）·
+> **脚本的扩展名白名单漏了 `.txt`/`.sql`/`.Dockerfile`**。
 
 > ## 🔴🔴 **2026-10-09 · 接续块（刀 4 之后）**（⛔ 下面所有更早的块原文保留，勿照旧读）
 >
