@@ -420,10 +420,15 @@ bash scripts/list_endpoints.sh          # 默认 http://127.0.0.1:8000
 >        · ⛔ **否决了**「做成 `app.` 包」与「把 `routing/` 改成 `api/`」—— 理由与代价见该 DEC
 >     ✅ **两个路径型 hook 补了自测**（`test_remind_hooks.sh` **10 → 22 条**，含变异自证）
 >     ✅ 新增 **`.claude/agents/subagent-lifecycle.md`**（subagent 生命周期与授权规范）
->     ⬜ **段 2**（44 份 spec 拆进 `app/<组>/specs/` · 补 17 份缺失 · 拆掉 `docs/文档地图.md` · 删 `preprocess.py`/`prompt/`/`bench/`）
+>     ✅ **段 2（一）**：**44 份 spec 已拆进 `app/<组>/specs/`**（`docs/specs/` 这个目录**已不存在**）
+>        + **三处门同步跟上并实测**（`spec_status.sh` 递归+防空跑 · `spec-remind.py` · `pre-commit-gates.py` §④
+>        —— 探针 `app/core/zzz_probe2.py` **真被拦**）· 删了 `preprocess.py` / `prompt/`
+>        · **判据**：913 passed / 2 skipped · ci-local 退出码 0 · 断链门/孤儿门 exit 0
+>     ⬜ **段 2（二）**：补 **14 份缺失 spec**（清单跑 `bash scripts/spec_status.sh`）
+>     ⬜ **段 3**：**53 份目录级 `CLAUDE.md`** —— 它是**该层的索引表 + 主要内容**，渐进式披露
+>        ⚠️ **`docs/文档地图.md` 的拆解【随段 3 做】** —— 它要被分发到的正是那 53 份，段 3 之前**没有落点**
 >     ⬜ **段 3**（**53 份目录级 `CLAUDE.md`** —— 它是**该层的索引表 + 主要内容**，渐进式披露；根 `CLAUDE.md` 248 → ≤120 行）
->     ⚠️ **段 2 有一个【会咬人】的连带**：`spec-remind.py` 与 `pre-commit-gates.py` **硬编码 `docs/specs/`**
->        ⇒ **搬 spec 时必须同步改这两处**，否则**门就瞎了**（已写进 `DEC-125 §六` 与 commit message）
+>     ✅ **那条「会咬人」的连带 —— 已办**：与搬 spec **同一批**改掉，且**三处门都实测过**（⛔ 不是「改了就算」）。
 
 ### ⑤ 下一步 + 阻塞项
 
