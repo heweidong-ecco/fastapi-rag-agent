@@ -70,14 +70,16 @@ def issue(user_name: str, days: int, role: str | None = None, out: str | None = 
 
     print(head)
     print()
-    # 🔴 **CodeQL 抑制（2026-10-10）**：`py/clear-text-logging-sensitive-data`
-    #    ⚠️ **这不是误报，但也【不是可修的东西】**：本脚本**就是**那把"把新 key 交给操作员"的工具 ——
-    #       ⛔ 不打印它，操作员就拿不到 key（库里只有哈希，⛔ 找不回来）。
-    #    🔴 **它指出的真风险是真的**：`print` 到 stdout 会被**管道 / CI 日志 / 会话记录**接走 ——
-    #       **2026-10-10 实测栽过一次**（Agent 跑本脚本时 key 进了会话记录）。
-    #    ⇒ 处置不是"删掉这行"，而是**给非交互调用一条不出现在 stdout 的路**：`--out <文件>`（见上）。
-    #    ⛔ **别把这条抑制当成"这事不用管"** —— 上面那段 `out` 的 docstring 才是真正的处置。
-    print(f"    {api_key}")  # codeql[py/clear-text-logging-sensitive-data]
+    # 🔴 **关于 CodeQL**（2026-10-10）：本行会命中 `py/clear-text-logging-sensitive-data`。
+    #    ⚠️ **这不是"没修"，而是【在这个文件上不可能消除】**：本脚本**就是**那把
+    #    "把新 key 交给操作员"的工具 —— ⛔ 不打印它，操作员就拿不到 key（库里只有哈希）。
+    #    换个交付方式（写文件 / 传参）**只是换一个 sink**，CodeQL 一样会报（实测：加 `--out` 之后
+    #    它**又**报了一条 `py/clear-text-storage-sensitive-data`）。
+    #    ⇒ 处置在**仓库配置**里（**只豁免这一个文件**）：`.github/workflows/codeql.yml` 的
+    #      `paths-ignore` —— 那里写清了理由、代价、与"试过但没生效"的写法。
+    #    🔴 **本仓真栽过的那次**：2026-10-10 Agent 跑本脚本时，**一把 key 进了会话记录**
+    #      ⇒ 非交互调用请用 `--out <文件>`（见上，那才是真处置）。
+    print(f"    {api_key}")
     print()
     print("⚠️ 上面这串**只显示这一次**（库里存的是哈希）。现在复制走，别等会儿再回来找。")
     print("⚠️ **在脚本 / 自动化里跑请改用 `--out <文件>`** —— 否则它会进管道、CI 日志、或会话记录。")

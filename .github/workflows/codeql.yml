@@ -37,4 +37,23 @@ jobs:
       - uses: github/codeql-action/init@v3
         with:
           languages: python
+          # 🔴 2026-10-10：**只豁免一个文件** —— `scripts/issue_api_key.py`。
+          #
+          # **为什么**：它是那把「**把新发的 API key 交给操作员**」的 CLI。CodeQL 的
+          # `py/clear-text-logging-sensitive-data` 与 `py/clear-text-storage-sensitive-data`
+          # 盯的是「**密钥流到一个输出点位**」—— 而**把 key 交出去正是这个工具的全部用途**
+          # （库里只有哈希，⛔ 找不回来）。换个交付方式（`print` / 写文件 / 传参）**只是换一个 sink**。
+          # ⇒ 这两条告警**在这个文件上不可能消除**，⛔ 不是"还没修"。
+          #
+          # ⚠️ **试过并【没生效】的写法**（⛔ 别重复踩）：在那一行加 `# codeql[py/…]` 注释 ——
+          #    2026-10-10 实测跑完一轮 CI，两条告警**照旧**。
+          #
+          # ⚠️ **豁免范围是【一个文件】，⛔ 不是把这两条规则全仓关掉** ——
+          #    `app/` 下的同类问题照样会报（那才是要紧的地方）。
+          # 📌 **代价（如实记）**：这个文件从此**不再被 CodeQL 覆盖**。
+          #    它是 55 行、不接请求、不碰用户输入的 CLI ⇒ 本仓判为可接受。
+          # 🔴 **真风险仍然存在，处置在代码里**：非交互调用请用 `--out <文件>`（权限 600），
+          #    ⛔ 别把 key 打进 stdout —— **2026-10-10 实测栽过一次**（key 进了会话记录）。
+          paths-ignore: |
+            scripts/issue_api_key.py
       - uses: github/codeql-action/analyze@v3
