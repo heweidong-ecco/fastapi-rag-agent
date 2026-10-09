@@ -42,7 +42,13 @@
   /* ── 消息流 ── */
   /* ⚠️ **`margin: 0`，⛔ 不是 `0 auto`** —— 居中的话，消息的左边缘与上面的
      `page-head`【不在一条线上】，看起来像两块东西拼的（2026-10-09 截图时看出来的）。 */
-  .log { max-width: 900px; margin: 0; padding: var(--sp-5) var(--sp-5) var(--sp-4); }
+  /* 🔴 `flex: 1; min-height: 0` 是 **2026-10-09 截图时才补的**（刀 2 检查点）：
+     原先只有 max-width/margin/padding ⇒ `.main` 那个 flex 列里**没人吃掉剩余高度**
+     ⇒ **空会话时消息区被挤成 0 高、输入框贴在页头下面**（截图里一眼就看出来，而
+     `node --test` 与 pytest **一条都不会红**）—— 本仓原话：「用例全绿证不了页面没坏」。
+     `min-height: 0` 不能省：flex 子项默认 `min-height: auto`，不加它 `overflow: auto` 不生效。 */
+  .log { flex: 1; min-height: 0; max-width: 900px; margin: 0;
+         padding: var(--sp-5) var(--sp-5) var(--sp-4); }
 
   /* ⚠️ 动效只做【一个有意义的】：新消息**淡入上浮** —— 它表达"这条是刚来的"，
      而不是为了好看而好看（`ui-ux-pro-max` 的 7 号规则：Motion conveys meaning）。
@@ -64,6 +70,10 @@
   .meta { color: var(--fg-dim); font-size: var(--fs-cap); margin-top: var(--sp-2);
           display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
   .badge { }                                   /* 外观走 app.css 的 .badge */
+  /* 🔴 刀 2（§7.1①）：原文里**与答案逐字重合**的片段。
+     ⚠️ 语义色用 `--warn` 的那一档（"这是一个标记"），⛔ 别用渐变/彩色 —— 它旁边还有正文。
+     ⛔ 别把它做成整段变色：高亮的是"抄自原文的那几个字"，**空的时候一个字都不标**。 */
+  .src-body mark { background: color-mix(in srgb, var(--warn) 28%, transparent); color: inherit; }
   .cite { color: var(--info); cursor: pointer; text-decoration: underline;
           text-underline-offset: 2px; }
   .cite.open { font-weight: 600; }
@@ -140,6 +150,9 @@
   <div id="main" class="main">
     <header class="page-head">
       <h1>对话</h1>
+      <!-- 🔴 链选择器（刀 2 · 2026-10-09）：6 条链**各有各的实现**，让访客当场换一条再问同一个问题。
+           ⚠️ 选项由 `RagSse.CHAINS` 生成（⛔ 不在这里手写 —— 手写就会与 `sse.js` 那份漂移）。 -->
+      <label class="field">链 <select id="chain"></select></label>
       <span class="spacer"></span>
       <span class="hint" id="headhint">逐字回答 · 引用可点开 · 每轮报 token 与费用</span>
     </header>
@@ -164,6 +177,7 @@
 
 const KEY_STORE = 'rag_api_key';
 const THREAD_STORE = 'rag_threads';
+const CHAIN_STORE = 'rag_chain';   // 上一次选的链（刀 2）
 
 // 状态机：idle → 请求中 → 流式中 → 完成｜已中断｜出错
 let state = 'idle';
@@ -272,6 +286,11 @@ function addTurn(question) {
 // 🔴 切分走 `RagSse.splitCitations` —— **正则只有那一份**（⛔ 本文件里不许再有第二份）。
 function renderAnswer(el, text, sources) {
   const turn = el.closest('.turn');
+  // 🔴 刀 2（§7.1①）：把**当前答案正文**记在 turn 上 —— 引用卡片要高亮
+  //    「答案与原文逐字重合的片段」，那就得知道答案是什么。
+  //    ⚠️ 记在**这里**（而不是在 `ask()` 的每一处 `renderAnswer` 之前各写一遍）——
+  //       那有 5 个调用点，漏一个的表现是"某些轮点开没有高亮"，而**不报错**。
+  turn._answer = text;
   // 🔴 `F4` ①（`DEC-091`）：**无据拒答**那一轮走另一条路（见 `renderRefusal`）。
   if (turn._refused) { renderRefusal(turn, el, text); return; }
   const byIndex = new Map(RagSse.resolveCitations(text, sources).map((r) => [r.index, r]));
@@ -356,8 +375,30 @@ function syncCard(turn) {
     m.className = 'src-meta';
     m.textContent = head.meta;
     const p = document.createElement('div');
-    // 🔴 用 textContent：文档正文里可能有尖括号 ⇒ innerHTML 会把它变成标签
-    p.textContent = src.content;
+    p.className = 'src-body';
+    // 🔴 刀 2（§7.1①）：**把「答案与这段原文逐字重合」的片段高亮出来**。
+    //    ⚠️ **它⛔ 不是"服务端给的命中区间"** —— `sources` 帧里没有任何位置字段
+    //       （只有 index / source / content / similarity）⇒ 本仓立场是「⛔ 不许印没有数据源的东西」，
+    //       所以高亮的是**一句真话**：「这几个字确实是从这段原文里来的」。
+    //    ⛔ **找不到重合就不高亮**（`overlapRanges` 回空数组）—— 不假装标了一段。
+    //    ⚠️ 阈值 6 个字：再短会把「保修期」这种词标得满屏黄。
+    //    🔴 全程 `createElement` / `textContent` 拼节点，⛔ **不用 innerHTML** ——
+    //       原文里可能有尖括号，innerHTML 会把它变成标签（本行上一版就是靠 textContent 防的）。
+    const body = String(src.content == null ? '' : src.content);
+    const ranges = RagSse.overlapRanges(body, turn._answer || '', 6);
+    if (!ranges.length) {
+      p.textContent = body;
+    } else {
+      let at = 0;
+      for (const r of ranges) {
+        if (r.start > at) p.appendChild(document.createTextNode(body.slice(at, r.start)));
+        const mk = document.createElement('mark');
+        mk.textContent = body.slice(r.start, r.end);
+        p.appendChild(mk);
+        at = r.end;
+      }
+      if (at < body.length) p.appendChild(document.createTextNode(body.slice(at)));
+    }
     card.appendChild(h); card.appendChild(m); card.appendChild(p);
   }
   card.hidden = !src;
@@ -426,17 +467,14 @@ async function ask() {
   $('send').disabled = true; $('stop').hidden = false;
   sentAt = performance.now();
 
+  // 🔴 6 条链的请求形状【不是同一套】（`rag_stream` 走 JSON body · 5 条 agent 走 query 参数 ·
+  //    `plan_execute` 那个键叫 `goal`）⇒ **统一交给 `RagSse.buildRequest` 一处生成**。
+  //    ⛔ 别在这页里再手拼一次 URL —— 两处一定漂移，而**表现是"没反应"，不报错**。
+  //    📄 形状表与依据 ⇒ `api/static/js/sse.js` 的 `CHAINS` 那段注释。
+  const chain = $('chain').value || 'rag_stream';
   try {
-    const resp = await fetch('/api/v1/rag/stream_search?thread_id=' + encodeURIComponent(threadId), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-API-Key': currentKey() },
-      // 🔴 三条前端必须遵守的（DEC-085 §3.3）：
-      //    ① citations 默认 False ⇒ 不显式传 true 就**根本没有 sources 帧**；
-      //    ② conversation_history 由后端按 (user, thread) 取 ⇒ 前端**不传**，
-      //       ⛔ 也别传 [] 去"清空"（后端那句 `if not req.conversation_history` 是 falsy 判断，[] 会被无视）。
-      body: JSON.stringify({ question, citations: true }),
-      signal: controller.signal,
-    });
+    const { url, init } = RagSse.buildRequest(chain, question, threadId, currentKey());
+    const resp = await fetch(url, Object.assign({}, init, { signal: controller.signal }));
 
     if (!resp.ok) {
       const { msg, relogin, breaker } = explainStatus(resp.status);
@@ -519,8 +557,12 @@ async function ask() {
     }
     const parts = [];
     if (exit === 'aborted') {
-      // 🔴 不是文案选择，是在说事实：usage 只在最后一帧回来，提前关流那帧到不了（DEC-084）
-      parts.push('中断未计费');
+      // 🔴 刀 2（§7.1②）：**说清"停在哪"**。
+      //    ⚠️ 不是文案选择，是在说事实：`usage` 只在**最后一帧**回来，
+      //       而我们提前关流 ⇒ **那帧到不了**（`DEC-084`）⇒ **没有 token 数可印**。
+      //    ⇒ 给数得出来的那个（已生成多少字）+ 明写未计费与原因。
+      //    📄 逻辑在 `sse.js::stoppedNotice`（有用例钉着，⛔ 别在这页里再拼一次）。
+      parts.push(RagSse.stoppedNotice(answer));
     } else if (usage) {
       parts.push(`${usage.model}`);
       parts.push(`${usage.prompt_tokens}+${usage.completion_tokens} tok`);
@@ -552,6 +594,24 @@ $('save').onclick = () => {
 $('send').onclick = ask;
 $('q').addEventListener('keydown', (e) => { if (e.key === 'Enter') ask(); });
 $('newthread').onclick = () => { newThread(); renderThreads(); showEmptyLog(); };
+
+// ---------- 链选择器（刀 2）----------
+// ⚠️ 选项**从 `RagSse.CHAINS` 生成** —— ⛔ 别在这页里手写一份（两份必然漂移，
+//    而漂移的表现是"某条链选了没反应"，不报错）。
+(function fillChains() {
+  const sel = $('chain');
+  for (const k of RagSse.CHAIN_KEYS) {
+    const opt = document.createElement('option');
+    opt.value = k;
+    opt.textContent = RagSse.CHAINS[k].label;
+    sel.appendChild(opt);
+  }
+  // 存过的链名**必须先在 CHAINS 里核一遍** —— 旧版本存下的名字（或手改过 localStorage）
+  // 会让 `sel.value = 'xxx'` 静默变成空串 ⇒ 发送时回落 `rag_stream`，而页面上看不出选的是哪条。
+  const saved = localStorage.getItem(CHAIN_STORE);
+  sel.value = RagSse.CHAINS[saved] ? saved : 'rag_stream';
+  sel.onchange = () => localStorage.setItem(CHAIN_STORE, sel.value);
+})();
 
 (currentKey() ? (showApp(), renderThreads()) : showLogin());
 </script>

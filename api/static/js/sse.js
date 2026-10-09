@@ -256,10 +256,169 @@ function refusalNotice() {
 //    ⚠️ **`node --test` 抓不到它**（用例只走 `module.exports`），页面加载时也**不报**
 //       （`RagSse` 第一次被用到是在**答案真的开始流**之后）—— 实测见施工单 Task 8。
 //    ⇒ 现在两侧都挂，且下面有两条用例钉住（浏览器那侧用 `node:vm` 造一个假 window 来测）。
+/* ══════════════ 6 · 六条链的调用契约（刀 2 · 2026-10-09）══════════════
+ *
+ * 🔴 **为什么要有这一块**：6 条链的**请求形状不是同一套**，而**走错一步只会在服务端 422，
+ *    前端不报任何错**（拿到 422 走进普通错误分支，用户看到的是"没反应"）。
+ *
+ * | 链 | 形状 | 问题那个键 |
+ * |---|---|---|
+ * | `rag_stream` | **JSON body** | `question`（+ **必须** `citations: true`） |
+ * | 5 条 `/agent/<链>/stream` | **query 参数** | `question` |
+ * | 🔴 `plan_execute` | query 参数 | **`goal`** |
+ *
+ * 📌 **表里的形状是 2026-10-09 从 `app.openapi()` 逐条核出来的**，⛔ 不是照文档抄的。
+ * ⚠️ **`rag_stream` 的 `citations: true` 非传不可**（`DEC-085 §3.3`）：后端默认 `False`
+ *    ⇒ 不传就**根本没有 `sources` 帧** ⇒ 引用卡片永远不出现，而**不报错**。
+ * ⚠️ 那 5 条**没有 `citations` 参数**（它们的引用是另一套），⛔ 别顺手一起传。
+ */
+const CHAINS = {
+  rag_stream: {
+    label: 'RAG 检索 + 引用',
+    path: '/api/v1/rag/stream_search',
+    qkey: 'question',
+    jsonBody: true,
+  },
+  langgraph_chat: {
+    label: 'LangGraph Agent（带人工审批）',
+    path: '/api/v1/agent/langgraph_chat/stream',
+    qkey: 'question',
+  },
+  advanced_chat: {
+    label: '进阶 Agent（学习型）',
+    path: '/api/v1/agent/advanced_chat/stream',
+    qkey: 'question',
+  },
+  memory_chat: {
+    label: '带记忆的 Agent',
+    path: '/api/v1/agent/memory_chat/stream',
+    qkey: 'question',
+  },
+  mcp_chat: {
+    label: 'MCP 工具 Agent',
+    path: '/api/v1/agent/mcp_chat/stream',
+    qkey: 'question',
+  },
+  plan_execute: {
+    // 🔴 它的问题那个键叫 **`goal`** —— 端点的形参就是 `goal: str`
+    //    ⇒ 传 `question` 会 **422**，而前端只会说"出错"，⛔ 不会告诉你是谁传错了。
+    label: '先计划、再执行',
+    path: '/api/v1/agent/plan_execute/stream',
+    qkey: 'goal',
+  },
+};
+
+const CHAIN_KEYS = Object.keys(CHAINS);
+
+/**
+ * 给一条链拼出 `fetch` 要的 `{url, init}`。
+ *
+ * ⚠️ **`apiKey` 由调用方传进来** —— 本文件是**纯逻辑**（⛔ 不碰 DOM / `localStorage`），
+ *    与 `sse.js` 其余部分同一条规矩。
+ *
+ * @param {string} chainKey `CHAIN_KEYS` 里的某一个
+ * @param {string} question 用户那句话（⛔ 空串会被后端 422，调用方先挡）
+ * @param {string} threadId 会话 id
+ * @param {string} [apiKey] 有就带上 `X-API-Key`
+ * @returns {{url: string, init: {method: string, headers: object, body?: string}}}
+ */
+function buildRequest(chainKey, question, threadId, apiKey) {
+  const chain = CHAINS[chainKey];
+  if (!chain) {
+    // 🔴 **响亮 > 静默**：写错链名就让它当场炸，⛔ 别回落成某一条默认链 ——
+    //    回落的表现是"页面没反应"，而**没有任何东西会红**。
+    throw new Error(`unknown chain: ${chainKey}`);
+  }
+
+  const params = new URLSearchParams();
+  params.set(chain.qkey, question);
+  params.set('thread_id', threadId);
+  const url = `${chain.path}?${params.toString()}`;
+
+  const headers = {};
+  if (apiKey) headers['X-API-Key'] = apiKey;
+
+  const init = { method: 'POST', headers };
+  if (chain.jsonBody) {
+    // ⚠️ 只有真正带 body 的那条才设 Content-Type —— 没 body 却声明 json
+    //    在某些代理/框架下会被当成"畸形请求"。
+    headers['Content-Type'] = 'application/json';
+    init.body = JSON.stringify({ [chain.qkey]: question, citations: true });
+  }
+  return { url, init };
+}
+
+/* ══════════════ 7 · 「答案与原文重合的那几段」（刀 2 · §7.1①）══════════════
+ *
+ * 🔴 **先说清它【不是】什么**：它 **⛔ 不是"服务端给的命中区间"** ——
+ *    `sources` 帧里**没有**任何位置字段（只有 `index` / `source` / `content` / `similarity`）。
+ *    本仓立场：「**⛔ 不许印没有数据源的东西**」⇒ 所以选了一条**真算得出来**的替代：
+ *    **答案与这段原文【逐字重合】的片段** —— 那正是「这句话确实是从这段抄来的」的证据。
+ *
+ * ⚠️ **找不到重合 ⇒ 返回空数组，页面就什么都不高亮** —— ⛔ 不假装高亮了一段。
+ * ⚠️ 算法是 O(n·m) 的最长公共子串扫描（语料是几百字，够用；⛔ 别拿去跑长文）。
+ *
+ * @param {string} text 原文（`sources[i].content`）
+ * @param {string} other 拿来找重合的文本（这里是**答案正文**）
+ * @param {number} minLen 多短算"太短、别高亮"（中文建议 ≥ 6 —— 否则「保修期」这种词会满屏标黄）
+ * @returns {Array<{start: number, end: number}>} 按位置排序、互不重叠
+ */
+function overlapRanges(text, other, minLen) {
+  const a = String(text == null ? '' : text);
+  const b = String(other == null ? '' : other);
+  const n = a.length, m = b.length;
+  if (!n || !m) return [];
+  const min = Math.max(1, Number(minLen) || 1);
+
+  // dp[j] = 以 a[i-1] 与 b[j-1] 结尾的最长公共后缀长度（滚动数组）
+  const dp = new Array(m + 1).fill(0);
+  const found = [];
+  for (let i = 1; i <= n; i++) {
+    let prev = 0;
+    for (let j = 1; j <= m; j++) {
+      const carry = dp[j];
+      if (a[i - 1] === b[j - 1]) {
+        dp[j] = prev + 1;
+        // ⚠️ 这里会把"长命中的每一个后缀"都收进来 ⇒ 后面必须去重（否则会标出一堆互相嵌套的黄块）
+        if (dp[j] >= min) found.push([i - dp[j], i]);
+      } else {
+        dp[j] = 0;
+      }
+      prev = carry;
+    }
+  }
+  if (!found.length) return [];
+
+  // 长优先、同长靠左 —— 贪心挑【互不重叠】的；被包住的那些自然落选
+  found.sort((x, y) => (y[1] - y[0]) - (x[1] - x[0]) || x[0] - y[0]);
+  const picked = [];
+  for (const [s, e] of found) {
+    if (picked.some(([ps, pe]) => s < pe && ps < e)) continue;
+    picked.push([s, e]);
+  }
+  picked.sort((x, y) => x[0] - y[0]);
+  return picked.map(([s, e]) => ({ start: s, end: e }));
+}
+
+/* ══════════════ 8 · 「按了停止，它停在哪」（刀 2 · §7.1②）══════════════
+ *
+ * 🔴 **它⛔ 不是"已用 N token"** —— 取消那一瞬后端**拿不到 usage**
+ *    （`DEC-084`：usage 只在**最后一帧**回来，而我们提前 `aclose()` ⇒ **那帧到不了**）。
+ *    本仓立场：「⛔ **不许印没有数据源的数**」⇒ 这一行只给**说得出处**的两样：
+ *    ① **已经生成了多少字**（本地数得出来）② **未计费 + 原因**。
+ *
+ * ⚠️ **别"顺手"把它改成 token 数** —— 那会让人以为这一轮花了钱，而账上根本没有那一笔。
+ */
+function stoppedNotice(generated) {
+  const n = String(generated == null ? '' : generated).replace(/\s/g, '').length;
+  return `已生成 ${n} 字 · 中断未计费（取消时那一帧 usage 到不了）`;
+}
+
 const RagSse = {
   DONE_SENTINEL, parseSseChunk, payloadKind, citationIndexes, splitCitations,
   resolveCitations, classifyExit, formatCost, formatSource, toggleOpen, breakerCard,
   refusalNotice,
+  CHAINS, CHAIN_KEYS, buildRequest, overlapRanges, stoppedNotice,
 };
 
 if (typeof module !== 'undefined' && module.exports) {

@@ -192,7 +192,13 @@ test('chat.html 用到的每一个 RagSse.* 都真的存在（⛔ 别等页面�
   assert.ok(used.length >= 4, `只从 chat.html 里认出 ${used.length} 个 RagSse.* —— 扫描失效了`);
   const api = loadInBrowserLikeSandbox().RagSse;
   for (const name of used) {
-    assert.strictEqual(typeof api[name], 'function', `chat.html 用了 RagSse.${name}，但 sse.js 没提供它`);
+    // ⚠️ **这里原本断言的是 `typeof === 'function'`** —— 2026-10-09（刀 2）**放宽成"必须存在"**：
+    //    那一版页面上开始用 `RagSse.CHAINS`（对象）与 `RagSse.CHAIN_KEYS`（数组），
+    //    它们在页面里**完全合法**，却被那条断言判红。
+    //    🔴 **门要测的是"会不会 ReferenceError"**，而"是不是函数"只是它的**代理量** ——
+    //    ⛔ 代理量把合法用法一起挡掉，就是靶子定窄了（本仓 `N14` 那一族的又一面）。
+    //    ⚠️ 放宽**不削弱它**：名字写错照样 `undefined` ⇒ 照样红。
+    assert.notStrictEqual(api[name], undefined, `chat.html 用了 RagSse.${name}，但 sse.js 没提供它`);
   }
 });
 
@@ -436,4 +442,140 @@ test('前端 ⛔ 不许自己认拒答 —— 判据只有后端一份（结构�
     [],
     '前端自己认起拒答来了 —— 判据只该在后端一处，前端只认帧',
   );
+});
+
+/* ══════════════ 刀 2：「6 条链」的调用契约 ══════════════
+ *
+ * 🔴 为什么这几条非要钉（2026-10-09 **逐条从 OpenAPI 核出来的**，⛔ 不是照文档抄的）：
+ *   6 条链的**请求形状【不是同一套】** —— 走错一步就是 **422**，
+ *   而**前端不报任何错**（拿到 422 只会走进普通错误分支，用户看到"没反应"）。
+ *
+ *   | 链 | 形状 | 键 |
+ *   |---|---|---|
+ *   | `/rag/stream_search` | **JSON body** | `question` + `citations: true` |
+ *   | 5 条 `/agent/<链>/stream` | **query 参数**（`question: str` 裸参数 = query） | `question` |
+ *   | 🔴 `plan_execute` | query 参数 | **`goal`** ← ⛔ 不是 question |
+ *
+ * ⚠️ **写这一块时【当场踩了一个坑，而且踩了两遍】**：原稿那行写的是「5 条 `/agent/<星号>/stream`」——
+ *    **星号紧挨斜杠**这两个字符连在一起，就是**块注释的结束符** ⇒ **提前把注释收掉了** ⇒
+ *    后半段变成代码 ⇒ `SyntaxError: Unexpected identifier 'question'`（整份文件加载失败，一条都不跑）。
+ *    🔴 **第二遍更值得记**：我在这段注释里**解释这个坑**时，又把那两个字符原样写进了注释 ⇒
+ *    **同一个错误当场复发**（报 `Invalid regular expression: missing /`）。
+ *    ⚠️ 这是本仓「**注释里的字面会反噬**」那一族的**第三个变体**
+ *    （前两个：**判据里写的字面数到了判据自己** · **`/<星号>` 被当成 CSS 注释开头、吃掉半个页面**）。
+ *    ⇒ **注释里写路径时，通配符换成 `<链>`；解释这个坑时，⛔ 别把那两个字符拼出来。**
+ *
+ * 📌 取法（可打印）：`cd api && ../venv/bin/python -c "from main import app; …"` 读 `app.openapi()`。
+ */
+const RagSse = require('./sse.js');
+
+test('6 条链都在，且每条都指向 /api/v1 下的一个流式端点', () => {
+  assert.ok(Array.isArray(RagSse.CHAIN_KEYS), 'CHAIN_KEYS 不是数组');
+  assert.strictEqual(RagSse.CHAIN_KEYS.length, 6, `应有 6 条链，实际 ${RagSse.CHAIN_KEYS.length}`);
+  for (const k of RagSse.CHAIN_KEYS) {
+    const { url } = RagSse.buildRequest(k, '问', 'tid');
+    assert.ok(url.startsWith('/api/v1/'), `${k} 的 url 没带 /api/v1 前缀：${url}`);
+    assert.ok(url.includes('tid'), `${k} 的 url 没带上 thread_id：${url}`);
+  }
+});
+
+test('🔴 plan_execute 的键是 goal，⛔ 不是 question（传错就是 422，而前端不报错）', () => {
+  const { url } = RagSse.buildRequest('plan_execute', '做个计划', 'tid');
+  const q = new URL(url, 'http://x').searchParams;
+  assert.strictEqual(q.get('goal'), '做个计划');
+  assert.strictEqual(q.get('question'), null, 'plan_execute ⛔ 不接受 question');
+});
+
+test('5 条 agent 链走【query 参数】，⛔ 不带 body', () => {
+  for (const k of RagSse.CHAIN_KEYS.filter((x) => x !== 'rag_stream')) {
+    const { url, init } = RagSse.buildRequest(k, '问一句', 'tid');
+    const q = new URL(url, 'http://x').searchParams;
+    assert.ok(q.get('question') || q.get('goal'), `${k} 把问题丢了`);
+    assert.strictEqual(init.body, undefined, `${k} ⛔ 不该带 body（它的 question 是 query 参数）`);
+  }
+});
+
+test('rag_stream 走【JSON body】，且必须显式 citations:true（不传就根本没有 sources 帧）', () => {
+  const { url, init } = RagSse.buildRequest('rag_stream', '问一句', 'tid');
+  assert.ok(url.includes('/api/v1/rag/stream_search'), url);
+  assert.ok(init.body, 'rag_stream 必须有 body');
+  const body = JSON.parse(init.body);
+  assert.strictEqual(body.question, '问一句');
+  assert.strictEqual(body.citations, true);
+});
+
+test('🔴 已知的链名写错 ⇒ 【抛错】，⛔ 不静默回落（回落 = 页面 422 而没人知道）', () => {
+  assert.throws(() => RagSse.buildRequest('langgraph', 'q', 't'), /unknown chain/);
+});
+
+test('thread_id 与问题都要【编码】（问题里会有 & 与空格）', () => {
+  const { url } = RagSse.buildRequest('mcp_chat', 'a&b c', 'x/y');
+  assert.ok(!/[\s]/.test(url), `url 里有未编码的空格：${url}`);
+  const q = new URL(url, 'http://x').searchParams;
+  assert.strictEqual(q.get('question'), 'a&b c');
+  assert.strictEqual(q.get('thread_id'), 'x/y');
+});
+
+/* ══════════════ 刀 2 · §7.1①：把「答案与原文重合的那几段」找出来 ══════════════
+ *
+ * 🔴 **为什么不做成"服务端给命中区间"**：`sources` 帧里**没有**任何位置字段
+ *    （只有 `index` / `source` / `content` / `similarity`）⇒ 服务端**没给命中区间**。
+ *    本仓立场是「**⛔ 不许印没有数据源的东西**」，所以选了一条**真的算得出来**的：
+ *    **答案里与这段原文逐字重合的片段** —— 那正是"这句话确实是从这段抄来的"的证据。
+ *
+ * ⚠️ 找不到重合 ⇒ **返回空数组**，页面**就什么都不高亮**（⛔ 不假装高亮了一段）。
+ */
+test('overlapRanges：找得出【答案与原文逐字重合】的片段', () => {
+  const chunk = '保修期自签收之日起计算，标准为十二个月。撞机属人为损坏。';
+  const answer = '根据资料，保修期自签收之日起计算，标准为十二个月。';
+  const r = RagSse.overlapRanges(chunk, answer, 6);
+  assert.strictEqual(r.length, 1);
+  assert.strictEqual(chunk.slice(r[0].start, r[0].end), '保修期自签收之日起计算，标准为十二个月。');
+});
+
+test('overlapRanges：重合短于 minLen ⇒ 不返回（⛔ 别把"的"这种单字也标高亮）', () => {
+  const r = RagSse.overlapRanges('保修期十二个月', '另外还有三年', 6);
+  assert.deepStrictEqual(r, []);
+});
+
+test('overlapRanges：多段重合按【位置排序】且【互不重叠】', () => {
+  const chunk = 'AAAAAA是保修期，BBBBBB是保修期';
+  const r = RagSse.overlapRanges(chunk, 'AAAAAA与BBBBBB', 4);
+  const texts = r.map((x) => chunk.slice(x.start, x.end));
+  assert.deepStrictEqual(texts, ['AAAAAA', 'BBBBBB']);
+  for (let i = 1; i < r.length; i++) assert.ok(r[i].start >= r[i - 1].end, '区间重叠了');
+});
+
+test('overlapRanges：空输入 / 空原文 ⇒ 空数组，⛔ 不炸', () => {
+  assert.deepStrictEqual(RagSse.overlapRanges('', 'abc', 3), []);
+  assert.deepStrictEqual(RagSse.overlapRanges('abc', '', 3), []);
+  assert.deepStrictEqual(RagSse.overlapRanges(null, null, 3), []);
+});
+
+/* ══════════════ 刀 2 · §7.1②：按「停止」之后，说清【停在哪】 ══════════════
+ *
+ * 🔴 **它⛔ 不能是"已用 N token"** —— 取消那一瞬后端**根本拿不到 usage**
+ *    （`DEC-084`：usage 只在**最后一帧**回来，而我们提前 `aclose()` ⇒ 那帧**到不了**）。
+ *    本仓立场：「⛔ **不许印没有数据源的数**」⇒ 给一条**说得出处**的话：
+ *    **已经生成了多少字**（本地数得出来）+ **明写"未计费、原因是什么"**。
+ */
+test('stoppedNotice：数的是【已生成多少字】，并明写"未计费"及原因', () => {
+  const s = RagSse.stoppedNotice('保修 期自签 收之日起');
+  // ⚠️ 去空格后是 **9** 个字（保·修·期·自·签·收·之·日·起）——
+  //    我第一版在这里写的是 7（**数错了**），是这条用例当场把数错抓出来的。
+  assert.match(s, /已生成 9 字/, `字数不对：${s}`);
+  assert.match(s, /中断|取消/);
+  assert.match(s, /未计费/);
+});
+
+test('stoppedNotice：一个字都没生成 ⇒ 也要说清（⛔ 别画成"停了但什么都没发生"）', () => {
+  const s = RagSse.stoppedNotice('');
+  assert.match(s, /0/);
+  assert.match(s, /未计费/);
+});
+
+test('🔴 stoppedNotice：⛔ 不许出现 "token" 这个数（那个数拿不到，写了就是编）', () => {
+  const s = RagSse.stoppedNotice('随便写点什么');
+  assert.doesNotMatch(s, /\d+\s*token/i, `不该给 token 数（拿不到）：${s}`);
+  assert.doesNotMatch(s, /undefined|NaN/, s);
 });
