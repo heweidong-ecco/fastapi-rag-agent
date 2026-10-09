@@ -5,14 +5,15 @@
 > **这是一个单人项目**（见「⚠️ 关于贡献」一节）——
 > 所以本文件的主要用途**不是"怎么提 PR"**，而是 **「换了一台机器 / 隔了几个月回来，怎么接着干」**。
 >
-> 📍 **文档全貌看 [`docs/文档地图.md`](docs/文档地图.md)** —— 那是索引，本文件不重复它。
+> 📍 **文档全貌** ⇒ 从仓库根 [`CLAUDE.md`](CLAUDE.md) 的「📇 本仓目录索引」**一层层往下**
+> （⚠️ 2026-10-09 起**每层目录都有 `CLAUDE.md`**，那是那一层的索引）。
 
 ---
 
 ## 一 · 五分钟把环境跑起来
 
 ```bash
-# ① 配置（⚠️ .env 必须在【仓根】，不是 api/ 下）
+# ① 配置（⚠️ .env 必须在【仓根】，不是 app/ 下）
 cp .env.example .env
 #    然后填 4 个必填键：DASHSCOPE_API_KEY · POSTGRES_PASSWORD · JWT_SECRET_KEY · LOGIN_PASSWORD
 #    ⇒ 逐键说明见 docs/契约/环境变量.md
@@ -97,7 +98,7 @@ git commit
 | 1 | 业务错误一律 `raise AppException(ErrorCode.XXX, msg)` |
 | 2 | ⛔ **中间件里不许抛 `AppException`** —— 直接返回 `JSONResponse`（否则变 500） |
 | 3 | 数据库一律用 `get_db()` 上下文管理器，**禁止裸连接** |
-| 4 | 环境变量**从 `api/config.py` 导入**，不要直接 `os.getenv` |
+| 4 | 环境变量**从 `app/core/config.py` 导入**，不要直接 `os.getenv` |
 | 5 | 注释**写「为什么」不写「是什么」**；更正类注释**带日期 + 出处** |
 | 6 | 删代码时**留一行说明删了什么**，不要静默删 |
 | 7 | 🔴 **PUBLIC 仓，不得写入明文凭据** |
@@ -120,7 +121,7 @@ git commit
 | **接口清单不写进文档** | 跑 `bash scripts/list_endpoints.sh` 现取 |
 | **按四层放** | 入口 / 契约 / 说明 / 过程 —— 见 `DEC-036` |
 | **加/改文档后跑** `scripts/check_doc_links.sh` | 它会抓断链 |
-| **同步 `docs/文档地图.md`** | 加了新文档要登记 |
+| **在新文档【所在目录】的 `CLAUDE.md` 里登记一行** | 每层 `CLAUDE.md` 就是那层的索引表 |
 
 ---
 
@@ -142,10 +143,10 @@ git commit
 |---|---|
 | **这项目是什么** | [`README.md`](README.md) |
 | **现在做到哪了** | [`ROADMAP.md`](ROADMAP.md) ⭐ **唯一权威** |
-| 所有文档在哪 | [`docs/文档地图.md`](docs/文档地图.md) |
+| 所有文档在哪 | 从仓库根 [`CLAUDE.md`](CLAUDE.md) 的「📇 本仓目录索引」往下 |
 | 接口怎么调 | [`docs/契约/接口契约.md`](docs/契约/接口契约.md) + `scripts/list_endpoints.sh` |
 | 环境变量 | [`docs/契约/环境变量.md`](docs/契约/环境变量.md) |
-| 表结构 | [`docs/契约/数据模型.md`](docs/契约/数据模型.md) + [`api/schema.sql`](api/schema.sql) |
+| 表结构 | [`docs/契约/数据模型.md`](docs/契约/数据模型.md) + [`app/schema.sql`](app/schema.sql) |
 | 出问题了 | [`docs/说明/运维.md`](docs/说明/运维.md) §七 · [`docs/FAQ.md`](docs/FAQ.md) |
 | 为什么这么设计 | [`docs/decisions/`](docs/decisions/) |
 | 过去犯过什么错 | [`docs/复盘/`](docs/复盘/) |

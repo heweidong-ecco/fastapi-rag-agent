@@ -48,13 +48,13 @@ bash scripts/spec_status.sh
 ### 3.1 先读代码（**别照抄别的文档**）
 
 ```
-api/<模块名>.py      ← 主文件，逐行读
+app/<模块名>.py      ← 主文件，逐行读
 ```
 
 **同时查这几处**（它们常有"看代码看不出来"的信息）：
 
 ```bash
-grep -rn "<模块名>" --include="*.py" api/ | grep -v "^api/<模块名>.py"   # 谁在用它
+grep -rn "<模块名>" --include="*.py" app/ | grep -v "^app/<模块名>.py"   # 谁在用它
 grep -rn "<模块名>" --include="*.md" . | grep -v 归档                     # 文档里怎么说的
 bash scripts/check_doc_orphans.sh --quiet >/dev/null 2>&1               # （顺带核引用）
 ```
@@ -65,7 +65,7 @@ bash scripts/check_doc_orphans.sh --quiet >/dev/null 2>&1               # （顺
 - `后端补齐清单-待裁-20260929.md`（它有没有在 B1–B14 里）
 - `docs/decisions/`（有没有裁过它）
 
-### 3.2 写 spec（**照 `docs/specs/README.md` 的模板**）
+### 3.2 写 spec（**照 `app/specs/README.md` 的模板**）
 
 ```
 docs/specs/<模块名>.md
@@ -98,7 +98,7 @@ bash scripts/check_doc_links.sh --quiet   # 新 spec 里的路径对不对
 ```
 
 **注意**：新 spec 会被 `check_doc_orphans.sh` 当成"孤儿" ——
-⚠️ **它需要有人在 `docs/specs/README.md` 里指向它**，而那张表是**生成的**：
+⚠️ **它需要有人在 `app/specs/README.md` 里指向它**，而那张表是**生成的**：
 
 ```bash
 bash scripts/spec_status.sh --write       # ⭐ 重生成模块表 ⇒ 新 spec 自动被索引

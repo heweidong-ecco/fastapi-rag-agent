@@ -40,15 +40,15 @@ docker ps --format '{{.Names}}' | grep -E 'postgres-rag|redis-rag' \
   && docker start postgres-rag redis-rag \
   || docker compose up -d postgres redis
 
-# ② 依赖（清单只有一份：api/requirements.txt）
+# ② 依赖（清单只有一份：app/requirements.txt）
 python3.10 -m venv venv
-venv/bin/pip install -r api/requirements.txt
+venv/bin/pip install -r app/requirements.txt
 
 # ③ 环境变量
 cp .env.example .env                                    # 然后填【四项】必填（见下）
 
 # ④ 起服务
-cd api && ENABLE_DASHBOARD=false ../venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
+cd app && ENABLE_DASHBOARD=false ../venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
 ```
 
 > 🔴 **①为什么要先判断（2026-09-20 实测）**：`docker compose up` 按 **compose 项目**工作，
@@ -58,17 +58,17 @@ cd api && ENABLE_DASHBOARD=false ../venv/bin/uvicorn main:app --host 127.0.0.1 -
 > ⇒ **撞名硬失败**，或**把容器重建到 `fastapi-rag-agent_app-net`**。
 > **已有容器 ⇒ `docker start`；全新机器才 `compose up`。**
 
-**必须填的【五项】（`api/config.py:58-79` 的 `validate_config` 是 fail-closed，缺一项即拒绝启动）**：
+**必须填的【五项】（`app/core/config.py:58-79` 的 `validate_config` 是 fail-closed，缺一项即拒绝启动）**：
 `DASHSCOPE_API_KEY` · **`LLM_API_KEY`** · **`POSTGRES_PASSWORD`** · `JWT_SECRET_KEY` · `LOGIN_PASSWORD`
 
 > ⚠️ 2026-09-20 修：此处原写「三个」——**漏了 `POSTGRES_PASSWORD`**（实测代码检查 4 项）。
 > 它由 `.env.example` 提供了占位值，所以容易漏；但**删掉/留空就会起不来**。
 
-> 📌 **② 的依赖清单只有一份：`api/requirements.txt`。**
-> 🔴 2026-09-20：此前那份"轻量版" `api/requirements-test.txt` **已删**（业务方裁决
+> 📌 **② 的依赖清单只有一份：`app/requirements.txt`。**
+> 🔴 2026-09-20：此前那份"轻量版" `app/requirements-test.txt` **已删**（业务方裁决
 > 「**不用双 requirements.txt，这样会混**」）。已核安全性：实测它是 `requirements.txt` 的**真子集**
 > （含版本约束在内比对整行 ⇒ 只在它里面出现的行 = **空**），切过去**不丢任何包**。
-> **代价**：本机会拉 torch 系（GB 级）。但 `api/reranker.py:14` 是真懒加载 ⇒
+> **代价**：本机会拉 torch 系（GB 级）。但 `app/rag/reranker.py:14` 是真懒加载 ⇒
 > **不碰 torch 也能跑**（默认模式 `accurate_norerank`）；只有 `mode=accurate`/`full` 与
 > `/rag/rerank_search` 才需要 torch + 2.3GB 模型。
 
@@ -83,7 +83,7 @@ cd api && ENABLE_DASHBOARD=false ../venv/bin/uvicorn main:app --host 127.0.0.1 -
 
 1. docker ps 看 postgres-rag / redis-rag 是否在跑（不在就报我，不要自己起）
 2. 如果 API 已经在 8000 端口，curl /health 与 /ready
-3. cd api && ../venv/bin/python -m pytest . -m "not integration and not needs_db" -q
+3. cd app && ../venv/bin/python -m pytest . -m "not integration and not needs_db" -q
    （若报 qdrant 单实例锁，改用：从仓库根跑 + MEM0_DIR=$(mktemp -d)）
 4. 把结果按「通过/失败/未验证」三态汇报，失败项给出原始报错。
 
@@ -123,7 +123,7 @@ cd api && ENABLE_DASHBOARD=false ../venv/bin/uvicorn main:app --host 127.0.0.1 -
 
 | 层 | 命令 | 需要什么 | 进 CI？ | 说明 |
 |---|---|---|---|---|
-| **L0/L1/L2 离线** | `cd api && ../venv/bin/python -m pytest . -m "not integration and not needs_db" -q` | **redis**（+ 默认无则跳过部分） | ✅ | **主力**，最快 |
+| **L0/L1/L2 离线** | `cd app && ../venv/bin/python -m pytest . -m "not integration and not needs_db" -q` | **redis**（+ 默认无则跳过部分） | ✅ | **主力**，最快 |
 | **L3 集成** | `... -m integration -q` | 真 Postgres + **外网**（DashScope embedding） | ❌ | 本机跑 |
 | **需要真库** | `... -m needs_db -q` | 真 Postgres | ❌ | ⚠️ **见 §6 红线：必须带 `POSTGRES_DB=rag_test`** |
 | **全部** | `... -q` | 全部 | ❌ | — |
@@ -138,7 +138,7 @@ POSTGRES_DB=rag_test ../venv/bin/python -m pytest . -q
 
 ```
 离线层：68 passed / 1 skipped / 11 deselected
-新增的 Agent 用例：18 passed（api/test_agent_repairs.py）
+新增的 Agent 用例：18 passed（app/tests/test_agent_repairs.py）
 ```
 
 ---
@@ -168,15 +168,15 @@ POSTGRES_DB=rag_test ../venv/bin/python -m pytest . -q
 
 | 要什么 | 去哪 |
 |---|---|
-| 应用日志（按日滚动） | `logs/api_YYYY-MM-DD.log`（仓库根）**和** `api/logs/api_YYYY-MM-DD.log`（历史日志在这里，两处都有） |
+| 应用日志（按日滚动） | `logs/api_YYYY-MM-DD.log`（仓库根）**和** `app/logs/api_YYYY-MM-DD.log`（历史日志在这里，两处都有） |
 | 错误日志 | 同上，`error_*.log` |
 | 起服务时看失败原因 | uvicorn 的 stderr —— `... > /tmp/api.log 2>&1 &` 然后 `tail` 它 |
-| 本仓特有的定位技巧 | 🔴 **本仓的错误日志带 rich 的变量树**（`│ └ <starlette...>`），**裸 grep 很容易误命中**。先 `sed 's/\x1b\[[0-9;]*m//g'` 去 ANSI，再只 grep 指向 `api/` 的帧：`grep -E "File \".*/api/"` |
+| 本仓特有的定位技巧 | 🔴 **本仓的错误日志带 rich 的变量树**（`│ └ <starlette...>`），**裸 grep 很容易误命中**。先 `sed 's/\x1b\[[0-9;]*m//g'` 去 ANSI，再只 grep 指向 `app/` 的帧：`grep -E "File \".*/app/"` |
 
 **定位一个 500 的标准动作**（实测有效）：
 
 ```bash
-sed 's/\x1b\[[0-9;]*m//g' /tmp/api.log | grep -E "File \".*/api/" | tail -6      # 哪几行本仓代码
+sed 's/\x1b\[[0-9;]*m//g' /tmp/api.log | grep -E "File \".*/app/" | tail -6      # 哪几行本仓代码
 sed 's/\x1b\[[0-9;]*m//g' /tmp/api.log | grep -E "^(TypeError|ValueError|RuntimeError|KeyError|AttributeError|openai\..*Error)" | tail -4   # 什么异常
 ```
 
@@ -203,7 +203,7 @@ bash scripts/check_secrets.sh        # 凭据门：命中即 exit 1（扫 staged
 
 > ⚠️ **口径**：它**只扫 staged 的新增行** —— 没 `git add` 就跑，会打印「staged 区为空」然后 exit 0，
 > **那不是"通过"，是"没扫"**。
-> 另外 `--all` 模式在干净仓库上**本来就会红**（`docs/说明/部署.md` / `api/schemas.py` 里有**占位符**命中 `sk-`/JWT 模式）
+> 另外 `--all` 模式在干净仓库上**本来就会红**（`docs/说明/部署.md` / `app/routing/schemas.py` 里有**占位符**命中 `sk-`/JWT 模式）
 > —— 那是**既存的占位符**，不是泄漏；但**不要把它当成"门坏了"**。
 
 ---

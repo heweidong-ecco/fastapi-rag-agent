@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 #
-# gen_schema_sql.sh —— 重新生成 `api/schema.sql`（**手写头 + pg_dump 正文**的拼接）
+# gen_schema_sql.sh —— 重新生成 `app/schema.sql`（**手写头 + pg_dump 正文**的拼接）
 #
 # ## 为什么要有它
 #
 # 🔴 **2026-10-08（`N12`）之前，这一步靠"人记得"** —— 文件头自己写着生成命令：
 #
 #     docker compose exec -T postgres pg_dump -U postgres -d rag_db --schema-only \
-#       --no-owner --no-privileges > api/schema.sql
+#       --no-owner --no-privileges > app/schema.sql
 #
 # ⚠️ **那条命令会把这文件【约 80 行手写头】当场冲掉** —— 头是手写的、`pg_dump` 不产它。
 # 🔴 `N12` 那次是**手工 `cat` 拼的**（`sed -n '1,71p'` 取头 + dump），
@@ -16,13 +16,13 @@
 #
 # ## 切分点 = 文件里的【哨兵行】
 #
-# 头与正文之间有一行哨兵（`api/schema.sql` 里那行 ⛔⛔ 切分哨兵）。
+# 头与正文之间有一行哨兵（`app/schema.sql` 里那行 ⛔⛔ 切分哨兵）。
 # **本脚本按它切**，⛔ 不按"第 N 行"（行号会随头的增删漂）。
 # 📌 找不到哨兵 ⇒ **exit 2「判不了」**，⛔ 不是"凑合生成"（三态：0 过 / 1 失败 / 2 判不了）。
 #
 # ## 用法
 #
-#     bash scripts/gen_schema_sql.sh            # 生成并覆盖 api/schema.sql
+#     bash scripts/gen_schema_sql.sh            # 生成并覆盖 app/schema.sql
 #     bash scripts/gen_schema_sql.sh --check    # ⛔ 不写文件，只报「与活库是否一致」
 #
 # ## 前置
@@ -48,7 +48,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${REPO_ROOT}"
 
-TARGET="api/schema.sql"
+TARGET="app/schema.sql"
 SENTINEL='切分哨兵'
 CONTAINER="postgres-rag"
 DB="${POSTGRES_DB:-rag_db}"

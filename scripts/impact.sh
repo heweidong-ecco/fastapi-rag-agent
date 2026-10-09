@@ -6,7 +6,7 @@
 #
 # 用法：
 #   scripts/impact.sh <关键词> [<关键词> ...]
-#   scripts/impact.sh -f api/main.py [api/db.py ...]   # 按文件：自动取 basename 与相对路径
+#   scripts/impact.sh -f app/main.py [app/core/db.py ...]   # 按文件：自动取 basename 与相对路径
 #
 # 输出：命中的**被 git 跟踪**文件（git grep ⇒ 天然排除 .gitignore 里的东西），
 #       按目录分组 + 明细 + 总数。

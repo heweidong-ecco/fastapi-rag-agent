@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# 自测：`.claude/hooks/` 下两个【提醒型】hook —— `py-compile-remind.py` · `claim-evidence-remind.py`
+# 自测：`.claude/hooks/` 下四个 hook ——
+#   · `py-compile-remind.py` · `claim-evidence-remind.py`（判据逻辑，2026-10-05 建）
+#   · 🆕 `spec-remind.py` · `route-auth-remind.py`（**路径判据**，2026-10-09 补 —— 见文件末 §路径判据）
 #
 # ── 为什么要有这个文件 ──────────────────────────────────────────────
 # 本仓纪律：**「门挂在别处，就等于没有门」**（`docs/复盘/2026-09-16-八个PR跳过了留痕门.md`）。
@@ -9,12 +11,12 @@
 # ⇒ 所以下面每一条**都必须能打印出一个可判的退出码 + 一句能 grep 的输出**。
 #
 # ── 判据（可打印） ──────────────────────────────────────────────────
-#   bash scripts/test_remind_hooks.sh        ⇒ 期望末行 `10 通过 / 0 失败`
+#   bash scripts/test_remind_hooks.sh        ⇒ 期望末行 `22 通过 / 0 失败`
 #
 # ── 🔴 还要在【副本里】跑一遍（本仓真踩过） ──────────────────────────
 #   ROOT=$(mktemp -d); mkdir -p "$ROOT/.claude/hooks" "$ROOT/scripts"
 #   cp .claude/hooks/*.py "$ROOT/.claude/hooks/"; cp scripts/test_remind_hooks.sh "$ROOT/scripts/"
-#   bash "$ROOT/scripts/test_remind_hooks.sh"       # ⇒ 也必须 10 通过
+#   bash "$ROOT/scripts/test_remind_hooks.sh"       # ⇒ 也必须 22 通过
 #   ⚠️ **为什么**：macOS 上 `/var` 是 `/private/var` 的**软链**，而 `mktemp -d` 给的正是 `/var/...`
 #      ⇒ 钩子里的 `Path(__file__).resolve()` 与调用方给的路径**两边形式不一致**
 #      ⇒ **T9 在真仓绿、在副本红**（实测 2026-10-05）。两边都跑才照得出来。
@@ -119,13 +121,75 @@ t "T6 「X 不存在」且无命令 ⇒ 出话"       出话  claim-evidence-rem
   "$(mkjson "${CLAIM_FILE}" '`/rag/ask` 不存在，`/rag/search` 也不生成答案。')"
 
 t "T7 有全称否定 + 行内命令 ⇒ 静默"      静默  claim-evidence-remind.py \
-  "$(mkjson "${CLAIM_FILE}" '`/rag/ask` 不存在 —— 判据：`grep -n "rag/ask" api/*.py` ⇒ 0 行。')"
+  "$(mkjson "${CLAIM_FILE}" '`/rag/ask` 不存在 —— 判据：`grep -n "rag/ask" app/*.py` ⇒ 0 行。')"
 
 t "T8 「全称否定」旁路 ⇒ 静默"           静默  claim-evidence-remind.py \
   "$(mkjson "${CLAIM_FILE}" '复盘里那句「全称否定」（X 不存在）是我写错的。')"
 
 t "T9 docs/复盘/ ⇒ 静默（历史不改写）"   静默  claim-evidence-remind.py \
   "$(mkjson "${REPO}/docs/复盘/2026-09-29-结果为空就断言能力不存在.md" '$X$ 不存在，且是唯一的。')"
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# §路径判据 —— 🆕 2026-10-09（模块化重构）补
+# ═══════════════════════════════════════════════════════════════════════
+#
+# 🔴 **为什么补这一段**：`spec-remind` 与 `route-auth-remind` **此前从没有自测** ——
+#    而它们的判据**全部按路径**（`app/` 下 + 文件名 + `docs/specs/<名>.md`），
+#    正是模块化重构**最容易弄瞎**的那一类。
+#    本仓纪律：「**门必须能测出自己会红**」（`DEC-061` / `DEC-066`）——
+#    一个永远不出声的提醒，与"出声了但没问题"在机器痕迹上**完全一样**。
+#    ⚠️ 2026-10-09 实测过：重构后这两个 hook **仍然正确**（此前"部分失明"是**读代码的推断，
+#       不是实测** ⇒ 那条推断是错的）。补自测是为了**以后**再重构时能立刻知道。
+
+# spec-remind 需要 `tool_name` 与 `cwd`（原 `mkjson` 只给 file_path ⇒ 它会静默退出）
+mkjson_edit() {
+  "$PY" -c '
+import json, sys
+print(json.dumps({"tool_name": sys.argv[2], "cwd": sys.argv[3],
+                  "tool_input": {"file_path": sys.argv[1]}}))
+' "$1" "${2:-Edit}" "${REPO}"
+}
+
+t "T10 组目录里的模块（有 spec）⇒ 出话"   出话  spec-remind.py "$(mkjson_edit "${REPO}/app/core/config.py")"
+t "T11 另一个组 + 有 spec）⇒ 出话"       出话  spec-remind.py "$(mkjson_edit "${REPO}/app/rag/chunker.py")"
+t "T12 app/ 根的 main.py（有 spec）⇒ 出话" 出话 spec-remind.py "$(mkjson_edit "${REPO}/app/main.py")"
+t "T13 app/tests/ 下的测试 ⇒ 静默"        静默  spec-remind.py "$(mkjson_edit "${REPO}/app/tests/test_main.py")"
+t "T14 .md ⇒ 静默"                       静默  spec-remind.py "$(mkjson_edit "${REPO}/docs/待办总表.md")"
+# ⚠️ 用 `Read` 而不是空串：bash 的 `${2:-Edit}` 在**空串**时**也会**取默认值
+#    （`:-` 的语义是"未设**或为空**就用默认"）⇒ 传空串**根本测不到**这一支。2026-10-09 实测踩过。
+t "T14b 非 Edit/Write（Read）⇒ 静默"      静默  spec-remind.py "$(mkjson_edit "${REPO}/app/core/config.py" Read)"
+# 🔴 `T14c` 专测 `app/` **前缀**那一支 —— 2026-10-09 变异自证发现：
+#    上面 T13 是被 `test_` 基线名挡下的、T14 是被 `.md` 挡下的，
+#    ⇒ **拿掉 `app/` 前缀判据后它们全绿**（用例对这个判据**没有牙齿**）。
+#    本仓原话：「**门的靶子要定准**」。
+t "T14c 仓外 .py（scripts/）⇒ 静默（只认 app/ 下）" 静默  spec-remind.py "$(mkjson_edit "${REPO}/scripts/issue_api_key.py")"
+
+# ── route-auth-remind：真正按路径判的是 `looks_like_route_file()` ──
+# ⚠️ **不测它的"出话"** —— 它只在「**新引入了没鉴权的路由**」时才出声，
+#    而那要求先造一条坏路由（会真改仓）。⇒ 测它**判据的那一半**：
+#    「这个 .py 算不算**生产路由文件**」。这一半**恰好是重构会弄瞎的那一半**。
+rl() {
+  "$PY" -c '
+import importlib.util, pathlib, sys
+s = importlib.util.spec_from_file_location("rah", sys.argv[1])
+m = importlib.util.module_from_spec(s); s.loader.exec_module(m)
+print("TRUE" if m.looks_like_route_file(pathlib.Path(sys.argv[2])) else "FALSE")
+' "${HOOKS}/route-auth-remind.py" "$1"
+}
+t2() {  # <名> <期望 TRUE|FALSE> <相对仓根的路径>
+  local got; got="$(rl "${REPO}/$3")"
+  if [ "${got}" = "$2" ]; then
+    printf '  ✅ %s ⇒ %s\n' "$1" "${got}"; PASS=$((PASS + 1))
+  else
+    printf '  ❌ %s ⇒ %s（期望 %s）\n' "$1" "${got}" "$2"; FAIL=$((FAIL + 1))
+  fi
+}
+t2 "T15 组目录里的路由文件（api_v1）"     TRUE  "app/routing/api_v1.py"
+t2 "T16 组目录里的路由文件（api_v1_rag）" TRUE  "app/routing/api_v1_rag.py"
+t2 "T17 非路由模块 ⇒ 不算"                FALSE "app/core/config.py"
+t2 "T18 tests/ 下的测试 ⇒ 不算"           FALSE "app/tests/test_api_v1.py"
+t2 "T19 仓根脚本 ⇒ 不算（不在 app/ 下）"   FALSE "scripts/check_route_auth.py"
 
 echo
 if [ "${FAIL}" -eq 0 ]; then

@@ -22,7 +22,7 @@ PreToolUse hook —— **`git commit` 之前，自动跑本仓的六道门**。
 | ① | **凭据门** | `scripts/check_secrets.sh` | PUBLIC 仓里混进明文凭据（**进了历史就改不掉**） |
 | ② | **链接检查** | `scripts/check_doc_links.sh` | 文档里指向不存在的路径（**当天已犯 4 次**） |
 | ③ | **孤儿检查** | `scripts/check_doc_orphans.sh` | 建了文档**但没人指向它**（索引挂空） |
-| ④ | **模块 spec 门**（内联） | — | 新增 `api/*.py` 模块却没有 `docs/specs/<模块>.md` |
+| ④ | **模块 spec 门**（内联） | — | 新增 `app/**/*.py` 模块却没有**同目录 `specs/<模块>.md`** |
 | ⑤ | **路由鉴权门** | `scripts/check_route_auth.py --baseline` | 新引入了**没有鉴权依赖**的路由（含 WebSocket）|
 | ⑥ | **静态检查门** 🆕 | `scripts/check_lint_baseline.sh` | 新出现的**未使用导入 / 语法级错误**（ruff · **基线棘轮**，2026-10-07 加）|
 
@@ -70,7 +70,7 @@ GATES = [
 ]
 
 # ── 第 ④ 道门（**内联，不是外部脚本**）：新增模块必须有 spec ──
-# 判据：`docs/specs/<模块名>.md` 是否存在（模块名 = `api/xxx.py` 去掉 `.py`）
+# 判据：`docs/specs/<模块名>.md` 是否存在（模块名 = `app/xxx.py` 去掉 `.py`）
 #
 # ⚠️ **只管【新增】的模块**（`--diff-filter=A`），**不管改已有的** ——
 #    "改了代码要不要更新 spec"是**判断**，机械判不了（那交给 `spec-remind.py` 提醒）。
@@ -79,7 +79,7 @@ NOT_A_MODULE = ("conftest.py",)
 
 
 def non_module_files(repo: str):
-    """`api/*.py` 里被 `spec_status.sh` 认定为【不是产品模块】的名字集合。
+    """`app/*.py` 里被 `spec_status.sh` 认定为【不是产品模块】的名字集合。
 
     ⚠️ **为什么是"去问脚本"、而不是在本文件里再抄一份名单**（2026-10-07 · `DEC-101`）：
         本仓有明文教训 —— **一个名字两个来源必然漂移，而漂移是静默的**（`DEC-051`）。
@@ -110,16 +110,20 @@ def new_modules_without_spec(repo: str):
     bad = []
     for f in r.stdout.splitlines():
         f = f.strip()
-        if not (f.startswith("api/") and f.endswith(".py")):
+        if not (f.startswith("app/") and f.endswith(".py")):
             continue
         base = os.path.basename(f)
         if base.startswith("test_") or base in NOT_A_MODULE:
             continue                     # 测试不算产品模块
         if base[:-3] in nonmods:
             continue                     # 【不是模块】（手动/离线脚本）⇒ 不要求 spec
-        spec = os.path.join(repo, *SPECS_DIR, base[:-3] + ".md")
+        # 🔴 2026-10-09（段 2）：spec **与它的模块同目录** —— 见 `spec-remind.py` 同一处注释。
+        _d = os.path.dirname(f)                    # "app/core" / "app"
+        spec_rel = (f"{_d}/specs/{base[:-3]}.md" if _d != "app"
+                    else f"app/specs/{base[:-3]}.md")
+        spec = os.path.join(repo, *spec_rel.split("/"))
         if not os.path.exists(spec):
-            bad.append((f, os.path.join(*SPECS_DIR, base[:-3] + ".md")))
+            bad.append((f, spec_rel))
     return bad
 
 
@@ -149,20 +153,20 @@ def is_doc_only(repo: str) -> bool:
 # 🔴 它 2026-09-30 就存在、也挂了提醒 hook，**但从没进过 CI，也没进过这道提交门**
 #    ⇒ 只在"改路由文件"时提醒一句。本仓原话：**门挂在别处，就等于没有门**。
 #
-# ⚠️ **触发条件取"任何 api/ 下的产品 .py"**，⛔ 不取具体文件名清单 ——
+# ⚠️ **触发条件取"任何 app/ 下的产品 .py"**，⛔ 不取具体文件名清单 ——
 #    提醒 hook 那边写的是 `{"main.py","api_v1.py","api_v1_rag.py","api_v1_agent.py"}`，
 #    **新建一个 `api_v2.py` 就整个漏掉**（`DEC-066`「守卫的形状盲区」）。
 #    这里用**范围**而不是**名字**，正是为了不留那个形状。
-#    ⚠️ 代价：本仓多数提交都会动 api/*.py ⇒ 每次提交多 ~10s（实测 9.95s）。
+#    ⚠️ 代价：本仓多数提交都会动 app/*.py ⇒ 每次提交多 ~10s（实测 9.95s）。
 #       这是**有意**拿时间换"不会被忘"；CI 那边无条件跑，是真正的兜底。
 def api_product_files_staged(repo: str):
-    """staged 里 `api/**.py` 的**产品**文件（排除测试与 conftest）。`None` = git 失败。"""
+    """staged 里 `app/**.py` 的**产品**文件（排除测试与 conftest）。`None` = git 失败。"""
     files = staged_files(repo)
     if files is None:
         return None
     out = []
     for f in files:
-        if not (f.startswith("api/") and f.endswith(".py")):
+        if not (f.startswith("app/") and f.endswith(".py")):
             continue
         base = os.path.basename(f)
         if base.startswith("test_") or base in NOT_A_MODULE:
@@ -244,7 +248,7 @@ def main() -> int:
 
     # ── 第 ⑤ 道门：路由鉴权（`DEC-074`）──
     # 三种状态必须分清（同第 ④ 道门的教训：**别把正常说成故障**）：
-    #   []        ⇒ 本次没动 api/ 产品代码            → ⏭
+    #   []        ⇒ 本次没动 app/ 产品代码            → ⏭
     #   [文件…]   ⇒ 跑检查：exit 0 过 / 非 0 拦       → ✅ / 🔴
     #   None      ⇒ git **真失败**                    → ⚠️ 跳过
     route_files = api_product_files_staged(repo)
@@ -276,7 +280,7 @@ def main() -> int:
             print("", file=sys.stderr)
             print("   ⇒ 为什么硬拦：**没有 spec 的模块，别人不知道它存在、也不知道做到哪。**",
                   file=sys.stderr)
-            print("   ⇒ 建 spec 的模板见 docs/specs/README.md（**⭐ 关键节是「看代码会误判的地方」**）",
+            print("   ⇒ 建 spec 的模板见 app/specs/README.md（**⭐ 关键节是「看代码会误判的地方」**）",
                   file=sys.stderr)
             print("   ⇒ ⚠️ 但它**如果是手动/离线脚本、不是产品模块** —— ⛔ 别为它造 spec：",
                   file=sys.stderr)
@@ -320,7 +324,7 @@ def main() -> int:
     if route_files:
         parts.append("路由鉴权门 ✅")
     elif route_files == []:
-        parts.append("路由鉴权门 ⏭ 本次没动 api/ 产品代码")
+        parts.append("路由鉴权门 ⏭ 本次没动 app/ 产品代码")
     else:
         parts.append("路由鉴权门 ⚠️ 跳过（脚本不在 / 跑不起来 / git 读不到 staged）")
     if skipped:

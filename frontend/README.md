@@ -11,7 +11,7 @@
 | 🔴🔴 **找东西先看这份** | ⭐ **`frontend/索引.md`** —— **前端的一切，从这里找**（业务方 2026-10-09：「**以后你要找，就在索引列表文档里面找，不用靠我来记，也不要用 grep 去找，也不准**」） |
 | ⭐ **另一份** | 🔴 **`frontend/页面与接口规格.md`** —— **每页放什么 · 打哪些接口 · 各状态显示什么**（**初稿的唯一输入**）。<br>⚠️ **两份分工**：**本文件** = **怎么长**（token/排版/组件/分页/红线）· **那份** = **放什么**（页面 · 接口 · 状态）。 |
 | **覆盖** | 风格（§三）· **排版（§四）**· **组件（§五）**· **列表与分页（§六）** · 落地红线（§七） |
-| **现状** | 🔴 **页面代码【还不在这个目录】** —— 在 `api/static/`（5 页 + 3 js + 3 test）· 搬迁见 §九 |
+| **现状** | 🔴 **页面代码【还不在这个目录】** —— 在 `app/static/`（5 页 + 3 js + 3 test）· 搬迁见 §九 |
 
 ---
 
@@ -35,7 +35,7 @@
 > **裁定（业务方 2026-10-09 · 甲）**：**首页 = 门户形态**（顶部条 + 居中卡片列，⛔ 无侧边栏）；
 > **侧边栏留内页**。依据：落地/门户页用顶部导航，侧边栏是"应用内导航"（Ant Design 口径；
 > 另有来源补一条顶在最高判据上的：「**桌面端⛔ 绝不许把导航藏进汉堡菜单** —— 会砍掉约 50% 的功能发现率」）。
-> 📄 规格 §3.0「页面形态」那行 · 守卫 `api/test_index_page.py`（`test_no_navigation_target_appears_twice`）。
+> 📄 规格 §3.0「页面形态」那行 · 守卫 `app/tests/test_index_page.py`（`test_no_navigation_target_appears_twice`）。
 
 ---
 
@@ -186,7 +186,7 @@ PY
 | 查什么 | 结果 |
 |---|---|
 | 页面里的分页控件 | 🔴 **0 个**（`grep -rniE '分页\|pagination\|offset\|上一页\|下一页'` ⇒ 无命中） |
-| 后端列表接口的 `LIMIT/OFFSET` | 🔴 **只有 1 处 `LIMIT`**（`api/api_v1_rag.py:447`），**没有任何 `OFFSET`** |
+| 后端列表接口的 `LIMIT/OFFSET` | 🔴 **只有 1 处 `LIMIT`**（`app/routing/api_v1_rag.py:447`），**没有任何 `OFFSET`** |
 | 现在怎么处理"多" | **硬截** —— 拉到上限就**不显示后面的**，且**界面上不说明被截了** |
 
 ⇒ 🔴 **这是一个真缺口，而且它不只是"样式"**：分页要**接口 + 组件两头**一起动。
@@ -202,7 +202,7 @@ PY
 
 > ⚠️ **本节的初稿写"本仓没有一个列表有分页"—— 那句不准确。** 实查发现：
 
-✅ **`/agent/trace/{thread_id}/cost` 已经是对的**（`api/token_tracker.thread_cost_breakdown`）：
+✅ **`/agent/trace/{thread_id}/cost` 已经是对的**（`app/billing/token_tracker.thread_cost_breakdown`）：
 `items` 有 `LIMIT`，但响应同时给 **`truncated`**（`total.count > len(items)`），
 且**合计由 SQL 算整条线程**（⛔ 不受 `LIMIT` 影响）⇒ **页面显示 `total`，⛔ 不自己求和**。
 
@@ -216,7 +216,7 @@ PY
 🔴 **两条路都行，但【必须说出来】这一半是共同的** —— 而它现在是**门**：
 
 ```
-venv/bin/python -m pytest api/test_truncation_declared.py -q
+venv/bin/python -m pytest app/tests/test_truncation_declared.py -q
 ```
 ⇒ **任何收了 `limit` 的端点，响应里必须有 `truncated` 或 `has_more`**；
 真要豁免 ⇒ 登记进 `scripts/truncation-exempt.txt` 并**写明理由**。
@@ -261,20 +261,20 @@ venv/bin/python -m pytest api/test_truncation_declared.py -q
 
 > 🔴 **2026-10-09 两次改口径，最终结论：⛔【不搬】** ——
 > 业务方先说「**把前端的东西都移动到 `frontend`**」，同日又说「**搬迁不做也可以**」⇒
-> 📄 **`DEC-120 §七`**：**落点维持 `api/static/`**（`DEC-119` 的裁定**恢复有效**）。
+> 📄 **`DEC-120 §七`**：**落点维持 `app/static/`**（`DEC-119` 的裁定**恢复有效**）。
 > ⚠️ **下面 9.1 那张「5 件代价」表【留着】** —— 记的是「**如果将来要搬，得改哪 5 处**」，⛔ 不是待办。
 > 🔴 **找代码请先看 `frontend/索引.md`** —— 它第一行就写着代码在哪。
 
-### 9.1 ✅ （现行）**页面留在 `api/static/`；本目录放【规范 · 规格 · 索引】**
+### 9.1 ✅ （现行）**页面留在 `app/static/`；本目录放【规范 · 规格 · 索引】**
 
 **硬技术约束（⛔ 不是偏好）**：
 
 ```bash
-grep -n -A3 '^  api:' docker-compose.yml     # ⇒ build: context: ./api
-grep -n 'COPY . \.' api/Dockerfile           # ⇒ :96
+grep -n -A3 '^  api:' docker-compose.yml     # ⇒ build: context: ./app
+grep -n 'COPY . \.' app/Dockerfile           # ⇒ :96
 ```
 
-**Docker 只能 `COPY` 【构建上下文内】的文件**，而上下文 = **`api/` 一个目录**
+**Docker 只能 `COPY` 【构建上下文内】的文件**，而上下文 = **`app/` 一个目录**
 ⇒ 页面搬到**仓根** `frontend/` 就**进不了镜像** ⇒ 容器起来**页面 404**。
 
 ⇒ 要搬，得连着改 5 件：构建上下文 → 仓根 · **新建仓根 `.dockerignore`**（现在**没有**）·
@@ -287,18 +287,18 @@ grep -n 'COPY . \.' api/Dockerfile           # ⇒ :96
 
 | 放什么 | 在哪 | 进镜像吗 |
 |---|---|---|
-| **页面 + JS + CSS**（运行时资源） | **`api/static/`** —— `app.css` · `web/*.html` · `js/*.js` | ✅ **随 `api/` 一起进** |
+| **页面 + JS + CSS**（运行时资源） | **`app/static/`** —— `app.css` · `web/*.html` · `js/*.js` | ✅ **随 `app/` 一起进** |
 | **设计系统规范**（人读的） | **`frontend/README.md`**（本文件） | ⛔ 不进 |
 | **风格稿原件** | `frontend/*.fig`（⛔ gitignored · 见 §八） | ⛔ 不进 |
 
-**一句话**：**这两类的生命周期不同** —— `api/static/` 是"跑起来要用的"，`frontend/` 是"人看的"；
+**一句话**：**这两类的生命周期不同** —— `app/static/` 是"跑起来要用的"，`frontend/` 是"人看的"；
 ⛔ 不该因为名字像就并到一起。
 
 📄 **完整裁定（含丙/丁两个备选的否决理由与反悔成本）⇒ `docs/decisions/DEC-119-前端落点页面留api-static.md`**
 
 ### 9.3 ⬜ 那"前端"这一步还剩什么
 
-* ✅ **规范定了**（§三–§六）· ✅ **共享样式表建了**（`api/static/app.css`）
+* ✅ **规范定了**（§三–§六）· ✅ **共享样式表建了**（`app/static/app.css`）
 * ✅ **`chat.html` 接上了**（零结构改动 · 亮暗两套截图验过）
 * ⬜ **另外 4 个页面**（`trace` / `approvals` / `eval` / `eval_gate`）**仍是各带内联 `<style>`**
   —— ⚠️ `trace.html` 的 `.card` **硬编码 `#fff`** 就在这一批里修
@@ -311,12 +311,12 @@ grep -n 'COPY . \.' api/Dockerfile           # ⇒ :96
 **为什么分两步**：风格/组件是**用户价值**；搬迁是**零价值的机械改动**（页面还是那些页面），
 但它碰 15+ 处 ⇒ **同时做会让"哪一步改坏了"分不清**。
 
-**牵连面（2026-10-08 核过 · 判据 `grep -rn "api/static\|static/web\|static/js"`）**：
+**牵连面（2026-10-08 核过 · 判据 `grep -rn "app/static\|static/web\|static/js"`）**：
 
 | 类 | 处 |
 |---|---|
-| 应用装配 | `api/main.py`（`app.mount("/static", …)` + **4 条 302 跳转**） |
-| CI | `.github/workflows/ci.yml` 的 `node --test api/static/js/*.test.js`（**glob** · `N18` 加的） |
+| 应用装配 | `app/main.py`（`app.mount("/static", …)` + **4 条 302 跳转**） |
+| CI | `.github/workflows/ci.yml` 的 `node --test app/static/js/*.test.js`（**glob** · `N18` 加的） |
 | 用例（5 份） | `test_chat_page.py` · `test_trace_page.py` · `test_approvals_page.py` · `test_web_pages.py` · `test_frontend_contract.py` |
 | spec（4 份） | `static_frontend.md` · `main.md` · `api_v1_agent.md` · `approval_audit.md` |
 | 其他 | `ROADMAP.md` 多处 |
@@ -332,14 +332,14 @@ grep -n 'COPY . \.' api/Dockerfile           # ⇒ :96
 
 | 手段 | 能验什么 | ⛔ 验不了什么 |
 |---|---|---|
-| `pytest api/test_*page*.py` | 路由在 · 跳转目标在盘上 · 页面里的 URL 带 `/api/v1` | **长什么样** |
-| `node --test api/static/js/*.test.js` | 纯逻辑（含 `pagerState` 那 9 条） | 同上 |
+| `pytest app/test_*page*.py` | 路由在 · 跳转目标在盘上 · 页面里的 URL 带 `/api/v1` | **长什么样** |
+| `node --test app/static/js/*.test.js` | 纯逻辑（含 `pagerState` 那 9 条） | 同上 |
 | **headless 截图**（本机 Chrome，见 11.1） | **静态渲染**：亮/暗两套 · 布局 · 颜色 | **交互**（登录 / 点 / 翻页 / 真实数据） |
 | **Playwright MCP**（✅ 2026-10-09 已装，见 11.3） | 🔴 **交互**：真登录 · 点 · 填表 · 翻页 · 看 console/network | ⚠️ 不是 CI 门（观察是本机、某一刻的） |
 
 ### 11.1 headless 截图怎么跑（⛔ 零依赖，只借本机 Chrome）
 
-仓库根起一个**一次性静态服务**（把 `/static/*` 映到 `api/static/*`，与 `api/main.py` 的 mount 同口径）：
+仓库根起一个**一次性静态服务**（把 `/static/*` 映到 `app/static/*`，与 `app/main.py` 的 mount 同口径）：
 
 ```bash
 venv/bin/python tmp/serve.py &          # 见本仓 tmp/serve.py（一次性的，⛔ 不进库）
@@ -350,7 +350,7 @@ venv/bin/python tmp/serve.py &          # 见本仓 tmp/serve.py（一次性的�
 ```
 
 ⚠️ **要验亮 / 暗两套** ⇒ 先 `sed` 出一个临时副本（在 `<html …>` 里插 `data-theme="light"` 或 `"dark"`）再截。
-🔴 **用完立刻删那个副本** —— `api/static/` 下的**任何 `.html`** 都会被 `api/test_web_pages.py`
+🔴 **用完立刻删那个副本** —— `app/static/` 下的**任何 `.html`** 都会被 `app/tests/test_web_pages.py`
 **当成一个页面**扫（它是"扫目录"型的门，⛔ 不认"这是临时的"）。
 
 ### 11.2 🔴 **要验"有数据的页面"，只能喂假数据** —— ⚠️ 但⛔ 不许把假数留在代码里
@@ -359,7 +359,7 @@ venv/bin/python tmp/serve.py &          # 见本仓 tmp/serve.py（一次性的�
 ⇒ 想看主界面 ⇒ **临时注入一段 mock**（照 2026-10-09 那次的做法），**截完把临时文件删掉**。
 
 🔴 **⛔ 别把 mock 写进真页面** —— 本仓有前科：`trace.html` 曾印两格「总 Token / 总花费」，
-而它们**没有数据源、恒为 `--`**。守卫在 `api/test_trace_page.py`
+而它们**没有数据源、恒为 `--`**。守卫在 `app/tests/test_trace_page.py`
 （`test_page_does_not_print_the_two_dead_overview_cards`）。
 
 ### 11.3 Playwright MCP（🔴 **要新开会话才生效** —— MCP 在**会话启动时**加载）

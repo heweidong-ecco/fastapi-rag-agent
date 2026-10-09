@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# spec_status.sh —— **对账**：`api/` 的模块 ↔ `docs/specs/` 的 spec
+# spec_status.sh —— **对账**：`app/` 的模块 ↔ **它自己目录下 `specs/` 里的** spec
+# 🔴 2026-10-09（段 2）：spec 已**随模块搬进** `app/<组>/specs/`，⛔ 不再是集中的 `docs/specs/`。
 #
 # ## 它回答一个问题
 #
@@ -12,15 +13,16 @@
 # ## 用法
 #
 #     bash scripts/spec_status.sh              # 只打对账结果
-#     bash scripts/spec_status.sh --write      # 顺带【重写】docs/specs/README.md 的模块表
+#     bash scripts/spec_status.sh --write      # 顺带【重写】app/specs/README.md 的模块表
 #     bash scripts/spec_status.sh --missing    # 只列缺 spec 的（给 hook 用）
 #     bash scripts/spec_status.sh --non-modules # 只列【不是模块】的（给 pre-commit 第 ④ 道门用）
 #
 # ## 判据
 #
-# * **模块** = `api/*.py` 里**非测试、非 conftest** 的（`test_*` / `conftest` 不算产品模块）
+# * **模块** = `app/*.py` 里**非测试、非 conftest** 的（`test_*` / `conftest` 不算产品模块）
 #   ⚠️ **再减掉 `NON_MODULE_FILES`** —— 那 3 个是**手动 / 离线脚本**，不是产品模块（见下表与理由）
-# * **有 spec** = `docs/specs/<模块名>.md` 存在
+# * **有 spec** = **该模块自己目录下的 `specs/<模块名>.md`** 存在
+#   （`app/` 根的那几个模块 —— 如 `main.py` —— 落在 `app/specs/`）
 #
 # ## ⚠️ 三条设计说明
 #
@@ -53,10 +55,11 @@ from collections import defaultdict
 
 MODE = sys.argv[1]
 REPO = os.getcwd()
-SPECS = os.path.join(REPO, "docs", "specs")
+# ⚠️ 这个变量只用于**模板 README** 的读写；spec 的**查找**见下面那次递归（`have`）。
+SPECS = os.path.join(REPO, "app", "specs")
 
 # ── 0. 【不是模块的 .py】── 2026-10-07 加（乙单 · `裁单-清账与spec-20261007.md` §乙-3）
-# 「模块 = api/*.py」还有第二个盲区：**手动脚本 / 离线脚本**也住在 `api/` 下 ——
+# 「模块 = app/*.py」还有第二个盲区：**手动脚本 / 离线脚本**也住在 `app/` 下 ——
 # 它们**不参与服务路径**、**跑法是 `python xxx.py`**（docstring 自己写着）。
 # ⚠️ **给它们建 spec = 为了让计数器归零而造文档** —— 与 README 那句
 #    「`spec` 列写『🔴 缺』的 … **那本身就是信息**」**正好相反**
@@ -70,42 +73,75 @@ SPECS = os.path.join(REPO, "docs", "specs")
 #      · `tools_with_cache.py` **是模块**（业务方 2026-10-07 裁：**⛔ 不删，要接回调用链**）
 #    ⇒ 机械规则把「**脚本**」与「**模块，只是没接上**」混成一类 ⇒ 只能**逐条给理由**。
 NON_MODULE_FILES = {
-    "preprocess":          "手动脚本：跑一遍 `DocumentPreprocessor`，肉眼比对输入输出",
+    # ⚠️ 2026-10-09（段 2）：`preprocess.py` **已删**（`DEC-125` §2.5 ⓒ）——
+    #    它是 25 行硬编码 print 脚本、零函数零调用方；真功能 `DocumentPreprocessor`
+    #    已在 `app/rag/document_preprocessor.py` 且被上传链路真调用。
     "plan_constraints":    "手动实验脚本：对比不同约束下的任务规划（**会真调 LLM**）",
     "evaluate_with_ragas": "RAGAS **离线**评测脚本（有 `__main__`，不在服务路径上）",
 }
 
 # ── 1. 扫模块 ──
+# 🔴 2026-10-09（模块化重构）：模块已按组收进 `app/<组>/`（core · routing · access ·
+#    billing · agent · rag · tools），另加 `app/eval/` 与 `app/tests/`。
+#    ⚠️ 原先那句 `os.listdir(api)` **只看一层** ⇒ 重构后只能看到
+#       `main.py` / `conftest.py` / `preprocess.py` —— **那 60 个模块一个都扫不到**。
+#       而本脚本的输出形态是「🔴 缺失 N 个 / ✅ 全部有」⇒ **扫到 0 个会打印成"没什么可报的"**，
+#       与"确实都没问题"**长得一样**（本仓原话：「**空跑 = 静默假通过**」）。
+#    ⇒ 改成**递归**，并排掉【不是产品模块】的目录：
+#       `tests/`（测试）· `specs/`（不是 .py）· `static/`（前端资源）·
+#       `alembic/`（迁移脚本，重构前就扫不到）· 缓存目录
+_API_SKIP_DIRS = {"tests", "specs", "static", "alembic", "__pycache__",
+                  "logs", ".pytest_cache", ".ruff_cache"}
+
 mods = []
 nonmods = []
-for f in sorted(os.listdir(os.path.join(REPO, "api"))):
-    if not f.endswith(".py"):
-        continue
-    if f.startswith("test_") or f == "conftest.py":
-        continue
-    p = os.path.join("api", f)
-    n = sum(1 for _ in io.open(os.path.join(REPO, p), encoding="utf-8", errors="ignore"))
-    if f[:-3] in NON_MODULE_FILES:
-        nonmods.append((f[:-3], p, n))
-        continue
-    mods.append((f[:-3], p, n))
+for _root, _dirs, _files in os.walk(os.path.join(REPO, "app")):
+    _dirs[:] = sorted(d for d in _dirs if d not in _API_SKIP_DIRS)
+    for f in sorted(_files):
+        if not f.endswith(".py"):
+            continue
+        if f.startswith("test_") or f == "conftest.py":
+            continue
+        p = os.path.relpath(os.path.join(_root, f), REPO)
+        n = sum(1 for _ in io.open(os.path.join(REPO, p), encoding="utf-8", errors="ignore"))
+        if f[:-3] in NON_MODULE_FILES:
+            nonmods.append((f[:-3], p, n))
+            continue
+        mods.append((f[:-3], p, n))
+
+# 🔴 防空跑：递归口径再坏一次的话，这里当场红，⛔ 不许静默变成"没什么可报的"。
+if len(mods) < 40:
+    print(f"🔴 防空跑：只扫到 {len(mods)} 个产品模块（预期 ≥ 40）—— 枚举口径坏了，"
+          f"⛔ 下面的对账结论**不可信**。")
+    raise SystemExit(2)
 
 # ── 2. 扫 spec ──
 have = {}
-if os.path.isdir(SPECS):
-    for f in os.listdir(SPECS):
-        if f.endswith(".md") and f != "README.md":
-            have[f[:-3]] = f
+# 🔴 2026-10-09（段 2）：递归扫 `app/**/specs/*.md` —— **spec 与它的模块同目录**。
+#    ⛔ 别改回"只看一处目录"：那正是这次重构要消的"集中索引"。
+for _r, _d, _fs in os.walk(os.path.join(REPO, "app")):
+    _d[:] = [x for x in _d if x != "__pycache__"]
+    if os.path.basename(_r) != "specs":
+        continue
+    for f in _fs:
+        # ⚠️ 2026-10-09（段 3）：`specs/` 目录里**也有 `CLAUDE.md`**（那是该层的索引表）
+        #    ⇒ ⛔ 不排除它会**被当成一份 spec**（报成「spec 有、代码没了」的假阳性）。
+        if f.endswith(".md") and f not in ("README.md", "CLAUDE.md"):
+            have[f[:-3]] = os.path.relpath(os.path.join(_r, f), REPO)
+# 🔴 防空跑：一份都扫不到 ⇒ 当场红（「扫不到」与「都没问题」在输出上一模一样）
+if not have:
+    print("🔴 防空跑：一份 spec 都没扫到 —— 枚举口径又变了，⛔ 下面的对账结论不可信。")
+    raise SystemExit(2)
 
 # ── 2b. 【非 .py 的子系统】── 2026-10-06 加（`DEC-085` 段 1 第一刀）
-# 上面那句「模块 = api/*.py」原先**默认每个子系统都有 .py 入口**。前端打破了这个默认：
-# 它是本仓第一个**没有 .py 模块**的子系统（代码是 `api/static/` 下的 .js / .html）。
+# 上面那句「模块 = app/*.py」原先**默认每个子系统都有 .py 入口**。前端打破了这个默认：
+# 它是本仓第一个**没有 .py 模块**的子系统（代码是 `app/static/` 下的 .js / .html）。
 # ⚠️ 不加这张表的话，`static_frontend.md` 会掉进下面的 `extra`
 #    ⇒ 报成「🗑 spec 有、代码没了」—— 而**代码在、且是本轮新建的**。
 #    README 明写这一行「应为 0」⇒ 那是**一条假警报**，比不报还坏
 #    （本仓立场：「从不命中」与「没人违规」在机器痕迹上一样）。
 # 判据：这张表里的 spec 名，只要它指向的路径**真的存在**，就不算残留。
-NON_PY_MODULES = {"static_frontend": "api/static"}
+NON_PY_MODULES = {"static_frontend": "app/static"}
 
 # ── 3. 对账 ──
 missing = [(m, p, n) for m, p, n in mods if m not in have]
@@ -120,15 +156,19 @@ ok      = [(m, p, n) for m, p, n in mods if m in have]
 # ⚠️ **为什么必须有**：白名单是**手写的** ⇒ 它会烂，而且**烂起来是静默的**。
 #    本仓为此栽过（`N10` 的 `ROUTE_FILES` 写死 ⇒ 改一次代码漂一次）。
 # ⇒ 两条**机械可判**的自检（**都不拦**，只报 —— 本脚本按设计不拦任何东西）：
-#    ① 表里的名字**必须还在** `api/` 下（文件没了 ⇒ 白名单烂了）
+#    ① 表里的名字**必须还在** `app/` 下（文件没了 ⇒ 白名单烂了）
 #    ② 表里的名字**不许有 spec**（有 ⇒ 有人给了它"模块"待遇，两边口径打架）
-nonmod_gone     = [k for k in NON_MODULE_FILES
-                   if not os.path.exists(os.path.join(REPO, "api", k + ".py"))]
+# ⚠️ 2026-10-09：原先按 `app/<名>.py` **一层**判"文件还在不在" ⇒ 重构后
+#    那 3 个脚本全挪了位置（`plan_constraints` → `agent/`、`evaluate_with_ragas` → `eval/`）
+#    ⇒ 一律被误报成"白名单过期"。改成**拿上面那次递归扫描的结果反查**，
+#    ⛔ 不再自己拼路径（拼一次就多一个会漂的口径）。
+_found_nonmod = {k for k, _, _ in nonmods}
+nonmod_gone     = [k for k in NON_MODULE_FILES if k not in _found_nonmod]
 nonmod_conflict = [k for k in NON_MODULE_FILES if k in have]
 
 def spec_status(name):
     """从 spec 文件里读它自报的状态（第一张表的『状态』行）"""
-    p = os.path.join(SPECS, have.get(name, ""))
+    p = os.path.join(REPO, have.get(name, ""))
     if not have.get(name) or not os.path.exists(p):
         return "❓ 未知"
     try:
@@ -155,7 +195,12 @@ if MODE == "nonmodules":
 rows = []
 for m, p, n in sorted(mods, key=lambda x: x[0]):
     if m in have:
-        rows.append(f"| `{p}` | {n} | ✅ [`specs/{m}.md`](./{m}.md) | {spec_status(m)} |")
+        # 🔴 2026-10-09（段 2）：spec 已**分散**在 8 个 `specs/` 目录里
+        #    ⇒ ⛔ 不能再拼 `./{m}.md`（那是"与 README 同级"的旧假设）。
+        #    改成：**标签写真实仓内路径**（断链门按它核）+ **链接写相对本 README 的路径**。
+        _rel = have[m]                                  # 如 app/tools/specs/browser_tools.md
+        _link = os.path.relpath(os.path.join(REPO, _rel), SPECS)
+        rows.append(f"| `{p}` | {n} | ✅ [`{_rel}`]({_link}) | {spec_status(m)} |")
     else:
         rows.append(f"| `{p}` | {n} | 🔴 **缺** | ❓ 未知 |")
 table = "\n".join(rows)
@@ -179,7 +224,7 @@ if MODE == "write":
         + E
         + tail
     )
-    print(f"✅ 已重写 docs/specs/README.md 的模块表（{len(mods)} 个模块）")
+    print(f"✅ 已重写 app/specs/README.md 的模块表（{len(mods)} 个模块）")
     sys.exit(0)
 
 # ── 5. 报告 ──
@@ -190,32 +235,32 @@ print(f"  🔴 没 spec        {len(missing)}   ← 别人【不知道它们存�
 print(f"  🗑  spec 有、代码没了 {len(extra)}   ← 模块删了，spec 残留")
 if extra:
     for k in extra:
-        print(f"        docs/specs/{have[k]}")
-# ⚠️ 这一行是【显示】的，不是"通过"的：非 .py 子系统**不在上面的 ok 里**（ok 由 api/*.py 推）
+        print(f"        {have[k]}")
+# ⚠️ 这一行是【显示】的，不是"通过"的：非 .py 子系统**不在上面的 ok 里**（ok 由 app/*.py 推）
 #    ⇒ 不打出来就等于它**哪一档都不占**，看起来像漏了一批。
 nonpy = [k for k in have if k in NON_PY_MODULES
          and os.path.exists(os.path.join(REPO, NON_PY_MODULES[k]))]
 if nonpy:
-    print(f"  🧩 非 .py 子系统   {len(nonpy)}   ← 没有 api/*.py 模块，代码在别处（见脚本里的 NON_PY_MODULES）")
+    print(f"  🧩 非 .py 子系统   {len(nonpy)}   ← 没有 app/*.py 模块，代码在别处（见脚本里的 NON_PY_MODULES）")
     for k in sorted(nonpy):
-        print(f"        docs/specs/{have[k]}  →  {NON_PY_MODULES[k]}/")
+        print(f"        {have[k]}  →  {NON_PY_MODULES[k]}/")
 # ⚠️ 同 `nonpy`：这几个**不在上面任何一档里**（不是产品模块 ⇒ 不进 `mods`）
 #    ⇒ **打了才看得见**；不打就等于**悄悄消失**。
 if nonmods:
-    print(f"  🧩 非模块脚本     {len(nonmods)}   ← `api/` 下的**手动 / 离线脚本**，不是产品模块（见脚本里的 NON_MODULE_FILES）")
+    print(f"  🧩 非模块脚本     {len(nonmods)}   ← `app/` 下的**手动 / 离线脚本**，不是产品模块（见脚本里的 NON_MODULE_FILES）")
     for m, p, n in nonmods:
         print(f"        {p:38} {n:4} 行  {NON_MODULE_FILES[m]}")
 # 🔴 自检结果（见脚本里的 §3b）—— 命中即为**真问题**，不是提示
 if nonmod_gone:
     print()
-    print(f"  🔴 白名单过期 {len(nonmod_gone)} 个：`api/<名>.py` 已不存在 ⇒ 更新 NON_MODULE_FILES")
+    print(f"  🔴 白名单过期 {len(nonmod_gone)} 个：`app/<名>.py` 已不存在 ⇒ 更新 NON_MODULE_FILES")
     for k in nonmod_gone:
-        print(f"        api/{k}.py")
+        print(f"        app/{k}.py")
 if nonmod_conflict:
     print()
     print(f"  🔴 口径打架 {len(nonmod_conflict)} 个：既在 NON_MODULE_FILES、又有 spec ⇒ 二者只能留一个")
     for k in nonmod_conflict:
-        print(f"        docs/specs/{have[k]}")
+        print(f"        {have[k]}")
 print()
 if missing:
     print("没 spec 的（按行数降序，前 15）：")

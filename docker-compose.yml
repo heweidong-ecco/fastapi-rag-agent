@@ -11,7 +11,7 @@ services:
     # ⇒ 那个名字上的镜像停留在 2026-07-01 的旧构建（缺整个 Agent 子系统）。
     image: fastapi-rag-agent:latest
     build:
-      context: ./api
+      context: ./app
       dockerfile: Dockerfile
     container_name: rag-api
     ports:
@@ -57,7 +57,7 @@ services:
   # ⚠️ **硬化配置逐条都有理由，⛔ 别"简化"掉任何一条** —— 见每行注释。
   executor:
     build:
-      context: ./api
+      context: ./app
       dockerfile: executor.Dockerfile
     container_name: rag-executor
     # ⛔ **不写 `ports:`** —— 它**只在内部网络里**被 api 调，⛔ 不对宿主暴露。

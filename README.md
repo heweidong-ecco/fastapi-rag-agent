@@ -1,6 +1,9 @@
 # RAG Agent API
 
-> ## 📍 找文档？先看 [`docs/文档地图.md`](docs/文档地图.md)
+> ## 📍 找文档？**从仓库根的 [`CLAUDE.md`](CLAUDE.md) 进**（它有一张「📇 本仓目录索引」）
+>
+> ⚠️ **2026-10-09 起每一层目录都有自己的 `CLAUDE.md`** —— 那是**那一层的索引表**。
+> `docs/文档地图.md` **已瘦成指针页**，只留「文档放置判据」与「还没有的」那份诚实清单。
 >
 > 那是**全项目文档的索引** —— 一页列出「**我想知道 X ⇒ 去哪**」+ 全部文档清单 + **还没建的**。
 > 🔴 **现状/进度/待办** ⇒ 一律以 [`ROADMAP.md`](ROADMAP.md) 为准（**唯一权威**）。
@@ -30,7 +33,7 @@
 
 **模型端点**（⚠️ **两件事别混**）：
 - **Embedding 固定走** 阿里云百炼 DashScope `text-embedding-v2`（1536 维）。
-- **生成/对话 LLM 是可配置的**，而 **`api/config.py` 的默认值是 DashScope + `qwen-turbo`/`qwen-plus`**。
+- **生成/对话 LLM 是可配置的**，而 **`app/core/config.py` 的默认值是 DashScope + `qwen-turbo`/`qwen-plus`**。
   🔴 **本项目开发机上用的是 DeepSeek**（`.env` 里 `LLM_BASE_URL=https://api.deepseek.com` ·
   `LLM_MODEL_FAST`/`LLM_MODEL_CHAT=deepseek-v4-flash`），但那是 **`.env`（不入库）里的取值**，
   **不是代码默认值** —— **新克隆下来跑的是 qwen，不是 DeepSeek。**
@@ -51,7 +54,7 @@
 | **错误率** | **77.24% / 96% / 97%** | 🔴 **远糟于**目标的 `< 0.1%` |
 | QPS | 5.1 / 10.5 / 17.8 req/s | — |
 
-> ⚠️ **那次压测跑在坏掉的环境上**：同日 `api/logs/api_2026-06-25.log` 含 **113 条未捕获异常**
+> ⚠️ **那次压测跑在坏掉的环境上**：同日 `app/logs/api_2026-06-25.log` 含 **113 条未捕获异常**
 > （`redis:6379` 解析失败、`could not translate host name "postgres"`），**与 77–97% 的错误率自洽**。
 > ⇒ **P99 那几个数不能采信**（失败请求不产生正常延迟样本），**口径也从未复核过**。
 >
@@ -64,7 +67,7 @@
 | **P99 检索延迟** | `< 800ms` | ⬜ **无可采信数据**（旧记录 28–68ms **跑在坏环境上**，不可用） |
 | **基础检索失败率** | `< 0.1%` | 🔴 **旧记录 77–97%（环境坏，不可用；但说明这条从未达标过）** |
 | **Embedding 缓存命中率** | `> 90%` | ⬜ **未实测** |
-| **多格式文档支持** | PDF, Word, Markdown, HTML | ✅ 已实现（`api/document_parser.py`） |
+| **多格式文档支持** | PDF, Word, Markdown, HTML | ✅ 已实现（`app/rag/document_parser.py`） |
 
 ## 🏗 技术架构
 
@@ -79,12 +82,12 @@
 >
 > ✅ **已逐项核对，图上组件本仓都有**：
 > FastAPI 网关（路由/认证/限流/日志/文本规范化）· LangGraph **部门制 Agent**
-> （Supervisor + 检索/计算/日期/翻译/ReAct + Checkpointer —— `api/agent_graph_advanced_learning.py:105/134/154/169/197/246`）
-> · **MCP Server 工具注册中心**（`api/mcp_server.py:24`）· RAG 检索管线 · Mem0 / Redis / pgvector
-> · **成本控制体系**（`api/cost_dashboard.py`）· Grafana + Prometheus（`docker-compose.yml:90`）。
+> （Supervisor + 检索/计算/日期/翻译/ReAct + Checkpointer —— `app/agent/agent_graph_advanced_learning.py:105/134/154/169/197/246`）
+> · **MCP Server 工具注册中心**（`app/tools/mcp_server.py:24`）· RAG 检索管线 · Mem0 / Redis / pgvector
+> · **成本控制体系**（`app/billing/cost_dashboard.py`）· Grafana + Prometheus（`docker-compose.yml:90`）。
 >
 > ⚠️ **一处已过时，别照图核代码**：图上工具层画的是 **`rag_search`**，而当前的实际工具是
-> **`fetch_webpage_html`**（`api/agent_graph_advanced_learning.py:47-51`）。⇒ 这张图记录的是**更早一代**的工具集。
+> **`fetch_webpage_html`**（`app/agent/agent_graph_advanced_learning.py:47-51`）。⇒ 这张图记录的是**更早一代**的工具集。
 
 ## ❓ 常见问题
 
@@ -107,11 +110,11 @@
     > 🔴 **2026-09-29 更正**：原文写「**三种模式**（fast / accurate / full）」——
     > **漏了 `accurate_norerank`，而它恰恰是默认值**（且**不依赖 torch**，是镜像里唯一能用的精确档）。
     > 另外原文**把 `fast` 说成"只查向量"也不对** —— 它**含 BM25 + RRF**。
-    > 判据：`api/api_v1_rag.py:467-476` 的枚举 · 详见 `docs/契约/接口契约.md` §四。
+    > 判据：`app/routing/api_v1_rag.py:467-476` 的枚举 · 详见 `docs/契约/接口契约.md` §四。
 -   **查询改写**：利用LLM对用户问题进行上下文补全和指代消解，显著提升多轮对话场景下的检索准确率。
 -   **引用溯源**：答案**后端**会自动标注信息来源（`[来源:n]` 行内标记 + 结构化 `sources`）。
     > 🔴 **2026-09-29 更正**：原文写「**支持点击溯源到原始文档块**」—— **"点击"不成立**。
-    > **全仓没有业务前端**（`api/static/` 只有 3 个调试测试页，**无 `package.json`**）⇒
+    > **全仓没有业务前端**（`app/static/` 只有 3 个调试测试页，**无 `package.json`**）⇒
     > **能点的界面还没做**（属**硬门 B 的前端部分**，排在「后端先行」之后）。
     > ⚠️ 另：**`citations` 默认 `False`** —— 不显式打开，**连后端都不会给引用**。
     > 详见 `docs/契约/接口契约.md` §四 · `ROADMAP.md` 功能现状表。
@@ -121,7 +124,7 @@
         ⚠️ **Agent 的 30 个端点里只有这 1 条是流式的**，其余 29 条仍全非流式（**硬门 A 缺口未关掉**）。
         > 📌 **「全仓唯一 SSE 端点」这句 2026-10-03 起失效** —— 现在有 2 条。
     > 🔴 **2026-09-29 更正**：原文写「**支持真中断，避免 Token 浪费**」—— **不成立**。
-    > 实测：全仓**唯一**的中断处理是 `api/api_v1_rag.py:676` 的 `except asyncio.CancelledError`
+    > 实测：全仓**唯一**的中断处理是 `app/routing/api_v1_rag.py:676` 的 `except asyncio.CancelledError`
     > ⇒ 只有 `print` + `yield [DONE]`；**全仓无 `is_disconnected` / `aclose`** ⇒ **不关上游 HTTP 流**；
     > **且全仓无前端、无停止按钮**。
     > ⇒ 属**硬门 C**，见 `后端补齐清单` **B2**（它自标「**最容易假完成**」）。
@@ -134,7 +137,7 @@
 
 | 项 | 状态 |
 |---|---|
-| **RAGAS 脚本 + 数据集** | ✅ **已入库**（`api/evaluate_with_ragas.py` · `api/eval_dataset.json` 37 条 + 2 份历史报告） |
+| **RAGAS 脚本 + 数据集** | ✅ **已入库**（`app/eval/evaluate_with_ragas.py` · `app/eval/eval_dataset.json` 37 条 + 2 份历史报告） |
 | **是否实跑过** | 🔴 **⬜ 没有** —— 本机 venv **未装** `ragas`/`datasets`，且脚本需 API 在跑 ⇒ **"已入库" ≠ "跑通了"** |
 | 历史评估数字（2026-06-29 **由原系统**跑出） | `faithfulness` 0.6267 · `context_recall` 0.7568 · `context_precision` 0.4369 |
 
@@ -150,8 +153,8 @@
 | 需要 | 说明 |
 |---|---|
 | **Docker + Docker Compose v2** | **唯一必需** —— 一条 `docker compose up -d` 起全栈（PostgreSQL+pgvector / Redis / API / Prometheus / Grafana） |
-| **磁盘 / 内存** | ⚠️ 要**下载并构建 GB 级镜像**（`api/requirements.txt` 含 torch 系）⇒ **首次启动较慢**。**8GB 内存的机器上实测构建会失败** —— 那是环境天花板，不是配置写错（见「已知限制」） |
-| **Python 3.10** | ⚠️ **只有要跑测试 / 本地改代码时才需要**（`api/Dockerfile` 的基础镜像也是 3.10）。**不要用 `python3`** —— 本机实测 `python3` = **3.14.7**，只有 `python3.10`（3.10.10）可用 |
+| **磁盘 / 内存** | ⚠️ 要**下载并构建 GB 级镜像**（`app/requirements.txt` 含 torch 系）⇒ **首次启动较慢**。**8GB 内存的机器上实测构建会失败** —— 那是环境天花板，不是配置写错（见「已知限制」） |
+| **Python 3.10** | ⚠️ **只有要跑测试 / 本地改代码时才需要**（`app/Dockerfile` 的基础镜像也是 3.10）。**不要用 `python3`** —— 本机实测 `python3` = **3.14.7**，只有 `python3.10`（3.10.10）可用 |
 
 ### 1. 克隆项目
 
@@ -167,7 +170,7 @@ cd fastapi-rag-agent
 
 ```bash
 cp .env.example .env
-# `api/config.py` 的 validate_config 检查【四项】—— 缺任何一项都【拒绝启动】：
+# `app/core/config.py` 的 validate_config 检查【四项】—— 缺任何一项都【拒绝启动】：
 #   DASHSCOPE_API_KEY   —— Embedding 用（阿里百炼）
 #   POSTGRES_PASSWORD   —— ⚠️ 这一项容易漏！.env.example 里给了个占位值 mysecretpassword，
 #                          不改成真的也能起来（本地 Docker 就是那套），但**不能删/留空**
@@ -180,7 +183,7 @@ cp .env.example .env
 ```
 
 > 🔴 2026-09-20 修：此处原写「**三项**」——**漏了 `POSTGRES_PASSWORD`**。
-> 实测 `api/config.py:58-74` 检查的是 **4 项**；漏写会让"删了这一项 ⇒ 起不来 ⇒ 按本表查不到原因"。
+> 实测 `app/core/config.py:58-74` 检查的是 **4 项**；漏写会让"删了这一项 ⇒ 起不来 ⇒ 按本表查不到原因"。
 
 ### 3. 启动（**一条命令**）
 
@@ -189,8 +192,8 @@ cp .env.example .env      # 上一步填好【四项】必填
 docker compose up -d
 ```
 
-⚠️ **首次会 `build` API 镜像**（`docker-compose.yml:13` 的 `build: context: ./api`），
-而 `api/requirements.txt` 含 torch 系 ⇒ **要下几个 GB、构建较久**。
+⚠️ **首次会 `build` API 镜像**（`docker-compose.yml:13` 的 `build: context: ./app`），
+而 `app/requirements.txt` 含 torch 系 ⇒ **要下几个 GB、构建较久**。
 **8GB 内存 / Docker 配额较小的机器上实测会失败** —— 那是**环境天花板，不是配置写错了**（见下方「已知限制」）。
 
 > 🔴 **2026-09-20 方向更正**：本段此前写的是「**两条路径**」（轻量：DB 用 Docker + API 跑本机；Docker 全量），
@@ -222,19 +225,19 @@ docker ps --format '{{.Names}}' | grep -E 'postgres-rag|redis-rag'
 
 ```bash
 python3.10 -m venv venv
-venv/bin/pip install -r api/requirements.txt
-cd api && ENABLE_DASHBOARD=false ../venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
+venv/bin/pip install -r app/requirements.txt
+cd app && ENABLE_DASHBOARD=false ../venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
 ```
 
 > 📌 `bash dev.sh` 干的就是这一步（起 postgres+redis → 等就绪 → 起 uvicorn）。
-> 🔴 **2026-10-07 删掉了原来那句「⚠️ 必须在 `api/` 目录下起 uvicorn（有一处路径按相对位置解析）」** ——
+> 🔴 **2026-10-07 删掉了原来那句「⚠️ 必须在 `app/` 目录下起 uvicorn（有一处路径按相对位置解析）」** ——
 > 那条约束的根因是 `logger_config.py` 里的 `logs/` 按**相对 CWD** 解析；现已改成基于 `__file__`
 > 的绝对路径，**从哪儿起都一样**。⚠️ 当时写这条的另一个理由是"本机 Docker 起不来"，现在 Docker 可用，一并作废。
 >
-> 📌 **依赖清单只有一份：`api/requirements.txt`。** 🔴 2026-09-20 删掉了此前那份"轻量版"
-> `api/requirements-test.txt` —— 业务方口径「**不用双 requirements.txt，这样会混**」。
+> 📌 **依赖清单只有一份：`app/requirements.txt`。** 🔴 2026-09-20 删掉了此前那份"轻量版"
+> `app/requirements-test.txt` —— 业务方口径「**不用双 requirements.txt，这样会混**」。
 > 已核安全性：实测那份是 `requirements.txt` 的**真子集**（含版本约束在内比对整行 ⇒ 只在它里面出现的行 = **空**），
-> 切过去**不丢任何包**。代价是本机会拉 torch 系；但 `api/reranker.py:14` 是真懒加载，
+> 切过去**不丢任何包**。代价是本机会拉 torch 系；但 `app/rag/reranker.py:14` 是真懒加载，
 > **不碰 torch 也能跑**（默认模式 `accurate_norerank`）。
 
 ### 4. 验证（**以下输出是 2026-09-20 实测的原文**）
@@ -289,14 +292,14 @@ curl -s -X POST localhost:8000/api/v1/rag/hybrid_search -H "Authorization: Beare
 
 > 🔴 **2026-09-29 删掉了一张手写的目录树**（原来 28 行，列了 20 个文件 + `...`）。
 > **为什么删**：手写的**文件清单必然过期** ——
-> 它列 20 个，实际 `api/` 下有 **68 个 `.py`**；`docs/` 那行还写着「FAQ、架构图、Demo、决策记录」，
+> 它列 20 个，实际 `app/` 下有 **68 个 `.py`**；`docs/` 那行还写着「FAQ、架构图、Demo、决策记录」，
 > 而现在是 **7 层 20+ 份**。📌 与「接口清单不写进文档」（跑 `list_endpoints.sh`）**是同一个理由**。
 
 | 要找… | 去哪 |
 |---|---|
-| **有哪些文档 / 每份干什么** | ⭐ **`docs/文档地图.md`** |
+| **有哪些文档 / 每份干什么** | 从仓库根 `CLAUDE.md` 的「📇 本仓目录索引」**一层层往下**；`docs/文档地图.md` 只剩判据与欠账清单 |
 | **代码怎么组织的**（模块全景 / 请求流 / 依赖枢纽） | **`docs/原理/架构.md`** |
-| **表结构** | `docs/契约/数据模型.md` + **`api/schema.sql`** |
+| **表结构** | `docs/契约/数据模型.md` + **`app/schema.sql`** |
 | **Demo 做到哪一步了** | 看 **`ROADMAP.md`**；施工区在 `demo/`（⚠️ 已 gitignore ⇒ **clone 你看不到**，故此处只给指针） |
 
 > 📌 **关于原 `Agent/` 目录（2026-09-20 已处置）** —— 🔴 **2026-09-29 移往 `docs/历史/`**：
@@ -320,7 +323,7 @@ curl -s -X POST localhost:8000/api/v1/rag/hybrid_search -H "Authorization: Beare
 
 | # | 限制 | 实测证据 | 影响 |
 |---|---|---|---|
-| 1 | ⏸ **浏览器工具已【挂起】—— 从工具表里摘掉了**（2026-09-21 · N13） | **2026-09-20 更正**：原文写「**在本机**不可用 …… **环境天花板**」—— ⚠️ **那是把"本仓部署方式都不装浏览器"说成了"我这台机器的毛病"**。实测：`api/Dockerfile` 与 `docker-compose.yml` **都没有 `playwright install`**（全仓提及它处**全是文档在解释它跑不了**，无一处是去装）⇒ **换机器 / 用 Docker 一样跑不了。**<br>另有**第二重原因**：本机缓存里是 chromium **1228**（556 MB），而 playwright 1.62 要 **1234** ⇒ **装了旧的也照样跑不了**。<br>**2026-09-21 处置（业务方裁「挂起 + 注释掉 + 标 `# 可扩展能力`」）**：见右 | **已摘掉** —— `mcp_server.TOOLS` 里那两行**已注释**（⇒ **LLM 的工具表由 6 个变 4 个**），两个 REST 端点也一并注释（⇒ `OPENAPI_PATHS` **59 → 57**）。<br>📌 **为什么摘掉而不留着**：那两行在 `TOOLS` 里 ⇒ LLM 的工具表**从 `TOOLS` 派生** ⇒ 留着就等于**给 LLM 一个每调必炸的工具**（实测确认过）。<br>🔧 **重新启用**：装好 chromium 后，按 `api/mcp_server.py` 里那段注释列的 **4 处一起**取消注释（含两条已 skip 的回归用例）。<br>⚠️ **要不要让它真能用，仍是产品决策** —— 实测代价 **+556 MB**（不是先前估的"约 300MB"） |
+| 1 | ⏸ **浏览器工具已【挂起】—— 从工具表里摘掉了**（2026-09-21 · N13） | **2026-09-20 更正**：原文写「**在本机**不可用 …… **环境天花板**」—— ⚠️ **那是把"本仓部署方式都不装浏览器"说成了"我这台机器的毛病"**。实测：`app/Dockerfile` 与 `docker-compose.yml` **都没有 `playwright install`**（全仓提及它处**全是文档在解释它跑不了**，无一处是去装）⇒ **换机器 / 用 Docker 一样跑不了。**<br>另有**第二重原因**：本机缓存里是 chromium **1228**（556 MB），而 playwright 1.62 要 **1234** ⇒ **装了旧的也照样跑不了**。<br>**2026-09-21 处置（业务方裁「挂起 + 注释掉 + 标 `# 可扩展能力`」）**：见右 | **已摘掉** —— `mcp_server.TOOLS` 里那两行**已注释**（⇒ **LLM 的工具表由 6 个变 4 个**），两个 REST 端点也一并注释（⇒ `OPENAPI_PATHS` **59 → 57**）。<br>📌 **为什么摘掉而不留着**：那两行在 `TOOLS` 里 ⇒ LLM 的工具表**从 `TOOLS` 派生** ⇒ 留着就等于**给 LLM 一个每调必炸的工具**（实测确认过）。<br>🔧 **重新启用**：装好 chromium 后，按 `app/tools/mcp_server.py` 里那段注释列的 **4 处一起**取消注释（含两条已 skip 的回归用例）。<br>⚠️ **要不要让它真能用，仍是产品决策** —— 实测代价 **+556 MB**（不是先前估的"约 300MB"） |
 | 2 | **`mode=accurate/full` 与重排序未验** | 本机 **8GB 内存 / 4 核**，装不下 torch + `bge-reranker-v2-m3`（2.3GB） | 默认模式是 `accurate_norerank`（**不碰 torch**），故产品可用；但这两条路径**本机验不了** |
 | 3 | **性能数字全部未实测** | 见上方「性能目标」段 | 不得作为选型/承诺依据 |
 | 4 | **知识库语料良莠不齐** | `documents` 表 **35/77 行是测试数据**（`source` = `test` 24 行 + `test_docs` 11 行），含「测试文档一」这类；其余是正经语料 | 结果**时好时坏** —— 同一个问题可能命中切题的（如 `eval_dataset.json#23`）也可能命中测试垃圾。**演示前建议先灌一份干净语料** |

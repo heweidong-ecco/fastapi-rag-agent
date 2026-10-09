@@ -1,0 +1,37 @@
+# `app/tests/` —— 94 个 pytest 用例
+
+> 📇 **本层 = 索引表 + 主要内容**。用例**按"被测模块"命名**，⛔ 不按测试类型。
+
+## 📇 本目录索引
+
+**跑法**（⛔ 从**仓库根**跑）：
+```bash
+./venv/bin/python -m pytest app/ -m "not integration and not needs_db" -q
+```
+- **`app/conftest.py`**（在**上一层**）是 pytest 根 conftest —— ⭐ 它一留，`app/` 就在 `sys.path` 上
+  ⇒ 本目录的用例才能用**裸导入**（`from main import app`）
+
+**命名规律**（照它找用例比列 94 行有用）：
+| 前缀 | 测什么 |
+|---|---|
+| `test_<模块>.py` | 那个模块本身 |
+| `test_<模块>_wiring.py` | 🔴 **接线**：那个能力**真的被调用链用上了吗**（本仓最多的一类判据） |
+| `test_<页面>_page.py` | 前端页面（`app/static/web/*.html`） |
+| `test_{auth,budget,breaker,session}*.py` | 几族横切能力 |
+
+**两个 marker**（`app/pytest.ini` 里定义，**都不进 CI**）：
+- `integration` —— 要真 Postgres + DashScope 外网
+- `needs_db` —— 只要真 Postgres（**本机跑必须带 `POSTGRES_DB=rag_test`**）
+
+## 🔴 本层特有的规矩
+
+1. 🔴 **⛔ 不许空跑**：凡是"遍历某集合再逐个断言"的用例，**必须带防空跑断言**
+   （本仓多条前科：`glob("*.py")` 扫到 0 个 ⇒ **空集合断言恒为真**）。
+   ⇒ 本目录里有 `_product_py()` 这样的共享助手，**它自带防空跑**，用那个。
+2. 🔴 **改了别的模块 ⇒ 全量跑**：`F401 ≠ 死导入`、`grep 也兜不住按属性取的调用` —— 
+   本仓为此红过多次（`DEC-099 §七`）。
+3. ⚠️ **拿真实服务当判据的用例**（`test_mcp_*`）**会真起子进程** ⇒ 偶尔抖动，
+   单跑绿、复跑绿即可判为抖动（`ROADMAP` 有登记）。
+
+## 📍 往上读
+- `../CLAUDE.md`（`app/`）· `docs/说明/测试.md` · 仓库根 `CLAUDE.md`

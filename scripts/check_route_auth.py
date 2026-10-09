@@ -7,7 +7,7 @@
 因为 `FastAPI 0.141` 起 `include_router` 的结果被包成 `_IncludedRouter`，
 **`len(app.routes)` 不再等于路由总数**。
 
-🔴 **而这个坑【仓里早就写着】** —— `api/test_public_paths.py:17-20` 一字不差地记着。
+🔴 **而这个坑【仓里早就写着】** —— `app/tests/test_public_paths.py:17-20` 一字不差地记着。
 ⇒ **知识在，但挂在一个谁都不会去读的地方**（那个测试文件的 docstring 里）。
 ⇒ 所以把它**做成一条能跑的命令**（本仓立场：「**写不出命令的，就是还没核过**」）。
 
@@ -37,7 +37,7 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-API = REPO / "api"
+API = REPO / "app"
 BASELINE = REPO / "scripts" / "route-auth-baseline.txt"
 
 # 这些依赖名 = 「这条路由要身份」。
@@ -115,7 +115,7 @@ def scan() -> tuple[list[tuple[str, str]], int]:
     sys.path.insert(0, str(API))
     os.chdir(API)                      # ⚠️ `main` 的导入期要读相对路径的 .env
 
-    # 🔴 必须在 `import main` **之前**设 —— 同 `api/conftest.py:20` 的理由：
+    # 🔴 必须在 `import main` **之前**设 —— 同 `app/conftest.py:20` 的理由：
     #    Gradio 在**导入期**就起非 daemon 线程去连 huggingface.co 发匿名遥测，
     #    本机网络不通时**卡在 TCP connect 上** ⇒ 实测把本脚本从 ~3s 拖到 **91s**。
     os.environ.setdefault("GRADIO_ANALYTICS_ENABLED", "False")
@@ -157,7 +157,7 @@ def main() -> int:
             "# ⚠️ 这份基线【不是「允许清单」】—— 它是「已知的债」，见 docs/待办总表.md 🅗。\n"
             "# 🔴 2026-10-04（DEC-065）后本表只剩 /api/v1/（main.py 根路径，一个 ping）；\n"
             "#    表里原先指的 S1/S2/S14 三条【已闭合】⇒ ⛔ 别再去表里找它们。\n"
-            "#    这一条的建议是【留公开】，但仍未正式裁定 ⇒ 见 docs/specs/api_v1.md 末节。\n"
+            "#    这一条的建议是【留公开】，但仍未正式裁定 ⇒ 见 app/routing/specs/api_v1.md 末节。\n"
             "# 🔴 2026-10-05（DEC-074）本表**开始含 WebSocket** —— 原先这里只有 HTTP，\n"
             "#    于是 /api/v1/ws/agent（真花钱、真没鉴权）【一条都扫不到】。当时补上后为 3 条。\n"
             "# 🟢 2026-10-05（DEC-075）那条真花钱的 WS 已【真修好】（不是挪走）：\n"

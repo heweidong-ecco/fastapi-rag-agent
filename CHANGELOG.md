@@ -10,6 +10,138 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- 🔴 **段 3：`CLAUDE.md` 分层覆盖 —— 全仓 53 份**（2026-10-09）。
+  - **性质变了**：每份 `CLAUDE.md` **不再是"模块规则"，而是【该层的索引表 + 主要内容】**。
+    业务方原话：「agent 进来，**从入口进来必须先看 `CLAUDE.md`**，**信息不够，需求再转**」
+    ⇒ **渐进式披露**：根（**每次会话都加载**）→ 各层（**懒加载**，读写到那层才注入）。
+  - ⚠️ **成本很低**：子目录的 `CLAUDE.md` **只在读写该目录文件时才注入** ⇒
+    53 份里绝大多数在任一次会话里**根本不会被加载**。
+  - **仓库根 `CLAUDE.md`**：🆕 加 **「📇 本仓目录索引」**（顶层导航 + 最常去的三个入口）；
+    `docs/specs/` 的旧路径**改成新的同目录口径**；**skills 必用表全文搬进
+    `docs/规范/skills必用表.md`**（根里只留摘要 + 指针，判据没放宽）。
+  - 🔴 **顺带被门抓到一个真问题**：`specs/` 目录里也放了 `CLAUDE.md`（该层的索引表）
+    ⇒ `spec_status.sh` 的递归扫描**把它当成一份 spec** ⇒ 报「spec 有、代码没了 1」的**假阳性**。
+    已修（`f not in ("README.md", "CLAUDE.md")`）。
+  - **判据**：`spec_status` **56 有 / 0 缺 / 0 残留** · 断链门/孤儿门/索引门 **exit 0** ·
+    `test_remind_hooks` **22 通过** · `pytest` **913 passed / 2 skipped** · `ci-local` **退出码 0**。
+- 🔴 **段 3（二）：`docs/文档地图.md` 瘦成指针页 —— 357 行 → 103 行**（业务方 2026-10-09 裁「**丙**」）。
+  - **为什么可以瘦**：它那两张表（§一 优先级索引 · §二 全部文档按角色分类，共 ~270 行）
+    **已被各层 `CLAUDE.md` 接管** ⇒ 留着就是**两份索引必然分叉**。
+  - **保留两样【别处没有】的**：
+    · **文档放置判据**（「这份东西该写进哪一层」）
+    · 🔴 **「还没有的」诚实清单** —— ⚠️ **`ROADMAP.md` 的功能表直接引用它**
+      （「文档体系欠账」那一行的**判据来源**就是这里 ⇒ 删了就悬空）
+  - **13 处"看文档地图"的说法改掉了** —— 它**不再承担导航**（`README` / `CLAUDE.md` /
+    `ROADMAP` / `CONTRIBUTING` / `.claude/commands/handoff.md` / `app/specs/README.md` / `docs/CLAUDE.md`）。
+  - ⚠️ **没有动孤儿门** —— 它不是删除，文件还在、仍被指着 ⇒ `KEY_TARGETS` 无需改。
+    （正是选「丙」而不是「乙」的理由：**改门要单独拍**。）
+  - **判据**：断链门 / 孤儿门 **exit 0** · `ci-local` **退出码 0**。
+
+- 🔴 **容器目录改名：`api/` → `app/`**（2026-10-09 · 业务方口述 · 裁定见 `docs/decisions/DEC-126`）。
+  **纯改名，⛔ 不改包语义、⛔ 不改 Docker 语义、⛔ 不改行为** ——
+  **判据**：`pytest` **913 passed / 2 skipped** · `bash scripts/ci-local.sh` **退出码 0** ·
+  6 道门全绿 · `docker compose config` 通过。
+  - **为什么**：`api/` **名不副实** —— 它装的是**整个应用**（`agent/` `rag/` `tools/` `billing/`），
+    不只是 API。改名后 **`from routing.api_v1 import X` 这类导入一个字都没动**
+    （`app/` 仍当容器 = `sys.path` 根，⛔ 不是包）。
+  - ⛔ **否决了「做成 `app.` 包」**：那要多付 **510 处导入改写 + Docker 构建上下文改到仓根 +
+    新建仓根 `.dockerignore`（否则 927 M 的 `venv/` 进 daemon）+ 一次 15–20 分钟 build 验证**，
+    而它换来的**不是**上面那个缺陷的修复。
+  - ⛔ **也没有**把 `routing/` 改成 `api/`（业务方原话里有这一条）——
+    **今天 `routing/` 与 URL `/api/v1/` 并不撞名**；改成 `api/` 反而会**制造**歧义
+    （`app/api/api_v1.py` 会被导入成 `api.api_v1`）。
+  - **改动面**：**196 个文件 `git mv`** · **105 个文件的路径引用**
+    （`docker-compose.yml` 的 `context:` ×2 · `dev.sh` · `ci.yml` · `scripts/` · **3 个 hook** ·
+    `frontend/索引.md` 清单 · 文档 prose）。**导入 0 处改写。**
+  - ⚠️ **过程中的两处自伤（已修）**：① `agent_graph_advanced.py` / `test_agent_repairs.py` 那两条
+    **反例注释**被逐字替换后**整段失去意义**（原意是"写相对路径会变成 `api/api/…`"）⇒ 整句重写；
+    ② 首轮脚本的扩展名白名单漏了 `.txt` / `.sql` / `.Dockerfile` ⇒ 那几处漏改，已补。
+  - ⚠️ **遗留**：`CHANGELOG` / `docs/复盘` / `docs/decisions`（除本两份）里的旧路径
+    **⛔ 有意不改**（本仓立场：原始记录不改写）。断链门**只查 `.md` 目标**，`.py` 路径不在它射程内。
+  - 📌 **段 2 / 段 3 的落点自此为 `app/<组>/specs/` 与 `app/…`**。
+- 🔴 **段 2（一）：spec 拆进模块** —— `docs/specs/` **44 份 spec 全部搬进 `app/<组>/specs/`**
+  （2026-10-09 · 业务方裁「拆进模块」· `DEC-125` §2.6）。⚠️ **`docs/specs/` 这个目录已不存在。**
+  - **新判据一句话**：**spec 与它的模块同目录** —— `app/core/config.py` ⇒ `app/core/specs/config.md`；
+    `app/` 根的模块（`main.py`）⇒ `app/specs/main.md`；模板与写作规范 ⇒ `app/specs/README.md`。
+  - 🔴 **同批改了三处【会瞎掉】的门**（⛔ 不同批改 = 模块 spec 门与提醒 hook 全部失明）：
+    `scripts/spec_status.sh`（**递归扫 `app/**/specs/` + 防空跑**）·
+    `.claude/hooks/spec-remind.py` · `.claude/hooks/pre-commit-gates.py` §④
+    ⇒ **三处都实测过**：`spec_status` ⇒ 42 有 / 14 缺 · `spec-remind` 喂真 JSON 出话 ·
+    提交门 §④ **真拦住**（探针 `app/core/zzz_probe2.py` ⇒ 退出码 2）。
+  - **97 个文件的引用改成新路径**（用 git 的 rename 对做**精确映射**，⛔ 不是裸正则）；
+    `docs/decisions/` 里的旧路径**加豁免**（本仓规矩：**原始记录不改写**）。
+  - **顺带删掉两件**（`DEC-125` §2.5 已裁）：`app/preprocess.py`（25 行硬编码 print 脚本、
+    零函数零调用方）· `prompt/`（0 文件空目录，git 里从来不存在）。
+    ⚠️ `bench/` **暂不动** —— 「要不要并进 `locust/`」还等你一句话。
+  - **判据**：`pytest` **913 passed / 2 skipped** · `bash scripts/ci-local.sh` **退出码 0** ·
+    断链门 / 孤儿门 **exit 0** · `spec_status` 42 有 / 14 缺（防空跑生效）。
+- 🔴 **段 2（二）：补齐 14 份缺失的模块 spec ⇒ 现在 56 个模块【一个不缺】**（2026-10-09）。
+  - 补的是：`logger_config` `exceptions` `jwt_handler` `memory_store` `browser_tools`
+    `websocket_callback` `schemas` `mcp_tool_factory` `simple_tools` `simple_tools_impl`
+    `document_preprocessor` `document_parser` `code_executor_impl` `cost_dashboard`。
+  - 每份按 `app/specs/README.md` 的四段式写，**重头是「⚠️ 看代码会误判的地方」** ——
+    内容来自**代码里的 ⚠️/🔴 注释**与 `docs/复盘/` / `DEC-*`，⛔ **不是读一遍代码的转录**
+    （本仓立场：**转录即负债**）。举几个只在那节里才有的：
+    · `browser_tools` **不在工具表里**（`N13` 摘掉），⛔ 且不许改成 `async`
+    · `simple_tools_impl` 的**返回值形状是逐字约定**的（失败也返回字符串、⛔ 不抛）
+    · `code_executor_impl` 的白名单里那两项是**业务方裁「放开」的**，⛔ 别当漏洞删
+    · `cost_dashboard` 的 **5 个格子口径不同**（前 4 格本人 / 第 5 格全站）
+    · `memory_store` 的 mem0 签名漂移**修过两次**，第一次是因为**判据只量了"不抛异常"**
+  - 🔴 **同时修掉 `spec_status.sh --write` 的一个旧假设**：它按「spec 与 README 同级」拼链接
+    ⇒ 现在 spec 分散在 8 个目录，链接**全断**（断链门报 14 处）。
+    已改成**标签写真实仓内路径 + 链接写相对 README 的路径**。
+  - **判据**：`bash scripts/spec_status.sh` ⇒ **56 有 / 0 缺** · 断链门 exit 0 · 孤儿门 exit 0 ·
+    `pytest` **913 passed / 2 skipped** · `ci-local` **退出码 0**。
+- 🔴 **段 2（三）：`bench/` 并进 `locust/`** ⇒ **压测只有一个家**（业务方 2026-10-09 裁）。
+  - **`api/`→`app/` 那批之后仓根只剩 3 个 `locustfile*.py`**；`bench/` 里还有**第 4 个** +
+    一份 README ⇒ 两代压测件、两个家。现在全部收进 **`locust/`**。
+  - ⚠️ **并进来时撞名了，改了名**：`bench/locustfile.py` ⇒ **`locust/locustfile_bench.py`**
+    （它与仓库根那个 `locustfile.py` **同名**，不改名会覆盖）。
+    🔴 **`locust/` 里现在是【两代】压测件，⛔ 别读混**：
+    · `locustfile.py` / `_v2` / `_hybrid` —— **上一代**，被 `app/tests/test_locust_payload.py` **守卫着**
+    · `locustfile_bench.py` —— **这一代**（`T5-8`），业务方 2026-10-07 裁「**不进 pytest**」
+  - 连带改：`app/tests/test_locust_payload.py` 的 `LOCUSTFILES`（**加了 `locust/` 前缀**，
+    它按 `REPO / name` 读文件）· `.github/PULL_REQUEST_TEMPLATE.md`（CI 不编译 `locust/`）·
+    `app/Dockerfile` 一处注释 · `locust/README.md` 抬头与命令。
+  - **判据**：`pytest app/tests/test_locust_payload.py -q` ⇒ **7 passed** · 全量 **913 passed / 2 skipped** ·
+    `ci-local` **退出码 0** · 断链门 / 孤儿门 exit 0。
+
+- 🔴 **`api/` 模块化：60 个平铺的产品模块拆成 7 个模块组 + `eval/` + 94 个测试进 `tests/`**
+  （2026-10-09 · 业务方口述 · 裁定见 `docs/decisions/DEC-125`）。
+  **⛔ 只动位置与导入，不改行为** —— **判据**：`pytest` **913 passed / 2 skipped**（基线 909/2）·
+  `bash scripts/ci-local.sh` **退出码 0**（含 155 条 node 前端测试）。
+  - **新结构**：`core`(8) · `routing`(7) · `access`(5) · `billing`(4) · `agent`(9) · `rag`(10) ·
+    `tools`(13) · `eval`(5) · `tests`(94)；`api/` 根**只留 `main.py` 与 `conftest.py`**
+    （⭐ 后者一留，`api/` 就在 `sys.path` 上 ⇒ 测试仍可用裸导入）。
+  - **154 个 `.py` 全部走 `git mv`**（保历史，git 认到 168 个 rename）；
+    **导入改写 537 处 / 115 个文件**，用**绝对写法**（根 = `api/`）——
+    ⛔ 不用相对写法（脚本直跑会失败）、⛔ 不用 `api.` 前缀（容器里 `/app` 就是 `api/`，**线上必 ImportError**）。
+  - 🔴 **修掉 6 类「静默坏」**（这类**不报错、只出错**，逐条见 `DEC-125 §四`）：  
+    ① **10 个测试用 `glob("*.py")` 扫 `api/`** ⇒ 挪走后**扫到 0 个文件**，而**空集合断言恒为真**
+    ⇒ 改 `_product_py()` 递归 + **防空跑断言**（其中一个测试自带的防空跑用例**当场就红了** ✅）  
+    ② `mcp_server.py` **被当脚本跑** ⇒ `sys.path[0]` 是 `api/tools/` ⇒ 加 sys.path 引导  
+    ③ `config.py` 的 `.env` 推算 ④ `logger_config` 的 `logs/` · `browser_tools` 的 `screenshots/`
+    ⇒ 各上溯一层（不改会**静默写错目录**）  
+    ⑤ `__import__("agent.agent_graph")` 返回**顶层包** ⇒ 改 `importlib.import_module`  
+    ⑥ `agent_graph_advanced` 用 `with_name("mcp_server.py")` 找同目录 ⇒ 改显式路径
+  - **连带改的**（判据绑在路径上的）：`pytest.ini` 加 `pythonpath` ·
+    `scripts/spec_status.sh` **改递归 + 防空跑 + 白名单自检复用扫描结果** ·
+    `ci.yml` 内联 `import config` → `import core.config`（**这道门自己抓到的**）·
+    `frontend/索引.md` 清单 28 处（**索引同步门抓到的**）·
+    `.gitignore` 加 `!.claude/agents/tmp/`（上面那条 `tmp/` 匹配任意层级，**会把归档一起排除**）
+  - **顺带**：新增 `.claude/agents/subagent-lifecycle.md`（**subagent 生命周期与授权规范**，英文 ——
+    业务方 2026-10-09：subagent 可以用，但**只建当次任务的临时 subagent**，任务结束**移进
+    `tmp/<任务类>/` 归档**；**常驻 subagent 必须人工批准**）+ `.claude/agents/tmp/README.md`（归档索引）。
+
+  - ⬜ **未做**：段 2（44 份 spec 拆进 `api/<组>/specs/`）· 段 3（53 份目录级 `CLAUDE.md` 索引）·
+    4 个 `.claude/hooks` 的判据。
+  - 🆕 **补 `spec-remind` 与 `route-auth-remind` 的自测**（`scripts/test_remind_hooks.sh` **10 → 22 条**）。
+    **实测结论**：**5 个 hook 在重构后的新结构下全部正确** —— ⚠️ 此前那句「部分失明」是
+    **读代码的推断，不是实测**（本仓有同型复盘）。真正的缺口是这两个 hook **从没有自测**
+    （「门必须能测出自己会红」`DEC-061`）。
+    🔴 **变异自证抓到一条假用例**：首版 6 条**拿掉 `api/` 前缀判据后全绿**
+    （被 `test_` / `.md` 两个旁支挡住）⇒ 已补 `T14c` 专测该判据，重跑变异即红。
+
 - 🔴 **首页每张卡加回「接口标注」那一行**（2026-10-09 · 业务方对回退后那一版的**逐条要求**）——
   他的原话：「**新版值得保留的是**：`POST /rag/stream_search（SSE 流式）`，**接口标注**，
   **字体要再缩小，太大了**」＋「**分组小标题多余**」＋「**标题太口语了**……**用原来的**」。

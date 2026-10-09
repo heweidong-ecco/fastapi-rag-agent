@@ -6,7 +6,7 @@ r"""PostToolUse hook：**改了路由文件就问一句「这条新路由有鉴�
 **起因**：核 `api_v1.py` 时手工扫"哪些路由没鉴权"，**第一版扫出 0 条** ——
 因为 `FastAPI 0.141` 起 `include_router` 的结果被包成 `_IncludedRouter`。
 
-🔴 **那个坑【仓里早就写着】**（`api/test_public_paths.py:17-20`）——
+🔴 **那个坑【仓里早就写着】**（`app/tests/test_public_paths.py:17-20`）——
 **知识在，但挂在一个谁都不会去读的地方**（一个测试文件的 docstring 里）。
 
 ⇒ 所以**不是再写一条规矩**，是**把它挪到"我一定会撞上"的位置**：
@@ -41,7 +41,7 @@ def looks_like_route_file(p: Path) -> bool:
     本钩子会**静默不跑** —— 而"静默不跑"与"跑过了没发现问题"在机器痕迹上**完全一样**
     （本仓 `DEC-061`）。⚠️ 清单式判据**天生**会随仓的生长而失效，且失效时不报警。
 
-    ⇒ 判据改成**问文件内容**：`api/` 下的 .py，只要出现 `APIRouter(` / `@router.` / `@app.`
+    ⇒ 判据改成**问文件内容**：`app/` 下的 .py，只要出现 `APIRouter(` / `@router.` / `@app.`
        就算路由文件。**新建文件自动被覆盖**，⛔ 不需要谁记得改清单。
     ⚠️ 三个判据都是**便宜**的（读一个文件），而它挡在后面的是 **9–13 秒**的全量扫描 ——
        ⇒ 宁可多跑几次，也别漏（多跑只是慢，漏跑是**假绿**）。
@@ -50,7 +50,7 @@ def looks_like_route_file(p: Path) -> bool:
     """
     if p.suffix != ".py":
         return False
-    if "api" not in p.parts:              # ⚠️ 只看 `api/` 下 —— 否则 docs 里的示例也会命中
+    if "app" not in p.parts:              # ⚠️ 只看 `app/` 下 —— 否则 docs 里的示例也会命中
         return False
     if p.name.startswith("test_") or "tests" in p.parts:
         return False
@@ -72,7 +72,7 @@ def main() -> int:
     if not fp:
         return 0
 
-    # ⚠️ 路径判据要**只看文件名 + 必须在 api/ 下** ——
+    # ⚠️ 路径判据要**只看文件名 + 必须在 app/ 下** ——
     #    否则 `docs/xx/api_v1.py.md` 之类也会命中（那个 checks 在 looks_like_route_file 里）
     if not looks_like_route_file(Path(fp)):
         return 0                                   # ← 绝大多数编辑走到这里，0.0x 秒

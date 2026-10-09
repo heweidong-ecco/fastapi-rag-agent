@@ -25,9 +25,9 @@ Agent 自己开的 PR 不许自合**（依 agent-eval-gate 的 D-23：单人仓�
 
 | 类别 | 是否改动 | 位置 |
 |---|---|---|
-| **Prompt** | 是 / 否 | `api/answer_with_citations.py` · `api/rag_pipeline.py` · `api/query_rewriter.py` |
-| **工具** | 是 / 否 | `api/mcp_server.py` · `api/mcp_tool_factory.py` · `api/simple_tools.py` · `api/search_tools.py` |
-| **记忆** | 是 / 否 | `api/memory_store.py`（Mem0） |
+| **Prompt** | 是 / 否 | `app/rag/answer_with_citations.py` · `app/rag/rag_pipeline.py` · `app/rag/query_rewriter.py` |
+| **工具** | 是 / 否 | `app/tools/mcp_server.py` · `app/tools/mcp_tool_factory.py` · `app/tools/simple_tools.py` · `app/tools/search_tools.py` |
+| **记忆** | 是 / 否 | `app/agent/memory_store.py`（Mem0） |
 
 > **任一为「是」时必须写明改了什么、为什么改。** 这三类直接改变系统对外行为，
 > 是评测与线上表现最敏感的面 —— 改而不说，等于让下一个人对着行为变化猜原因。
@@ -36,9 +36,10 @@ Agent 自己开的 PR 不许自合**（依 agent-eval-gate 的 D-23：单人仓�
 
 - [ ] **CI 通过**（`.github/workflows/ci.yml` 只跑 `compileall`，是本仓唯一的自动门槛）
 - [ ] **实机验证**：<命令 + 实际输出；没实机跑就不勾>
-- [ ] **本机预检**：`python3.10 -m compileall api/ -q` 已过
+- [ ] **本机预检**：`python3.10 -m compileall app/ -q` 已过
 
-> ⚠️ 改动涉及 `locustfile*.py` 时注意：**CI 不编译仓库根目录**，漏跑 `py_compile` 则语法错了 CI 照样绿。
+> ⚠️ 改动涉及 `locust/locustfile*.py` 时注意：**CI 不编译 `locust/`**（它只 `compileall app/`），
+> 漏跑 `py_compile` 则语法错了 CI 照样绿。
 
 ## 四、回滚
 

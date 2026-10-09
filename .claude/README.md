@@ -21,7 +21,7 @@
 | 1 | **凭据门** | `scripts/check_secrets.sh` | PUBLIC 仓里混进**明文凭据**（**进了历史就改不掉**） | 🛑 拦 |
 | 2 | **链接检查** | `scripts/check_doc_links.sh` | 文档里**指向不存在的路径** | 🛑 拦 |
 | 3 | **孤儿检查** | `scripts/check_doc_orphans.sh` | 建了文档**但没人指向它**（索引挂空） | 🛑 拦 |
-| 4 | 🆕 **模块 spec 门** | **内联在 hook 里**（不调外部脚本） | **新增了 `api/X.py` 但 `docs/specs/` 下与模块同名的那个 不存在** | 🛑 **拦** |
+| 4 | 🆕 **模块 spec 门** | **内联在 hook 里**（不调外部脚本） | **新增了 `app/X.py` 但 `docs/specs/` 下与模块同名的那个 不存在** | 🛑 **拦** |
 | 5 | **路由鉴权门** | `scripts/check_route_auth.py --baseline` | **新引入了没有鉴权依赖的路由**（比基线**变多**） | 🛑 拦 |
 | 6 | 🆕 **静态检查门**（2026-10-07） | `scripts/check_lint_baseline.sh` | `ruff` 的 `E9`/`F` **比基线变多**（存量认下 ⇒ ⛔ 不是"一条都没有"） | 🛑 拦 |
 
@@ -36,14 +36,14 @@
 > ⚠️ **第 ④ 道门只管【新增】模块**（`--diff-filter=A`）——
 > **改已有模块要不要更新 spec 是【判断】，机械判不了** ⇒ 交给下面那个 PostToolUse hook **提醒**。
 
-### ①·5 · 写完 `api/*.py` 之后的**提醒** —— `.claude/hooks/spec-remind.py`
+### ①·5 · 写完 `app/*.py` 之后的**提醒** —— `.claude/hooks/spec-remind.py`
 
 **触发**：`PostToolUse` 匹配 `Edit|Write|NotebookEdit`。
-**做**：如果动的是 **`api/` 下的 `.py`、且不是测试** ⇒ 打一行：
+**做**：如果动的是 **`app/` 下的 `.py`、且不是测试** ⇒ 打一行：
 
 ```
-有 spec 的： 📋 你动了 `api/reranker.py` —— 记得更新 `docs/specs/reranker.md`（⭐ 关键节：「看代码会误判的地方」）
-没 spec 的： 📋 你动了 `api/db.py` —— ⚠️ **它还没有 spec**……做完记得建一份
+有 spec 的： 📋 你动了 `app/rag/reranker.py` —— 记得更新 `app/rag/specs/reranker.md`（⭐ 关键节：「看代码会误判的地方」）
+没 spec 的： 📋 你动了 `app/core/db.py` —— ⚠️ **它还没有 spec**……做完记得建一份
 其它（文档/测试/脚本）： 静默
 ```
 
@@ -53,7 +53,7 @@
 ### ①·6 · 🆕 改**路由文件**之后的提醒 —— `.claude/hooks/route-auth-remind.py`
 
 **触发**：`PostToolUse` 匹配 `Edit|Write|NotebookEdit`，**且**改的是
-**`api/` 下的路由文件**（**脚本自己按【形状】判** —— 见下面那条更正）。
+**`app/` 下的路由文件**（**脚本自己按【形状】判** —— 见下面那条更正）。
 **做**：跑 `scripts/check_route_auth.py --baseline` ⇒ **只报「比基线【变多】」**：
 
 ```
@@ -68,7 +68,7 @@
 > 核 `api_v1.py` 时**手工扫"哪些路由没鉴权"，第一版扫出 0 条** ——
 > 因为 `FastAPI 0.141` 起 `include_router` 的结果被包成 `_IncludedRouter`。
 >
-> 🔴 **那个坑【仓里早就写着】**（`api/test_public_paths.py:17-20`）——
+> 🔴 **那个坑【仓里早就写着】**（`app/tests/test_public_paths.py:17-20`）——
 > **知识在，但挂在一个谁都不会去读的地方**（一个测试文件的 docstring 里），**我当天踩了两次**。
 >
 > ⇒ **不是再写一条规矩**（那天规矩写了三条、犯了五次），
@@ -80,7 +80,7 @@
 · 改**路由**文件 ⇒ **约 9–13s**（要 import `main` 拿真实路由表）
 ⇒ ⛔ **所以它【先判路径】** —— 不然每次编辑都付 10 秒。
 📌 另外那条 91s→9s 的提速，靠的是**在 import 前关掉遥测**（`GRADIO_ANALYTICS_ENABLED` 等），
-   根因与 `api/conftest.py:20` 记的**是同一个**。
+   根因与 `app/conftest.py:20` 记的**是同一个**。
 
 > ⛔ **它不阻止**（`PostToolUse` 拦不住已发生的编辑）—— 价值是**把话说到眼前**。
 > 📌 与 ①·5 的分工一致：**能机械判的 ⇒ 硬拦；判不了的 ⇒ 提醒。**
@@ -88,7 +88,7 @@
 > 🔴 **2026-10-05（批 4 · `N10`）判据由【清单】改成【形状】** —— 此前写死 4 个文件名
 > （`main.py` / `api_v1.py` / `api_v1_rag.py` / `api_v1_agent.py`）⇒ **新建第 5 个路由文件时
 > 这个 hook 静默不跑**，而"**静默不跑**"与"跑过了没发现问题"在机器痕迹上**完全一样**（`DEC-061`）。
-> 现改为**问文件内容**：`api/` 下的 `.py`，只要出现 `APIRouter(` / `@router.` / `@app.` 就算路由文件
+> 现改为**问文件内容**：`app/` 下的 `.py`，只要出现 `APIRouter(` / `@router.` / `@app.` 就算路由文件
 > ⇒ **新建文件自动被覆盖，⛔ 不需要谁记得改清单**。
 > ⚠️ **同一个盲区在提交门那侧也犯过**（`DEC-074`：触发取范围而非文件名清单）—— **这是第二次**。
 
@@ -98,7 +98,7 @@
 **做**：`python3 -m py_compile <那个文件>`，**不过就说**：
 
 ```
-🔴 **编译不过**：api/xxx.py —— 这个文件现在不是合法 Python。
+🔴 **编译不过**：app/xxx.py —— 这个文件现在不是合法 Python。
    （SyntaxError 那几行）
 📌 本仓纪律：**「我写进去了」≠「它能用」** —— 判据是【跑一次】，⛔ 不是【我改了】。
 ```
@@ -119,7 +119,7 @@
 **做**：指出是第几行，并给判据：
 
 ```
-🟡 **规则 1 提醒** —— `docs/specs/breaker.md` 这次写入里有 **2 处全称否定**，但**没看到任何命令**：
+🟡 **规则 1 提醒** —— `app/billing/specs/breaker.md` 这次写入里有 **2 处全称否定**，但**没看到任何命令**：
    ⇒ 全称否定**没法用「我看到过」证明**，只能靠**穷举** ——
      判据是**一条能打印出来的命令**（`grep -n` / `ls` / `curl`），**把输出贴进结论里**。
 ```
@@ -194,7 +194,7 @@
 ├── settings.json                 ← 注册 hook（⛔ 不要 gitignore 它）
 ├── hooks/
 │   ├── pre-commit-gates.py       ← 提交前六道门（凭据/链接/孤儿/模块spec/路由鉴权/**静态检查**）
-│   ├── spec-remind.py            ← 改 api/*.py 后提醒更新 spec（①·5）
+│   ├── spec-remind.py            ← 改 app/*.py 后提醒更新 spec（①·5）
 │   ├── route-auth-remind.py      ← 改路由文件后查「有没有没鉴权的」（①·6）
 │   ├── py-compile-remind.py      ← 🆕 改完 .py 当场编译一次（①·7 · §五·4）
 │   └── claim-evidence-remind.py  ← 🆕 写「不存在/唯一」前先出一条命令（①·8 · §五·1）
@@ -220,7 +220,7 @@
 > ⇒ **现表 1 条，且这一条是 HTTP**（⛔ **一条 WS 都不剩**）。
 > ⚠️ 判据别只看条数变少 —— 跑 `venv/bin/python scripts/check_route_auth.py` 直接看
 > 输出里的 **WS 行**：`/ws/agent` 必须**不在**清单里（在 = 又变回匿名了）；
-> ⛔ 而 `/ws/test` 该看的是**它整条路由都没了**（`api/test_removed_endpoints.py::test_ws_test_stays_removed`）。
+> ⛔ 而 `/ws/test` 该看的是**它整条路由都没了**（`app/tests/test_removed_endpoints.py::test_ws_test_stays_removed`）。
 > 📌 判据（可打印）：`venv/bin/python scripts/check_route_auth.py` ⇒ **无鉴权路由 1 条（HTTP 1 · WS 0）** ·
 > `venv/bin/python scripts/check_route_auth.py --baseline` ⇒ **与基线一致**。
 
@@ -281,12 +281,12 @@ scripts/check_secrets.sh            ← 能改
   （`grep -n check_route_auth .github/workflows/*.yml scripts/ci-local.sh .claude/hooks/pre-commit-gates.py` ⇒ 三处全空）
   ⇒ 它**只在 Claude 会话里提醒一句** ⇒ 「**门挂在别处，就等于没有门**」的又一例。
   同时把 **WS 补进扫描口径**（此前只认 `APIRoute`）。
-  ⚠️ 触发取 **`api/**.py`（范围）**而非文件名清单 —— 旧提醒 hook 写死 4 个名字，
+  ⚠️ 触发取 **`app/**.py`（范围）**而非文件名清单 —— 旧提醒 hook 写死 4 个名字，
   **新建 `api_v2.py` 就漏**。代价：动了 api 代码的提交多 ~10s（实测 9.95s）。
   📄 `docs/decisions/DEC-074-中间件豁免名单改名与路由鉴权门的接线.md` · `docs/规范/开发规范.md` §1.5
 - **2026-09-30** 加第 ③ 道门（**①·6 `route-auth-remind.py`** + `scripts/check_route_auth.py` + 基线）。
   起因：核 `api_v1.py` 时**手工扫无鉴权路由，第一版扫出 0 条**（踩了 `_IncludedRouter`）——
-  **而那个坑仓里早写着**（`api/test_public_paths.py:17-20`），**当天踩了两次**。
+  **而那个坑仓里早写着**（`app/tests/test_public_paths.py:17-20`），**当天踩了两次**。
   ⇒ **把知识从"没人读的 docstring"挪到"一定会撞上的 hook"。**
   📄 `docs/规范/开发规范.md` **§1.5** · `docs/复盘/2026-09-30-判据在手边却没查.md`
 - 2026-09-29 建立（业务方裁「甲」；hook 从 1 道扩到 3 道）。

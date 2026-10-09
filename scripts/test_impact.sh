@@ -24,8 +24,8 @@ echo "test_impact.sh · impact.sh 回归"
 # T1 命中已知文件
 out=$("$IMPACT" POSTGRES_PASSWORD 2>&1)
 case "$out" in
-  *"api/config.py"*) ok "T1 命中 api/config.py" ;;
-  *) bad "T1 未命中 api/config.py" "$out" ;;
+  *"app/core/config.py"*) ok "T1 命中 app/core/config.py" ;;
+  *) bad "T1 未命中 app/core/config.py" "$out" ;;
 esac
 
 # T2 gitignore 里的**文件本身**不能出现在命中列表里（git grep 只搜被跟踪的）
@@ -79,9 +79,9 @@ rmdir "$tmp" 2>/dev/null || rm -rf "$tmp"
 [ "$rc" = "1" ] && ok "T7 -f 不存在文件 exit 1" || bad "T7 -f 不存在文件 exit $rc (期望 1)"
 
 # T8 -f 模式：已知文件 ⇒ 命中它自己
-out=$("$IMPACT" -f api/config.py 2>&1)
+out=$("$IMPACT" -f app/core/config.py 2>&1)
 case "$out" in
-  *"api/config.py"*) ok "T8 -f 模式命中目标文件" ;;
+  *"app/core/config.py"*) ok "T8 -f 模式命中目标文件" ;;
   *) bad "T8 -f 模式未命中" "$out" ;;
 esac
 

@@ -17,24 +17,24 @@ cp .env.example .env       # 填【四项】必填，见 Q1.4
 docker compose up -d
 ```
 
-⚠️ **首次会 `build` API 镜像**（`docker-compose.yml:13` 的 `build: context: ./api`），
-而 `api/requirements.txt` 含 torch 系 ⇒ **要下几个 GB、构建较久**。
+⚠️ **首次会 `build` API 镜像**（`docker-compose.yml:13` 的 `build: context: ./app`），
+而 `app/requirements.txt` 含 torch 系 ⇒ **要下几个 GB、构建较久**。
 **8GB 内存 / Docker 配额较小的机器上实测会失败** —— 那是**环境天花板，不是配置写错**
 （见 `README.md` 的「⚠️ 已知限制」）。
 
-> 📌 **原 Q1.1 写的是"轻量路径"**（DB/Redis 用 Docker、API 跑本机、装 `api/requirements-test.txt`）——
+> 📌 **原 Q1.1 写的是"轻量路径"**（DB/Redis 用 Docker、API 跑本机、装 `app/requirements-test.txt`）——
 > **已删**。业务方裁决**不要双 requirements**，**那份文件也已删除** ⇒
-> **依赖清单只有 `api/requirements.txt` 一份**。
+> **依赖清单只有 `app/requirements.txt` 一份**。
 >
 > 🔧 **只有要跑测试 / 在本机改代码时**才需要下面这套（**开发路径，不是交付路径**）：
 >
 > ```bash
 > python3.10 -m venv venv
-> venv/bin/pip install -r api/requirements.txt
-> cd api && ENABLE_DASHBOARD=false ../venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
+> venv/bin/pip install -r app/requirements.txt
+> cd app && ENABLE_DASHBOARD=false ../venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
 > ```
 >
-> ⚠️ 本机会因此拉 torch 系（GB 级）。但 `api/reranker.py:14` 是**真懒加载** ⇒
+> ⚠️ 本机会因此拉 torch 系（GB 级）。但 `app/rag/reranker.py:14` 是**真懒加载** ⇒
 > **不碰 torch 也能跑**（默认模式 `accurate_norerank`）。`mode=accurate`/`full` 与 `/rag/rerank_search`
 > 才需要 torch + 2.3GB 模型。
 
@@ -70,7 +70,7 @@ docker start postgres-rag redis-rag        # 若已存在但停了：重启【�
 
 ### Q1.4：应用起不来，报 `EnvironmentError` / 提示缺配置？
 
-`api/config.py` 的 `validate_config()` 对**四个必填项**是 **fail-closed**（缺失即拒绝启动）：
+`app/core/config.py` 的 `validate_config()` 对**四个必填项**是 **fail-closed**（缺失即拒绝启动）：
 
 | 必填 | 说明 |
 |---|---|
@@ -90,15 +90,15 @@ docker start postgres-rag redis-rag        # 若已存在但停了：重启【�
 
 ### Q1.5：`pytest` 报 `Storage folder ./.mem0/qdrant is already accessed by another instance of Qdrant client`
 
-**这是已知限制，不是测试坏了** —— `api/memory_store.py:12` 在**模块导入期**就开本地 Qdrant
+**这是已知限制，不是测试坏了** —— `app/agent/memory_store.py:12` 在**模块导入期**就开本地 Qdrant
 （`path="./.mem0/qdrant"`），而本地 Qdrant 是**单实例锁**。⇒ **应用跑着的时候 `pytest` 跑不了。**
 
-**逃生口（两个都要，实测只有其一不行）**：① 从**仓库根**跑（避开 `api/.mem0/qdrant`）
+**逃生口（两个都要，实测只有其一不行）**：① 从**仓库根**跑（避开 `app/.mem0/qdrant`）
 ② 设 `MEM0_DIR=<临时目录>`（避开 `~/.mem0/migrations_qdrant`）：
 
 ```bash
 pkill -f "uvicorn main:app"                                  # 或 ①
-MEM0_DIR=$(mktemp -d) venv/bin/python -m pytest api/ -m "not integration and not needs_db" -q
+MEM0_DIR=$(mktemp -d) venv/bin/python -m pytest app/ -m "not integration and not needs_db" -q
 ```
 
 ### Q1：执行 `docker compose up -d` 后，API 容器一直在重启？
@@ -240,8 +240,8 @@ curl http://localhost:8000/api/v1/agent/mcp_tools_dynamic -H "Authorization: Bea
 curl http://localhost:8000/api/v1/agent/tool_health -H "Authorization: Bearer <token>"
 ```
 
-- **MCP 注册表**在 `api/mcp_server.py:24` 的 `TOOLS`（**当前 6 项**）。
-- **LLM 工具表**在 `api/agent_graph_advanced_learning.py:47-51`（**当前 7 项**）。
+- **MCP 注册表**在 `app/tools/mcp_server.py:24` 的 `TOOLS`（**当前 6 项**）。
+- **LLM 工具表**在 `app/agent/agent_graph_advanced_learning.py:47-51`（**当前 7 项**）。
 - ⚠️ **两张表不一致时，LLM 看得见、却调不到**，且**不报错、不 500**，只回一句「未找到工具」。
   🔴 **本仓当前就有这一处**：`fetch_webpage_html` 在 LLM 表里，**不在** MCP `TOOLS` 里 ⇒ 待修（见 `fastapi-rag-agent-TODO待办/归档/待办登记-2026-09-20-全仓审计与方向更正.md` §一·C）。
 - 不健康的工具（`unhealthy`）会被移出可用列表 —— 这是**设计行为**，不是 bug。
@@ -272,9 +272,9 @@ curl http://localhost:8000/api/v1/agent/tool_health -H "Authorization: Bearer <t
    ⇒ ⛔ **别再用旧地址，用上面的 `/trace`。**
    ⚠️ **上半页（轨迹）是进程内存，重启 API 即清空**，而且目前只有 Agent 链会写它 ——
    走 `/chat`（检索链）时**上半页必然是空的**，下半页的花费账仍然完整。
-> 🔴 **2026-10-09 更正（上面这句已不成立）**：`N16` **已于 2026-10-08 落地**（`DEC-093 §七`）—— `/rag/stream_search` **现在建轨迹**（判据：`grep -n 'start_trace' api/api_v1_rag.py` ⇒ 有）。⇒ **现在的"空"是"这条线程还没跑过"，⛔ 不是"这条链不建轨迹"**。⚠️ **`N16` 仍挂着的是另一半**：**其余 Agent 链**仍不建轨迹。
+> 🔴 **2026-10-09 更正（上面这句已不成立）**：`N16` **已于 2026-10-08 落地**（`DEC-093 §七`）—— `/rag/stream_search` **现在建轨迹**（判据：`grep -n 'start_trace' app/routing/api_v1_rag.py` ⇒ 有）。⇒ **现在的"空"是"这条线程还没跑过"，⛔ 不是"这条链不建轨迹"**。⚠️ **`N16` 仍挂着的是另一半**：**其余 Agent 链**仍不建轨迹。
 
-3. 给最大工具调用次数加限制 —— 逻辑在 `api/agent_graph_advanced_learning.py:246` 的 `should_continue`。
+3. 给最大工具调用次数加限制 —— 逻辑在 `app/agent/agent_graph_advanced_learning.py:246` 的 `should_continue`。
 
 ### A4：Token 统计的数据重启后丢失？
 
@@ -284,7 +284,7 @@ curl http://localhost:8000/api/v1/agent/tool_health -H "Authorization: Bearer <t
 curl "http://localhost:8000/api/v1/agent/cost/records?days=30" -H "Authorization: Bearer <token>"
 ```
 
-持久化写入点在 `api/token_tracker.py`（`INSERT INTO token_usage_logs`）。
+持久化写入点在 `app/billing/token_tracker.py`（`INSERT INTO token_usage_logs`）。
 
 ### A5：预算检查拦截了正常的调用？
 
@@ -293,7 +293,7 @@ curl http://localhost:8000/api/v1/agent/token/budget -H "Authorization: Bearer <
 ```
 
 1. 预算用完 ⇒ 管理员可调整用户角色（`free` → `premium`）。
-2. 预估成本过高 ⇒ 检查 `api/token_tracker.py:485` 的 `TOOL_ESTIMATED_COST` 是否合理
+2. 预估成本过高 ⇒ 检查 `app/billing/token_tracker.py:485` 的 `TOOL_ESTIMATED_COST` 是否合理
    （该表通过 `/api/v1/agent/budget/estimates` 暴露）。
 
 > ⚠️ **本仓历史坑**：预算闸门曾因**三处单位错配**而**恒放行**（已修，见 `CHANGELOG`）。
@@ -303,7 +303,7 @@ curl http://localhost:8000/api/v1/agent/token/budget -H "Authorization: Bearer <
 
 1. 确认服务已起：`docker compose ps`
 2. 地址是 **`http://localhost:8000/dashboard`**（**不是**独立端口）。
-3. 它由 `api/cost_dashboard.py` 挂载，**默认开启**（`api/main.py:523`：`ENABLE_DASHBOARD` 默认 `"true"`）。
+3. 它由 `app/billing/cost_dashboard.py` 挂载，**默认开启**（`app/main.py:523`：`ENABLE_DASHBOARD` 默认 `"true"`）。
 4. ⚠️ **如果你是按 README 的「🔧 本地开发路径」起的服务**，命令行里带了 `ENABLE_DASHBOARD=false` ⇒
    **面板被刻意跳过**（为了不导入 gradio/matplotlib）。**这不是坏了** —— 去掉那个环境变量即可。
    📌 用 `docker compose up -d`（交付路径）起的话**没有这个变量**，看板默认就是挂载的。
@@ -312,7 +312,7 @@ curl http://localhost:8000/api/v1/agent/token/budget -H "Authorization: Bearer <
 
 > 🔴 **2026-09-20 更正 —— 原系统这条写的是「检查 `.env` 中的 `MEM0_API_KEY`」，在本仓是错的。**
 > 本仓 Mem0 跑的是**本地模式**，**不连云、也没有 `MEM0_API_KEY` 这个键**
-> （`api/memory_store.py:12-39`：向量库 = 本地 `./.mem0/qdrant`；embedder = `DASHSCOPE_API_KEY`；
+> （`app/agent/memory_store.py:12-39`：向量库 = 本地 `./.mem0/qdrant`；embedder = `DASHSCOPE_API_KEY`；
 > Mem0 自己的 LLM = `LLM_API_KEY`/`LLM_BASE_URL`）。
 > **按原写法去 `.env` 里找那个键，会白找。**
 
@@ -331,7 +331,7 @@ curl http://localhost:8000/api/v1/agent/token/budget -H "Authorization: Bearer <
 
 ### A8：如何清空某个用户的长期记忆？
 
-⚠️ **本仓没有提供删除单条记忆的 API**（`api/memory_store.py` 里**没有** `delete` 方法 —— 原系统文档说"可调用 Mem0 的 `delete()`"，**在本仓不成立**）。
+⚠️ **本仓没有提供删除单条记忆的 API**（`app/agent/memory_store.py` 里**没有** `delete` 方法 —— 原系统文档说"可调用 Mem0 的 `delete()`"，**在本仓不成立**）。
 
 可行的办法：**直接清本地存储目录** `./.mem0/qdrant`（或设 `MEM0_DIR` 指到别处），重启服务即可。
 ⚠️ 这是**整库清空**，不是按用户删。

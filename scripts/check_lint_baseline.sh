@@ -25,12 +25,12 @@
 #
 # | 形状 | 谁在用 | 怎么发现 |
 # |---|---|---|
-# | `mod.NAME`（属性访问） | `api/test_cancel_propagation.py` **6 处** `rag_mod.INTERRUPTED_SUFFIX` | 全仓 grep **能**搜到 |
-# | `别名.NAME` | `api/test_memory_chat_approval.py` `assert ac.SENSITIVE_TOOLS is ag.SENSITIVE_TOOLS`（`ac` 是模块别名） | 🔴 **grep `模块名.名字` 搜不到** |
+# | `mod.NAME`（属性访问） | `app/tests/test_cancel_propagation.py` **6 处** `rag_mod.INTERRUPTED_SUFFIX` | 全仓 grep **能**搜到 |
+# | `别名.NAME` | `app/tests/test_memory_chat_approval.py` `assert ac.SENSITIVE_TOOLS is ag.SENSITIVE_TOOLS`（`ac` 是模块别名） | 🔴 **grep `模块名.名字` 搜不到** |
 #
 # ⚠️ **两种都在 2026-10-07 那批里真删过、真红过**（各红 6 条 / 1 条用例，当场还原）。
 # ⇒ **规矩**：清未使用导入时，**每一段都要跑全量 `pytest`**，⛔ **不能只看 ruff 报绿**。
-#    📄 实例与全部理由 ⇒ `api/agent_checkpointer.py:25-30` · `api/api_v1_rag.py:60-64`
+#    📄 实例与全部理由 ⇒ `app/agent/agent_checkpointer.py:25-30` · `app/routing/api_v1_rag.py:60-64`
 #    📄 裁定 ⇒ `docs/decisions/DEC-099-静态检查接门方式基线棘轮.md`
 #
 # ## 🔴 判据是【集合】，⛔ 不是【计数】
@@ -93,7 +93,7 @@ EXIT_NOTRUN=3
 if [ -z "${RUFF}" ]; then
     echo "⚠️ 静态检查门【未跑】（按「未跑」计，⛔ 不是通过）—— 找不到 ruff。" >&2
     echo "   它既不在 venv/bin/ 里，也不在 PATH 上。" >&2
-    echo "   装法：venv/bin/pip install ruff    （⛔ 别写进 api/requirements.txt，那会进 demo 镜像）" >&2
+    echo "   装法：venv/bin/pip install ruff    （⛔ 别写进 app/requirements.txt，那会进 demo 镜像）" >&2
     echo "   本地会把它标成 ⏭；CI 的 syntax job 会装上它并把它跑成真判据。" >&2
     exit "${EXIT_NOTRUN}"
 fi
@@ -118,14 +118,14 @@ exit "${FAKE_RC:-0}"
 SHIM
     chmod +x "${TMPD}/ruff"
 
-    printf 'api/a.py:1:1: F401 [*] unused\napi/a.py:9:1: F401 [*] unused\napi/b.py:3:2: F541 [*] f-string\n' > "${TMPD}/out.base"
-    printf 'api/a.py:1:1: F401 [*] unused\napi/a.py:9:1: F401 [*] unused\napi/b.py:3:2: F541 [*] f-string\napi/c.py:5:5: F401 [*] unused\n' > "${TMPD}/out.extra"
+    printf 'app/a.py:1:1: F401 [*] unused\napp/a.py:9:1: F401 [*] unused\napp/b.py:3:2: F541 [*] f-string\n' > "${TMPD}/out.base"
+    printf 'app/a.py:1:1: F401 [*] unused\napp/a.py:9:1: F401 [*] unused\napp/b.py:3:2: F541 [*] f-string\napp/c.py:5:5: F401 [*] unused\n' > "${TMPD}/out.extra"
     # 🔴 这一对是**本门存在的理由**：组数都是 1，**只是文件换了** ⇒ 计数法判绿、集合法判红。
-    printf 'api/d.py:1:1: F401 [*] unused\n' > "${TMPD}/out.swap"
-    printf '# ruff %s\napi/a.py\tF401\n' "0.16.10" > "${TMPD}/base.swap"
+    printf 'app/d.py:1:1: F401 [*] unused\n' > "${TMPD}/out.swap"
+    printf '# ruff %s\napp/a.py\tF401\n' "0.16.10" > "${TMPD}/base.swap"
 
-    printf '# ruff %s\napi/a.py\tF401\napi/b.py\tF541\n' "0.16.10" > "${TMPD}/base.ok"
-    printf '# ruff %s\napi/a.py\tF401\napi/b.py\tF541\n' "9.9.9"  > "${TMPD}/base.oldver"
+    printf '# ruff %s\napp/a.py\tF401\napp/b.py\tF541\n' "0.16.10" > "${TMPD}/base.ok"
+    printf '# ruff %s\napp/a.py\tF401\napp/b.py\tF541\n' "9.9.9"  > "${TMPD}/base.oldver"
 
     run_case() {  # $1=名字 $2=期望退出码 $3=FAKE_OUT $4=BASELINE [$5=FAKE_RC]
         local got

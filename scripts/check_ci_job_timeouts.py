@@ -13,7 +13,7 @@
 
 ## 为什么是纯文本解析（⛔ 不 `import yaml`）
 
-`PyYAML` 在本机 `venv` 里有（实测 6.0.3），但**不在 `api/requirements.txt`** ⇒ CI 里没有。
+`PyYAML` 在本机 `venv` 里有（实测 6.0.3），但**不在 `app/requirements.txt`** ⇒ CI 里没有。
 ⛔ **不为一道门给 demo 镜像加依赖** —— 同「`ruff` 不进 requirements」那条理由
 （那份清单会进 demo 镜像）。本脚本**只用标准库**。
 
