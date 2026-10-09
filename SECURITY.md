@@ -72,38 +72,75 @@
 `app/access/permission.py:get_user_role()` —— `admin` 特判 + 探针身份，**其余全 FREE**。
 ⇒ 不是查库。接 DB 这件事**挂起**（`DEC-033` 🅱️「后端先行」）。
 
-### 🔴 3.4 依赖里有 **21 条已知漏洞 / 9 个包**（**2026-10-09 新查出 · 未修**）
+### ✅ ~~3.4 依赖里的已知漏洞~~ —— **2026-10-09 本批【全部清掉】**
 
-> 🔴 **这是本轮【最有价值】的发现** —— 它是**加了本地扫描工具之后才浮出来的**。
-> ⚠️ **讽刺的是**：钉死版本（§3.3）让它们**看得见**，而钉在**旧版本**上等于**把它们冻住**。
-> 🔴 **这个数会自己变**：2026-10-09 早些时候扫出的是 **16 条 / 7 个包**，同日晚间复扫**长到 21 条 / 9 个包**
-> （新增 `langchain` 与 `langchain-core`）。⚠️ 同脚本、同文件、同过滤正则 ⇒ 差异只能来自
-> **advisory 库**（`pip-audit` **每次联网取**，⛔ 不是本地快照）。
-> ⇒ ⛔ **引用这个数之前先跑一遍** —— 别抄本文档、也别抄施工单。
+**判据（可打印）**：`bash scripts/check_dep_vulns.sh` ⇒ **退出码 0** +「扫了 165 个包，**0 条**」。
 
-**判据（可打印）**：`bash scripts/check_dep_vulns.sh` ⇒ 退出码 **1** + 下面这张表。
+> ⚠️ **这个数会自己变，而且一天之内变过四次**：
+> **16 条 / 7 包** ⇒ **21 / 9** ⇒ **19 / 8** ⇒ **0**。
+> ⚠️ 同脚本、同文件、同过滤正则 ⇒ 前面那几次差异只能来自 **advisory 库**
+> （`pip-audit` **每次联网取**，⛔ 不是本地快照）。
+> ⇒ ⛔ **引用之前先跑一遍** —— 别抄本文档、也别抄施工单。
 
-| 包 | 现值 | 修好于 | ⚠️ |
-|---|---|---|---|
-| 🔴 `langchain` | 0.3.30 | **1.3.9** | **大版本跳 0.3 → 1.x** · `PYSEC-2026-2192` |
-| 🔴 `langchain-core` | 0.3.86 | **1.2.22** / 1.2.11 | **大版本跳 0.3 → 1.x** · `PYSEC-2026-2193` / `2562` |
-| `langchain-text-splitters` | 0.3.11 | 1.1.2 | `PYSEC-2026-77` |
-| 🔴 `langchain-openai` | 0.2.14 | 1.1.14 | **大版本跳** · `PYSEC-2026-76` |
-| `langgraph` | 1.0.1 | 1.0.10 | `PYSEC-2026-83` |
-| 🔴 `langgraph-checkpoint` | 3.0.1 | 4.0.0 / 4.1.1 | **大版本跳** · `PYSEC-2026-2573/2574` |
-| `langgraph-sdk` | 0.2.15 | 0.3.15 / 0.4.4 | `PYSEC-2026-2194/2575` · `CVE-2026-104873` |
-| `langgraph-checkpoint-sqlite` | 3.0.3 | 3.1.1 | `PYSEC-2026-3636` |
-| `pyjwt` | 2.14.0 | 2.15.0 | `PYSEC-2026-4141/4183` |
+**怎么清的**（📄 决策全文 ⇒ **`docs/decisions/DEC-127-langchain-core-1x连锁升级.md`**）：
 
-⛔ **处置不能"顺手升"**：其中 **4 个是大版本跳**（`langchain` 0.3→1.x · `langchain-core` 0.3→1.x ·
-`langchain-openai` 0.2→1.1 · `langgraph-checkpoint` 3→4）⇒ **要单独一轮**，跑全量测试 + 真服务验。
-🔴 **其中 `langchain` / `langchain-core` 那条 0.3→1.x 与 `app/requirements.txt` 里的上界注释直接冲突** ——
-那行写着「**本仓代码是按 langchain 0.3.x 写的**，必须加上界」⇒ 升 1.x **等于改代码**，⛔ 不是改个版本号。
-📌 **在那之前，这份清单就是"为什么不静默放过"的凭证。**
+- ✅ **`pyjwt` 2.14.0 ⇒ 2.15.0**（当天先做）—— 它是那 9 个包里**唯一能单独升的**。
+- ✅ **其余 8 个包一次升完**（`langchain-core` 0.3→**1.6.9** 为总闸），
+  连带 **`openai` 1.109.1 ⇒ 2.54.0**（`langchain-openai` 1.x 硬要的 ⇒ 不是可选项）
+  · 🆕 加 **`langchain-classic==1.0.8`**（`langchain` 1.x 删掉了 legacy agent API，
+  不走它 `/ws/agent` 那条**活路径会直接起不来**）。
+- 🔴 **顺带修掉一个「门自己会撒谎」的 bug**：`scripts/check_dep_vulns.sh` 原先只看
+  `pip-audit` 的退出码，而**「找到漏洞」与「Python 抛异常（如网络超时）」退出码都是 1**
+  ⇒ **网络崩了被报成「有已知漏洞」**。已改成**按「输出是不是合法 JSON」判**，
+  自测从 1 相扩到 **3 相**（含"**判不了必须落 2**"那一相）。
+
+#### ⚠️ 保留下来的教训：这批**不能按版本号大小分批** —— 8 个包塌在【同一个闸】上
+
+> 🔴 **原计划分「小版本批 / 大版本批」，2026-10-09 实测推翻。**
+> 那个切法切的是**版本号外观，不是依赖闭包** —— 除 `pyjwt` 外，**原「批 1」的另外 4 个
+> 每一个都把整条链拖进「批 2」**。**剩下 8 个包是【一件事】。**
+> 下表是拿【钉死集】跑 `pip install --dry-run -r` 的实测（⛔ 一行代码没动、venv 没动）：
+
+| 想升的 | 真实解析结果（pip 原文口径） |
+|---|---|
+| `pyjwt` 2.15.0 | ✅ **只装它自己** —— 真·独立 |
+| `langgraph-sdk` 0.3.15 | ❌ ⚠️ **它根本不在 `requirements.txt` 里**（是 `langgraph` 的传递依赖）；而 `langgraph 1.0.1` 要 **`langgraph-sdk<0.3.0`** ⇒ 升它**必须先升 `langgraph`** |
+| `langgraph` 1.0.10 | ❌ 要 `langgraph-prebuilt>=1.0.8` ⇒ 而 1.0.8–1.0.13 **每一个都要求 `langchain-core>=1.0.0`** |
+| `langgraph-checkpoint-sqlite` 3.1.1 | ❌ 要 `langgraph-checkpoint>=4.1.0`；而 `langgraph 1.0.1` 要 **`<4.0.0`** ⇒ **两者互斥** |
+| `langchain-text-splitters` 1.1.2 | ❌ 要 **`langchain-core>=1.2.31,<2.0.0`** |
+
+pip 报错原文（⛔ 不是我的推断）：
+
+```
+ERROR: … langchain-core==0.3.86 because these package versions have conflicting dependencies.
+    langgraph-prebuilt 1.0.13 depends on langchain-core>=1.3.1
+    langgraph-checkpoint-sqlite 3.1.1 depends on langgraph-checkpoint<5.0.0 and >=4.1.0
+    langgraph 1.0.1 depends on langgraph-checkpoint<4.0.0 and >=2.1.0
+```
+
+⇒ **`langchain-core` 0.3.86 → 1.x 是这条链的【总闸】**：
+
+```
+langchain-core  0.3.86 → >=1.2.31
+   ├─ 逼 langchain                0.3.30 → 1.x
+   ├─ 逼 langchain-openai         0.2.14 → 1.1.14
+   ├─ 逼 langchain-text-splitters 0.3.11 → 1.1.2
+   └─ 逼 langgraph                1.0.1  → 1.0.10  → 连带 sdk / prebuilt
+          └─ 逼 langgraph-checkpoint 3.0.1 → 4.x
+```
+
+⇒ **这 8 个包、6 个直系文件，是【一件事】，⛔ 不是两批。**
+
+⛔ **处置不能"顺手升"** —— 本轮**跑了全量测试 + ci-local**，⛔ **但真服务验还没做**（见 `DEC-127` §五·5）。
+🔴 **`langchain-core` / `langchain` 那条 0.3→1.x 与 `app/requirements.txt` 里的上界注释直接冲突** ——
+那行写着「**本仓代码是按 langchain 0.3.x 写的**，必须加上界」⇒ 升 1.x **确实等于改代码**
+（实际只改了 1 行 import，但那条注释本身也**必须同步改掉**，⛔ 别让它是假的）。
+📌 **这份清单的作用，是留下"为什么当初不能一次升完"的凭证。**
 
 ### ✅ ~~3.3 依赖版本宽松约束~~ —— **2026-10-09 本批收掉**
 
-`app/requirements.txt` **就地钉死**：43 行 `>=` ⇒ **40 行 `==`**（取本机 venv 的**实测版本**）。
+`app/requirements.txt` **就地钉死**：43 行 `>=` ⇒ **41 行 `==`**（取本机 venv 的**实测版本**；
+⚠️ 41 而非 40：2026-10-09 加了 `langchain-classic`，见 §3.4）。
 ⛔ **没有新增约束文件** ⇒ 与 `DEC-034`「不另建约束文件」**不冲突**。
 ⚠️ **6 个仍留 `>=`**：它们**不在本机 venv 里**（构建期被裁）⇒ 取不到实测版本，**钉了就是编个数**。
 ✅ **另有 3 个原先【完全无约束】的裸名也已钉死** —— `langgraph-checkpoint` **3.0.1** ·
@@ -113,7 +150,7 @@
 📌 判据（⚠️ **必须排除 `#` 之后的注释**，且**别用裸 `grep -c '=='`** ——
 钉死行的行尾注释里写着原来的 `>=`，而**判据所在的行自己**也在演示这两个符号
 ⇒ 不排除注释数出来的是**假数**，且**那个假数还随注释文字自身变化**）：
-`grep -cE '^[A-Za-z][^#]*==' app/requirements.txt` ⇒ **40** ·
+`grep -cE '^[A-Za-z][^#]*==' app/requirements.txt` ⇒ **41** ·
 `grep -cE '^[A-Za-z][^#]*>=' app/requirements.txt` ⇒ **6** ·
 `grep -vE '^\s*(#|$)' app/requirements.txt | grep -cvE '^[A-Za-z][^#]*(==|>=)'` ⇒ **0**（**无裸名**）
 

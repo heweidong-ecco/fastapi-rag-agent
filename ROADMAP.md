@@ -452,22 +452,26 @@ bash scripts/list_endpoints.sh          # 默认 http://127.0.0.1:8000
 > ### ⬜ **下一轮就做这两项**（业务方已裁，⛔ 不用再问要不要做）
 > 📄 **施工单（含两个拦路石）** ⇒ **`fastapi-rag-agent-TODO待办/施工单-20261009-安全收尾两项-接续.md`**
 >
-> ① **§3.4 · 依赖里有 21 条已知漏洞 / 9 个包**（裁「**甲 · 完整修好**」）——
->    ⚠️ **这个数会自己变**：2026-10-09 早先扫出 **16 条 / 7 包**，**同日晚间复扫 21 条 / 9 包** ⇒
->    **advisory 库是联网取的**。⛔ **动手前先跑脚本，别抄这里或 `SECURITY.md` 的数。**
->    分两批：**小版本 5 个**（pyjwt / langgraph / langgraph-sdk / checkpoint-sqlite / text-splitters）
->    + 🔴 **大版本 4 个**（`langchain` 0.3→**1.x** · `langchain-core` 0.3→**1.x** ·
->    `langchain-openai` 0.2→**1.1** · `langgraph-checkpoint` 3→**4**，**都会改 API**）。
->    📌 判据：`bash scripts/check_dep_vulns.sh`（**本轮新建**，本地 `pip-audit`，⛔ 不依赖 GitHub）。
+> ① ✅ **§3.4 依赖漏洞 —— 2026-10-09 当天【全部清掉】**
+>    📌 判据：`bash scripts/check_dep_vulns.sh` ⇒ **退出码 0** +「扫了 165 个包，**0 条**」。
+>    ⚠️ **这个数一天变过四次**（16/7 → 21/9 → 19/8 → **0**）—— **advisory 库是联网取的**，
+>    ⛔ **引用之前先跑脚本**，别抄这里或 `SECURITY.md` 的数。
+>    📄 **决策全文 ⇒ `docs/decisions/DEC-127-langchain-core-1x连锁升级.md`**（备选 / 反悔成本 / 遗留）。
+>    🔴 **过程中两件值得记住的**（都记进 DEC-127 了）：
+>    · **「小版本 5 + 大版本 4」的分批是错的** —— 除 `pyjwt` 外剩下 **8 个包是【一件事】**，
+>      全塌在 **`langchain-core` 0.3 → 1.x** 这个总闸上。
+>    · 🔴 **`/ws/agent` 升级后真坏了，而 913 条测试【全绿】** —— 唯一提到它的两条用例
+>      把它 `monkeypatch` 掉了 ⇒ **假绿**。**⛔ 别把「测试全绿」读成「活路径没坏」。**
 > ② **B1 · 角色接 DB**（裁「**甲 · 加 `role` 列**」）——
 >    ⚠️ **本轮查出两个拦路石**（施工单 §三）：`get_user_role` **在热路径上** ·
 >    `permission.md:88` 写着「**无 `lru_cache` 是有意的**」· 且 `_no_db` 守卫**会拦**。
 >
 > ### ✅ 本轮（安全线）已落
-> **3 个端口收窄** · **依赖就地钉死**（**40 行 `==`**；⚠️ 只剩 **6 个 `>=`** —— 它们不在本机 venv 里，
+> **3 个端口收窄** · **依赖就地钉死**（**41 行 `==`**；⚠️ 只剩 **6 个 `>=`** —— 它们不在本机 venv 里，
 > 见 `SECURITY.md` §3.3）· **A1 匿名配额给最低档** ·
-> **C 本地依赖扫描**（它扫出上面那 21 条）· **D CodeQL** · **E gitleaks** · **F 威胁模型** · **H Grafana 口令**
-> 📄 `SECURITY.md`（含 §3.4 那张漏洞表和"已收掉的"留痕）
+> **C 本地依赖扫描**（它扫出上面这批）· **D CodeQL** · **E gitleaks** · **F 威胁模型** · **H Grafana 口令**
+> ✅ **依赖漏洞清零**（`pyjwt` 当天先升；其余 8 个包 + `openai` 2.x 一次升完 ⇒ **0 条**）
+> 📄 `SECURITY.md`（§3.4 已收口，闭包分析留档）· `docs/decisions/DEC-127`
 >
 > ✅ **PR [#125](https://github.com/heweidong-ecco/fastapi-rag-agent/pull/125)** —— 分支 `fix/security-ports`。
 > ⚠️ **合并纪律**：⛔ **Agent 自己开的 PR 不许自合** —— 要先问业务方「可以合吗」。

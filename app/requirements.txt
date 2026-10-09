@@ -8,12 +8,13 @@
 #       钉死行的行尾注释里都写着原来的 `>=`，而**本段注释自己**也在演示这两个符号
 #       ⇒ 不排除注释的 `grep -c '=='` / `grep -c '>='` 数出来的是**假数**，
 #       且**那个假数还随本段文字自己变化** ⇒ ⛔ 别把裸 `grep -c` 当判据）：
-#         grep -cE '^[A-Za-z][^#]*==' app/requirements.txt   ⇒ 40
+#         grep -cE '^[A-Za-z][^#]*==' app/requirements.txt   ⇒ 41
 #         grep -cE '^[A-Za-z][^#]*>=' app/requirements.txt   ⇒ 6
 #         grep -nE '^[A-Za-z].*==\s*(#|$)' app/requirements.txt ⇒ 空（**无空版本行**）
 #    ✅ **另有 3 个原先【完全无约束】的裸名**（`langgraph-checkpoint` / `langgraph-checkpoint-sqlite` /
 #       `matplotlib`）—— **本次一并钉死**（它们装在本机 venv 里，取得到实测版本）。
-#       ⇒ 现在 **46 个包行 = 40 个 `==` + 6 个 `>=` + 0 个裸名**。
+#       ⇒ 现在 **47 个包行 = 41 个 `==` + 6 个 `>=` + 0 个裸名**
+#       （41 而非 40：2026-10-09 加了 `langchain-classic`，见下方 `DEC-127` 那段）。
 #
 # Web 框架与服务器
 fastapi==0.141.1    # ← 2026-10-09 钉死（原 fastapi>=0.115.0 · SECURITY.md §3.5）
@@ -24,18 +25,31 @@ pydantic==2.13.5    # ← 2026-10-09 钉死（原 pydantic>=2.0.0 · SECURITY.md
 python-dotenv==1.2.3    # ← 2026-10-09 钉死（原 python-dotenv>=1.0.0 · SECURITY.md §3.5）
 
 # 大模型与 AI 框架
-# ⚠️ 必须加上界：本仓代码是按 langchain **0.3.x** 写的。原先只写 `>=0.3.13`（无上界），
-#    pip 会装到 **1.x**，而 1.x 把 classic agent 移到了 `langchain_classic`，导致
-#    app/routing/api_v1_rag.py:681 `from langchain.agents import create_tool_calling_agent, AgentExecutor`
-#    → ImportError: cannot import name 'create_tool_calling_agent' from 'langchain.agents'
-#    ⇒ 应用在 **import 阶段**就崩（2026-09-15 实测）。
-openai==1.109.1    # ← 2026-10-09 钉死（原 openai>=1.0.0,<4 · SECURITY.md §3.5）
-langchain==0.3.30    # ← 2026-10-09 钉死（原 langchain>=0.3.13,<0.4 · SECURITY.md §3.5）
-langchain-openai==0.2.14    # ← 2026-10-09 钉死（原 langchain-openai>=0.2.14,<0.3 · SECURITY.md §3.5）
+# 🔴 2026-10-09：**下面那条 2026-09-15 的警告，今天【一字不差地应验了】** —— 留档，⛔ 别删。
+#    ⚠️ 原文：必须加上界：本仓代码是按 langchain **0.3.x** 写的。原先只写 `>=0.3.13`（无上界），
+#       pip 会装到 **1.x**，而 1.x 把 classic agent 移到了 `langchain_classic`，导致
+#       api_v1_rag.py 的 `from langchain.agents import create_tool_calling_agent, AgentExecutor`
+#       → `ImportError: cannot import name 'create_tool_calling_agent' from 'langchain.agents'`
+#       ⇒ 应用在 **import 阶段**就崩（2026-09-15 实测）。
+#    ✅ **2026-10-09 真跳上 1.x，报错与上面那行【逐字一致】**；修法也正是它指的
+#       **改用 `langchain_classic`**（📄 `docs/decisions/DEC-127` §2.4）。
+#    ⚠️ **教训**：这条警告躺在文件里 **24 天**，而真跳时**没人先读它** ——
+#       发现顺序是「测试全绿 → 我手工调真身 → ImportError」，**不是**「先读注释」。
+#    ⇒ 现在本仓 **`langchain` 就是 1.x**（代码按 1.x 写）；全局只剩**一处**仍走 legacy：
+#      `app/routing/api_v1_rag.py` 的 agent executor（它上方的注释记了判据）。
+openai==2.54.0    # ← 2026-10-09 **大版本跳**（原 1.109.1 · `langchain-openai` 1.x 硬要 `>=2.26.0`）
+                  #    🔴 本仓【直接】用它 ⇒ `app/rag/embedding_client.py:4` · `app/rag/query_rewriter.py:9`
+                  #    ⚠️ 选了 **2.x** 而不是 resolver 默认的 3.x ⇒ 见 `docs/decisions/DEC-127`
+langchain==1.4.4    # ← 2026-10-09 **大版本跳**（原 0.3.30）· 总闸是 `langchain-core` 0.3→1.x · `DEC-127`
+langchain-openai==1.7.0    # ← 2026-10-09 **大版本跳**（原 0.2.14）· `DEC-127`
 langchain-community==0.3.31    # ← 2026-10-09 钉死（原 langchain-community>=0.3.13,<0.4 · SECURITY.md §3.5）
-langchain-core==0.3.86    # ← 2026-10-09 钉死（原 langchain-core>=0.3.0,<0.4 · SECURITY.md §3.5）
-langchain-text-splitters==0.3.11    # ← 2026-10-09 钉死（原 langchain-text-splitters>=0.3.0,<0.4 · SECURITY.md §3.5）
-langgraph==1.0.1    # ← 2026-10-09 钉死（原 langgraph>=1.0,<2 · SECURITY.md §3.5）
+langchain-core==1.6.9    # ← 2026-10-09 **大版本跳**（原 0.3.86）· 🔴 **这条链的【总闸】** · `DEC-127`
+langchain-classic==1.0.8    # ← 2026-10-09 🆕 —— **langchain 1.x 把 legacy agent API 搬来了这里**
+                            #    🔴 没有它，`app/routing/api_v1_rag.py` 的 `/ws/agent` **整条活路径起不来**
+                            #    （`create_tool_calling_agent` / `AgentExecutor` 在 `langchain` 1.x 里已删）
+                            #    📌 选它的理由（vs 换 `create_agent`、vs 自己手搓）⇒ `DEC-127` §2.4
+langchain-text-splitters==1.1.3    # ← 2026-10-09（原 0.3.11）· ⚠️ **分块默认参数可能变** ⇒ 影响检索口径 · `DEC-127`
+langgraph==1.2.14    # ← 2026-10-09（原 1.0.1）· `DEC-127`
 
 # 文档处理
 pymupdf==1.28.2    # ← 2026-10-09 钉死（原 pymupdf>=1.24.0 · SECURITY.md §3.5）
@@ -58,7 +72,9 @@ psycopg2-binary==2.9.13    # ← 2026-10-09 钉死（原 psycopg2-binary>=2.9.0 
 redis==8.1.0    # ← 2026-10-09 钉死（原 redis>=5.0.0 · SECURITY.md §3.5）
 
 # 认证
-pyjwt==2.14.0    # ← 2026-10-09 钉死（原 pyjwt>=2.8.0 · SECURITY.md §3.5）
+pyjwt==2.15.0    # ← 2026-10-09 升级（先钉 2.14.0 ⇒ 升到**修好版**；`SECURITY.md` §3.4 · `PYSEC-2026-4141/4183`）
+                 #    ⚠️ 它是那 7 个漏洞包里【唯一】能【单独】升的 —— 其余 6 个都要先动
+                 #    `langchain-core` 0.3→1.x（详见 `SECURITY.md` §3.4 的依赖闭包那节）
 
 # 日志
 loguru==0.7.3    # ← 2026-10-09 钉死（原 loguru>=0.7.0 · SECURITY.md §3.5）
@@ -96,8 +112,8 @@ python-multipart==0.0.32    # ← 2026-10-09 钉死（原 python-multipart>=0.0.
 # Agent langGraph
 # 注：langgraph 与 langchain-core 已在上方「大模型与 AI 框架」段声明**带约束**的版本，
 #     此处原先又裸名重复了一次（无约束）。重复条目会掩盖版本漂移，已删除。
-langgraph-checkpoint==3.0.1    # ← 2026-10-09 钉死（原为**裸名 · 完全无约束** · SECURITY.md §3.5）
-langgraph-checkpoint-sqlite==3.0.3    # ← 2026-10-09 钉死（同上）
+langgraph-checkpoint==4.2.0    # ← 2026-10-09 **大版本跳**（原 3.0.1；它原先还是**裸名**）· `DEC-127`
+langgraph-checkpoint-sqlite==3.1.1    # ← 2026-10-09（原 3.0.3）· ⚠️ 它逼着 `langgraph-checkpoint` 上 4.x · `DEC-127`
 # mem0 2.x 起 Memory.__init__ 不再接受 dict，代码使用 Memory.from_config(dict)，需 >=2.0
 mem0ai==2.0.20    # ← 2026-10-09 钉死（原 mem0ai>=2.0.0 · SECURITY.md §3.5）
 

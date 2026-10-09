@@ -31,8 +31,12 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "app"))
 
-from auth import create_user_api_key, hash_api_key          # noqa: E402,F401
-from db import get_db                                       # noqa: E402
+# 🔴 2026-10-09 修：模块化重构（`#123`）把这两个挪进了 `app/access/` 与 `app/core/`，
+#    而这里的扁平导入没跟着改 ⇒ **本脚本整条跑不起来**（`ModuleNotFoundError: No module named 'auth'`）。
+#    ⚠️ **它是【发凭据】的那把工具** —— 坏了就等于"进不去系统"。
+#    ⚠️ 913 条 pytest **照不到脚本**；CI 的 `compileall` 也照不到（**导入期错 ≠ 语法错**）。
+from access.auth import create_user_api_key, hash_api_key   # noqa: E402,F401
+from core.db import get_db                                  # noqa: E402
 
 
 def issue(user_name: str, days: int) -> None:

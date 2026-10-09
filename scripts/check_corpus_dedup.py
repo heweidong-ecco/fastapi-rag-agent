@@ -41,7 +41,10 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-API_DIR = REPO_ROOT / "api"
+# 🔴 2026-10-09 修：`api/` 已被 `DEC-126`（模块化重构 `#123`）改名成 **`app/`** ——
+#    这里还写着 `"api"` ⇒ `sys.path` 被加了一个**不存在的目录** ⇒ 下面那些
+#    `from rag.… import …` 全部 `ModuleNotFoundError`。**两处是同一个重构造成的**。
+API_DIR = REPO_ROOT / "app"
 if str(API_DIR) not in sys.path:
     sys.path.insert(0, str(API_DIR))
 
@@ -125,8 +128,11 @@ def layer3_semantic(docs):
 
     🔴 失败/无 key ⇒ **返回原因**，⛔ 不返回空列表假装"没有重复"。
     """
-    from chunker import split_text_with_filter
-    from embedding_client import get_embedding
+    # 🔴 2026-10-09 修：模块化重构（`#123`）把这两个模块挪进了 `app/rag/`，
+    #    而这里的扁平导入没跟着改 ⇒ 本函数**一调就 ModuleNotFoundError**。
+    #    ⚠️ 913 条 pytest **照不到脚本**，CI 的 `compileall` 也照不到（**这不是语法错，是导入期错**）。
+    from rag.chunker import split_text_with_filter
+    from rag.embedding_client import get_embedding
 
     chunks = []          # (path, idx, text)
     for p, text in docs.items():

@@ -10,6 +10,75 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- ✅ **依赖漏洞【清零】—— `langchain-core` 0.3 → 1.x 连锁升级**（2026-10-09 · 📄 **`DEC-127`**）——
+  业务方裁「**甲 · 完整修好**」。`SECURITY.md` §3.4 那 19 条 ⇒ **0 条**。
+  - **升了 8 个包**：`langchain` 0.3.30→**1.4.4** · `langchain-core` 0.3.86→**1.6.9**（**总闸**）·
+    `langchain-openai` 0.2.14→**1.7.0** · `langchain-text-splitters` 0.3.11→**1.1.3** ·
+    `langgraph` 1.0.1→**1.2.14** · `langgraph-checkpoint` 3.0.1→**4.2.0** ·
+    `langgraph-checkpoint-sqlite` 3.0.3→**3.1.1** · **`openai` 1.109.1→2.54.0**。
+    ⚠️ **`openai` 不是可选项**（`langchain-openai` 1.x 硬要 `>=2.26.0`），
+    而它落在 **RAG 主路径**上（`embedding_client.py` · `query_rewriter.py`）——
+    🔴 **业务方裁「夹在 2.x」而非 resolver 默认的 3.x**（`DEC-127` §2.1）。
+  - 🆕 **加 `langchain-classic==1.0.8`** —— `langchain` 1.x **删掉了 legacy agent API**，
+    不走它 `/ws/agent` 那条**活路径直接 ImportError**（`DEC-127` §2.4）。
+    **代码只改了 1 行 import，实现一行没动。**
+  - 🔴 **推翻了我自己写过的计划**：原「小版本 5 个先做 / 大版本 4 个另做」**是错的** ——
+    除 `pyjwt` 外剩下 8 个包**全塌在同一个总闸上**，是【一件事】，⛔ 不是两批。
+  - 🔴🔴 **最该记住的一条：`/ws/agent` 真的坏了，而 913 条测试【全绿】** ——
+    唯一提到它的两条用例（`app/tests/test_ws_auth.py:292` / `:376`）把 `get_agent_executor`
+    **`monkeypatch` 掉了** ⇒ 函数体从没执行 ⇒ `ImportError` 永远碰不到。
+    ⛔ **「测试全绿」≠「活路径没坏」**。是**手工调真身**才抓到的
+    （`ImportError: cannot import name 'create_tool_calling_agent' from 'langchain.agents'`）。
+  - 🔴 **顺带修掉一个「门自己会撒谎」的 bug**：`scripts/check_dep_vulns.sh` 原先只看
+    `pip-audit` 的退出码，而**「找到漏洞」与「Python 抛异常（如网络超时）」退出码都是 1**
+    ⇒ **网络崩了被报成「🔴 有已知漏洞」**（实测栽过一次）。已改成**按「输出是不是合法 JSON」判**，
+    自测从 1 相扩到 **3 相**（含「**判不了必须落 2**」那一相）。
+  - ✅ **真服务验证【已做】**（起真服务 + 真调 LLM）—— `/ws/agent` 端到端 ⇒ `ready → thinking →
+    final("3 加 5 等于 8。") → done`，**无 error** · `/rag/search` ⇒ HTTP 200 + **`rewrite_ms=3726`**
+    （改写真调了 LLM）+ 命中 3 条 · `token/usage` ⇒ `total_cost=0.001913` / `calls=2`，
+    **账记到了认证出来的人头上**。
+    ⚠️ **一条别误读**：新用户搜出 **0 条** = **按 `requested_by` 的正确隔离**（`bm25_index.py:65`），
+    ⛔ 不是检索坏了 —— **正控**：拿名下有语料的 `isolation_a` 再搜 ⇒ **命中 3 条**。
+    📌 **"0 条"必须配上正控才算验过。**
+
+- 🔴 **修掉两处被 `#123` 模块化重构【静默打断】的活工具**（2026-10-09 · 📄 **复盘
+  `docs/复盘/2026-10-09-测试全绿而活路径坏了两次.md`**）——
+  `scripts/issue_api_key.py`（`from auth import …` ⇒ `access.auth`）·
+  `scripts/check_corpus_dedup.py`（**两处**：`API_DIR = REPO_ROOT / "api"` ⇒ `"app"`，
+  以及 `from chunker import …` ⇒ `rag.chunker`）。
+  ⚠️ **`issue_api_key.py` 是【发凭据】的那把工具** —— 它坏了等于"进不去系统"。
+  🔴 **913 条测试与 CI 的 `compileall` 全都照不到**：脚本不在 pytest 采集范围内，
+  而 `compileall` **只查语法** —— 这是**导入期**错。
+  - **判据**：`./venv/bin/python scripts/issue_api_key.py --help` ⇒ **不再 ModuleNotFoundError** ·
+    `./venv/bin/python scripts/check_corpus_dedup.py` ⇒ **退出码 0**（第三层 `⇒ ran`）。
+  - ⬜ **还没做成门** —— 现在是一次性机械扫描（命令在复盘 §四）。
+    按本仓「**门挂在别处就等于没有门**」已登记 `docs/待办总表.md` **`N21`**。
+  - **判据**：`pytest app/ -m "not integration and not needs_db" -q` ⇒ **913 passed / 2 skipped** ·
+    `bash scripts/ci-local.sh` ⇒ **退出码 0** · `bash scripts/check_dep_vulns.sh` ⇒ **退出码 0**
+    +「扫了 165 个包，**0 条**」· 断链 / 孤儿 / 索引 / 凭据四道门 ⇒ **exit 0** ·
+    **真身**：`python -c "…import routing.api_v1_rag as m; m.get_agent_executor()"` ⇒ **不抛错**、
+    且 `AgentExecutor` 带 `['calculator','date_today','web_search']`。
+
+- ✅ **依赖漏洞清掉 2 条：`pyjwt` 2.14.0 ⇒ 2.15.0**（2026-10-09 · `SECURITY.md` §3.4）——
+  ⚠️ **它是那 9 个漏洞包里【唯一】能单独升的**（实测只装它自己）
+  ⇒ 从 **21 条 / 9 包** 降到 **19 条 / 8 包**（清掉 `PYSEC-2026-4141` / `4183`）。
+  - **判据**：`bash scripts/check_dep_vulns.sh` ⇒ **Found 19 known vulnerabilities in 8 packages**、
+    表里**不再有 `pyjwt`** · `pytest app/ -q` ⇒ **913 passed / 2 skipped** · `ci-local` ⇒ **退出码 0**。
+
+- 🔴 **推翻一条自己写过的计划：依赖升级的「小版本批 / 大版本批」分法是错的**（2026-10-09 · `SECURITY.md` §3.4）——
+  🔴 **这是本批【最操作价值】的一条** —— 它让「**先做便宜的那批**」这个**前提直接塌了**。
+  拿**钉死集**跑 `pip install --dry-run -r`（**一行代码没动、venv 也没动**）实测：
+  **除 `pyjwt` 外，原「批 1」的另外 4 个，每一个都把整条链拖进「批 2」**。
+  ⇒ **剩下 8 个包是【一件事】，总闸是 `langchain-core` 0.3.86 → 1.x**。
+  - **三条硬证据**（pip 原文，⛔ 不是推断）：`langgraph-prebuilt` 1.0.8–**1.0.13 每个都要求
+    `langchain-core>=1.0.0`** · `langgraph-checkpoint-sqlite 3.1.1` 要 `langgraph-checkpoint>=4.1.0`
+    而 `langgraph 1.0.1` 要 **`<4.0.0`（互斥）** · `langchain-text-splitters 1.1.2` 要
+    **`langchain-core>=1.2.31,<2.0.0`**。
+  - 🔴 **顺带查实**：`langgraph-sdk` **不在 `requirements.txt` 里**（是 `langgraph` 的传递依赖）
+    ⇒ 它**根本没法单独升**。⚠️ **要不要把它补进那份清单 = 一条【未裁】的事**
+    （「依赖清单单一化」的口径指向"补"，但⛔ 别顺手定）。
+  - 📌 **完整对照表 + 依赖闭包图** ⇒ `SECURITY.md` §3.4（施工单与 `ROADMAP` 都改成指针）。
+
 - 🔴 **依赖就地【钉死】：`>=` 43 行 ⇒ `==` 40 行**（2026-10-09 · `SECURITY.md` §3.3 / §3.5）——
   业务方：「**文档中所有要修复和漏洞，能修的全部处理好**」。原先 `app/requirements.txt`
   **46 个包行【全是 `>=` 或裸名】** ⇒ **每次 build 可能拉到不同版本**。
