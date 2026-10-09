@@ -111,9 +111,9 @@
       <li class="card card-hover"><a href="/approvals">人工接管</a>
           <span class="why">敏感工具调用会停下来等人批；点开看完整上下文，批准 / 拒绝 / 代填结论。</span>
           <span class="apis">GET /agent/pending · POST /agent/approve</span></li>
-      <li class="card card-off"><span>成本可见</span><span class="badge">未上线</span>
-          <span class="why">每次调用的 token 与费用、按会话与用途汇总、四层额度。施工中（刀 4）。</span>
-          <span class="apis">GET /agent/cost/* · /agent/token/*</span></li>
+      <li class="card card-hover"><a href="/cost#cost-overview">成本可见</a>
+          <span class="why">每次调用的 token 与费用、按用途与模型分布、月度报告、四层额度 —— 并标明每一格是【读库】还是【进程内存】。</span>
+          <span class="apis">GET /agent/cost/* · /agent/token/budget · /agent/token/history · /agent/token/usage</span></li>
       <li class="card card-hover"><a href="/trace">执行轨迹</a>
           <span class="why">一次调用里 agent 走了哪些步、每步花了多少（两轴分屏）。</span>
           <span class="apis">GET /agent/trace/{thread_id} · /agent/traces</span></li>
@@ -135,8 +135,8 @@
       <li class="card card-off"><span>执行器</span><span class="badge">未上线</span>
           <span class="why">在无网硬化容器里跑代码。施工中（刀 6）。</span>
           <span class="apis">POST /agent/execute_code</span></li>
-      <li class="card card-off"><span>预算 / 熔断</span><span class="badge">未上线</span>
-          <span class="why">额度检查、预估、拦截记录。施工中（刀 4）。</span>
+      <li class="card card-hover"><a href="/cost#cost-budget">预算 / 熔断</a>
+          <span class="why">额度检查、单次预估成本、你自己被拦下的次数。在成本看板同一页上。</span>
           <span class="apis">GET /agent/budget/check · /estimates · /intercepts</span></li>
       <li class="card card-off"><span>系统状态</span><span class="badge">未上线</span>
           <span class="why">health / ready / Prometheus 指标。施工中（刀 6）。</span>

@@ -5,7 +5,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 
 const {
-  BOUNDARY_KEYS, boundaryText, paramQuery, stateOf,
+  BOUNDARY_KEYS, boundaryText, boundaryShort, paramQuery, stateOf,
   emptyReason, truncationNotice, errorText,
 } = require('./panel.js');
 
@@ -50,6 +50,24 @@ test('⚠️ boundaryText：verify 是【另一类】—— 它讲"我们自证�
   const s = boundaryText('verify');
   assert.doesNotMatch(s, /平台限制/, 'verify 那条⛔ 不能说成平台限制 —— 它是我们自己的事');
   assert.ok(BOUNDARY_KEYS[4] === 'verify', 'verify 必须是第 5 个 —— 渲染时要与前面 4 条分开');
+});
+
+test('🔴 boundaryShort：五个 key 都有短版，且【真的比长版短】（面板顶部用）', () => {
+  // 起因（2026-10-09 刀 4）：成本看板 9 个面板挂 9 个一模一样的长框 ⇒ 读的人第三次起就不看了
+  // ⇒ 页面顶部留长版、面板顶部用短版。⛔ 两份都只许在 `panel.js` 里（由上面那条结构守卫钉）。
+  for (const k of BOUNDARY_KEYS) {
+    const s = boundaryShort(k);
+    assert.ok(typeof s === 'string' && s.length > 10, `${k} 的短版为空`);
+    assert.ok(s.length < boundaryText(k).length, `${k} 的"短版"并不比长版短 —— 那它就没有意义`);
+  }
+  assert.throws(() => boundaryShort('nope'), /unknown boundary key/);
+});
+
+test('🔴 boundaryShort⛔ 不许把【归因】丢掉（平台限制 / 不是故障 / 不是你点坏了）', () => {
+  // 这一条的目的就是归因 —— 短版可以短，但**不能短掉那句归因**，否则就退回成"一句抱怨"。
+  assert.match(boundaryShort('platform_restart'), /平台限制/);
+  assert.match(boundaryShort('platform_restart'), /不是系统故障/);
+  assert.match(boundaryShort('rate_limit'), /不是你点坏了/);
 });
 
 /* ══════════════ 2 · 参数拼串 ══════════════ */
@@ -158,7 +176,7 @@ function loadInBrowserLikeSandbox() {
 test('把 panel.js 当【经典脚本】跑一遍 ⇒ window.RagPanel 存在且接口齐全', () => {
   const w = loadInBrowserLikeSandbox();
   assert.strictEqual(typeof w.RagPanel, 'object', 'panel.js 没挂 window.RagPanel ⇒ 页面里全报 ReferenceError');
-  for (const k of ['boundaryText', 'paramQuery', 'stateOf', 'emptyReason', 'truncationNotice', 'errorText']) {
+  for (const k of ['boundaryText', 'boundaryShort', 'paramQuery', 'stateOf', 'emptyReason', 'truncationNotice', 'errorText']) {
     assert.strictEqual(typeof w.RagPanel[k], 'function', `window.RagPanel.${k} 不是函数`);
   }
   assert.ok(Array.isArray(w.RagPanel.BOUNDARY_KEYS), 'BOUNDARY_KEYS 不是数组');

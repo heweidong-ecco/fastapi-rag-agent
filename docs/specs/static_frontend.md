@@ -4,7 +4,7 @@
 |---|---|
 | **状态** | 🟡 **部分可用**（2026-10-06 建 · `DEC-085` 段 1 第一刀 · 同日补 `DEC-089` 的 `F8` · `DEC-090` 的熔断卡片 · `DEC-091` 的无据拒答 · `DEC-093` 的 Trace 页 · 2026-10-07 补 `DEC-097` 的 Eval 页）—— **四个页面通了**：对话页（`DEC-085` · 引用卡片 `DEC-089` · **熔断卡片 `DEC-090`** · **无据拒答 `DEC-091`**）+ **接管页**（`DEC-088` · `F1`）+ **Trace 页**（`DEC-093` · `F2`）+ **Eval 页**（`DEC-097` · `F3`，🔴 **是【占位页】不是功能页** —— 见下） |
 | 🔴 **找前端的东西** | ⭐ **`frontend/索引.md`** —— **唯一查找入口**（业务方 2026-10-09 立的：「**不要用 grep 去找，也不准**」） |
-| **对外提供** | `GET /chat` → **302** `/static/web/chat.html`（`api/main.py:548`，**`include_in_schema=False`**）<br>`GET /approvals` → **302** `/static/web/approvals.html`（`api/main.py:557`，**同上**）<br>`GET /trace` → **302** `/static/web/trace.html`（`api/main.py:569`，**同上**）<br>`GET /eval` → **302** `/static/web/eval.html`（`api/main.py:582`，**同上**）<br>🆕 `GET /lab` → **302** `/static/web/lab.html`（`api/main.py:595`，**同上** —— 2026-10-09 刀 3 · `DEC-123`）<br>· 页面本体由已挂的 `/static` 托管（零构建、零新服务、零 CORS）<br>⚠️ **五条 302 都在无鉴权基线里**（`scripts/route-auth-baseline.txt`）—— **故意公开**：它们是"给人打开 HTML"的跳转，**本身不含数据**；真正的边界在页面调的后端接口上（⚠️ **`/eval` 例外**：它连后端接口都不调，见下）<br>⚠️ **上面那五个行号是 2026-10-09 现算的**（`grep -n '@app.get("/…"' api/main.py`）—— 前四个原先写着 `538/547/559/572`，**都是加 `/lab` 之前的老位置**，已一并刷新。⛔ 读的人**跑一遍那条 grep**，别当永久值 |
+| **对外提供** | `GET /chat` → **302** `/static/web/chat.html`（`api/main.py:548`，**`include_in_schema=False`**）<br>`GET /approvals` → **302** `/static/web/approvals.html`（`api/main.py:557`，**同上**）<br>`GET /trace` → **302** `/static/web/trace.html`（`api/main.py:569`，**同上**）<br>`GET /eval` → **302** `/static/web/eval.html`（`api/main.py:582`，**同上**）<br>🆕 `GET /lab` → **302** `/static/web/lab.html`（`api/main.py:595`，**同上** —— 2026-10-09 刀 3 · `DEC-123`）<br>🆕 `GET /cost` → **302** `/static/web/cost.html`（`api/main.py:607`，**同上** —— 2026-10-09 刀 4 · `DEC-124`）<br>· 页面本体由已挂的 `/static` 托管（零构建、零新服务、零 CORS）<br>⚠️ **六条 302 都在无鉴权基线里**（`scripts/route-auth-baseline.txt`）—— **故意公开**：它们是"给人打开 HTML"的跳转，**本身不含数据**；真正的边界在页面调的后端接口上（⚠️ **`/eval` 例外**：它连后端接口都不调，见下）<br>⚠️ **上面那五个行号是 2026-10-09 现算的**（`grep -n '@app.get("/…"' api/main.py`）—— 前四个原先写着 `538/547/559/572`，**都是加 `/lab` 之前的老位置**，已一并刷新。⛔ 读的人**跑一遍那条 grep**，别当永久值 |
 | **谁在用** | 人（浏览器）。⚠️ **后端不 import 它、没有任何 `.py` 依赖它** —— 这就是本目录此前一直是"没人管"的原因 |
 
 **四个页面、各 3 个文件**（Eval 那组例外，见下；其余老页面见 §🟡）：
@@ -27,6 +27,10 @@
 | 🆕 `api/static/web/lab.html` | 435 | **检索实验室**（2026-10-09 · 施工单**刀 3**）—— 规格 §2.2 那 **5 条检索接口**的**唯一可点入口**：`pg` / `hybrid` / `rerank` / `rewrite` / `pipeline` 五个面板，一条一跑。🔴 **每个面板顶部先给边界提示条、再给"运行"按钮**（`DEC-123` §1.1） |
 | 🆕 `api/static/js/lab.js` | 191 | **检索实验室的纯逻辑** —— 五个面板的路径/分数字段名（`similarity` / `rrf_score` / `rerank_score` **三条链各不相同**）· `buildRequest`（⚠️ `thread_id` **只有 rewrite 与 pipeline 带**）· 结果归一（**缺分数给 `null`，⛔ 不编 0**）· `envLimitHint`（**只有 rerank + 5xx** 才说是环境限制）—— ⛔ 不碰 DOM、不发请求 |
 | 🆕 `api/static/js/lab.test.js` | 203 | `node --test` 用例（**20 条**）—— 🔴 **本文件同时是那 5 个 `/api/v1` 前缀的守卫**（页面走 helper ⇒ `test_web_pages.py` 对它**空过**）· + 假 `window` 跑一遍 |
+| 🆕 `api/static/web/cost.html` | 443 | **成本看板**（2026-10-09 · 施工单**刀 4**）—— 规格 §2.5(9) + §2.6(3) − **有意不露(3)** = **9 个面板**。🔴 每格标题带**口径徽标**（读库 / 进程内存 / 配置常量）—— 见下「看代码会误判」那条 |
+| 🆕 `api/static/js/cost.js` | 306 | **成本看板的纯逻辑** —— 九条路径 · 三态口径（`SOURCE_LABELS`）· `NOT_EXPOSED`（三条不露 + 理由）·`buildRequest` · `kvRows`/`tableOf`/`table2Of` · `memoryWarning` · 格式化（🔴 `fmtMoney(null)` 曾回 `0.0000` ⇒ 已挡） |
+| 🆕 `api/static/js/cost.test.js` | 226 | `node --test` 用例（**25 条**）—— 含「面板表与不露表不许重叠」「**缺值不许编 0**」+ 假 `window` |
+| 🆕 `api/test_cost_page.py` | 196 | **成本看板守卫**（Python · 不连库）—— 4 条同构 + **4 条本页特有的**：九个面板 · **口径徽标** · **三条不露不许被请求** · 提示条在按钮之前 |
 | 🆕 `api/test_lab_page.py` | 149 | **检索实验室守卫**（Python · 不连库）—— 4 条与另几页同构（302 / 目标在盘上 / 不进 openapi / **两个脚本都引了**）+ 2 条页面本体的（**五个面板都在** · 🔴 **边界提示条排在提交按钮【之前】**） |
 | 🆕 `api/static/js/panel.test.js` | 156 | `node --test` 用例（**13 条**）—— 除功能断言外有一条**结构型守卫**：**边界文案只许在 `panel.js` 里出现一次**（数的是【文件】，⛔ 不是"我记得没抄第二份"）+ **假 window** 跑一遍（⛔ 少挂 `window.RagPanel` 页面就 ReferenceError） |
 | 🆕 `api/test_web_pages.py` | 112 | **全站页面守卫**（Python · 不连库）—— **扫 `api/static/` 下每个 `.html`**：`getJSON(…)`/`fetch(…)` 的字面量必须以 `/api/v1` 开头 + 1 条**防空跑**。<br>🔴 **2026-10-06（`DEC-094`）建的**：原先这条守卫只在 `api/test_trace_page.py` 里、**只读 `trace.html`** ⇒ 下一个页面照样能坏<br>⚠️ **用例数 = 被扫的 `.html` 个数 + 1** —— 走过 7 → 5（`DEC-096` 删两个坏页）→ **7**（`DEC-097` 加两个 Eval 页）。**页面一少它自动跟着少**，⛔ 那不是守卫变松<br>⚠️ **它对 Eval 这两页【空过】**：那两页一个 `fetch` 都没有 ⇒ 没有字面量可查（见 §⚠️ 那条） |
@@ -112,6 +116,19 @@
     ⛔ **这不等于 `F3` 那个功能做完了**，等于**换了个交付口径**（`DEC-097` §二 记了裁定原文）。
   · ⚠️ **它比另外三页【更没有暴露面】**：那三页各自调带鉴权的后端接口（边界在那几条接口上），
     这一页与子页**一个 `fetch` 都没有** ⇒ 公开面 = 两个静态 HTML。
+- 🔵 **成本看板（施工单刀 4 · 2026-10-09 · `DEC-124`）** —— 入口 `GET /cost` → `/static/web/cost.html`。
+  🔴 **本刀的正文其实是【可见性】不是"画表格"**：
+  · ✅ **核了规格点名的那一条**：`/agent/budget/intercepts` 是**本人可见** ⇒ **露**（施工单的规则原文「本人可见 ⇒ 露」）。
+  · 🔴 **同时查出同族另有三条不是本人口径** ⇒ **有意不露**（`RagCost.NOT_EXPOSED`）：
+    `token/recent`（**每条记录带别人的 `user_name`** —— 它读的是进程内那张**所有人共用**的表）、
+    `token/purpose` / `token/thread`（**全站口径、不分用户**）。三条**各有本人口径的替代出口**。
+    ⚠️ 其中 `token/recent` 的根因是**端点收了 `user_name` 却从没用它** ⇒ 真缺陷，已登记 `N20`。
+  · 🔴 **这一页同时摆着三种数**（读库 / 进程内存 / 配置常量），而它们对「**重启后还在不在**」答案不同
+    ⇒ **每个面板标题上带口径徽标**。⛔ 不标的后果本仓栽过：`DEC-047`（库里有 4216 tokens，界面答 `0`，**不报错**）。
+  · 🔴 **「我的额度」一格里有【两套口径】**（本人 `R1.3` + 全站 `R1.4`）⇒ 分成「我 ·」「全站 ·」两组渲染。
+  · 📌 守卫：`api/test_cost_page.py`（**9 条**）· `api/static/js/cost.test.js`（**25 条**）。
+  ⚠️ **本页对"URL 字面量"那道门同样【空过】**（9 条路径由 `RagCost.buildRequest()` 出）⇒ 尺子在 `cost.test.js`。
+
 - 🔵 **检索实验室（施工单刀 3 · 2026-10-09 · `DEC-123`）—— 第一个【能力页】** ——
   入口 `GET /lab` → `/static/web/lab.html`；规格 §2.2 那 **5 条检索接口**（`pg_search` ·
   `hybrid_search` · `rerank_search` · `rewrite_search` · `/rag/search`）**一条一个面板**。
@@ -187,6 +204,8 @@
 | 🔴🔴 **「路由 302 对了 ⇒ 这个页面就能用」** | ⛔ **两件事，实测栽过** —— `approvals.html`（`F1`）**302 正确 · 目标文件在磁盘上 · 不在 openapi 里**（三条用例全绿），**而浏览器里 100% 打不开**：它 fetch 的 **4 条 URL 全少 `/api/v1`**。<br>🔴 **三层判据一条都不会红**：页面用例只看 302 · JS 用例全是**纯函数**（前缀不经过它们）· 路由门只管**后端有没有多余的无鉴权路由**。<br>⇒ 🆕 **加了一类新守卫**：**读页面源码，把 `getJSON(...)` / `fetch(...)` 的字符串字面量抠出来，必须以 `/api/v1` 开头**。<br>🔴 **⚠️ 它在 `api/test_web_pages.py`，不在 `test_trace_page.py` 里** —— 2026-10-06（`DEC-094`）搬的：原版**只读 `trace.html` 一个文件**，而**那正是它当初没拦住 `approvals.html` 的原因**；现在扫 `api/static/` 下**每一个** `.html`（实测 6 个）。<br>📌 **判据（可打印）**：`grep -n "getJSON('/\|fetch('/" api/static/web/approvals.html` ⇒ **4 条**（在 `loadPending` / `openContext` / `decide` / `loadHistory` 四处），**已全部带 `/api/v1`**（✅ 同日修完）<br>⚠️ **⛔ 别抄行号** —— 这次修复本身就把它们整体下移了 5 行（加了一段告示注释） |
 | 🔴 **「Trace 页那两条轴是一条链的两段，能拼成一棵树」** | ⛔ **拼不成** —— 上半页读 `/agent/trace/{id}`（**追踪轴** · 进程内存 · 粒度 = **工具调用**），下半页读 `/agent/trace/{id}/cost`（**成本轴** · PG `token_usage_logs` · 粒度 = **模型调用**）。<br>🔴 **两轴没有共同的步 id** ⇒ 一个 `agent_decision`（模型）与一个 `search`（工具）之间**没有可判定的对应**。<br>⇒ 页面**并排画、⛔ 不相加**。⚠️ 想"合成树"只能靠**时间接近**猜层parent-child，而**猜出来的层级不报错**（本仓最恨的形态）。<br>📌 判据 ⇒ `trace.test.js` 里 `summarizeCost` **⛔ 不把 rows 加起来**那条 |
 | ⚠️ **「页面里的接口 URL 写相对路径（`/agent/…`）也行」** | ⛔ **不行** —— 后端路由前缀是 **`/api/v1`**（`api/main.py:517-519` 挂载），页面由 `/static` 托管**同源**，所以相对路径**不会**被补前缀，只会打到一个**不存在的路径**上（**404，而页面上通常看不出是路径错**）。<br>⇒ 有了上面那条守卫之后，**裸的 `/agent/…` 会被用例拦下**。<br>⚠️ **但"写字面量"本身是允许的，只要带全 `/api/v1`** —— `approvals.html` 就是**带前缀的字面量**（4 条），而 `trace.html` 走的是已被用例钉住的纯函数（`RagTrace.buildPath` / `buildCostPath`）。**两种写法本仓都有，⛔ 别以为只有一种是对的**。<br>⚠️ 同理：`X-API-Key` 要**显式带**（页面自己从 `localStorage` 取，⛔ 没有 cookie 会话） |
+| 🔴 **「成本看板那一页的数就是"我花了多少钱"」** | ⛔ **一半是** —— 那一页**同时摆着三种数**：**读库**的（全时累计，权威）· **进程内存**的（**平台重启容器就归零**）· **配置常量**的。⇒ 每格标题上有口径徽标，⛔ **别只看数字**。<br>⚠️ 本仓栽过同型：`/agent/cost/overview` 曾读进程内存，库里有 4216 tokens 它答 `0`，**不报错、界面照常出数**（`DEC-047`）。 |
+| 🔴 **「`token/recent` 是我自己的记录」** | ⛔ **不是** —— 它读的是进程内 `_usage_records`（**所有人共用**），**每条记录里带别人的 `user_name`**。🔴 根因是**端点收了 `user_name` 却从没用它**（登记 `N20`）⇒ **成本看板有意不露它**，有结构型守卫钉着（`DEC-124` §二）。 |
 | 🔴 **「`api/test_web_pages.py` 全绿 ⇒ 检索实验室那 5 条路径也验过了」** | ⛔ **对它【空过】** —— 本页的 5 条路径**由 `RagLab.buildRequest()` 出**，页面里没有带 `/api/v1` 的 URL 字面量（全局只有额度那条 `/api/v1/agent/token/budget`）。<br>⇒ 那 5 个前缀的尺子在 **`api/static/js/lab.test.js`**（与 `trace.js` 的 `buildPath` 同一分工）。⚠️ **别把"扫不到字面量"读成"这个页面验过了"**（`DEC-094` 记过同型）。 |
 | 🔴 **「三个面板的分数都一样，横向比比看哪个检索更好」** | ⛔ **不能比** —— `pg_search` 给的是余弦 `similarity`（0–1）· `hybrid`/`rewrite` 给的是 `rrf_score`（约 1/(60+rank)，**很小**）· `rerank` 给的是 Cross-Encoder `rerank_score`（logits，**可正可负**）。⇒ 三种口径**没有同一个量纲**，页面上明写了"⛔ 不能横向比大小"。 |
 | 🔴 **「`rerank_search` 报 500 ⇒ 这个功能坏了」** | ⛔ **大概率是环境** —— 它要跑 Cross-Encoder（torch），而**演示镜像里没装 torch 系**（`DEC-034`）。⇒ 页面用 `RagLab.envLimitHint` **只对 5xx** 说清"这是环境限制，⛔ 不是功能坏了"。⚠️ **401/429 不走这条**（那是 key / 额度，别拿环境去盖）。 |
@@ -205,6 +224,8 @@ venv/bin/python -m pytest api/test_approvals_page.py -q   # ⇒ 3 passed（GET /
 venv/bin/python -m pytest api/test_trace_page.py -q       # ⇒ 6 passed（GET /trace：3 条同构 + 3 条页面坏法的守卫）
 venv/bin/python -m pytest api/test_eval_page.py -q        # ⇒ 5 passed（GET /eval：3 条同构 + 2 条占位页本体的）
 venv/bin/python -m pytest api/test_lab_page.py -q         # ⇒ 7 passed（GET /lab：4 条同构 + 2 条页面本体的）
+venv/bin/python -m pytest api/test_cost_page.py -q        # ⇒ 9 passed（GET /cost：4 条同构 + 4 条本页特有的）
+node --test api/static/js/cost.test.js                    # ⇒ pass 25 / fail 0（刀 4 实测；⚠️ 数量别抄）
 node --test api/static/js/lab.test.js                     # ⇒ pass 20 / fail 0（刀 3 实测；⚠️ 数量别抄，跑命令）
 venv/bin/python -m pytest api/test_web_pages.py -q        # ⇒ 7 passed（6 个 .html 的 URL 前缀 + 1 条防空跑）
 #   对端（后端那半，本页消费的契约）——
@@ -248,7 +269,9 @@ curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' http://127.0.0.1:8000/e
 #   ⇒ 302 http://127.0.0.1:8000/static/web/eval.html
 curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' http://127.0.0.1:8000/lab
 #   ⇒ 302 http://127.0.0.1:8000/static/web/lab.html
-# 🔴 这**五条**必须在 scripts/route-auth-baseline.txt 里（故意公开）—— `check_route_auth.py --baseline` **查不出"路径被删"**
+curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' http://127.0.0.1:8000/cost
+#   ⇒ 302 http://127.0.0.1:8000/static/web/cost.html
+# 🔴 这**六条**必须在 scripts/route-auth-baseline.txt 里（故意公开）—— `check_route_auth.py --baseline` **查不出"路径被删"**
 #    （少一条它报「少了 N 条（修好了）」并 exit 0）⇒ 真正的守卫是那五个 page 用例（2026-10-09 起含 `test_lab_page.py`）
 
 # ②'' 🔴 Eval 占位页（DEC-097 · F3）—— 「按钮指向子页、子页带那一行」两条要能【会动】
@@ -298,6 +321,7 @@ venv/bin/python -m pytest api/test_web_pages.py -q               # ⇒ 7 passed�
   **页面守卫改扫全站** · **`ci.yml` 的 `node --test` 改 glob + 防空跑** —— 含"裸 glob 更弱"的反证实测）
 - 🔴 `docs/decisions/DEC-097-Eval页降级为占位页.md`（**`F3`**：**把"跑分 + 对比箭头"改成占位页**的裁定 ·
   `/eval` 入口 · ⚠️ **它明写"这不是把功能做完了，是换了交付口径"**）
+- 🔴 `docs/decisions/DEC-124-刀4成本看板的可见性与口径.md`（**刀 4**：**可见性预检**（`intercepts` 本人可见 ⇒ 露；`token/recent`/`purpose`/`thread` 不是本人口径 ⇒ 不露）· **口径徽标** · 首页两张卡同址用**锚点** · 面板边界文案改**短版** · 六条反证）
 - 🔴 `docs/decisions/DEC-123-刀3检索实验室的两个落点.md`（**刀 3**：**能力页的边界标注怎么落**
   （页面顶部 5 条 + 每面板 1 条、排在提交按钮之前）· **五条检索接口归位** ·
   **侧边栏导航只放「主要功能」那 5 类** · 四条反证实测记录）

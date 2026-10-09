@@ -343,6 +343,18 @@ input:disabled, textarea:disabled, select:disabled { opacity: .55; cursor: not-a
   background: var(--surface);
 }
 
+/* 🔴 `.slim` = **能力面板顶部**那一份（2026-10-09 刀 4 加）。
+   起因：成本看板 9 个面板挂 9 个**一模一样的长框** ⇒ 读的人第三次起就不看了
+   （banner blindness）—— 那正好把这一条要的「先看到提示才给接口」毁掉。
+   ⇒ 页面顶部保留**完整版**，面板顶部用**短版**（`RagPanel.boundaryShort`）+ 更轻的盒子。
+   ⚠️ 它只调【外观】，文案仍只有 `panel.js` 那一份（结构守卫在 `panel.test.js`）。 */
+.panel-boundary.slim {
+  border-left-width: 2px;
+  padding: var(--sp-1) var(--sp-2);
+  margin-bottom: var(--sp-3);
+  background: transparent;
+}
+
 /* 能力面板网格：比 .grid 更密（它是 420px 起，25 个面板要窄一点） */
 .panel-grid {
   display: grid; gap: var(--sp-4); align-items: start; list-style: none;

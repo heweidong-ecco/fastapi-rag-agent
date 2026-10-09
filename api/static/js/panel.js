@@ -64,6 +64,34 @@ function boundaryText(key, data) {
   }
 }
 
+/* ══════════════ 1b · 边界标注的【短版】—— 只给能力面板顶部用 ══════════════
+ *
+ * 🔴 为什么要有第二份（2026-10-09 刀 4 截图时看出来的）：
+ *    规格 §3.6.1 的② 要求**每个面板顶部**都挂一条。而成本看板有 **9 个面板**
+ *    ⇒ 9 个面板挂 9 个**长得一模一样的两行框** ⇒ 读的人第三次起就不看了
+ *       （banner blindness）—— 那**正好把这一条要的东西毁掉**
+ *       （业务方原话：「**让别人在用接口的时候要先看到这个提示，才给接口**」）。
+ * ⇒ **页面顶部那份保持【完整版】不动**；面板顶部用这份**短版**。
+ * ⚠️ 两份**都在本文件里** —— ⛔ 别抄进任何 `.html`（那份结构型守卫会当场红）。
+ * ⚠️ 短版⛔ 不许把**归因**丢掉：`平台限制 / 不是系统故障 / 不是你点坏了` 这类词必须在。
+ */
+const BOUNDARY_SHORT = {
+  platform_restart: '平台重启会清空数据 —— 这是【平台限制】，⛔ 不是系统故障。',
+  quota: '每人有独立的每日 token 额度；登录后这里会显示已用 / 上限 / 剩余。',
+  rate_limit: '每人独立的额度桶；超了会看到 429 与一张说明卡（⛔ 不是你点坏了）。',
+  real_api: '这里真的在调大模型 —— 会产生真实的 token 消耗。',
+  verify: '这几条怎么验 ⇒ 见总览首页的「怎么验证它真的做完了」。',
+};
+
+/**
+ * 取一条边界文案的**短版**（面板顶部用）。⛔ 未知 key **抛错**（与 `boundaryText` 同款）。
+ */
+function boundaryShort(key) {
+  const s = BOUNDARY_SHORT[key];
+  if (!s) throw new Error(`unknown boundary key: ${key}`);
+  return s;
+}
+
 /* ══════════════ 2 · 参数 → query string ══════════════ */
 
 /** 把表单值拼成 query string。⛔ 空串 / `undefined` / `null` **跳过**（不是拼成 `k=`）。 */
@@ -126,7 +154,7 @@ function errorText(status) {
 }
 
 const RagPanel = {
-  BOUNDARY_KEYS, boundaryText, paramQuery, stateOf, emptyReason, truncationNotice, errorText,
+  BOUNDARY_KEYS, boundaryText, boundaryShort, paramQuery, stateOf, emptyReason, truncationNotice, errorText,
 };
 
 if (typeof module !== 'undefined' && module.exports) {

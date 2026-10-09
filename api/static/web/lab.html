@@ -43,6 +43,7 @@
       <a href="/chat">对话</a>
       <a href="/lab" class="active">检索实验室</a>
       <a href="/approvals">人工接管</a>
+      <a href="/cost">成本看板</a>
       <a href="/trace">执行轨迹</a>
       <a href="/eval">评测</a>
     </nav>
@@ -96,7 +97,7 @@
         <section class="panel" data-panel="pg">
           <div class="panel-head">纯向量检索 <span class="badge">pg_search</span></div>
           <div class="panel-body">
-            <div class="panel-boundary" data-boundary="real_api"></div>
+            <div class="panel-boundary slim" data-boundary="real_api"></div>
             <div class="panel-params">
               <label class="field">问题 <input data-param="question" type="text" placeholder="例：净利润是多少"></label>
               <label class="field">top_k <input data-param="top_k" type="number" min="1" max="20" value="3"></label>
@@ -110,7 +111,7 @@
         <section class="panel" data-panel="hybrid">
           <div class="panel-head">混合检索 <span class="badge">hybrid_search</span></div>
           <div class="panel-body">
-            <div class="panel-boundary" data-boundary="real_api"></div>
+            <div class="panel-boundary slim" data-boundary="real_api"></div>
             <div class="panel-params">
               <label class="field">问题 <input data-param="question" type="text" placeholder="例：净利润是多少"></label>
               <label class="field">top_k <input data-param="top_k" type="number" min="1" max="20" value="3"></label>
@@ -124,7 +125,7 @@
         <section class="panel" data-panel="rerank">
           <div class="panel-head">Cross-Encoder 精排 <span class="badge">rerank_search</span></div>
           <div class="panel-body">
-            <div class="panel-boundary" data-boundary="real_api"></div>
+            <div class="panel-boundary slim" data-boundary="real_api"></div>
             <div class="panel-params">
               <label class="field">问题 <input data-param="question" type="text" placeholder="例：净利润是多少"></label>
               <label class="field">top_k <input data-param="top_k" type="number" min="1" max="20" value="3"></label>
@@ -141,7 +142,7 @@
         <section class="panel" data-panel="rewrite">
           <div class="panel-head">查询改写 + 混合检索 <span class="badge">rewrite_search</span></div>
           <div class="panel-body">
-            <div class="panel-boundary" data-boundary="real_api"></div>
+            <div class="panel-boundary slim" data-boundary="real_api"></div>
             <div class="panel-params">
               <label class="field">问题 <input data-param="question" type="text" placeholder="例：净利润是多少"></label>
               <label class="field">top_k <input data-param="top_k" type="number" min="1" max="20" value="3"></label>
@@ -156,7 +157,7 @@
         <section class="panel" data-panel="pipeline">
           <div class="panel-head">综合检索（四模式） <span class="badge">/rag/search</span></div>
           <div class="panel-body">
-            <div class="panel-boundary" data-boundary="real_api"></div>
+            <div class="panel-boundary slim" data-boundary="real_api"></div>
             <div class="panel-params">
               <label class="field">问题 <input data-param="question" type="text" placeholder="例：净利润是多少"></label>
               <label class="field">top_k <input data-param="top_k" type="number" min="1" max="20" value="3"></label>
@@ -405,7 +406,11 @@ document.querySelectorAll('[data-panel]').forEach(function (section) {
 
 // 边界标注的文案【只从 RagPanel 取】—— ⛔ 别在这里再抄一遍（规格 §3.6.2）
 document.querySelectorAll('[data-boundary]').forEach(function (n) {
-  n.textContent = RagPanel.boundaryText(n.dataset.boundary);
+  // 🔴 面板顶部用【短版】（`.slim`），页面顶部用【完整版】—— 两份都在 `panel.js` 里，
+  //    ⛔ 这份 HTML 一个字都不抄（结构守卫在 `panel.test.js`）。
+  n.textContent = n.classList.contains('slim')
+    ? RagPanel.boundaryShort(n.dataset.boundary)
+    : RagPanel.boundaryText(n.dataset.boundary);
 });
 
 // 额度那条要【当场读数】。⚠️ 未登录拿不到 ⇒ **保留不带数字的那句**，⛔ 不编数。
