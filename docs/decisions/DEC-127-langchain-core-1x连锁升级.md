@@ -126,8 +126,10 @@ langchain-core  0.3.86 → >=1.2.31          ← 总闸
 1. ✅ **`/ws/agent` 已修**（§2.4）—— 判据：
    `./venv/bin/python -c "import sys;sys.path.insert(0,'app');import routing.api_v1_rag as m;m.get_agent_executor()"`
    ⇒ **不抛 ImportError**，且建出来的 `AgentExecutor` 带 `['calculator','date_today','web_search']` 三个工具。
-2. ⛔ **`langchain-community` 去留**（§2.3）—— 它现在**仍然没被任何代码 import**。
-3. ⛔ **要不要把 `langgraph-sdk` / `langgraph-prebuilt` 补进 `requirements.txt`**（§三）
+2. ✅ **`langchain-community` 去留 —— 已裁「删」**（📄 **`DEC-128` §1.1**，2026-10-09 同日）：
+   依据是**三条实测**，其中最关键的是「**卸掉它之后 `get_agent_executor()` 真身照常建出来**」。
+3. ✅ **`langgraph-sdk` / `langgraph-prebuilt` —— 已裁「补进清单」**（📄 **`DEC-128` §1.2**）：
+   ⚠️ **这条与我给的建议相反**（我建议不补），**依据与代价在那一份里如实记了**。
 4. ✅ **依赖漏洞已清零** —— 2026-10-09 实测 `bash scripts/check_dep_vulns.sh` ⇒
    **`（扫了 165 个包，0 条）` + 退出码 0**。§3.4 那 19 条 **全部清掉**（`pyjwt` 那 2 条已于同日单独清）。
 5. ✅ **真服务验证【已做】**（2026-10-09，起真服务 + 真调 LLM）—— 三条全过：
