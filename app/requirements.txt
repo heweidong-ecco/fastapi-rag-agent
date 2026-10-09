@@ -58,7 +58,9 @@ psycopg2-binary==2.9.13    # ← 2026-10-09 钉死（原 psycopg2-binary>=2.9.0 
 redis==8.1.0    # ← 2026-10-09 钉死（原 redis>=5.0.0 · SECURITY.md §3.5）
 
 # 认证
-pyjwt==2.14.0    # ← 2026-10-09 钉死（原 pyjwt>=2.8.0 · SECURITY.md §3.5）
+pyjwt==2.15.0    # ← 2026-10-09 升级（先钉 2.14.0 ⇒ 升到**修好版**；`SECURITY.md` §3.4 · `PYSEC-2026-4141/4183`）
+                 #    ⚠️ 它是那 7 个漏洞包里【唯一】能【单独】升的 —— 其余 6 个都要先动
+                 #    `langchain-core` 0.3→1.x（详见 `SECURITY.md` §3.4 的依赖闭包那节）
 
 # 日志
 loguru==0.7.3    # ← 2026-10-09 钉死（原 loguru>=0.7.0 · SECURITY.md §3.5）

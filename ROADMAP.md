@@ -452,12 +452,16 @@ bash scripts/list_endpoints.sh          # 默认 http://127.0.0.1:8000
 > ### ⬜ **下一轮就做这两项**（业务方已裁，⛔ 不用再问要不要做）
 > 📄 **施工单（含两个拦路石）** ⇒ **`fastapi-rag-agent-TODO待办/施工单-20261009-安全收尾两项-接续.md`**
 >
-> ① **§3.4 · 依赖里有 21 条已知漏洞 / 9 个包**（裁「**甲 · 完整修好**」）——
->    ⚠️ **这个数会自己变**：2026-10-09 早先扫出 **16 条 / 7 包**，**同日晚间复扫 21 条 / 9 包** ⇒
->    **advisory 库是联网取的**。⛔ **动手前先跑脚本，别抄这里或 `SECURITY.md` 的数。**
->    分两批：**小版本 5 个**（pyjwt / langgraph / langgraph-sdk / checkpoint-sqlite / text-splitters）
->    + 🔴 **大版本 4 个**（`langchain` 0.3→**1.x** · `langchain-core` 0.3→**1.x** ·
->    `langchain-openai` 0.2→**1.1** · `langgraph-checkpoint` 3→**4**，**都会改 API**）。
+> ① **§3.4 · 依赖里有 19 条已知漏洞 / 8 个包**（裁「**甲 · 完整修好**」）——
+>    ⚠️ **这个数会自己变，一天变了两回**：2026-10-09 早先 **16 条 / 7 包** ⇒ 晚间 **21 / 9**
+>    ⇒ 当晚 `pyjwt` 升 2.15.0 修掉 2 条 ⇒ **19 / 8**。**advisory 库是联网取的。**
+>    ⛔ **动手前先跑脚本，别抄这里或 `SECURITY.md` 的数。**
+>    🔴 **原「小版本 5 + 大版本 4」的分批【已被实测推翻】**（2026-10-09）——
+>    **除 `pyjwt`（✅ 已修）外，剩下 8 个包是【一件事】**：全都塌在
+>    **`langchain-core` 0.3.86 → 1.x** 这个总闸上（连 `langchain` / `langchain-openai` /
+>    `langgraph` / `checkpoint` / `text-splitters` / `sdk`）。⚠️ **升它等于改代码**
+>    （`requirements.txt` 写着「本仓代码是按 langchain **0.3.x** 写的」）。
+>    📌 **完整对照表与 pip 报错原文 ⇒ `SECURITY.md` §3.4**。
 >    📌 判据：`bash scripts/check_dep_vulns.sh`（**本轮新建**，本地 `pip-audit`，⛔ 不依赖 GitHub）。
 > ② **B1 · 角色接 DB**（裁「**甲 · 加 `role` 列**」）——
 >    ⚠️ **本轮查出两个拦路石**（施工单 §三）：`get_user_role` **在热路径上** ·
@@ -466,7 +470,8 @@ bash scripts/list_endpoints.sh          # 默认 http://127.0.0.1:8000
 > ### ✅ 本轮（安全线）已落
 > **3 个端口收窄** · **依赖就地钉死**（**40 行 `==`**；⚠️ 只剩 **6 个 `>=`** —— 它们不在本机 venv 里，
 > 见 `SECURITY.md` §3.3）· **A1 匿名配额给最低档** ·
-> **C 本地依赖扫描**（它扫出上面那 21 条）· **D CodeQL** · **E gitleaks** · **F 威胁模型** · **H Grafana 口令**
+> **C 本地依赖扫描**（它扫出上面这批）· **D CodeQL** · **E gitleaks** · **F 威胁模型** · **H Grafana 口令**
+> ✅ **`pyjwt` 2.14.0 ⇒ 2.15.0**（2026-10-09 当晚，**唯一能单独升的那个**，清掉 2 条告警）
 > 📄 `SECURITY.md`（含 §3.4 那张漏洞表和"已收掉的"留痕）
 >
 > ✅ **PR [#125](https://github.com/heweidong-ecco/fastapi-rag-agent/pull/125)** —— 分支 `fix/security-ports`。

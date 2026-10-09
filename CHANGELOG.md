@@ -10,6 +10,26 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- ✅ **依赖漏洞清掉 2 条：`pyjwt` 2.14.0 ⇒ 2.15.0**（2026-10-09 · `SECURITY.md` §3.4）——
+  ⚠️ **它是那 9 个漏洞包里【唯一】能单独升的**（实测只装它自己）
+  ⇒ 从 **21 条 / 9 包** 降到 **19 条 / 8 包**（清掉 `PYSEC-2026-4141` / `4183`）。
+  - **判据**：`bash scripts/check_dep_vulns.sh` ⇒ **Found 19 known vulnerabilities in 8 packages**、
+    表里**不再有 `pyjwt`** · `pytest app/ -q` ⇒ **913 passed / 2 skipped** · `ci-local` ⇒ **退出码 0**。
+
+- 🔴 **推翻一条自己写过的计划：依赖升级的「小版本批 / 大版本批」分法是错的**（2026-10-09 · `SECURITY.md` §3.4）——
+  🔴 **这是本批【最操作价值】的一条** —— 它让「**先做便宜的那批**」这个**前提直接塌了**。
+  拿**钉死集**跑 `pip install --dry-run -r`（**一行代码没动、venv 也没动**）实测：
+  **除 `pyjwt` 外，原「批 1」的另外 4 个，每一个都把整条链拖进「批 2」**。
+  ⇒ **剩下 8 个包是【一件事】，总闸是 `langchain-core` 0.3.86 → 1.x**。
+  - **三条硬证据**（pip 原文，⛔ 不是推断）：`langgraph-prebuilt` 1.0.8–**1.0.13 每个都要求
+    `langchain-core>=1.0.0`** · `langgraph-checkpoint-sqlite 3.1.1` 要 `langgraph-checkpoint>=4.1.0`
+    而 `langgraph 1.0.1` 要 **`<4.0.0`（互斥）** · `langchain-text-splitters 1.1.2` 要
+    **`langchain-core>=1.2.31,<2.0.0`**。
+  - 🔴 **顺带查实**：`langgraph-sdk` **不在 `requirements.txt` 里**（是 `langgraph` 的传递依赖）
+    ⇒ 它**根本没法单独升**。⚠️ **要不要把它补进那份清单 = 一条【未裁】的事**
+    （「依赖清单单一化」的口径指向"补"，但⛔ 别顺手定）。
+  - 📌 **完整对照表 + 依赖闭包图** ⇒ `SECURITY.md` §3.4（施工单与 `ROADMAP` 都改成指针）。
+
 - 🔴 **依赖就地【钉死】：`>=` 43 行 ⇒ `==` 40 行**（2026-10-09 · `SECURITY.md` §3.3 / §3.5）——
   业务方：「**文档中所有要修复和漏洞，能修的全部处理好**」。原先 `app/requirements.txt`
   **46 个包行【全是 `>=` 或裸名】** ⇒ **每次 build 可能拉到不同版本**。

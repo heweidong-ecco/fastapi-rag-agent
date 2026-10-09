@@ -72,32 +72,69 @@
 `app/access/permission.py:get_user_role()` —— `admin` 特判 + 探针身份，**其余全 FREE**。
 ⇒ 不是查库。接 DB 这件事**挂起**（`DEC-033` 🅱️「后端先行」）。
 
-### 🔴 3.4 依赖里有 **21 条已知漏洞 / 9 个包**（**2026-10-09 新查出 · 未修**）
+### 🔴 3.4 依赖里有 **19 条已知漏洞 / 8 个包**（**2026-10-09 新查出 · 未修**）
 
 > 🔴 **这是本轮【最有价值】的发现** —— 它是**加了本地扫描工具之后才浮出来的**。
 > ⚠️ **讽刺的是**：钉死版本（§3.3）让它们**看得见**，而钉在**旧版本**上等于**把它们冻住**。
-> 🔴 **这个数会自己变**：2026-10-09 早些时候扫出的是 **16 条 / 7 个包**，同日晚间复扫**长到 21 条 / 9 个包**
-> （新增 `langchain` 与 `langchain-core`）。⚠️ 同脚本、同文件、同过滤正则 ⇒ 差异只能来自
-> **advisory 库**（`pip-audit` **每次联网取**，⛔ 不是本地快照）。
+> 🔴 **这个数会自己变**，而且**同一天就变了两回**：
+> 2026-10-09 早些时候 **16 条 / 7 包** ⇒ 同日晚间 **21 条 / 9 包**（新增 `langchain` · `langchain-core`）
+> ⇒ **同日晚些 `pyjwt` 升到 2.15.0 修掉 2 条 ⇒ 19 条 / 8 包**。
+> ⚠️ 同脚本、同文件、同过滤正则 ⇒ 差异只能来自 **advisory 库**（`pip-audit` **每次联网取**，⛔ 不是本地快照）。
 > ⇒ ⛔ **引用这个数之前先跑一遍** —— 别抄本文档、也别抄施工单。
 
 **判据（可打印）**：`bash scripts/check_dep_vulns.sh` ⇒ 退出码 **1** + 下面这张表。
 
 | 包 | 现值 | 修好于 | ⚠️ |
 |---|---|---|---|
-| 🔴 `langchain` | 0.3.30 | **1.3.9** | **大版本跳 0.3 → 1.x** · `PYSEC-2026-2192` |
-| 🔴 `langchain-core` | 0.3.86 | **1.2.22** / 1.2.11 | **大版本跳 0.3 → 1.x** · `PYSEC-2026-2193` / `2562` |
+| 🔴 `langchain-core` | 0.3.86 | **1.2.22** / 1.2.11 | `PYSEC-2026-2193` / `2562` · 🔴 **它是下面全部的【总闸】** |
+| 🔴 `langchain` | 0.3.30 | **1.3.9** | `PYSEC-2026-2192` |
+| 🔴 `langchain-openai` | 0.2.14 | 1.1.14 | `PYSEC-2026-76` |
 | `langchain-text-splitters` | 0.3.11 | 1.1.2 | `PYSEC-2026-77` |
-| 🔴 `langchain-openai` | 0.2.14 | 1.1.14 | **大版本跳** · `PYSEC-2026-76` |
 | `langgraph` | 1.0.1 | 1.0.10 | `PYSEC-2026-83` |
-| 🔴 `langgraph-checkpoint` | 3.0.1 | 4.0.0 / 4.1.1 | **大版本跳** · `PYSEC-2026-2573/2574` |
+| 🔴 `langgraph-checkpoint` | 3.0.1 | 4.0.0 / 4.1.1 | `PYSEC-2026-2573/2574` |
 | `langgraph-sdk` | 0.2.15 | 0.3.15 / 0.4.4 | `PYSEC-2026-2194/2575` · `CVE-2026-104873` |
 | `langgraph-checkpoint-sqlite` | 3.0.3 | 3.1.1 | `PYSEC-2026-3636` |
-| `pyjwt` | 2.14.0 | 2.15.0 | `PYSEC-2026-4141/4183` |
 
-⛔ **处置不能"顺手升"**：其中 **4 个是大版本跳**（`langchain` 0.3→1.x · `langchain-core` 0.3→1.x ·
-`langchain-openai` 0.2→1.1 · `langgraph-checkpoint` 3→4）⇒ **要单独一轮**，跑全量测试 + 真服务验。
-🔴 **其中 `langchain` / `langchain-core` 那条 0.3→1.x 与 `app/requirements.txt` 里的上界注释直接冲突** ——
+✅ **`pyjwt` 已修**（2026-10-09：2.14.0 ⇒ **2.15.0**，清掉 `PYSEC-2026-4141` / `4183` 两条）
+—— 🔴 **它是这 9 个包里【唯一】能单独升的**，理由见下。
+
+#### 🔴 关键：这批**不能按版本号大小分批** —— 剩下 8 个包塌在【同一个闸】上
+
+原打算分「小版本跳先做 / 大版本跳另做」两批。
+**2026-10-09 拿【钉死集】跑 `pip install --dry-run -r` 实测：那个分法不成立。**
+
+| 想升的 | 真实解析结果（pip 原文口径） |
+|---|---|
+| `pyjwt` 2.15.0 | ✅ **只装它自己** —— 真·独立 |
+| `langgraph-sdk` 0.3.15 | ❌ ⚠️ **它根本不在 `requirements.txt` 里**（是 `langgraph` 的传递依赖）；而 `langgraph 1.0.1` 要 **`langgraph-sdk<0.3.0`** ⇒ 升它**必须先升 `langgraph`** |
+| `langgraph` 1.0.10 | ❌ 要 `langgraph-prebuilt>=1.0.8` ⇒ 而 1.0.8–1.0.13 **每一个都要求 `langchain-core>=1.0.0`** |
+| `langgraph-checkpoint-sqlite` 3.1.1 | ❌ 要 `langgraph-checkpoint>=4.1.0`；而 `langgraph 1.0.1` 要 **`<4.0.0`** ⇒ **两者互斥** |
+| `langchain-text-splitters` 1.1.2 | ❌ 要 **`langchain-core>=1.2.31,<2.0.0`** |
+
+pip 报错原文（⛔ 不是我的推断）：
+
+```
+ERROR: … langchain-core==0.3.86 because these package versions have conflicting dependencies.
+    langgraph-prebuilt 1.0.13 depends on langchain-core>=1.3.1
+    langgraph-checkpoint-sqlite 3.1.1 depends on langgraph-checkpoint<5.0.0 and >=4.1.0
+    langgraph 1.0.1 depends on langgraph-checkpoint<4.0.0 and >=2.1.0
+```
+
+⇒ **`langchain-core` 0.3.86 → 1.x 是这条链的【总闸】**：
+
+```
+langchain-core  0.3.86 → >=1.2.31
+   ├─ 逼 langchain                0.3.30 → 1.x
+   ├─ 逼 langchain-openai         0.2.14 → 1.1.14
+   ├─ 逼 langchain-text-splitters 0.3.11 → 1.1.2
+   └─ 逼 langgraph                1.0.1  → 1.0.10  → 连带 sdk / prebuilt
+          └─ 逼 langgraph-checkpoint 3.0.1 → 4.x
+```
+
+⇒ **剩下这 8 个包、6 个直系文件，是【一件事】，⛔ 不是两批。**
+
+⛔ **处置不能"顺手升"** —— 这一轮要跑全量测试 + 真服务验。
+🔴 **`langchain-core` / `langchain` 那条 0.3→1.x 与 `app/requirements.txt` 里的上界注释直接冲突** ——
 那行写着「**本仓代码是按 langchain 0.3.x 写的**，必须加上界」⇒ 升 1.x **等于改代码**，⛔ 不是改个版本号。
 📌 **在那之前，这份清单就是"为什么不静默放过"的凭证。**
 
