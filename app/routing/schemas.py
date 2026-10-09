@@ -102,3 +102,12 @@ class UserCreate(BaseModel):
         le=365,
         example=90
     )
+    # 🔴 2026-10-09（B1 · `DEC-129`）：角色。
+    #    ⚠️ **默认 `None`（不传）= 写 `NULL`** ⇒ 读侧走**回退**（探针身份 + admin + 其余 FREE）。
+    #    ⛔ **别给它默认值 `"free"`** —— "**没写**"与"**写了 free**"不是一回事，
+    #    而 B1 整套设计正是靠这条区分活着（见 `app/access/permission.py` 的 docstring）。
+    role: str | None = Field(
+        None,
+        description="角色（free / premium / admin）。**不传 = 不裁决**，按用户名回退到内置规则",
+        example="premium",
+    )

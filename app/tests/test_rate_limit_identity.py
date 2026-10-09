@@ -31,6 +31,23 @@ def _no_db(monkeypatch):
     做法：把 `auth.get_db` 换成一个直接抛 `AssertionError` 的函数。
     于是任何**忘了 stub** 的测试会立刻报「不许碰数据库」，
     ⛔ 而不会退化成一个"看起来像环境问题"的 psycopg2 报错（那正是上次误判的形态）。
+
+    ## 🔴 2026-10-09（B1 · `DEC-129`）：**还多拦一处，否则这道守卫会【静默失效】**
+
+    B1 之后 `permission.get_user_role()` 也要查库了。⚠️ 它**不是**走 `auth.get_db`
+    （那是 `access.auth` 自己的绑定），所以**上面那一行拦不到它**。
+
+    🔴 **而它的失败方式比"红"更糟**：`get_user_role` **吞掉所有异常走回退**
+    （这是有意的 —— 库抖了不该把全站打死，见 `permission.py`）⇒
+    **守卫不报错、库却真被碰了**，两边都看不出来。
+    📌 **实测**（2026-10-09）：把 `core.db.get_db` 换成抛 `AssertionError` 的替身后调
+    `get_user_role("isolation_a")` ⇒ **它被调了 1 次**、异常被吞、静默返回 `free`。
+
+    ⇒ 这里补两样，**都要**：
+    1. 把 `permission._fetch_role_from_db`（**本模块唯一的 DB 入口**，收口在一处就是为这个）
+       换成同款 `_boom`；
+    2. `invalidate_role_cache()` —— ⛔ 不清缓存的话，结论会**随上一条用例的缓存状态**变
+       （命中缓存 ⇒ 根本不查库 ⇒ 用例"过"了但**什么都没测**）。
     """
     def _boom(*args, **kwargs):
         raise AssertionError(
@@ -39,6 +56,11 @@ def _no_db(monkeypatch):
             "需要验签的用例请 monkeypatch(auth, 'verify_api_key', ...)。"
         )
     monkeypatch.setattr(auth, "get_db", _boom, raising=False)
+
+    # 🔴 B1：`permission` 那条库访问路径（见 docstring）
+    import access.permission as permission
+    monkeypatch.setattr(permission, "_fetch_role_from_db", _boom, raising=False)
+    permission.invalidate_role_cache()
 
 
 def test_no_db_guard_actually_blocks():
@@ -49,6 +71,27 @@ def test_no_db_guard_actually_blocks():
     """
     with pytest.raises(AssertionError, match="不许碰数据库"):
         auth.get_db()
+
+
+def test_no_db_guard_也拦住_permission_那条路():
+    """**自证（B1 · `DEC-129`）**：`_no_db` 也拦得住 `permission` 查角色那条路。
+
+    🔴 **为什么这条必须存在**：B1 让 `get_user_role` 也查库了，而它**不是**走 `auth.get_db`
+    ⇒ 上面 fixture 里光有那一行**拦不到它**。⚠️ 而它的失败方式**比"红"更糟**：
+    `get_user_role` 会**吞掉库异常走回退**（那是有意的）⇒ **守卫不报错、库却真被碰了**。
+    📌 2026-10-09 实测过这个形态：把 `core.db.get_db` 换成抛 `AssertionError` 的替身后调
+    `get_user_role("isolation_a")` ⇒ **它被调了 1 次**、异常被吞、静默返回 `free`。
+
+    ⇒ 这条同时钉两件事：
+    ① fixture 里补的那一行**真的在拦**；
+    ② `get_user_role` 的捕获范围是 **`psycopg2.Error` 而不是 `Exception`** ——
+       写成宽捕获，`AssertionError` 会被它吞掉，**这条用例当场红**
+       （本仓原话见 `app/access/auth.py:153`：「捕获写宽 ⇒ 那道门静默失效」）。
+    """
+    from access.permission import get_user_role
+
+    with pytest.raises(AssertionError, match="不许碰数据库"):
+        get_user_role("isolation_a")
 
 
 # 一个形态逼真、但数据库里不存在的 key。

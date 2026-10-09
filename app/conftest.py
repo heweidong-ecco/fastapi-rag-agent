@@ -100,3 +100,27 @@ def sample_document():
         "content": "Python是一门强大的编程语言，广泛应用于AI和数据科学领域。",
         "source": "test_docs"
     }
+
+# ══════════════════════════════════════════════════════════════════════
+# 🔴 B1 · `DEC-129`：**每条用例前后都清掉角色缓存**
+# ══════════════════════════════════════════════════════════════════════
+#
+# `permission.get_user_role` 带**进程内 TTL 60s 缓存**（它在配额热路径上，
+# 一个请求最多调 10 次 —— 见 `app/access/permission.py` 的 docstring）。
+#
+# ⚠️ **缓存是【进程级】的** ⇒ 它**会跨用例残留**。那会带来两种**都不出声**的坏结果：
+#   ① 某条用例先替身出了一个角色 ⇒ 后面真调 `get_user_role` 的用例**拿到那个替身值**；
+#   ② 某条用例改了库里的 `role` ⇒ 后面 60 秒内的用例**仍看到旧值**。
+# 两者都会让结论**取决于用例的【执行顺序】** —— 而"顺序换了就红/就绿"在本仓是明令要消的形态。
+#
+# ⇒ 用 autouse fixture 清掉，让每条用例都从**冷缓存**开始。
+#    ⚠️ 它**⛔ 不是**"为了让测试过"的开关 —— 缓存本身有 `test_user_role_from_db.py`
+#      那 10 条专门钉它（TTL / 写侧失效 / 不误伤别人）。这里清掉的只是**跨用例的脏残留**。
+@pytest.fixture(autouse=True)
+def _clear_role_cache_between_tests():
+    """见上方长注释：消掉「结论随执行顺序变」这个不确定性。"""
+    from access.permission import invalidate_role_cache
+
+    invalidate_role_cache()
+    yield
+    invalidate_role_cache()

@@ -87,7 +87,14 @@ def create_table():
                         --    ⚠️ 全仓另外两处也是**整数**口径，别只改这里：
                         --    `app/core/db_metadata.py:41`（`Integer, server_default="1"`）·
                         --    `app/tests/test_auth_api_key_active.py:78`（sqlite `INTEGER`）。
-                        is_active INTEGER DEFAULT 1
+                        is_active INTEGER DEFAULT 1,
+                        -- 🔴 2026-10-09（B1 · `DEC-129`）：**角色接 DB** 的落点。
+                        --    读侧唯一入口 = `app/access/permission.py::get_user_role()`。
+                        --    ⚠️ **故意可空**（⛔ 别加 `NOT NULL`、⛔ 别加默认值）——
+                        --    理由与上面 `is_active` **逐字同款**：加列之前写进去的老行
+                        --    **没有这个值**，而"**没写**"与"**写了 free**"**不是一回事**：
+                        --    前者要走**回退**（那三个探针身份 + admin），后者是明确的裁决。
+                        role TEXT
                     );
                 """)
                 conn.commit()
@@ -120,6 +127,31 @@ def create_table():
                             ALTER TABLE api_keys ADD COLUMN is_active INTEGER DEFAULT 1;
                         END IF;
                     END $$;
+                """)
+                # 🔴 同一款：`api_keys.role`（2026-10-09 · B1 · `DEC-129`）
+                #    理由与上面 `is_active` 那段**逐字同款**：本机这条 PG 是**先建的**，
+                #    光把列写进建表语句 ⇒ **老库永远补不上**。
+                #    ⚠️ 而这一列补不上的**症状比 `is_active` 那次更阴**：
+                #    `get_user_role` 查不到列会**吞掉异常走回退**（见 `permission.py` 的 docstring）
+                #    ⇒ **静默退回硬编码**，排查时只看到"角色没生效"，**一个报错都没有**。
+                cur.execute("""
+                    DO $$
+                    BEGIN
+                        IF NOT EXISTS (
+                            SELECT 1 FROM information_schema.columns
+                            WHERE table_name='api_keys' AND column_name='role'
+                        ) THEN
+                            ALTER TABLE api_keys ADD COLUMN role TEXT;
+                        END IF;
+                    END $$;
+                """)
+                # 🔴 2026-10-09（B1）：`api_keys` **原本没有任何 `user_name` 索引** ——
+                #    而 `get_user_role` 正是按 `user_name` 查 `role` ⇒ 那是**全表扫**。
+                #    ⚠️ 这条要**和 B1 一起进**，⛔ 别留到"以后优化" ——
+                #    它正是"每请求最多调 10 次"那条热路径上唯一的查询。
+                cur.execute("""
+                    CREATE INDEX IF NOT EXISTS api_keys_user_name_idx
+                    ON api_keys (user_name);
                 """)
                 # 为向量字段创建索引，加速检索
                 cur.execute("""

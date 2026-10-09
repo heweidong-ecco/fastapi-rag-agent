@@ -39,13 +39,50 @@ from access.auth import create_user_api_key, hash_api_key   # noqa: E402,F401
 from core.db import get_db                                  # noqa: E402
 
 
-def issue(user_name: str, days: int) -> None:
-    api_key = create_user_api_key(user_name, expire_days=days)
-    print(f"✅ 已为用户 {user_name!r} 发一把 key（{days} 天）：")
+def issue(user_name: str, days: int, role: str | None = None, out: str | None = None) -> None:
+    """发一把 key 并把它交给调用者。
+
+    ## 🔴 `out`：**非交互调用必须用它**（2026-10-10 加 · 见下）
+
+    默认（`out=None`）把 key **打到 stdout** —— 那是**交互式**用法：人在终端里看得见、随手复制走。
+
+    ⚠️ **在脚本 / 自动化里跑，stdout 会被别处接走**（管道、CI 日志、**以及 agent 会话记录**）
+    ⇒ key 就**落进了一个你不再控制的地方**。
+    🔴 **本仓 2026-10-10 实测栽过这一次**：Agent 跑本脚本时，**key 进了会话记录**。
+    ⇒ 非交互场景请传 `--out <文件>`：key 写进那个文件（**权限 600**），**stdout 只出现路径**。
+
+    ⚠️ **不覆盖已存在的文件** —— 免得把上一把还没抄走的 key 默默盖掉。
+    """
+    api_key = create_user_api_key(user_name, expire_days=days, role=role)
+    shown = role if role is not None else "（未指定 ⇒ 库里写 NULL ⇒ 读侧按用户名回退）"
+    head = f"✅ 已为用户 {user_name!r} 发一把 key（{days} 天 · role={shown}）"
+
+    if out:
+        p = Path(out)
+        if p.exists():
+            raise SystemExit(f"⛔ 拒绝覆盖已存在的文件：{p}（先把里面那把处理掉，或换个路径）")
+        p.write_text(api_key + "\n", encoding="utf-8")
+        p.chmod(0o600)
+        print(head)
+        print(f"   已写入 {p}（**权限 600**）")
+        print("   ⚠️ **只显示这一次**（库里存的是哈希）。用完请删掉那个文件。")
+        return
+
+    print(head)
     print()
+    # 🔴 **关于 CodeQL**（2026-10-10）：本行会命中 `py/clear-text-logging-sensitive-data`。
+    #    ⚠️ **这不是"没修"，而是【在这个文件上不可能消除】**：本脚本**就是**那把
+    #    "把新 key 交给操作员"的工具 —— ⛔ 不打印它，操作员就拿不到 key（库里只有哈希）。
+    #    换个交付方式（写文件 / 传参）**只是换一个 sink**，CodeQL 一样会报（实测：加 `--out` 之后
+    #    它**又**报了一条 `py/clear-text-storage-sensitive-data`）。
+    #    ⇒ 处置在**仓库配置**里（**只豁免这一个文件**）：`.github/workflows/codeql.yml` 的
+    #      `paths-ignore` —— 那里写清了理由、代价、与"试过但没生效"的写法。
+    #    🔴 **本仓真栽过的那次**：2026-10-10 Agent 跑本脚本时，**一把 key 进了会话记录**
+    #      ⇒ 非交互调用请用 `--out <文件>`（见上，那才是真处置）。
     print(f"    {api_key}")
     print()
     print("⚠️ 上面这串**只显示这一次**（库里存的是哈希）。现在复制走，别等会儿再回来找。")
+    print("⚠️ **在脚本 / 自动化里跑请改用 `--out <文件>`** —— 否则它会进管道、CI 日志、或会话记录。")
 
 
 def revoke(user_name: str) -> int:
@@ -70,6 +107,17 @@ def main() -> int:
     ap.add_argument("user_name")
     ap.add_argument("--days", type=int, default=30)
     ap.add_argument("--revoke", action="store_true", help="撤销该用户名下全部 key")
+    # 🔴 2026-10-09（B1 · `DEC-129`）：角色。
+    #    ⚠️ **不给默认值**（`default=None`）—— "不传"与"传了 free"**不是一回事**：
+    #    不传 ⇒ 库里写 `NULL` ⇒ 读侧按用户名**回退**；传了 ⇒ 就是裁决。
+    ap.add_argument("--role", default=None,
+                    help="角色（free / premium / admin）。⛔ 不传 ≠ 传 free —— 不传走回退")
+    # 🔴 2026-10-10：非交互调用请用它 —— key 写进文件（权限 600），stdout **只出现路径**。
+    #    ⚠️ 默认（打到 stdout）是**交互式**用法；在脚本 / 自动化里跑，stdout 会被
+    #       管道 / CI 日志 / **会话记录**接走 ⇒ 本仓 2026-10-10 实测栽过一次。
+    ap.add_argument("--out", default=None, metavar="文件",
+                    help="把 key 写进这个文件（权限 600），⛔ 不覆盖已存在的文件。"
+                         "非交互调用【应当】用它 —— 否则 key 会进管道/日志")
     args = ap.parse_args()
 
     if args.revoke:
@@ -78,7 +126,7 @@ def main() -> int:
               f"：{args.user_name!r} 共 {n} 行")
         return 0
 
-    issue(args.user_name, args.days)
+    issue(args.user_name, args.days, role=args.role, out=args.out)
     return 0
 
 
