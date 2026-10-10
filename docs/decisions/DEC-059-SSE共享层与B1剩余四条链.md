@@ -189,7 +189,7 @@ STREAMABLE_NODES = frozenset({"agent"})
 | # | 事项 | 为什么不本轮做 |
 |---|---|---|
 | **1** | 🔴 **链 B（`/agent/memory_chat`）的记账【从来没执行过】** —— `agent_checkpointer.py:83` 判的是 `hasattr(response, "usage")`，而真 `AIMessage` **只有 `usage_metadata`、没有 `.usage`** ⇒ **恒为 False** | **修它 = 开始拦人，是【行为变更】**（配额从"形同虚设"变成"真拦"）⇒ **要单独裁**。📄 勘察 §8.5 |
-| **2** | ⚠️ **`ensure_ascii` 两种口径并存**（RAG `True` / Agent `False`） | 见 §五 —— 统一会破坏"逐帧等价"，**已登记待裁** |
+| **2** | ⚠️ **`ensure_ascii` 两种口径并存**（RAG `True` / Agent `False`） | 见 §五 —— 统一会破坏"逐帧等价"。📌 **2026-10-10 已正式登记** ⇒ `docs/待办总表.md` **`N30`**（未裁） |
 | **3** | ⚠️ **`api/agent_graph_advanced_learning.py:71` 的行内注释已过期** —— 它说捆绑的 `calculator` / `date_today` 在 `:145` / `:160` 调用，**实际是 `:170` / `:185`** | ⛔ **本 Agent 未改**（属"顺手清理"，用户明确拒绝）⇒ **报告，不动手**。📌 判据：`grep -n "tool_calls\[0\]" api/agent_graph_advanced_learning.py` 对 `:71` 那句 |
 | **4** | ⚠️ **「其余 29 条端点不是缺口」是【本批的判断】，⛔ 没走业务裁定** | 硬门 A 要的是「**该**流的流」，「该不该」**得由业务方按端点定** ⇒ 已写进 `ROADMAP.md` / `docs/待办总表.md` / `docs/契约/接口契约.md` **三处**，每处都标了 |
 | **5** | ⚠️ **`DEC-055`（中断 / 异常路径的留痕口径）的前提要按新数重核** —— 它普查时"3 条流式里只有 1 条是 LangGraph"，现在是 **6 条** | 那是**另一件事**的实现前提，⛔ 不在本轮范围。已在该条上加了提示 |

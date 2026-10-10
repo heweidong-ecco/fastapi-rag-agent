@@ -30,6 +30,7 @@
 | `backup.sh` · `issue_api_key.py` · `list_endpoints.sh` | 备份 · 发 key · 列接口 |
 | `test_check_*.sh` · `test_remind_hooks.sh` · `test_impact.sh` | ⭐ **门自己的自测**（**进 CI**） |
 | `test_check_stale_imports.sh` | 过期导入门的自测（**7 条**，含两条「**判不了必须是 exit 2**」的正例） |
+| 🆕 `test_pre_commit_gates.sh` | **提交门【本体】的自测**（**8 条** · 2026-10-10 补 · 待办总表 `§七·3`）<br>🔴 在它之前，**八道门里只有它自己没有测试**。夹具**自带 `scripts/` + `.claude/hooks/` + `.env`**（⛔ 否则八道门全进"跳过" ⇒ **假绿**）。变异自证过：把 `return 2` 改成 `0` ⇒ **3 条红** |
 | 🆕 `check_layered_claude_md.sh --self-test` | 分层 CLAUDE.md 门的自测（**5 条**，含「**豁免目录不报**」与「**不是 git 仓必须是 3**」）—— ⚠️ **它是脚本自带的 `--self-test`，⛔ 不像别家另开 `test_*.sh`**（判据简单，不需要夹具文件） |
 | `doc-links-ignore.txt` · `ruff-baseline.txt` · `route-auth-baseline.txt` | 三份**判据数据** |
 

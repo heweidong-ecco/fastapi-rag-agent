@@ -23,6 +23,7 @@ Plan-and-Execute 模块
 """
 import json
 import time
+from loguru import logger
 from dataclasses import dataclass
 from typing import List, Dict, Optional
 from core.llm_factory import make_llm   # ①b Task 5：model / api_key / base_url / max_tokens 的唯一落点
@@ -649,16 +650,24 @@ def execute_step_with_retry(step: Dict, input_data: str, context: str,
         except Exception as e:
             if attempt < max_retries:
                 # 失败时，重新生成输入参数
+                # ⚠️ 这里【保留】`str(e)` —— 它是**喂给模型**的**内部输入**，⛔ 不是出口：
+                #    ⛔ 去掉它 ⇒ 模型不知道上一步为什么失败 ⇒ **改不出新参数 ⇒ 重试等于白试**。
+                #    （与下面 `.text` 的处置**相反**，理由就是"它到不到用户面前"。）
                 input_data = generate_dynamic_input(
                     step, context + f"\n[上一步尝试失败，原因：{str(e)}]", "", user_name
                 )
             else:
-                # ⚠️ 这句 `text` **用户可见**（原样进 `results`、原样返回给调用方）——
-                #    `S10` 只换**判定依据**，⛔ 不许顺手改它的措辞。
+                # ⚠️ 这句 `text` **用户可见**（原样进 `results`、原样返回给调用方）。
+                # 🔴 2026-10-10（`N23` · CodeQL `py/stack-trace-exposure` **同族**）：
+                #    ⛔ **用户可见的那份去掉 `str(e)`**（异常原文会带出路径 / 连接串）。
+                #    ⚠️ **本仓「失败要说出来」那条不变** —— 仍然**说**「失败了、重试过几次」，
+                #    只是**不再说内部细节**：细节进服务端日志（下一行）。
+                #    📌 形状照 `api_v1_agent.py` / `token_tracker.py`（同族先例）。
+                logger.exception("计划步骤执行失败（已重试 {} 次）: {}", max_retries, step)
                 return StepResult(
                     ok=False,
-                    text=f"执行失败（已重试{max_retries}次）：{str(e)}",
-                    error=str(e),          # ← 不带那句格式化前缀的**异常原文**
+                    text=f"执行失败（已重试{max_retries}次），请稍后重试（详细信息见服务端日志）",
+                    error=str(e),          # ← 给【代码】判的，⛔ 不到用户面前
                 )
 
 
