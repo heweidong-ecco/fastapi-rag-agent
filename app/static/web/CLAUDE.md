@@ -22,4 +22,4 @@
 - ⚠️ **⛔ 不许引外网 CDN**（首页有专门断言）
 
 ## 📍 往上读
-- `../CLAUDE.md`（`app/static/`）· `frontend/索引.md` · 仓库根 `CLAUDE.md`
+- `../CLAUDE.md`（`app/static/`）· `frontend-demo/索引.md` · 仓库根 `CLAUDE.md`

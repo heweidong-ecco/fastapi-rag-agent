@@ -132,7 +132,7 @@ from billing.token_tracker import record_usage
 > **一个名单两个来源必然漂移**（`DEC-051`）⇒ **改这条就同批改脚本里的 `NAME_EXEMPT` / `PATH_EXEMPT`**。
 
 **边界**：`CLAUDE.md` 答"这里有什么、在哪"；
-**逐模块的"做到哪"⇒ `app/<组>/specs/<模块>.md`** · **前端各刀 ⇒ `frontend/索引.md`** ·
+**逐模块的"做到哪"⇒ `app/<组>/specs/<模块>.md`** · **前端各刀 ⇒ `frontend-demo/索引.md`** ·
 **阶段级 / 跨模块的经过 ⇒ `docs/history` 那类的 `docs/历史/`** · **`ROADMAP` 答"当前状态与顺序"**。
 
 > 🔴 **2026-10-10 改**：原句是「`ROADMAP` 答"做到哪了"· **不要把进度写进 `CLAUDE.md`**」——

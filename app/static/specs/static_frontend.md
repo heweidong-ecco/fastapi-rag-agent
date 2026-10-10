@@ -3,7 +3,7 @@
 | 项 | 内容 |
 |---|---|
 | **状态** | 🟡 **部分可用**（2026-10-06 建 · `DEC-085` 段 1 第一刀 · 同日补 `DEC-089` 的 `F8` · `DEC-090` 的熔断卡片 · `DEC-091` 的无据拒答 · `DEC-093` 的 Trace 页 · 2026-10-07 补 `DEC-097` 的 Eval 页）—— **四个页面通了**：对话页（`DEC-085` · 引用卡片 `DEC-089` · **熔断卡片 `DEC-090`** · **无据拒答 `DEC-091`**）+ **接管页**（`DEC-088` · `F1`）+ **Trace 页**（`DEC-093` · `F2`）+ **Eval 页**（`DEC-097` · `F3`，🔴 **是【占位页】不是功能页** —— 见下） |
-| 🔴 **找前端的东西** | ⭐ **`frontend/索引.md`** —— **唯一查找入口**（业务方 2026-10-09 立的：「**不要用 grep 去找，也不准**」） |
+| 🔴 **找前端的东西** | ⭐ **`frontend-demo/索引.md`** —— **唯一查找入口**（业务方 2026-10-09 立的：「**不要用 grep 去找，也不准**」） |
 | **对外提供** | `GET /chat` → **302** `/static/web/chat.html`（`app/main.py:564`，**`include_in_schema=False`**）<br>`GET /approvals` → **302** `/static/web/approvals.html`（`app/main.py:573`，**同上**）<br>`GET /trace` → **302** `/static/web/trace.html`（`app/main.py:585`，**同上**）<br>`GET /eval` → **302** `/static/web/eval.html`（`app/main.py:598`，**同上**）<br>`GET /lab` → **302** `/static/web/lab.html`（`app/main.py:611`，**同上** —— 2026-10-09 刀 3 · `DEC-123`）<br>`GET /cost` → **302** `/static/web/cost.html`（`app/main.py:623`，**同上** —— 2026-10-09 刀 4 · `DEC-124`）<br>🆕 `GET /tools` → **302** `/static/web/tools.html`（`app/main.py:637`，**同上** —— 2026-10-10 刀 5 · `DEC-139`）<br>🆕 `GET /system` → **302** `/static/web/system.html`（`app/main.py:653`，**同上** —— 2026-10-10 刀 6 · `DEC-140`）<br>· 页面本体由已挂的 `/static` 托管（零构建、零新服务、零 CORS）<br>⚠️ **八条 302 都在无鉴权基线里**（`scripts/route-auth-baseline.txt`）—— **故意公开**：它们是"给人打开 HTML"的跳转，**本身不含数据**；真正的边界在页面调的后端接口上（⚠️ **`/eval` 例外**：它连后端接口都不调，见下）<br>⚠️ **上面那八个行号是 2026-10-10 现算的**（`grep -n '@app.get("/…"' app/main.py`）—— 此前那五个写着 `548/557/569/582/595/607`，**都已经过期**（它们在 `/tools` 之前就已经被别的提交下移过）。⛔ 读的人**跑一遍那条 grep**，别当永久值 |
 | **谁在用** | 人（浏览器）。⚠️ **后端不 import 它、没有任何 `.py` 依赖它** —— 这就是本目录此前一直是"没人管"的原因 |
 
@@ -392,7 +392,7 @@ venv/bin/python -m pytest app/tests/test_web_pages.py -q               # ⇒ 7 p
 
 ---
 
-## 🔴 2026-10-08 · 分页（`frontend/README.md` §六）
+## 🔴 2026-10-08 · 分页（`frontend-demo/README.md` §六）
 
 **改前的现状**：本仓**没有一个列表有 `offset`** —— 全是"取最近 N 条"，
 而 `approvals.html` **硬写 `limit=50`、界面不说明被截了**（**静默截断**）。
@@ -444,7 +444,7 @@ POSTGRES_DB=rag_test venv/bin/python -m pytest app/tests/test_approval_events_db
 | | |
 |---|---|
 | **业务方问过** | 「**是 specs 没记录吗**」—— 🔴 **当时的答案是【没有】**：<br>`grep -rn '主要功能\|其他功能'` ⇒ **全仓 0 命中**；本文件里也**只有 4 条页面路由**，⛔ 没有"首页"这一格 |
-| **现在的落点** | ⭐ **`frontend/页面与接口规格.md` §3.0**（**唯一权威** —— 那里有主次划分的建议 + "能点击跳转"的判据） |
+| **现在的落点** | ⭐ **`frontend-demo/页面与接口规格.md` §3.0**（**唯一权威** —— 那里有主次划分的建议 + "能点击跳转"的判据） |
 | **为什么写在这里** | 本文件是**前端模块的 spec** ⇒ 它必须**指出那份规格**，⛔ 不能各自记一半 |
 
 ### 现状（⛔ 别读成"首页已经算了"）

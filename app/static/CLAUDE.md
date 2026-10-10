@@ -16,9 +16,9 @@
   「**95% 的人不会去看代码**……**显示了，才知道你有做**」⇒ **藏进后端 = 等于没做**。
 - 🔴 **必须`app.mount("/static", …)` 且路径锚在 `main.py` 旁边**（`os.path.dirname(__file__)`）
   ⇒ ⛔ **`main.py` 搬家会连带这里**。
-- ⚠️ **前端的事优先看 `frontend/索引.md`**（业务方立的查找纪律：「**不用靠我来记，也不要用 grep**」）。
+- ⚠️ **前端的事优先看 `frontend-demo/索引.md`**（业务方立的查找纪律：「**不用靠我来记，也不要用 grep**」）。
 - ⚠️ **JS 纯逻辑用 `node --test`**（`app/static/js/*.test.js`），⛔ **不加 `package.json` / `npm install`**
   —— CI 里就是一条 glob + node 自带测试器。
 
 ## 📍 往上读
-- `../CLAUDE.md`（`app/`）· `frontend/索引.md` · 仓库根 `CLAUDE.md`
+- `../CLAUDE.md`（`app/`）· `frontend-demo/索引.md` · 仓库根 `CLAUDE.md`

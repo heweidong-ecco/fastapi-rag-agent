@@ -20,6 +20,7 @@
 | `static/` | **真前端**（22 个：`web/*.html` · `js/*.js`） | `static/CLAUDE.md` |
 | `alembic/` | 迁移脚本（6 个） | `alembic/CLAUDE.md` |
 | 🔴 **`demo/`** | **demo 专属代码区** —— ⛔ **本仓的代码不引用它**（业务方 2026-10-10 裁的「甲」）<br>内含 `claim.py` = 访客凭据的发放 | `demo/CLAUDE.md` |
+| 🔴 **`frontend/`** | **本仓自己的前端** —— ⚠️ **现在是空的**（只放了一份 `CLAUDE.md` 占位）<br>业务方 2026-10-11 裁的：本仓前端放这儿；⚠️ **还没立项** ⇒ ⛔ 别替它设计 | `frontend/CLAUDE.md` |
 
 **留在 `app/` 根的 3 个 `.py`**（⛔ 别挪）：
 - **`main.py`** —— 服务入口。`uvicorn main:app` 与 Docker `CMD` **都绑它** · spec ⇒ `specs/main.md`
