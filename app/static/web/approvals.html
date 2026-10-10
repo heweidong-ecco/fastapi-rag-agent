@@ -6,53 +6,80 @@
 <title>人工接管</title>
 <link rel="stylesheet" href="/static/app.css">
 <style>
-  /* 本页只写【页面专属】规则 —— 通用组件与 token 在 `/static/app.css`
-     （= `frontend/README.md` §三–§五 那份规范的实现）。
-     🔴 2026-10-08：删掉本页自带的 `:root`（与全局 token 同名不同值），硬编码色换成 token。
-     ⚠️ **本轮⛔ 没有改 class 名 / id / JS** —— 页面脚本按它们建元素。 */
+  /* 本页只写【页面专属】规则 —— 通用组件与 token 在 `/static/app.css`。
+   * 2026-10-08：删掉本页自带的 `:root`（与全局 token 同名不同值），硬编码色换成 token。
+   * 🔴 2026-10-10（施工单**刀 8**）两件事：
+   *   ① 与全站重复的（`table`/`th`/`td` · `#notice` · `pre` · `details summary` ·
+   *      以及那句 `body { padding }` —— 它与骨架**打架**）⇒ 已收进 `app.css` §4.9；
+   *   ② 🔴 **本页补上了 `.app-shell` 骨架** —— 原先它是个**裸文档**（没有侧边栏、没有页头），
+   *      而它是「人工接管」，属**5 类主要功能之一**，别的四个主要功能页都有骨架。
+   * ⚠️ ⛔ 没有改 class 名 / id / JS 的取值 —— 页面脚本按它们建元素。 */
 
   :root {
     /* 三种消息各一种颜色 —— 它们是**谁说的**，⛔ 不是好看用的 */
     --human: var(--info); --ai: var(--ok); --tool: var(--warn);
   }
-  body { padding: var(--sp-4); }
-  .sub { color: var(--fg-dim); margin: 0 0 var(--sp-3); }
-  input, button, textarea { font: inherit; }
-  input[type=password] { width: 320px; }
-  button.primary { border-color: var(--info); color: var(--info); }
-  button.danger  { border-color: var(--bad);  color: var(--bad); }
-  #notice { margin: var(--sp-2) 0; min-height: 1.4em; color: var(--fg-dim); }
-  #notice.bad { color: var(--bad); }
 
-  table { border-collapse: collapse; width: 100%; background: var(--surface); }
-  th, td { border: 1px solid var(--line); padding: var(--sp-2) var(--sp-2); text-align: left; vertical-align: top; }
-  th { background: var(--bg); font-weight: 600; }
   tr.pick > td { background: color-mix(in srgb, var(--info) 8%, transparent); }
 
   .msg { border-left: 3px solid var(--line); padding: 2px var(--sp-2); margin: var(--sp-1) 0; }
   .msg.human { border-color: var(--human); } .msg.ai { border-color: var(--ai); }
   .msg.tool  { border-color: var(--tool); }
   .msg .role { font-weight: 600; font-size: var(--fs-cap); color: var(--fg-dim); }
-  .msg pre { margin: 2px 0 0; white-space: pre-wrap; word-break: break-word; }
-  details > summary { cursor: pointer; color: var(--fg-dim); font-size: var(--fs-cap); }
+
   #opbox { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-card);
            padding: var(--sp-3); margin: var(--sp-2) 0; }
   #edited { width: 100%; min-height: 64px; }
 </style>
 </head>
 <body>
-<h1>人工接管</h1>
-<p class="sub">待接管会话 · 点一行看**完整上下文** · 批准 / 拒绝 / 代替模型给出这次工具调用的结果</p>
+<div class="app-shell">
 
-<p>
-  <label>API Key：<input id="apikey" type="password" placeholder="X-API-Key"></label>
-  <button id="save">保存</button>
-  <button id="refresh">刷新</button>
-</p>
-<div id="notice"></div>
+  <aside class="sidebar">
+    <div class="brand">青云精工 · RAG</div>
+    <nav class="nav">
+      <a href="/chat">对话</a>
+      <a href="/lab">检索实验室</a>
+      <a href="/approvals" class="active">人工接管</a>
+      <a href="/cost">成本看板</a>
+      <a href="/trace">执行轨迹</a>
+      <a href="/eval">评测</a>
+    </nav>
+  </aside>
+
+  <div class="main">
+
+    <header class="page-head">
+      <h1>人工接管</h1>
+      <span class="spacer"></span>
+      <label class="field">API Key <input id="apikey" type="password" placeholder="X-API-Key"></label>
+      <button id="save" class="btn">保存</button>
+      <button id="refresh" class="btn">刷新</button>
+    </header>
+
+    <div class="content">
+      <div id="notice" class="notice"></div>
+
+      <!-- 🔴 原先这句里写的是 `**完整上下文**` —— **两个星号是直接印在页面上的**
+           （页面一律 `textContent`，markdown 记号会原样出来）。2026-10-10 修成 `<b>`。
+           ⚠️ ⛔ **不是改文案口径** —— 口径那两句（熔断「这不是故障」· 拒答「资料里没有」）一个字没动；
+              这里修的是**渲染**。同族缺陷本仓已记三次（tools / system / ops 各有守卫钉着）。 -->
+      <p class="sub">待接管会话 · 点一行看<b>完整上下文</b> · 批准 / 拒绝 / 代替模型给出这次工具调用的结果</p>
+
+      <!-- 🔴 边界标注（规格 §3.6.1 的② · 提示在前）。文案【只从 RagPanel 取】。 -->
+      <section class="panel" id="boundary" aria-label="使用前必读（平台与额度边界）"
+               style="margin-bottom:var(--sp-4)">
+        <div class="panel-body">
+          <h2 style="margin-top:0">使用前必读</h2>
+          <div class="panel-boundary" data-boundary="platform_restart"></div>
+          <div class="panel-boundary" data-boundary="quota"></div>
+          <div class="panel-boundary" data-boundary="rate_limit"></div>
+          <div class="panel-boundary" data-boundary="real_api"></div>
+        </div>
+      </section>
 
 <h2>待接管</h2>
-<table id="pending">
+<table id="pending" class="tbl">
   <thead><tr><th>属主</th><th>图</th><th>轮次</th><th>卡了多久</th><th>待批的工具</th></tr></thead>
   <tbody></tbody>
 </table>
@@ -63,14 +90,16 @@
   <h2>代替模型执行这次工具调用</h2>
   <p class="sub">它拿着你给的结论继续往下答。<b>不填也能批 / 拒</b> —— 不填就是「原样放行」。</p>
   <textarea id="edited" placeholder="（可留空）"></textarea>
+  <!-- 🔴 提示条排在按钮【之前】（规格 §3.6.1 的② · `DEC-123` §1.1） -->
+  <div class="panel-boundary slim" data-boundary="real_api"></div>
   <p>
-    <button id="approve" class="primary">批准</button>
-    <button id="reject" class="danger">拒绝</button>
+    <button id="approve" class="btn primary">批准</button>
+    <button id="reject" class="btn danger">拒绝</button>
   </p>
 </div>
 
 <h2>裁决历史</h2>
-<table id="history">
+<table id="history" class="tbl">
   <thead><tr><th>属主</th><th>谁批的</th><th>裁决</th><th>改写</th><th>轮次</th><th>为什么</th></tr></thead>
   <tbody></tbody>
 </table>
@@ -85,6 +114,11 @@
   <span id="pagehint" class="page-hint"></span>
 </div>
 
+    </div>
+  </div>
+</div>
+
+<script src="/static/js/panel.js"></script>
 <script src="/static/js/approvals.js"></script>
 <script>
 'use strict';
@@ -286,6 +320,14 @@ document.addEventListener('visibilitychange', () => {
 });
 
 $('apikey').value = key();
+/* 边界标注（2026-10-10 · 施工单刀 8）：文案【只从 `RagPanel` 取】——
+   ⛔ 别在这份 HTML 里再抄一遍（规格 §3.6.2 · 「边界文案全站只有一份」）。 */
+document.querySelectorAll('[data-boundary]').forEach((n) => {
+  n.textContent = n.classList.contains('slim')
+    ? RagPanel.boundaryShort(n.dataset.boundary)
+    : RagPanel.boundaryText(n.dataset.boundary);
+});
+
 $('save').onclick = () => {
   localStorage.setItem(KEY_STORE, $('apikey').value.trim());
   notice('已保存'); refreshAll(); schedule();

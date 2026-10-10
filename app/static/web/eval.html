@@ -8,8 +8,10 @@
 <style>
   /* 本页只写【页面专属】规则；token 与通用组件在 `/static/app.css`。
      🔴 2026-10-08：删掉本页自带的 `:root`，硬编码色（#222/#1a73e8/#e8f0fe）换成 token。 */
+  /* 🔴 2026-10-10（施工单刀 8）：`.hint` 那条**已收进 `app.css` §4.9**（辅助说明行全站一份）。
+     本页只留下面这条【页面专有】的：它是**居中的落地页**，说明行要更松一点。 */
   .wrap { max-width: 680px; margin: 10vh auto; padding: 0 var(--sp-4); }
-  .hint { color: var(--fg-dim); font-size: var(--fs-body); margin: 0 0 var(--sp-5); }
+  .wrap .hint { font-size: var(--fs-body); margin: 0 0 var(--sp-5); }
 
   /* 🔴 它就是业务方要的那个「按钮」（`DEC-097`）：**一个 <a>**，样式做成按钮。
      ⚠️ 用 <a href> 而不是 <button onclick="location=…">：

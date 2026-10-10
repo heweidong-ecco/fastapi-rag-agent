@@ -6,53 +6,32 @@
 <title>执行轨迹与花费</title>
 <link rel="stylesheet" href="/static/app.css">
 <style>
-  /* 本页只写【页面专属】规则 —— 通用组件与 token 在 `/static/app.css`
-     （= `frontend/README.md` §三–§五 那份规范的实现）。
-
-     🔴 **2026-10-08 改了什么**：本页原先自带着一套 `:root`（`--fg/--muted/--line/--bg/--bad/--warn`）
-     —— **与全局 token 同名却是另一套值**。那正是「同名 class 不同义」那个病的另一面：
-     一个页面里看到的 `--line` 和另一页的 `--line` 不是同一个颜色。
-     ⇒ **删掉本页的 `:root`**（除两条轴各自的颜色），改用全局 token。
-     ⚠️ **本轮⛔ 一个字的结构都没动**：没有改 class 名、没有改 id、没有动 JS。
-     ⛔ 文案口径也没动（`#empty` 里「为什么空」那几句是裁过的 · `DEC-093`）。 */
+  /* 本页只写【页面专属】规则 —— 通用组件与 token 在 `/static/app.css`。
+   *
+   * 🔴 **2026-10-10（施工单刀 8）：本页与全站重复的规则已收进 `app.css` §4.9。**
+   *    原先这里还写过 `table/th/td` · `#notice` · `pre` · `details summary` · `input` · `.card` 一堆，
+   *    它们**全站通用**，而且在好几个页面里各写一遍 ⇒ 已搬走。
+   *    ⚠️ 顺带删掉两条**死规则**：`.card .k` 与 `.card .v` —— 页面上那两格用的是
+   *       `class="card metric"` + `metric-l`/`metric-v`（`app.css` 已有）
+   *       ⇒ 那两条选择器**一个元素都匹配不到**（排查时要留意：⛔ 别以为它们还在起作用）。
+   *
+   * ⚠️ 本页历史（保留）：2026-10-08 删掉本页自带的 `:root`（与全局 token 同名不同值）。
+   * ⛔ 文案口径没动（`#empty` 里「为什么空」那几句是裁过的 · `DEC-093`）。 */
 
   :root {
     /* 两条轴各用一种颜色 —— 它们**不是同一种东西**，⛔ 别让人以为能按步对齐 */
     --trace: var(--info); --cost: var(--ok);
   }
-  /* ⚠️ 页面【不再自己给 body 加 padding】—— 外层的 `.app-shell` / `.content` 管布局
-     （2026-10-09 按风格稿重排：sidebar + page-head + 卡片网格）。 */
-  .content { overflow: auto; }
-  .sub { color: var(--fg-dim); margin: 0 0 var(--sp-3); }
-  input, button { font: inherit; }
-  input[type=password] { width: 320px; }
-  input[type=text] { width: 260px; }
-  button.primary { border-color: var(--info); color: var(--info); }
-  #notice { margin: var(--sp-2) 0; min-height: 1.4em; color: var(--fg-dim); }
-  #notice.bad { color: var(--bad); }
-
-  table { border-collapse: collapse; width: 100%; background: var(--surface); }
-  th, td { border: 1px solid var(--line); padding: var(--sp-2) var(--sp-2); text-align: left; vertical-align: top; }
-  th { background: var(--bg); font-weight: 600; }
-  td.num { text-align: right; }
-  tfoot td { background: var(--bg); font-weight: 600; }
 
   /* 🔴 只染【顶边】那一条 —— 原先写 `border-top: 3px solid` + `border-color: …`，
      而 `border-color` 会作用到【四条边】⇒ 1px 的其余三边也被染色 ⇒ 渲染成整圈彩框。
      ⚠️ 这是 2026-10-09 截图时看出来的（⛔ 不是想出来的）。 */
-  .axis { }                                  /* 外观交给 app.css 的 .panel */
   #traceaxis { border-top: 3px solid var(--trace); }
   #costaxis  { border-top: 3px solid var(--cost); }
-  .tag { font-size: var(--fs-cap); color: var(--bg); border-radius: var(--r-pill);
-         padding: 1px var(--sp-2); margin-left: var(--sp-2); font-weight: 400; vertical-align: 2px; }
   #traceaxis .tag { background: var(--trace); }
   #costaxis  .tag { background: var(--cost); }
 
   .cards { display: flex; gap: var(--sp-3); flex-wrap: wrap; margin: var(--sp-2) 0; }
-  .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-card);
-          padding: var(--sp-3) var(--sp-4); min-width: 130px; }
-  .card .k { font-size: var(--fs-cap); color: var(--fg-dim); }
-  .card .v { font-size: 20px; }
 
   /* 🔴 「为什么空」那句是裁过的（`DEC-093`）：⛔ 别把这几个字当样式改 */
   #empty { background: color-mix(in srgb, var(--warn) 10%, transparent);
@@ -60,8 +39,6 @@
            border-radius: var(--r-card); padding: var(--sp-3); margin: var(--sp-2) 0; }
   #empty:empty { display: none; }
   .step.err { color: var(--bad); }
-  details > summary { cursor: pointer; color: var(--fg-dim); font-size: var(--fs-cap); }
-  pre { white-space: pre-wrap; word-break: break-word; margin: 2px 0; }
   #warn { color: var(--warn); font-size: var(--fs-body); }
 </style>
 </head>
@@ -91,11 +68,23 @@
       <label class="field">API Key <input id="apikey" type="password" placeholder="X-API-Key"></label>
       <button id="save">保存</button>
       <label class="field">thread_id <input id="thread" type="text" placeholder="default"></label>
-      <button id="load" class="primary">查询</button>
+      <button id="load" class="btn primary">查询</button>
     </header>
 
     <div class="content">
-      <div id="notice"></div>
+      <div id="notice" class="notice"></div>
+
+      <!-- 🔴 边界标注（规格 §3.6.1 的② · 提示在前）。文案【只从 RagPanel 取】—— ⛔ 别在这抄一遍。 -->
+      <section class="panel" id="boundary" aria-label="使用前必读（平台与额度边界）"
+               style="margin-bottom:var(--sp-4)">
+        <div class="panel-body">
+          <h2 style="margin-top:0">使用前必读</h2>
+          <div class="panel-boundary" data-boundary="platform_restart"></div>
+          <div class="panel-boundary" data-boundary="quota"></div>
+          <div class="panel-boundary" data-boundary="rate_limit"></div>
+          <div class="panel-boundary" data-boundary="real_api"></div>
+        </div>
+      </section>
 
       <p class="sub">
         同一个线程，<b>两条轴各画各的</b> —— 它们的数据源不同、粒度不同，
@@ -110,6 +99,7 @@
         <section id="traceaxis" class="axis panel">
           <div class="panel-head">追踪轴 <span class="tag">进程内存 · 一次工具调用一条</span></div>
           <div class="panel-body">
+            <div class="panel-boundary slim" data-boundary="platform_restart"></div>
             <p class="sub" id="tracewho"></p>
 
             <div class="cards">
@@ -126,7 +116,7 @@
 
             <div id="tracebox" hidden>
               <p><b>提问：</b><span id="query"></span></p>
-              <table id="steps">
+              <table id="steps" class="tbl">
                 <thead><tr><th style="width:36px">#</th><th>工具</th><th style="width:90px">状态</th>
                            <th style="width:90px">耗时</th><th>结果</th></tr></thead>
                 <tbody></tbody>
@@ -147,8 +137,9 @@
         <section id="costaxis" class="axis panel">
           <div class="panel-head">成本轴 <span class="tag">PostgreSQL · 一次模型调用一条</span></div>
           <div class="panel-body">
+            <div class="panel-boundary slim" data-boundary="real_api"></div>
             <p class="sub" id="costwho"></p>
-            <table id="costs">
+            <table id="costs" class="tbl">
               <thead><tr><th style="width:36px">#</th><th style="width:170px">时间</th><th>用途</th>
                          <th>模型</th><th style="width:90px">token</th><th style="width:100px">花费</th></tr></thead>
               <tbody></tbody>
@@ -159,16 +150,43 @@
         </section>
 
       </div>
-    </div>
-  </div>
-</div>
+
+      <!-- 🔴 `GET /agent/traces`（列出轨迹）—— 规格 §3.3 写着「⚠️ 现在没用到 ⇒ 补进导航」。
+           ⚠️ 它⛔ 不是"往侧边栏加一条"：侧边栏只放【5 类主要功能】（口径 ②），
+              而这条属于**已经在那 5 类里的「执行轨迹」** ⇒ 入口落在本页自己身上。 -->
+      <section class="panel" id="tracespanel" style="margin-top:var(--sp-4)">
+        <div class="panel-head">我的轨迹 <span class="tag">进程内存 · 重启即空</span></div>
+        <div class="panel-body">
+          <div class="panel-boundary slim" data-boundary="platform_restart"></div>
+          <p class="sub" style="margin-top:var(--sp-1)">
+            列出轨迹摘要，挑一条把它填进上面的 <code>thread_id</code> 再查。
+            <b>⛔ 只看得到你自己的</b>（管理员例外是后端显式给的一行）。
+          </p>
+          <p class="sub">
+            🔴 这条接口还回了一个 <code>total_cost</code> 字段，但它<b>没有数据源</b> ——
+            写轨迹的那四个地方调 <code>finish_trace</code> 时<b>都没传</b>这个值 ⇒ <b>恒为 0</b>。
+            ⇒ 本页<b>不印它</b>（本仓立场：⛔ 不印"没有数据源的数"，
+            同上面那两格被删掉的理由 · `DEC-093`）。
+          </p>
+          <div id="listnotice" class="notice"></div>
+          <div class="panel-actions"><button class="btn primary" id="loadlist">列出我的轨迹</button></div>
+          <div class="panel-out" id="tracesout" hidden></div>
+        </div>
+      </section>
+
+      <!-- ⚠️ 这段原先**游离在 `.app-shell` 外面**（渲染在骨架之外）⇒ 2026-10-10 收进来。 -->
 
 <p class="sub" style="margin-top:24px">
   ⚠️ 上半页（追踪轴）读的是 API 进程的<b>内存</b> —— <b>重启即清空</b>，而且目前只有
   Agent 链（<code>/agent/mcp_chat</code> 系列）会写它。<br>
   下半页（成本轴）读的是 <b>PostgreSQL</b>，不受重启影响，覆盖所有花钱的地方。
 </p>
+    </div>
+  </div>
+</div>
 
+
+<script src="/static/js/panel.js"></script>
 <script src="/static/js/trace.js"></script>
 <script>
 'use strict';
@@ -366,6 +384,95 @@ async function refreshAll() {
     notice('追踪轴：' + traceRes.reason.message, true);
   }
 }
+
+/* ==================== 边界标注（2026-10-10 · 施工单刀 8）====================
+ * 文案【只从 `RagPanel` 取】—— ⛔ 别在这份 HTML 里再抄一遍（规格 §3.6.2）。
+ * ⚠️ 本页**不是**能力面板那一族（那几页用 `RagOps` / `RagTools` 那套 helper），
+ *    它照旧用 `RagPanel` —— **边界文案全站只有这一份**（`panel.js`）。 */
+document.querySelectorAll('[data-boundary]').forEach((n) => {
+  n.textContent = n.classList.contains('slim')
+    ? RagPanel.boundaryShort(n.dataset.boundary)
+    : RagPanel.boundaryText(n.dataset.boundary);
+});
+
+/* ==================== 列出我的轨迹（`GET /agent/traces`）====================
+ * 🔴 **为什么印的列只有这四个**：接口还回了一个 `total_cost`，而它**没有数据源**
+ *    （四个写轨迹的地方调 `finish_trace` 时都没传那个值）⇒ **恒为 0**
+ *    ⇒ ⛔ **不印它**（本仓立场：⛔ 不印"没有数据源的数"）。
+ *    ⚠️ 那正是本页原先删掉「总 Token / 总花费」两格的**同一个理由**（`DEC-093`）——
+ *       别因为"接口里有这个字段"就把它画出来。 */
+function el(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text !== undefined) n.textContent = text;   // ⛔ 一律 textContent
+  return n;
+}
+
+function listNotice(msg, bad) {
+  const n = $('listnotice');
+  n.textContent = msg || '';
+  n.classList.toggle('bad', !!bad);
+}
+
+function renderTraces(payload) {
+  const out = $('tracesout');
+  out.innerHTML = '';
+  const rows = (payload && Array.isArray(payload.traces)) ? payload.traces : [];
+  if (!rows.length) {
+    const box = el('div', 'empty');
+    box.appendChild(el('div', '', '这一格没有数据。'));
+    box.appendChild(el('div', 'why',
+      '你的轨迹列表是空的 —— 要么还没跑过 Agent 链，要么服务重启过（这张表在进程内存里）。'
+      + '⛔ 不是这条接口坏了。'));
+    out.appendChild(box);
+    return;
+  }
+  const tbl = el('table', 'tbl');
+  const hr = el('tr');
+  ['thread_id', '提问', '工具调用', '耗时', ''].forEach((h) => hr.appendChild(el('th', '', h)));
+  const thead = el('thead'); thead.appendChild(hr); tbl.appendChild(thead);
+  const tb = el('tbody');
+  rows.forEach((t) => {
+    const tr = el('tr');
+    tr.appendChild(el('td', '', String(t.thread_id)));
+    tr.appendChild(el('td', '', String(t.user_query === undefined ? '--' : t.user_query)));
+    tr.appendChild(el('td', 'num', String(t.tool_calls_count)));
+    tr.appendChild(el('td', 'num', (t.duration_ms === undefined ? '--' : t.duration_ms + ' ms')));
+    const tdB = el('td');
+    const b = el('button', 'btn', '查这条');
+    // 🔴 点一下 ⇒ 填进上面的 thread_id 并**立即查**（"看得见 + 点得到"）
+    b.onclick = () => { $('thread').value = String(t.thread_id); refreshAll(); };
+    tdB.appendChild(b);
+    tr.appendChild(tdB);
+    tb.appendChild(tr);
+  });
+  tbl.appendChild(tb);
+  out.appendChild(tbl);
+}
+
+$('loadlist').onclick = async () => {
+  const out = $('tracesout');
+  out.hidden = false;
+  out.textContent = '请求中…';
+  listNotice('');
+  try {
+    const r = await fetch('/api/v1/agent/traces', { headers: { 'X-API-Key': key() } });
+    const text = await r.text();
+    let payload = null;
+    try { payload = JSON.parse(text); } catch (e) { payload = null; }
+    if (!r.ok) {
+      out.innerHTML = '';
+      const msg = (payload && typeof payload.error === 'string') ? payload.error : ('HTTP ' + r.status);
+      out.appendChild(el('div', 'alert error', '列不出来：' + msg));
+      return;
+    }
+    if (payload === null) { out.textContent = '返回的不是 JSON：' + text.slice(0, 300); return; }
+    renderTraces(payload);
+  } catch (e) {
+    out.innerHTML = '';
+    out.appendChild(el('div', 'alert error', '请求发不出去：' + e.message));
+  }
+};
 
 $('apikey').value = key();
 $('thread').value = RagTrace.readThreadId(location.search);
