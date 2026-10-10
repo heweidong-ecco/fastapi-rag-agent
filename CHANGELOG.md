@@ -10,6 +10,14 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- 🔴 **收尾自查补的两处**（2026-10-10 · `/handoff` 按 `git` 核出来的）：
+  - `ROADMAP.md` §⑤「在飞 PR」还写着 **无** ⇒ 改成**这一支**（`gates/layered-claude-md`），
+    并写明**它在主干合入之前，主干上那四份文档还是旧的**。⚠️ **条数写的是命令，⛔ 不是数字**。
+  - `CLAUDE.md` §六「判据」纪律 **加两行**（⛔ 都是我这次真踩的）：
+    ① **切片改文档前先断言 `a < b`** —— `old_end` 在 `old_start` 之前 ⇒ **74 行被整段复制 + 吞掉一节**，
+    而**没有任何门会红**；② **zsh 双引号里 `\n` 是字面反斜杠 n** · **Python heredoc 里 ASCII 双引号会 `SyntaxError`**
+    （一天栽 2 次）。
+
 - 🔴 **补齐原两张图的【另一个视角】+ 修两处与代码对不上的数字**（2026-10-10 · 业务方：「**要补，
   还有什么要补和修改的一并补好，不要一直我说一句你做一个**」）。
   - 🆕 **`docs/end-to-end.png`**（`04-端到端链路.mmd`）—— **一次检索请求从头走到尾**
