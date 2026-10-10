@@ -1,0 +1,15 @@
+%% 一次请求怎么走 —— 中间件顺序陷阱。内容来源：docs/原理/架构.md §2.2
+%% ⚠️ 标签必须【短】—— 长标签会把节点撑成竖条，出图变窄高条
+flowchart TB
+  S1["源码顺序：日志 → 限流 → 配额 → 规范化"]
+  S2["实际执行：规范化 → 配额 → 限流 → 日志"]
+  S1 -. "逐层相反" .-> S2
+  S2 --> R["路由 · 鉴权 · 业务 · 存储"]
+  S2 -. "429" .-> T["被拒 ⇒ 不经过日志中间件<br/>⇒ 不进指标 · 无 X-Request-ID"]
+
+  classDef mw fill:#eef3ff,stroke:#4d7cfe,color:#1c46c0
+  classDef bad fill:#fff0f0,stroke:#d6336c,color:#a61e4d
+  classDef src fill:#fff4e8,stroke:#e08a2e,color:#7a3d00
+  class S2,R mw
+  class T bad
+  class S1 src

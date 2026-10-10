@@ -1,0 +1,21 @@
+{
+  "_comment": "mermaid-cli 的样式配置。⛔ 别把 fontFamily 写死成某个平台专有字体名（换机器会静默退回默认字体 ⇒ 中文变方框）。",
+  "theme": "base",
+  "themeVariables": {
+    "fontFamily": "\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Noto Sans CJK SC\", sans-serif",
+    "fontSize": "15px",
+    "lineColor": "#8c959f",
+    "primaryTextColor": "#1f2328",
+    "clusterBkg": "#fbfcfd",
+    "clusterBorder": "#d0d7de"
+  },
+  "flowchart": {
+    "curve": "basis",
+    "nodeSpacing": 45,
+    "rankSpacing": 60,
+    "padding": 12,
+    "useMaxWidth": false,
+    "htmlLabels": true,
+    "wrappingWidth": 420
+  }
+}
