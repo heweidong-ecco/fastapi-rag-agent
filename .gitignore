@@ -79,3 +79,6 @@ frontend/*.fig
 #    而那份归档**必须入库**（`subagent-lifecycle.md` §5 的落点；不入库 = 换台机器就没了）。
 #    ⇒ 反向加回来。⚠️ 下面这条**必须放在 `tmp/` 之后**（.gitignore 后写的规则优先）。
 !.claude/agents/tmp/
+
+# ===== Playwright MCP 的临时产物（截图 / 快照 / 控制台日志）=====
+.playwright-mcp/

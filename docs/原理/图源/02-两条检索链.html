@@ -1,0 +1,106 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>两条检索链</title>
+<style>
+  :root{--bg:#f6f8fa;--fg:#1f2328;--muted:#656d76;--line:#d0d7de;
+        --a:#4d7cfe;--b:#e08a2e;--bad:#d6336c;--ok:#2f9e44;
+        --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font:14px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}
+  .canvas{width:1600px;padding:36px 40px 40px}
+  h1{font-size:22px;margin:0 0 4px}
+  .sub{color:var(--muted);font-size:13px;margin-bottom:20px}
+  .split{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
+  .col{background:#fff;border:1.5px solid var(--line);border-radius:12px;padding:14px 16px}
+  .col.a{border-color:var(--a)} .col.b{border-color:var(--b)}
+  .col h2{font-size:14px;margin:0 0 4px}
+  .col.a h2{color:#1c46c0} .col.b h2{color:#8a4b00}
+  .path{font-family:var(--mono);font-size:12.5px;color:var(--muted);margin-bottom:10px}
+  .stepline{display:flex;flex-direction:column;gap:6px}
+  .s{border:1px solid var(--line);border-radius:8px;padding:7px 11px;font-size:12.5px;background:#fbfcfd}
+  .s.k{background:#eef3ff;border-color:var(--a);font-weight:600}
+  .s.w{background:#fff4e8;border-color:var(--b);font-weight:600}
+  .s.x{background:#f0f3f6;border-style:dashed;color:var(--muted)}
+  .s.d{background:#fff0f0;border-color:var(--bad);font-weight:600}
+  .down{text-align:center;color:#8c959f;font-size:12px;line-height:1}
+  table{border-collapse:collapse;width:100%;font-size:13px;background:#fff}
+  th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+  th{background:#f0f3f6;font-weight:600}
+  code{font-family:var(--mono);font-size:12px;background:#f0f3f6;padding:1px 5px;border-radius:4px}
+  .bad{color:#a61e4d;font-weight:600} .ok{color:#1a7a2e;font-weight:600}
+  .warn{border:1.5px solid var(--bad);background:#fff0f0;border-radius:10px;padding:12px 15px;font-size:13px;margin-bottom:16px}
+  .warn b{color:#a61e4d}
+  .muted{color:var(--muted);font-size:12px}
+</style>
+<div class="canvas">
+  <h1>两条检索链 —— 它们<b>不一样</b>，这是本仓最该知道的一件事</h1>
+  <div class="sub">同样一个 <code>top_k</code>，两条链<b>召回的文档集不同源</b>。
+    权威来源：<code>docs/原理/架构.md</code> §三。</div>
+
+  <div class="split">
+    <div class="col a">
+      <h2>POST /rag/search —— “管线化”的那条</h2>
+      <div class="path">走 <code>app/rag/rag_pipeline.py</code></div>
+      <div class="stepline">
+        <div class="s k">① 清洗</div><div class="down">▼</div>
+        <div class="s k">② 查询改写（LLM · Redis 缓存 1h）</div><div class="down">▼</div>
+        <div class="s k">③ 查询扩展</div><div class="down">▼</div>
+        <div class="s k">④ 每个子查询 → embedding（DashScope）</div><div class="down">▼</div>
+        <div class="s k">⑤ 向量检索 <code>search_similar_async</code>（pgvector <code>&lt;=&gt;</code>）</div><div class="down">＋</div>
+        <div class="s k">⑥ BM25 检索（jieba + rank_bm25）</div><div class="down">▼</div>
+        <div class="s k">⑦ <b>RRF 融合</b>（k=60）</div><div class="down">▼</div>
+        <div class="s w">⑧ 重排序（Cross-Encoder）<b>← 需要 torch</b></div><div class="down">▼</div>
+        <div class="s k">⑨ 过滤 <code>rerank_score &lt; 0</code></div><div class="down">▼</div>
+        <div class="s">⑩ 可选：生成答案 + 标引用</div>
+      </div>
+      <div class="muted" style="margin-top:10px">
+        ✅ <b>每一环都可开关</b>，由 <code>mode</code> 决定 —— 4 种：<code>fast</code> / <code>accurate</code> /
+        <b><code>accurate_norerank</code>（默认）</b> / <code>full</code>
+      </div>
+    </div>
+
+    <div class="col b">
+      <h2>POST /rag/stream_search —— “自成一体”的那条</h2>
+      <div class="path">走 <code>app/routing/api_v1_rag.py</code> 端点自己</div>
+      <div class="stepline">
+        <div class="s w">① 读对话历史（Redis）</div><div class="down">▼</div>
+        <div class="s w">② 问题 → embedding</div><div class="down">▼</div>
+        <div class="s d">③ <b>裸 SQL 直查 pgvector</b></div><div class="down">▼</div>
+        <div class="s x">✗ 不走 rag_pipeline</div>
+        <div class="s x">✗ 不走 hybrid_search / BM25</div>
+        <div class="s x">✗ 不走 reranker</div>
+        <div class="down">▼</div>
+        <div class="s w">④ 组 prompt（<code>citations</code> 决定用哪套）</div><div class="down">▼</div>
+        <div class="s w">⑤ <b>逐 chunk yield</b>（SSE 流式）</div><div class="down">▼</div>
+        <div class="s w">⑥ 写回对话历史</div>
+      </div>
+      <div class="muted" style="margin-top:10px">
+        🔴 它是 <b>6 条流式端点的骨架</b>模板；取消/异常/正常三条出口都留痕。
+      </div>
+    </div>
+  </div>
+
+  <div class="warn">
+    <b>关键差异：</b>「检索结果和流式结果对不上」<b>不是 bug，是设计如此</b> ——
+    但它<b>没被任何文档写下来过</b>，直到 <code>docs/原理/架构.md</code>。
+    ⬜ <b>待裁</b>：这是有意（流式要快）还是欠账？<b>已登记</b> <code>ROADMAP.md</code>。
+  </div>
+
+  <table>
+    <tr><th>比什么</th><th>/rag/search</th><th>/rag/stream_search</th></tr>
+    <tr><td><b>召回来源</b></td><td class="ok">改写 + 向量 + BM25 + RRF + 重排</td><td class="bad">仅向量（裸 SQL）</td></tr>
+    <tr><td><b>受 <code>mode</code> 影响</b></td><td class="ok">✅ 4 种模式</td><td class="bad">⛔ 它没有 <code>mode</code> 参数</td></tr>
+    <tr><td><b>用 hybrid_search / bm25_index</b></td><td class="ok">✅</td><td class="bad">⛔</td></tr>
+    <tr><td><b>流式输出</b></td><td>⛔</td><td class="ok">✅ SSE 逐字</td></tr>
+  </table>
+
+  <div class="warn" style="margin-top:16px;border-color:#e08a2e;background:#fff4e8">
+    <b style="color:#8a4b00">另一处「同一算法两份实现」：</b>
+    <code>rag_pipeline.py</code> 与 <code>hybrid_search.py</code> 各有一套 <b>RRF，互不共用</b> ——
+    <code>/rag/search</code> 走前者、<code>/rag/hybrid_search</code> 走后者；
+    ⚠️ 而测试里还有<b>第三份复制</b> ⇒ <b>真融合逻辑在测试里没被直接覆盖</b>。
+  </div>
+
+  <div class="muted">权威来源：<code>docs/原理/架构.md</code> §三（核过代码）· 各模块细节 ⇒ <code>app/&lt;组&gt;/specs/</code></div>
+</div>

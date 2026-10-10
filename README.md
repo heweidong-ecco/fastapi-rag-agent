@@ -162,16 +162,26 @@ bash dev.sh        # 起 postgres+redis → 等就绪 → 起 uvicorn（热重�
 
 📄 逐项 + 落点 ⇒ `docs/原理/架构.md` §1 · 环境变量 ⇒ `docs/契约/环境变量.md`
 
-## 技术架构
+## 系统架构
 
-![系统架构图](docs/architecture.png)
+**① 系统总览** —— 四层：客户端 → FastAPI 应用（单容器）→ 存储 → 外部服务
 
-**整套系统架构图**（上面那张没画到的部分：MCP 工具层 · 部门制 Agent · 成本控制体系）：
+![系统总览](docs/architecture.png)
 
-![完整系统架构图](docs/architecture-full.png)
+**② 一次请求怎么走** —— ⚠️ 中间件的**执行顺序与源码顺序逐层相反**（被 429 拒掉的请求**不进指标**）
 
-> ⚠️ **一处已过时，别照图核代码**：图上工具层画的是 `rag_search`，而当前实际工具是 `fetch_webpage_html`
-> ⇒ 这张图记录的是**更早一代**的工具集。
+![请求流与中间件](docs/request-flow.png)
+
+**③ 两条检索链** —— `/rag/search`（管线化）与 `/rag/stream_search`（裸 SQL）**召回来源不同源**
+
+![两条检索链](docs/retrieval-chains.png)
+
+**④ 部署拓扑** —— 6 容器 · 3 张网络 · **对外端口全绑 `127.0.0.1`**
+
+![部署拓扑](docs/deploy-topology.png)
+
+> 📄 **图源是 HTML**（`docs/原理/图源/*.html`）⇒ **改它 + 重出图**即可，⛔ 不是"手画完就没人会更新"的位图。
+> 📄 **文字版（更全，且核过代码）⇒ `docs/原理/架构.md`**。
 
 ## 性能目标（⚠️ **是目标值 —— 不是指标**）
 

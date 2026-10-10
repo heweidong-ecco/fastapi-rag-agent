@@ -1,0 +1,109 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>部署拓扑</title>
+<style>
+  :root{--bg:#f6f8fa;--fg:#1f2328;--muted:#656d76;--line:#d0d7de;
+        --a:#4d7cfe;--store:#e08a2e;--mon:#2f9e44;--iso:#d6336c;
+        --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font:14px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}
+  .canvas{width:1560px;padding:36px 40px 40px}
+  h1{font-size:22px;margin:0 0 4px}
+  .sub{color:var(--muted);font-size:13px;margin-bottom:20px}
+  .host{border:2px solid var(--a);border-radius:14px;padding:14px 16px;background:#eef3ff}
+  .host>.t{font-size:13px;font-weight:700;color:#1c46c0;margin-bottom:12px}
+  .net{border:1.5px dashed var(--line);border-radius:12px;padding:12px 14px;margin-bottom:12px;background:#fff}
+  .net>.t{font-size:12.5px;font-weight:700;margin-bottom:10px}
+  .net.app{border-color:var(--a)}      .net.app>.t{color:#1c46c0}
+  .net.mon{border-color:var(--mon)}    .net.mon>.t{color:#1a7a2e}
+  .net.iso{border-color:var(--iso);background:#fff7f9} .net.iso>.t{color:#a61e4d}
+  .row{display:flex;gap:12px;flex-wrap:wrap}
+  .c{border:1.5px solid var(--line);border-radius:10px;padding:10px 13px;background:#fff;min-width:212px;flex:1}
+  .c b{display:block;font-size:13px;margin-bottom:3px}
+  .c .img{font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:4px}
+  .c .p{font-family:var(--mono);font-size:11.5px;color:#1c46c0}
+  .c .n{font-size:11.5px;color:var(--muted)}
+  .store{border-color:var(--store);background:#fff4e8}
+  .iso{border-color:var(--iso);background:#ffeef4}
+  .mon{border-color:var(--mon);background:#effbf1}
+  code{font-family:var(--mono);font-size:12px;background:#f0f3f6;padding:1px 5px;border-radius:4px}
+  .warn{border:1.5px solid var(--iso);background:#fff0f0;border-radius:10px;padding:12px 15px;font-size:13px;margin-top:14px}
+  .warn b{color:#a61e4d}
+  .ok{border:1.5px solid var(--mon);background:#effbf1;border-radius:10px;padding:12px 15px;font-size:13px;margin-top:14px}
+  .ok b{color:#1a7a2e}
+  .muted{color:var(--muted);font-size:12px}
+  ul{margin:6px 0 0;padding-left:20px} li{margin:3px 0}
+</style>
+<div class="canvas">
+  <h1>部署拓扑 —— 6 个容器 · 3 张网络</h1>
+  <div class="sub">来源：<code>docker-compose.yml</code>（实测读数）·
+    🔴 <b>所有对外端口都只绑 <code>127.0.0.1</code></b>（2026-09 起的端口收窄）</div>
+
+  <div class="host">
+    <div class="t">主机（本机 Docker）—— 一条 <code>docker compose up -d</code> 起全栈</div>
+
+    <div class="net app">
+      <div class="t">app-net（bridge）—— 应用网络</div>
+      <div class="row">
+        <div class="c"><b>rag-api</b><div class="img">fastapi-rag-agent:latest</div>
+          <div class="p">127.0.0.1:8000 → 8000</div>
+          <div class="n">FastAPI 应用本体</div></div>
+        <div class="c store"><b>postgres-rag</b><div class="img">pgvector/pgvector:pg17</div>
+          <div class="p">127.0.0.1:5432 → 5432</div>
+          <div class="n">向量 + 业务表（7 张）</div></div>
+        <div class="c store"><b>redis-rag</b><div class="img">redis:7-alpine</div>
+          <div class="p">127.0.0.1:6379 → 6379</div>
+          <div class="n">缓存 · 限流桶 · 会话</div></div>
+      </div>
+    </div>
+
+    <div class="net iso">
+      <div class="t">exec-net（<code>internal: true</code> = 没有对外网关）—— 执行器专用网</div>
+      <div class="row">
+        <div class="c iso"><b>rag-executor</b><div class="img">executor.Dockerfile</div>
+          <div class="p">⛔ 不映射任何端口</div>
+          <div class="n">跑 <code>execute_python</code>：<b>出不了互联网</b> · 非 root · 只读根 ·
+            5s / 256MB / pids 上限</div></div>
+      </div>
+      <div class="muted" style="margin-top:8px">
+        🔴 应用侧<b>不碰 <code>docker.sock</code></b> —— 代码执行被隔到这一层。
+      </div>
+    </div>
+
+    <div class="net mon">
+      <div class="t">monitor-net（bridge）—— 监控网络</div>
+      <div class="row">
+        <div class="c mon"><b>prometheus</b><div class="img">prom/prometheus:latest</div>
+          <div class="p">127.0.0.1:9090 → 9090</div>
+          <div class="n">指标抓取</div></div>
+        <div class="c mon"><b>grafana</b><div class="img">grafana/grafana:latest</div>
+          <div class="p">127.0.0.1:3000 → 3000</div>
+          <div class="n">看板（<code>admin</code>/<code>admin</code> 默认）</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="ok">
+    <b>端口全在回环上 —— 这是有意的安全收窄：</b>
+    <ul>
+      <li><code>8000</code> 原先是 <code>"8000:8000"</code> = 绑 <code>0.0.0.0</code> ⇒ 同网段任何人可调这个 API</li>
+      <li><code>5432</code> / <code>6379</code> 同理；⚠️ <b>Redis 没有口令</b>，暴露面比 Postgres 更大</li>
+      <li><code>9090</code>（Prometheus 默认无鉴权）· <code>3000</code>（Grafana 默认口令）同理</li>
+    </ul>
+  </div>
+
+  <div class="warn">
+    <b>两处仍未解决（⛔ 别读成"全好了"）：</b>
+    <ul>
+      <li><b>Grafana 口令仍是默认值</b> —— 绑回环只挡住局域网；上公网前<b>必须显式设口令</b>。</li>
+      <li><b>看板是【手工配置】的</b>（在 <code>grafana.db</code> 里，<b>仓库无 provisioning</b>）
+        ⇒ 换台机器起来会「容器在、看板没有」。</li>
+    </ul>
+  </div>
+
+  <div class="muted" style="margin-top:14px">
+    权威来源：<code>docker-compose.yml</code> · 安全细节 ⇒ <code>SECURITY.md</code> ·
+    威胁模型与<b>已接受的残余风险</b> ⇒ <code>docs/威胁模型.md</code>
+  </div>
+</div>

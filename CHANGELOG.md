@@ -10,6 +10,23 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- 🔴 **架构图【全部重画】—— 图源入库，图能再生成**（2026-10-10 · 业务方指令 · 📄 **`DEC-136`**）。
+  - ⛔ **删** `docs/architecture-full.png`（**1.5 MB 旧图**）· 🔁 **重画** `docs/architecture.png`。
+  - 🆕 **补三张**（对照 `docs/原理/架构.md` 里两条"只有文字、没人画过"的东西）：
+    - **`docs/request-flow.png`** —— 一次请求怎么走 + **中间件顺序陷阱**
+      （**执行顺序与源码顺序逐层相反**；**被 429 拒掉的请求不进指标**）
+    - **`docs/retrieval-chains.png`** —— `/rag/search` vs `/rag/stream_search` **召回来源不同源**
+      （架构文档自己写着这条「**没被任何文档写下来过**」）
+    - **`docs/deploy-topology.png`** —— 6 容器 / 3 张网络 / **对外端口全绑 `127.0.0.1`**
+  - 🆕 **`docs/原理/图源/`（HTML + CSS 源）** —— 🔴 **图能再生成**，⛔ 不是"手画完就没人会更新"的位图。
+    ⚠️ **出图没有 CLI 脚本**（工具是 Playwright MCP，不是命令行）⇒ 做法写在它的 `CLAUDE.md` 里。
+    ⚠️ **浏览器挡 `file://`** ⇒ 要起 **`--bind 127.0.0.1`** 的静态服务（⛔ 别用默认 `0.0.0.0`）。
+  - 🔴 **为什么非重画不可**：`docs/原理/架构.md` 自己记着 —— 旧图**工具层画的是 `rag_search`**，
+    而实际是 `fetch_webpage_html` ⇒ **图比文字更容易烂，且烂了没有门会红**。
+  - 📌 **出图路线**：⛔ **没装 graphviz / mermaid CLI**（为出图给本机加依赖 = 与「别往 requirements 塞 linter」同一条线）——
+    走 **HTML + Playwright 截图**，**零新依赖**。新图 **180–230 KB/张**。
+  - 🆕 **`.playwright-mcp/` 进 `.gitignore`** —— Playwright MCP 的临时产物，⚠️ **原先没被忽略**。
+
 - 🔴 **`README.md` 对齐 GitHub 高星项目的 README 结构**（2026-10-10 · 业务方指令「**联网搜索下 GitHub 置信度高的项目的 README.md 是怎么写的，参考，回写**」）——
   **219 → 252 行**。
   - **参考对象（实测抓的真 README）**：`infiniflow/ragflow` · `langgenius/dify` · `langchain-ai/langgraph`
