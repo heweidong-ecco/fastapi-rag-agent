@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-PreToolUse hook —— **`git commit` 之前，自动跑本仓的七道门**。
+PreToolUse hook —— **`git commit` 之前，自动跑本仓的八道门**。
 
 ## 为什么要它（这不是"再提醒一次"，是补一个结构性缺口）
 
@@ -15,7 +15,7 @@ PreToolUse hook —— **`git commit` 之前，自动跑本仓的七道门**。
 * 改完文档**没跑链接检查**（一路靠"我记得"）
 * 新建文档**没登记 `docs/文档地图.md`**（脚本有了，但没人跑它）
 
-## 七道门
+## 八道门
 
 | # | 门 | 脚本 | 拦住什么 |
 |---|---|---|---|
@@ -25,7 +25,8 @@ PreToolUse hook —— **`git commit` 之前，自动跑本仓的七道门**。
 | ④ | **模块 spec 门**（内联） | — | 新增 `app/**/*.py` 模块却没有**同目录 `specs/<模块>.md`** |
 | ⑤ | **路由鉴权门** | `scripts/check_route_auth.py --baseline` | 新引入了**没有鉴权依赖**的路由（含 WebSocket）|
 | ⑥ | **静态检查门** | `scripts/check_lint_baseline.sh` | 新出现的**未使用导入 / 语法级错误**（ruff · **基线棘轮**，2026-10-07 加）|
-| ⑦ | **过期导入门** 🆕 | `scripts/check_stale_imports.sh` | `app/` 之外的 .py 里**模块搬了家但导入没改**（`from auth import …`）· **2026-10-09 加（`N21`）** |
+| ⑦ | **过期导入门** | `scripts/check_stale_imports.sh` | `app/` 之外的 .py 里**模块搬了家但导入没改**（`from auth import …`）· **2026-10-09 加（`N21`）** |
+| ⑧ | 🆕 **分层 CLAUDE.md 门** | `scripts/check_layered_claude_md.sh` | **新加了一个目录、却没给它 `CLAUDE.md`** —— 而「每层一份 `CLAUDE.md`」这套机制**此前全靠自觉** · **2026-10-10 加** |
 
 ⚠️ **七道都会【跳过本次提交】吗** —— 不是，见下面「克制」。
 ⚠️ **⑥ 与前几道的口径不同**：它拦的是「**比基线多出来的**」，⛔ 不是「一条都不许有」
@@ -82,6 +83,17 @@ GATES = [
     #    理由同第 ⑥ 道门那条「没跑 ≠ 通过」。
     # 📄 背景 ⇒ `docs/复盘/2026-10-09-测试全绿而活路径坏了两次.md`
     ("过期导入门", "scripts/check_stale_imports.sh"),
+    # ── 第 ⑧ 道门：分层 CLAUDE.md（2026-10-10 加）──
+    # 拦什么：**新加了一个目录、却没给它 `CLAUDE.md`**。
+    # 🔴 **为什么非要有它**：2026-10-09 起本仓用「每层目录一份 `CLAUDE.md`」这套机制
+    #    （规范 ⇒ `docs/规范/目录结构与分层CLAUDE规范.md` §六），但**它一直是【靠自觉】的** ——
+    #    · 第 ④ 道管的是「新增 **`.py` 模块** ⇒ 必须有 spec」  ⛔ 不管目录
+    #    · 第 ③ 道（孤儿门）管的是「**`.md` 文档**必须被指向」    ⛔ 也不管目录
+    #    ⇒ **漏一层不会让任何门变红**（本仓原话：「**门挂在别处，就等于没有门**」·
+    #      「**只有文字就漏，结构才执行**」—— 补这道门之前，规范 §六 **只有文字**）。
+    # ⚠️ 退出码 **3 = 「判不了 / 没跑」**（不是 git 仓、git 读不到）—— 与"干净"分开，
+    #    理由同第 ⑥/⑦ 道门那条「**没跑 ≠ 通过**」。
+    ("分层CLAUDE.md门", "scripts/check_layered_claude_md.sh"),
 ]
 
 # ── 第 ④ 道门（**内联，不是外部脚本**）：新增模块必须有 spec ──
@@ -375,7 +387,7 @@ def main() -> int:
         parts.append("路由鉴权门 ⚠️ 跳过（脚本不在 / 跑不起来 / git 读不到 staged）")
     if skipped:
         parts.append("⚠️ 跳过：" + " · ".join(skipped))
-    print(f"🔒 提交前七道门：{' ｜ '.join(parts) or '（无门可跑）'}", file=sys.stderr)
+    print(f"🔒 提交前八道门：{' ｜ '.join(parts) or '（无门可跑）'}", file=sys.stderr)
     return 0
 
 

@@ -486,6 +486,28 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- 🆕 **第 ⑧ 道提交门 —— 分层 CLAUDE.md 门**（2026-10-10 · 📄 **`DEC-131`**）—— `scripts/check_layered_claude_md.sh`。
+  - 🔴 **为什么非要有它**：2026-10-09 起本仓用「**每层目录一份 `CLAUDE.md`**」这套机制
+    （规范 ⇒ `docs/规范/目录结构与分层CLAUDE规范.md` §六），但**它一直是【靠自觉】的** ——
+    **全仓 7 道门里没有一道管目录层**：
+    · 第 ④ 道管的是「新增 **`.py` 模块** ⇒ 必须有 spec」 ⛔ **不管目录**；
+    · 第 ③ 道（孤儿门）管的是「**`.md` 文档**必须被指向」 ⛔ **也不管目录**。
+    ⇒ **漏一层不会让任何门变红** —— 本仓原话：「**门挂在别处，就等于没有门**」·
+    **「只有文字就漏，结构才执行」**（补这道门之前，规范 §六 **只有文字**）。
+  - **判据**：**每个【含 tracked 文件】的目录，除豁免名单外，都必须有 tracked 的 `CLAUDE.md`**。
+    ⚠️ 口径问的是 **git（克隆者拿得到什么）**，⛔ 不是磁盘（同断链门 `DEC-076 §2.9`）。
+  - **豁免名单直接抄自规范 §六**（`venv/` `logs/` `archive/` `demo/设置与命令/` `.claude/worktrees/`…），
+    ⛔ **不在脚本里另造一份** —— 本仓教训：**一个名单两个来源必然漂移，而漂移是静默的**（`DEC-051`）。
+  - **退出码三态**：`0` 通过 · `1` 有缺（**点名到目录**）· **`3` = 没跑**（不是 git 仓）
+    ⇒ hook 里显示成 **⏭ 未跑**，⛔ **不是 ✅**（同第 ⑥/⑦ 道门的约定）；**CI 那边任何非 0 都算失败**。
+  - ⚠️ **它自带 `--self-test`（5 条）**，⛔ **不像别家另开 `test_*.sh`**（判据简单，不需要夹具文件）：
+    T1 全有 ⇒ 绿 · **T2 有内容却没 `CLAUDE.md` ⇒ 红且指名** · T3 补上 ⇒ 回绿（**证明 T2 钉的真是那一件**）·
+    T4 **豁免目录不报** · T5 **不是 git 仓必须是 3**。
+  - **落点**：`.claude/hooks/pre-commit-gates.py`（GATES 第 8 项）· `.github/workflows/ci.yml`（`offline-tests` 的 run 块）·
+    `.claude/README.md`（门一览 · **本层规矩：新加门必须登记**）· `scripts/CLAUDE.md` · 规范 §六/§八。
+  - 📌 判据（可打印）：`bash scripts/check_layered_claude_md.sh` ⇒ **exit 0**（实测 **51 个目录层 · 0 缺**）·
+    `… --self-test` ⇒ **5 通过 / 0 失败**。
+
 - 🔴 **修：`GET /agent/token/recent` 会返回【所有人】的记录**（2026-10-09 · 业务方当天裁「修」· `DEC-124` §九）——
   它的签名**收了 `user_name`**（`Depends(get_current_user_hybrid)`），而函数体写的是
   `get_recent_usage(limit + 1)` —— **身份根本没往下传** ⇒ 它读的 `_usage_records` 是

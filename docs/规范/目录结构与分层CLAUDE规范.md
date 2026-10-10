@@ -124,6 +124,11 @@ from billing.token_tracker import record_usage
 
 **不建 `CLAUDE.md` 的目录**：`venv/` `venv-ragas/`（依赖）· 被 `.gitignore` 的（`tmp/` `logs/` `archive/` `screenshots/` `self-prompt/` `demo/设置与命令/`）· 自动生成的（`.claude/worktrees/`）· 缓存目录。
 
+> 🔴 **上面这份【就是】门的豁免名单，⛔ 别在别处再造一份。**
+> 判据 ⇒ **`bash scripts/check_layered_claude_md.sh`**（**第 ⑧ 道提交门**，2026-10-10 加 · `DEC-131`）。
+> ⚠️ **两处不一致的表现是"门放行了规范不许放的东西"（或反之），而不报错** —— 本仓明文教训：
+> **一个名单两个来源必然漂移**（`DEC-051`）⇒ **改这条就同批改脚本里的 `NAME_EXEMPT` / `PATH_EXEMPT`**。
+
 **边界**：`CLAUDE.md` 答"这里有什么、在哪"；
 **逐模块的"做到哪"⇒ `app/<组>/specs/<模块>.md`** · **前端各刀 ⇒ `frontend/索引.md`** ·
 **阶段级 / 跨模块的经过 ⇒ `docs/history` 那类的 `docs/历史/`** · **`ROADMAP` 答"当前状态与顺序"**。
@@ -153,6 +158,8 @@ ls app/main.py app/conftest.py                 # 两个入口留在 app/ 根
 ls app/*/specs/*.md | wc -l                    # spec 分散在各组
 bash scripts/spec_status.sh                    # 模块 ↔ spec 对账（56 有 / 0 缺）
 bash scripts/check_doc_links.sh                # 断链门
+bash scripts/check_layered_claude_md.sh        # 🆕 分层 CLAUDE.md 门（每个目录层都得有它）
+bash scripts/check_layered_claude_md.sh --self-test   # 🆕 它的自测（5 条）
 ./venv/bin/python -m pytest app/ -m "not integration and not needs_db" -q
 grep -rn "api/" --include='*.py' app | grep -v "/api/v1"   # 应只剩 URL 前缀
 ```
@@ -162,5 +169,6 @@ grep -rn "api/" --include='*.py' app | grep -v "/api/v1"   # 应只剩 URL 前�
 | 日期 | 变更 |
 |---|---|
 | 2026-10-09 | 建立本规范。`api/` 拆七组 + 容器改名 `app/`（`#123`）· spec 拆进模块 · 分层 `CLAUDE.md` 全覆盖 |
+| 2026-10-10 | §六 **补上第 ⑧ 道提交门**（`scripts/check_layered_claude_md.sh` · `DEC-131`）—— 在此之前这套机制**只有文字、没有门**；§六 的「边界」那句随业务方裁「甲」修正（`DEC-130`） |
 
 详细过程与当时的备选方案见 `docs/历史/模块化重构-过程记录-20261009.md`。

@@ -1,11 +1,11 @@
-# `scripts/` —— 门与工具（28 个）
+# `scripts/` —— 门与工具（29 个）
 
 > 📇 **`scripts/` 不是一个程序，是一组"判据"** —— 每份脚本基本都对应
 > `.claude/README.md` 上的某一道门，或一个手工工具。
 
 ## 📇 本目录索引
 
-**门（提交前 6 道 · 都在 `pre-commit-gates.py` 里调）**
+**门（提交前 8 道 · 都在 `pre-commit-gates.py` 里调）**
 | 脚本 | 拦什么 |
 |---|---|
 | `check_secrets.sh` | 明文凭据（**进了历史就改不掉**） |
@@ -15,7 +15,8 @@
 | `check_route_auth.py` | **新引入了没鉴权的路由** |
 | `check_ci_job_timeouts.py` | **每个 CI job 带 `timeout-minutes`** |
 | `check_index_sync.sh` | **索引声明覆盖的东西还在不在** |
-| `check_stale_imports.sh` | 🆕 **`app/` 之外的 .py 里，模块搬了家但导入没改**（`from auth import …`）—— 2026-10-09 加（`N21`） |
+| `check_stale_imports.sh` | **`app/` 之外的 .py 里，模块搬了家但导入没改**（`from auth import …`）—— 2026-10-09 加（`N21`） |
+| `check_layered_claude_md.sh` | 🆕 **新加了一个目录、却没给它 `CLAUDE.md`** —— 「每层一份 `CLAUDE.md`」那套机制**此前全靠自觉** · 2026-10-10 加 |
 
 **工具 / 自测**
 | 脚本 | 用途 |
@@ -28,7 +29,8 @@
 | `seed_isolation_*.sh` | 三家常驻隔离语料 / 会话 |
 | `backup.sh` · `issue_api_key.py` · `list_endpoints.sh` | 备份 · 发 key · 列接口 |
 | `test_check_*.sh` · `test_remind_hooks.sh` · `test_impact.sh` | ⭐ **门自己的自测**（**进 CI**） |
-| `test_check_stale_imports.sh` | 🆕 过期导入门的自测（**7 条**，含两条「**判不了必须是 exit 2**」的正例） |
+| `test_check_stale_imports.sh` | 过期导入门的自测（**7 条**，含两条「**判不了必须是 exit 2**」的正例） |
+| 🆕 `check_layered_claude_md.sh --self-test` | 分层 CLAUDE.md 门的自测（**5 条**，含「**豁免目录不报**」与「**不是 git 仓必须是 3**」）—— ⚠️ **它是脚本自带的 `--self-test`，⛔ 不像别家另开 `test_*.sh`**（判据简单，不需要夹具文件） |
 | `doc-links-ignore.txt` · `ruff-baseline.txt` · `route-auth-baseline.txt` | 三份**判据数据** |
 
 ## 🔴 本层特有的规矩

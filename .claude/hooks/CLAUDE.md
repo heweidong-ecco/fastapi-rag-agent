@@ -3,7 +3,7 @@
 ## 📇 本目录索引
 | 文件 | 触发 | 干什么 |
 |---|---|---|
-| `pre-commit-gates.py` | `PreToolUse`·Bash 含 `git commit` | **提交前 7 道门**（任一不过就**阻止提交**） |
+| `pre-commit-gates.py` | `PreToolUse`·Bash 含 `git commit` | **提交前 8 道门**（任一不过就**阻止提交**） |
 | `spec-remind.py` | `PostToolUse`·Edit/Write | 写完 `app/**.py` 提醒更新**同目录 `specs/<同名>.md`** |
 | `route-auth-remind.py` | `PostToolUse`·Edit/Write | 改了**路由文件**就跑**路由鉴权门** |
 | `py-compile-remind.py` | `PostToolUse`·Edit/Write | 改完 `.py` **当场编译一次** |

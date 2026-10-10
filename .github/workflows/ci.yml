@@ -309,6 +309,17 @@ jobs:
           bash scripts/check_stale_imports.sh
           bash scripts/test_check_stale_imports.sh
 
+          # ⭐ 分层 CLAUDE.md 门（2026-10-10 加）—— **每个目录层都必须有 `CLAUDE.md`**。
+          #   🔴 为什么非要有它：2026-10-09 起本仓用「每层一份 `CLAUDE.md`」这套机制，
+          #      而**全仓 7 道门里没有一道管目录层** ——
+          #      第 ④ 道管的是「新增 `.py` 模块 ⇒ 必须有 spec」· 第 ③ 道（孤儿）管的是「`.md` 必须被指向」，
+          #      两道都**不管"这个目录有没有索引页"** ⇒ 新加目录忘了写，**没有任何信号**。
+          #   🔴 口径问的是 **git（克隆者拿得到什么）**，⛔ 不是磁盘（同断链门 `DEC-076 §2.9`）。
+          #   ⚠️ 退出码三态：`0` 通过 · `1` 有缺（点名）· **`3` = 没跑**（⛔ 别读成通过）。
+          #   ⚠️ 自测 5 条（含"豁免目录不报"与"不是 git 仓必须是 3"），~0.5s。
+          bash scripts/check_layered_claude_md.sh
+          bash scripts/check_layered_claude_md.sh --self-test
+
           # ⭐ 两个【提醒型】hook 的自测（2026-10-05 加，`DEC-080`）—— 10 条，~1s。
           #   ⚠️ hook 只在 Claude 会话里跑，**CI 里不会触发它们** —— 那为什么还要在这儿测？
           #      因为被测的是**脚本本身**（判据 / 路径剪枝 / 不崩），⛔ 不是"CI 里会发生什么"；
