@@ -55,7 +55,7 @@
 |---|---|
 | `app/specs/main.md` | **中间件的 `PUBLIC_PATHS` 只豁免中间件，≠ 该端点不需要鉴权** —— 本文件的 ⚠️① 就是这条的实例 |
 | `app/access/specs/rate_limiter.md` | `/debug/rate_limit` 用的是它；`user_name` 在那里是**桶名** |
-| `docs/specs/归档/quota_limiter.md` | ⚰️ **已归档** —— `/debug/quota` **原先**用的是它；**2026-10-03 起改用 `token_tracker.get_token_budget_info`**（`DEC-046`） |
+| `app/specs/归档/quota_limiter.md` | ⚰️ **已归档** —— `/debug/quota` **原先**用的是它；**2026-10-03 起改用 `token_tracker.get_token_budget_info`**（`DEC-046`） |
 | `后端补齐清单` **B9** | ⚠️ **本文件 ⚠️② 直接改变 B9 的状态** —— 见下 |
 | `DEC-046` · `app/billing/specs/token_tracker.md` | 🔴 **2026-10-03 配额口径改动** —— `/debug/quota` 的数字**从「次数」变成 token**；`get_user_quota` **已删**（原是本文件 + `main.py` 共三个调用点之一） |
 | `docs/说明/测试.md` §六 | 「103 个未使用导入」的一个来源（已裁「先挂起」） |

@@ -1,4 +1,4 @@
-# `docs/specs/` —— 模块规格
+# `app/specs/` —— 模块规格（**⚠️ 已按模块拆开，2026-10-09**）
 
 > ## 这份目录回答什么
 >
@@ -161,7 +161,7 @@ bash scripts/spec_status.sh --missing  # 只列缺的
 
 📌 **也可以打 `/specs`**（斜杠命令，见 `.claude/commands/`）。
 📌 **第 3 条的判据（可打印）**：`bash scripts/spec_status.sh` 的 **`🗑 spec 有、代码没了`** 一行 —— **应为 0**。
-（脚本只扫 `docs/specs/*.md`、**不递归子目录** ⇒ 移进 `归档/` 就等于解掉这条告警。）
+（脚本递归扫 `app/**/specs/*.md` ⇒ 移进 `归档/` 就等于解掉这条告警。）
 **2026-10-03 首次用到**：`quota_limiter.md`（`DEC-046` 删了那个模块）。
 
 ### 📌 锚点约定：**写函数名，⛔ 不写行号**（2026-10-08 立 · `DEC-100` §一·①）
@@ -175,7 +175,7 @@ bash scripts/spec_status.sh --missing  # 只列缺的
 | `` `safe_math.calculate` `` | `` `safe_math.py:226` `` |
 
 **为什么**（实测 · 本条编号 `N8`）：行号**系统性漂移**。2026-10-03 现跑
-`grep -o ':[0-9][0-9][0-9]' docs/specs/*.md | wc -l` 时，光 `api_v1_rag.md` 一份就有 **23 处**对不上
+`grep -o ':[0-9][0-9][0-9]' app/**/specs/*.md | wc -l` 时，光 `api_v1_rag.md` 一份就有 **23 处**对不上
 —— `/rag/ask` 标 `:832` ⇒ **实际 `:971`**；`stream_search` 标 `:687` ⇒ **实际 `:625`**。
 
 🔴 **漂移是静默的**：没有门会红，**读的人照着找找不到，只会以为自己看错了文件**
@@ -194,7 +194,7 @@ bash scripts/spec_status.sh --missing  # 只列缺的
 ```bash
 grep -n '锚点约定' app/specs/README.md          # ⇒ 有命中
 # ⚠️ 清点存量时必须【排除本文件】—— 理由见下面那条"字面污染"
-grep -o ':[0-9][0-9][0-9]' docs/specs/*.md | grep -v 'app/specs/README.md' | wc -l
+grep -o ':[0-9][0-9][0-9]' app/**/specs/*.md | grep -v 'app/specs/README.md' | wc -l
 ```
 
 🔴 **反证**：本条只**加规矩**、⛔ **不改存量** ⇒ 上面第二条命令的读数
@@ -202,7 +202,7 @@ grep -o ':[0-9][0-9][0-9]' docs/specs/*.md | grep -v 'app/specs/README.md' | wc 
 ⇒ ⛔ 别把它当永久值，比的是"落地那一刻的前后"）。
 
 🔴 **为什么必须 `grep -v 'app/specs/README.md'`** —— **本规自己举了 9 个 `:NNN` 例子**，
-直接数 `docs/specs/*.md` 会让**判据自己污染判据**：README 这一份的读数
+直接数 `app/**/specs/*.md` 会让**判据自己污染判据**：README 这一份的读数
 **47 → 56**（实测，+9 恰是那 9 个例子）。
 ⇒ **本仓同款前科与解法**：`docs/待办总表.md` 那条 grep 用**字符类 `[到]`**
 避开"数到本行自己"。**写判据时先问一句：这条命令会不会数到它自己的说明？**
@@ -224,7 +224,7 @@ grep -o ':[0-9][0-9][0-9]' docs/specs/*.md | grep -v 'app/specs/README.md' | wc 
 
 | 机制 | 在哪 | 拦不拦 |
 |---|---|---|
-| **提交前第 ④ 道门** | `.claude/hooks/pre-commit-gates.py` | ✅ **硬拦**：**新增了 `app/X.py` 但 `docs/specs/` 下与模块同名的那个文件 不存在** |
+| **提交前第 ④ 道门** | `.claude/hooks/pre-commit-gates.py` | ✅ **硬拦**：**新增了 `app/X.py` 但 `app/<组>/specs/` 下与模块同名的那个文件 不存在** |
 | **写完 `app/*.py` 后提醒** | `.claude/hooks/spec-remind.py` | ⛔ 不拦（写代码过程中太频繁） |
 | **`/specs` 命令** | `.claude/commands/specs.md` | 手动跑对账 |
 

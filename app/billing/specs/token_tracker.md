@@ -92,7 +92,7 @@
 ## 关联
 
 `app/billing/specs/token_config.md`（**常量的真身**）·
-`docs/specs/归档/quota_limiter.md`（⚰️ **原先的「次数」那套 —— 2026-10-03 已删**）·
+`app/specs/归档/quota_limiter.md`（⚰️ **原先的「次数」那套 —— 2026-10-03 已删**）·
 `app/specs/main.md`（**全路径按用户日级** = `R1.3`，消费本文件）·
 `app/access/specs/permission.md`（⏳ 待建）·
 `DEC-029`（两套口径，**已由 `DEC-040` 收口**）· **`DEC-046`**（次数那套的删除 + 原位换 token）·
@@ -511,7 +511,7 @@ python -m pytest app/tests/test_token_config.py -q     # 计划时估计 3 条�
 - [ ] **Step 5: 写 `app/billing/specs/token_config.md`**
 
 ⛔ **不写会被 `pre-commit-gates.py` 硬拦**（"新增模块必须同时建 spec"）。
-按 `docs/specs/归档/quota_limiter.md` 的格式写四节，**重点写「⚠️ 看代码会误判的地方」**：
+按 `app/specs/归档/quota_limiter.md` 的格式写四节，**重点写「⚠️ 看代码会误判的地方」**：
 
 必须写进去的一条：**「本模块只集中常量，⛔ 不做运行时路由/热加载」** ——
 看代码的人容易以为"集中了就动态了"，**那两件事不是一回事**。
@@ -696,7 +696,7 @@ python -m pytest app/ -m "not integration and not needs_db" -q
 
 - [ ] **Step 7: 更新文档 + 提交**
 
-要同步的三处：`docs/specs/归档/quota_limiter.md`（它写着"额度来自 `permission.ROLE_QUOTA`"）·
+要同步的三处：`app/specs/归档/quota_limiter.md`（它写着"额度来自 `permission.ROLE_QUOTA`"）·
 `app/billing/specs/token_tracker.md`（本文件的 ⚠️ 节）· `CHANGELOG.md`
 
 ```bash
@@ -1202,7 +1202,7 @@ PG 方言/时区下的**边界**行为、生产数据量下的表现，**都没�
   —— 🔴 **没有 TTL 可核**：日级用量在 **PG**（`token_usage_logs`），恢复靠 SQL 自己翻页，
   **整个机制里没有「到期释放」这回事**。⇒ 详见 `app/billing/specs/breaker.md` §⚠️ 第 1 条。
   ✅ 替代的实测：`test_yesterdays_usage_does_not_count`（塞一条**昨天**的记录，断言它不进今日合计）。
-  ⚠️ **它顺带要求核掉的 `quota_limiter` 那条** —— **2026-10-02 已补核**，见 `docs/specs/归档/quota_limiter.md`
+  ⚠️ **它顺带要求核掉的 `quota_limiter` 那条** —— **2026-10-02 已补核**，见 `app/specs/归档/quota_limiter.md`
   （那条是**另一套机制**：`quota_limiter.py` 确实用 Redis + `EXPIRE 86400`）。
   🔴 **2026-10-03**：那个模块**已随 `DEC-046` 删除** ⇒ 上句是**历史结论**，⛔ 别再当现状读。
 
@@ -1296,7 +1296,7 @@ PG 方言/时区下的**边界**行为、生产数据量下的表现，**都没�
 | ③ | 抽两个**纯函数** `quota_reject_payload(info)` / `quota_headers(info)` + `_next_day_reset_ts()` | 同上 `:238` / `:245` / `:273` |
 | ④ | `/debug/quota/{user_name}` 改走同一套（字段名不变、**单位变**） | `app/routing/api_v1.py:220` |
 | ⑤ | 删未使用的 `get_user_quota` / `UserRole` import | `app/routing/api_v1_rag.py:39` · `app/routing/api_v1.py` |
-| ⑥ | **删模块** `app/quota_limiter.py`（撤点后零调用者）+ **归档 spec** | `app/` · `docs/specs/归档/quota_limiter.md` |
+| ⑥ | **删模块** `app/quota_limiter.py`（撤点后零调用者）+ **归档 spec** | `app/` · `app/specs/归档/quota_limiter.md` |
 | ⑦ | 重写那条会红的测试（**保留** `_MEASURED_PLAN_EXECUTE_TOKENS = 3346` 这个实测数） | `app/tests/test_plan_execute_tools.py` |
 | ⑧ | **新增** `app/tests/test_quota_middleware.py`（9 条 · **不连 DB/Redis**） | `app/` |
 

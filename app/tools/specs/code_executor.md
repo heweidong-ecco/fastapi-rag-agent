@@ -53,6 +53,6 @@
 ## 关联
 
 - **决策** ⇒ `DEC-108`（进容器 · 全量）· `DEC-049` / `DEC-066`（`eval` → `safe_math`）· `DEC-107`（工具清单收口）
-- **容器那侧** ⇒ `docs/specs/` 下的 `executor_server` 那份 · `DEC-108` §3.3（硬化逐条）
+- **容器那侧** ⇒ `app/<组>/specs/` 下的 `executor_server` 那份 · `DEC-108` §3.3（硬化逐条）
 - **邻居** ⇒ `app/tools/specs/safe_math.md`（`calculator` 的安全实现，同族的"LLM 输入"问题）
 - ⚠️ **`EXECUTOR_URL` 的注入处** = `docker-compose.yml` 的 `api` 服务 —— 改它要动那里，⛔ 不是改代码默认值
