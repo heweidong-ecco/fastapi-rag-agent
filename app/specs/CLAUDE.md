@@ -8,6 +8,7 @@
 |---|---|
 | **`README.md`** | ⭐ **spec 的写作模板与说明** —— 动手写之前先看它 |
 | `main.md` | `app/main.py` 的 spec（`main.py` 在 `app/` 根，**不属于任何组**） |
+| 🆕 `demo_main.md` | `app/demo_main.py` 的 spec（同样在 `app/` 根 · **demo 的入口** —— 见 `app/demo/CLAUDE.md`） |
 | `归档/` | **退役模块的 spec**（如 `quota_limiter.md`）—— ⛔ 只留痕，不是待办 |
 
 ## 🔴 本层特有的规矩
