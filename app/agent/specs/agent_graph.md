@@ -17,7 +17,8 @@
   ②「无审批」**不是这两张图特有的** —— 别处（`plan_execute` / `..._learning` / 经 MCP 的
   `agent_graph_advanced` / `/agent/execute_code`）**同样拿得到且同样不在审批名单**
   ⇒ 抠掉它**并没挡住什么**，只制造不一致。
-  🔴 **真正该管的是 `SENSITIVE_TOOLS`**（全局审批名单）⇒ **已立为待裁项**（`docs/待办总表.md`）。
+  ✅ **`SENSITIVE_TOOLS`（全局审批名单）那条【已裁】：`execute_python` 不进** ——
+  业务方裁「保持现状」（`docs/待办总表.md` §二·11）。依据：**敏感 = 这个工具会把数据发到本机之外**。
   · ⭐ **工具名只有 `tools` 一个来源** —— `TOOLS_BY_NAME = {t.name: t for t in tools}`，`tool_execute` 查它，⛔ 不许再抄名字
   · ⚠️ **连带删掉的 import**：`datetime` / `safe_math.calculate` / `search_tools.web_search` / `langchain` 的 `tool`
     （它们只服务于那三个已删的定义 ⇒ 留着就是 `F401`，第 ⑥ 道门会红）

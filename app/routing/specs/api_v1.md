@@ -28,8 +28,8 @@
 
 - ✅ ~~🔴 **鉴权缺失**（见 ⚠️①）~~ **2026-10-04 已收口**（`DEC-065`）：**6 条带 `require_admin`**，
   其余 3 条**有意公开** ⇒ **匿名可调 0 条**。⚠️ 追溯口径见 ⚠️①②③（**三行的"现状"已不成立，原文保留**）。
-- ⬜ **仍未裁**：`/debug/*` 这类**调试端点到底要不要挂到线上**（**现在已锁定为仅管理员可用**，
-  但"锁住"与"线上不挂载"是两件事 —— `app/routing/specs/api_v1.md` 这一条**仍然开着**）。
+- ⬜ **未裁**：`/debug/*` 这类**调试端点到底要不要挂到线上**（**现已锁定为仅管理员可用**，
+  但「**锁住**」与「**线上不挂载**」是**两件事**）⇒ `docs/待办总表.md` **`N31`**。
 - 🔴 **21 个未使用 import**（实测）：`insert_document` · `insert_batch_documents` · `client` · `calculator` ·
   `rerank_search` · `hybrid_search_with_rewrite` · `create_fast_pipeline` · `create_accurate_pipeline` ·
   `create_full_pipeline` · `DocumentPreprocessor` · `split_text_with_filter` · `parse_document` ·
@@ -77,14 +77,15 @@
 >
 > | # | 事 | 结果 |
 > |---|---|---|
-> | **1** | 🔴 **给 `/debug/*` 加鉴权**（至少 `require_admin`），或**决定线上不挂载它们** | ✅ **已加 `require_admin`**（4 条）。<br>⬜ **但"线上要不要挂载"仍未裁** —— 见下方「仍未裁」。 |
+> | **1** | 🔴 **给 `/debug/*` 加鉴权**（至少 `require_admin`），或**决定线上不挂载它们** | ✅ **已加 `require_admin`**（4 条）。<br>⬜ **但「线上要不要挂载」未裁** ⇒ `docs/待办总表.md` **`N31`** |
 > | **2** | 🔴 **`/rag/benchmark-embedding` 加鉴权** | ✅ **已加 `require_admin`**（`DEC-065`）。 |
 > | **3** | ⚠️ **21 个未使用 import** | ⏸ **仍挂起**（`T6`）⇒ ⛔ **别顺手清**（本次只动了**因删端点而失效的那 2 行**）。 |
 > | **4** | ⚠️ **`/users/{user_id}` 要么真查库，要么删** | ✅ **走了「删」**（`DEC-065`）。 |
 >
 > #### ⬜ 仍未裁（本次**没动**）
 >
-> - ⚠️ **`/debug/*` 这类调试端点到底要不要挂到线上** —— **现在已锁成"仅管理员"**，
->   但「**锁住**」与「**线上不挂载**」是**两件事**。**这一条仍然开着。**
-> - ⚠️ **`/api/v1/`（`main.py` 的根路径）仍无鉴权** —— 它是**唯一**一条剩下的
->   （`scripts/route-auth-baseline.txt` 现为 **1 条**）。**是否有意公开，本 spec 未裁。**
+> - ⬜ **`/debug/*` 这类调试端点到底要不要挂到线上** —— **现已锁成「仅管理员」**，
+>   但「**锁住**」与「**线上不挂载**」是**两件事** ⇒ `docs/待办总表.md` **`N31`**。
+> - ✅ **`/api/v1/`（`main.py` 的根路径）无鉴权 = 【有意公开】** —— 它是**唯一**一条剩下的
+>   （判据：`venv/bin/python scripts/check_route_auth.py` ⇒ **无鉴权路由 1 条**；
+>   `scripts/route-auth-baseline.txt` 同）。📄 口径同时写在 `docs/待办总表.md` 🅗。

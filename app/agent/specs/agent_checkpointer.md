@@ -19,7 +19,8 @@
   ✅ **2026-10-08：原先的 `execute_python` 排除【已放开】**（业务方同意「甲」）——
   理由与逐条处置**同 `agent_graph.md` 同一处**（⛔ 别在这儿再抄一遍）。本图工具表现在也与
   `mcp_server.TOOLS` 逐名一致（4 个）。
-  🔴 **真正该管的是 `SENSITIVE_TOOLS`**（全局审批名单）⇒ **已立为待裁项**（`docs/待办总表.md`）。
+  ✅ **`SENSITIVE_TOOLS`（全局审批名单）那条【已裁】：`execute_python` 不进** ——
+  业务方裁「保持现状」（`docs/待办总表.md` §二·11）—— ⛔ 同 `agent_graph.md`，这儿不重抄依据。
   · ⭐ **工具名只有 `tools` 一个来源** —— `TOOLS_BY_NAME`，`tool_execute` 查它
   · ⚠️ **删了 import 后⛔ 别误删 `from agent_graph import SENSITIVE_TOOLS, should_continue, human_approval # noqa: F401`**
     —— 那一行是**结构性守卫**要的（`test_memory_chat_approval.py` 断言两模块的白名单**是同一个对象**）
