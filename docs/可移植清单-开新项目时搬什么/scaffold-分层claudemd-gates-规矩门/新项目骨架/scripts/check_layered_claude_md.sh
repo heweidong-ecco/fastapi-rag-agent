@@ -131,6 +131,17 @@ PY
 # ⇒ 正例（该绿）与反例（该红）**都要有**，且反例必须真的让它红。
 self_test() {
   local pass=0 fail=0 tmp
+
+  # 🔴🔴 先摘掉**继承来的** git 定向变量 —— **`GIT_DIR` 盖过 `git -C`**。
+  #    只要外面 export 了 `GIT_DIR`（本地"复现 CI"的脚本常这么干，为的是让别的门
+  #    能在临时副本里跑到真仓的提交范围），夹具里的 `git init/add` 就会打到**外面那个仓**上，
+  #    而下面 `check "${tmp}"` 读到的也是**那个仓** ⇒
+  #    **反例永远红、正例"绿得没意义"**（它验的不是夹具）。
+  #    📌 **为什么必须由本脚本自己摘**：夹具的自测**天生要造真 git 仓** ——
+  #       这件事的性质决定了它不能指望调用方给一个干净的环境。
+  #       ⛔ 别改到调用方去（在外面写 `env -u GIT_DIR …`）—— 那会让这条性质消失。
+  unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
+
   tmp="$(mktemp -d)"
   trap 'rm -rf "${tmp}"' RETURN
 
@@ -149,6 +160,10 @@ self_test() {
   mk "archive" 1 no          # ← 豁免名单里的，⛔ 不该红
 
   git -C "${tmp}" init -q >/dev/null 2>&1
+  # 🔴 夹具仓**必须真的建起来** —— 被继承的 `GIT_DIR` 下 `git init` 会**返回 0 却什么都不建**。
+  #    不钉这一条，下面五条会"全绿"而**验的根本不是夹具** ——
+  #    那正是本门最恨的那种「空跑 = 静默假通过」。
+  [ -d "${tmp}/.git" ] || { echo "⛔ 夹具仓没建起来：${tmp}/.git 不存在（GIT_DIR 被继承了？）" >&2; exit 2; }
   git -C "${tmp}" add -A >/dev/null 2>&1
 
   # T1 正例：全都有 ⇒ 必须 exit 0

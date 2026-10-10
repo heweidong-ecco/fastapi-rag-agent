@@ -371,3 +371,36 @@ input:disabled, textarea:disabled, select:disabled { opacity: .55; cursor: not-a
 /* 结果区：长了要能滚，但⛔ 不许把整页撑飞 */
 .panel-out { margin-top: var(--sp-3); max-height: 22rem; overflow: auto; }
 .panel-out pre { margin: 0; font-family: var(--mono); font-size: var(--fs-cap); white-space: pre-wrap; }
+
+/* ── 4.9 全站共用的几小块（2026-10-10 · 施工单**刀 8** 从各页面收上来的）────────
+ *
+ * 🔴 **为什么收上来**：下面这几条原先在**好几个页面里各写一遍、值一模一样**。
+ *    ⇒ 「接设计系统」在这一刀落到实处的那一半，就是把它们**从页面搬到全站**。
+ *
+ * ⚠️⚠️ **两个类名，一件事** —— 「辅助说明行」在本仓有 **两个名字**：
+ *    `.hint`（**7 个页面**用）/ `.sub`（**2 个页面**用）。此处**只把规则合并成一条**，
+ *    ⛔ **没有统一类名**（那要动 9 个页面的 markup）。
+ *    🔴 **这是欠账，⛔ 不是"已经统一了"** —— 见 `frontend/索引.md`。
+ */
+.hint, .sub { color: var(--fg-dim); font-size: var(--fs-cap); line-height: var(--lh-body); }
+/* ⚠️ **两种用法，间距不同，⛔ 别挤成一种**：
+ *    `.hint` = 跟在控件**下面**的一句（上边留白）· `.sub` = 段落的**块级说明**（下边留白）。 */
+.hint { margin: var(--sp-2) 0 0; }
+.sub  { margin: 0 0 var(--sp-3); }
+
+/* 页内提示条。⛔ **只提样式、⛔ 不改 JS** —— 脚本仍在 toggle `.bad` 这个类，
+   所以 markup 只要加一句 `class="notice"` 即可（`trace` / `approvals` 各一份 → 收成一份）。 */
+.notice { margin: var(--sp-2) 0; min-height: 1.4em; color: var(--fg-dim); }
+.notice.bad { color: var(--bad); }
+
+/* 预格式化文本与可折叠块。
+   ⚠️ **不会改变 `.panel-out pre`** —— 那条是 `.panel-out pre`（更具体），它赢。
+   ⚠️ 页面若自己定义了 `pre` / `details > summary`，**页面的赢**（`<style>` 在 `<link>` 之后）。 */
+pre { white-space: pre-wrap; word-break: break-word; margin: 2px 0; }
+details > summary { cursor: pointer; color: var(--fg-dim); font-size: var(--fs-cap); }
+
+/* 角标（轨迹页那两条轴上的小标签）。⚠️ **颜色由页面给** —— 两条轴各一色，那是页面专有的。 */
+.tag {
+  font-size: var(--fs-cap); color: var(--bg); border-radius: var(--r-pill);
+  padding: 1px var(--sp-2); margin-left: var(--sp-2); font-weight: 400; vertical-align: 2px;
+}

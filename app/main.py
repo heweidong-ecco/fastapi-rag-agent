@@ -625,6 +625,53 @@ async def cost_page():
     """把人送到成本看板。⚠️ `include_in_schema=False`：它不是 API，⛔ 别混进 openapi。"""
     return RedirectResponse(url="/static/web/cost.html", status_code=302)
 
+# 🔴 2026-10-10（施工单**刀 5**）：**工具与记忆**的入口 URL。形状与上面六条**逐字同款**。
+#    ⚠️ 它盖的是规格 §2.7 的 5 条 + §2.8 的 `memory/add` · `memory/search` —— 在这之前
+#       **这 7 条一条可点入口都没有**（按最高判据 = 等于没做）。
+#    🔴 代价已认：这是**新公开路由** ⇒ `check_route_auth.py --baseline` 会 exit 1
+#       ⇒ **已显式写进 `scripts/route-auth-baseline.txt`**（一次有意识的操作）。
+#       ⚠️ 它**不含数据**：真正的边界在它调的那 7 条接口上 —— **7 条都带鉴权**
+#       （`get_current_user_hybrid`）。
+#    ⚠️ 本页**不进侧边栏** —— 规格 §3.0 把「工具 / 记忆」归在「其他功能」，
+#       而口径 ② 是「侧边栏只放 5 类【主要功能】」⇒ 入口 = 首页那两张卡（带锚点）。
+@app.get("/tools", include_in_schema=False)
+async def tools_page():
+    """把人送到工具与记忆页。⚠️ `include_in_schema=False`：它不是 API，⛔ 别混进 openapi。"""
+    return RedirectResponse(url="/static/web/tools.html", status_code=302)
+
+# 🔴 2026-10-10（施工单**刀 6**）：**系统与执行器**的入口 URL。形状与上面七条**逐字同款**。
+#    ⚠️ 它盖的是规格 §2.9 的 `execute_code` + §2.13 的 `health` · `ready` · `metrics` ——
+#       后**三条是【根路径】**（就在本文件上面几十行），⛔ 不在 `/api/v1` 下。
+#       ⇒ 页面里**一个 URL 字面量都不写**，四条全走 `RagSystem.buildRequest()`
+#         （否则硬约束 #8「URL 字面量必须带 `/api/v1`」会当场把它拦下，而**那条红会把人引向错误的修法**）。
+#    ⭐ 它是「**批② 执行器进容器**」那件事的**唯一可见证据**。
+#    🔴 代价已认：这是**新公开路由** ⇒ `check_route_auth.py --baseline` 会 exit 1
+#       ⇒ **已显式写进 `scripts/route-auth-baseline.txt`**（一次有意识的操作）。
+#       ⚠️ 它**不含数据**：真正的边界在它调的 4 条上 —— `execute_code` **带鉴权**
+#       （`get_current_user_hybrid`），另**三条是有意公开的探活口**（`/health` `/ready` `/metrics`）。
+#    ⚠️ 本页**同样不进侧边栏**（规格 §3.0 把「执行器 / 系统状态」归「其他功能」）⇒ 入口 = 首页那两张卡。
+@app.get("/system", include_in_schema=False)
+async def system_page():
+    """把人送到系统与执行器页。⚠️ `include_in_schema=False`：它不是 API，⛔ 别混进 openapi。"""
+    return RedirectResponse(url="/static/web/system.html", status_code=302)
+
+# 🔴 2026-10-10（施工单**刀 7**）：**运维探针**的入口 URL。形状与上面八条**逐字同款**。
+#    ⚠️ 它盖的是规格 §2.12 那 4 条 `/debug/*` —— 在这之前**一条可点入口都没有**
+#       （按最高判据 = 等于没做）；而它们**恰恰是**「限流桶 / 配额 / 缓存」唯一的可见证据。
+#    🔴 **这一页差点做不成**：那 4 条原先是 `Depends(require_admin)` ⇒ 访客拿普通 key
+#       **4 格全 403**。⇒ 业务方 2026-10-10 裁「顺带放开」，做法见 `DEC-141`
+#       （**删掉 `{user_name}` 越权面**，⛔ 不是放宽管理员校验）。
+#       ⚠️ 所以本页**没有任何输入框** —— 那两条现在只查调用者自己。
+#    🔴 代价已认：这是**新公开路由** ⇒ `check_route_auth.py --baseline` 会 exit 1
+#       ⇒ **已显式写进 `scripts/route-auth-baseline.txt`**（一次有意识的操作）。
+#       ⚠️ 它**不含数据**：真正的边界在它调的那 4 条上 —— **4 条都带鉴权**
+#       （`get_current_user_hybrid`，⛔ 不再是 `require_admin`，但**匿名仍打不到**）。
+#    ⚠️ 本页**同样不进侧边栏**（规格 §3.0 把「运维探针」归「其他功能」）⇒ 入口 = 首页那张卡。
+@app.get("/ops", include_in_schema=False)
+async def ops_page():
+    """把人送到运维探针页。⚠️ `include_in_schema=False`：它不是 API，⛔ 别混进 openapi。"""
+    return RedirectResponse(url="/static/web/ops.html", status_code=302)
+
 # 新增  嵌入了 Prometheus 指标采集
 # 指标暴露接口
 @app.get("/metrics")

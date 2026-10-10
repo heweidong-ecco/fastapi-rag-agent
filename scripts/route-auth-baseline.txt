@@ -49,3 +49,26 @@
 #    🔴 三条【有意不露】的（token/recent · token/purpose · token/thread）**不在这一页上**，
 #       理由见 `docs/decisions/DEC-124`。
 /cost
+# 🟢 2026-10-10（施工单刀 5）新增 1 条：/tools —— **工具与记忆页的入口 URL**，故意公开
+#    （同上：它是给人打开 HTML 的跳转，本身不含数据）。
+#    ⚠️ 真正的边界在它调的那 **7 条**接口上 —— available_tools · tool_health ·
+#    tool_health/refresh · tool_versions · mcp_tools_dynamic · memory/add · memory/search，
+#    **7 条全带鉴权**（`get_current_user_hybrid`）。
+#    🔴 本条与上面六条的区别：**本页不进侧边栏**（规格 §3.0 把「工具 / 记忆」归在「其他功能」，
+#       而口径 ② 是「侧边栏只放 5 类【主要功能】」）⇒ 入口 = 首页那两张卡（带锚点
+#       `/tools#tools` · `/tools#memory`，见 `DEC-139`）。
+/tools
+# 🟢 2026-10-10（施工单刀 6）新增 1 条：/system —— **系统与执行器页的入口 URL**，故意公开
+#    （同上：它是给人打开 HTML 的跳转，本身不含数据）。
+#    ⚠️ 它调的那 4 条里：`execute_code` **带鉴权**（`get_current_user_hybrid`）；
+#    另 **3 条本来就有意公开**（`/health` · `/ready` · `/metrics` —— 探活口，且**在根路径上**）。
+#    ⚠️ 本页同样**不进侧边栏**（规格 §3.0 归「其他功能」）⇒ 入口 = 首页那两张卡，带锚点。
+/system
+# 🟢 2026-10-10（施工单刀 7）新增 1 条：/ops —— **运维探针页的入口 URL**，故意公开
+#    （同上：它是给人打开 HTML 的跳转，本身不含数据）。
+#    ⚠️ 它调的那 4 条 `/debug/*` **全部带鉴权**（`get_current_user_hybrid`）——
+#    🔴 这一点 2026-10-10 变过：原先它们要 `require_admin`（访客 4 格全 403），
+#    业务方当日裁「顺带放开」⇒ `DEC-141` **删掉了 `{user_name}` 越权面**后才降到「登录即可」。
+#    ⛔ **别把这一条读成"debug 那 4 条不鉴权了"** —— 匿名打那 4 条**仍然 401**。
+#    ⚠️ 本页同样**不进侧边栏**（规格 §3.0 归「其他功能」）⇒ 入口 = 首页那张卡。
+/ops

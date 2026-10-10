@@ -13,7 +13,10 @@ from routing.schemas import (
     RefreshRequest,
     UserCreate,
 )
-from routing.deps import require_admin
+# ⚠️ `get_current_user_hybrid` **2026-10-07 曾被当死导入删掉**（见下面那段沿革），
+#    2026-10-10（`DEC-141`）**又接回来了** —— 本节 4 条 `/debug/*` 从「要管理员」降为
+#    「登录即可」，用的就是它。⛔ 别再按"它没被用到"删第二遍：判据要现跑 `ruff`，⛔ 不是看历史。
+from routing.deps import require_admin, get_current_user_hybrid
 from core.db import get_db
 from rag.embedding_client import get_embedding
 # B11（①b Task 4）：全站日级熔断
@@ -216,15 +219,34 @@ async def create_user(
 #    `Depends(require_admin)`。此前它们**匿名可打** —— 其中 `/debug/quota/{user_name}` 与
 #    `/debug/rate_limit/{user_name}` **泄露任意用户的角色/配额/限流桶**（**可枚举用户名**），
 #    `/rag/benchmark-embedding` 更是**全仓唯一匿名真烧钱**的端点。
-# ⚠️ **参数名用 `_admin`**：`check_quota` / `check_rate_limit` 的**路径参数就叫 `user_name`**
-#    （那个是「要查谁」，管理员才有权指定别人）⇒ 依赖的返回值不能重名，取值也不用。
+#
+# 🔴🔴 2026-10-10（`DEC-141`）：**本节 4 条从「要管理员」降为「登录即可」** ——
+#    做法是把**越权面本身删掉**：`/debug/quota/{user_name}` 与 `/debug/rate_limit/{user_name}`
+#    的**路径参数没了**，**永远查调用者自己**。
+#    ⚠️ 为什么这比"再加一个 demo 开关"好：删掉形参之后**"查别人"这条路径不存在了**
+#      ⇒ 对**任何**部署放开都是安全的 ⇒ **没有理由让 demo 与完整版行为不同**
+#      （对比 `tools/mcp_server.py` 的 `DEMO_MODE`：那里是**真的不同** —— demo 只有一个容器、
+#       没有执行器 ⇒ 那才配一个开关）。
+#    ⚠️ **代价已认**：**管理员不再能通过这两条查别人**的配额/限流桶
+#      （`DEC-065` 记过「那对管理员是对的」）。要查别人 ⇒ **另行设计**，
+#      ⛔ 别把形参直接加回来 —— `app/tests/test_debug_endpoints_self_only.py` 会红。
+#    🔴 动机之二（前端刀 7「运维探针」页）：这一族是「限流桶 / 配额 / 缓存」**唯一的可见证据**
+#      （`frontend/页面与接口规格.md` §3.7）。原先要**管理员** key ⇒ 访客 4 格全 403
+#      ⇒ 按最高判据「**看不见 = 等于没做**」，那一页等于没做。
+#
+# ⚠️ **`/rag/benchmark-embedding`【不在这 4 条里】—— 它仍要 `require_admin`。**
+#    它是**真烧钱**的那条（`get_embedding` 真调 DashScope）⇒ ⛔ 别顺手把它也放开。
 @router.get(
     "/debug/count",
     summary="调试：查看数据库中文档数量",
     tags=["调试"]
 )
-async def debug_count(_admin: str = Depends(require_admin)):
-    """查看文档总数"""
+async def debug_count(_user: str = Depends(get_current_user_hybrid)):
+    """查看文档总数（**全站口径** · ⛔ 不是"你的"）。
+
+    ⚠️ `_user` **不用** —— 它只用来**要一次登录**。名字带下划线是刻意的：
+    ⛔ 别删掉这个参数"因为它没用到"，那会把这**一条**变成匿名可打。
+    """
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT COUNT(*) FROM documents")
@@ -232,17 +254,21 @@ async def debug_count(_admin: str = Depends(require_admin)):
     return {"total_documents": count}
 
 @router.get(
-    "/debug/quota/{user_name}",
-    summary="权限分流的测试接口",
-    description="查看用户的日配额（**token 口径** · 按角色不同预算）",
+    "/debug/quota",
+    summary="调试：查看【自己】的日配额",
+    description="查看**调用者自己**的日配额（**token 口径** · 按角色不同预算）。"
+                "⚠️ 只查自己 —— 路径参数 `{user_name}` 已删（`DEC-141`）",
     tags=["调试"]
 )
-async def check_quota(user_name: str, _admin: str = Depends(require_admin)):
-    """查看用户的日配额（**token 口径** · `DEC-046`）。
+async def check_quota(user_name: str = Depends(get_current_user_hybrid)):
+    """查看**自己**的日配额（**token 口径** · `DEC-046`）。
 
     🔴 2026-10-03 改：原先返回「每日**请求次数**」（`permission.ROLE_QUOTA` + `quota_limiter`）。
     两者口径实测**差 35 倍**（`DEC-029`）⇒ 业务方裁「统一到 token 一套」（`DEC-040`）。
     ⚠️ 字段名 `daily_limit` / `remaining` **保留**，但**单位已从「次」变成 token**。
+
+    🔴 2026-10-10（`DEC-141`）：`user_name` **从路径参数改成依赖注入的返回值** ——
+    它现在**只能是调用者自己**，⛔ 传不进别人。这正是本节 4 条能放开的那一步。
     """
     role = get_user_role(user_name)
     info = get_token_budget_info(user_name)
@@ -294,7 +320,12 @@ async def benchmark_embedding(req: QuestionRequest, _admin: str = Depends(requir
     summary="调试接口，用来查看当前缓存中有多少个 Embedding 键",
     tags=["调试"]
 )
-async def cache_stats(_admin: str = Depends(require_admin)):
+async def cache_stats(_user: str = Depends(get_current_user_hybrid)):
+    """Redis 里 `emb:*` 键的条数与前 5 个样本键（**全站口径** · ⛔ 不是"你的"）。
+
+    🔴 **`count == 0` ⛔ 不等于"缓存坏了"** —— 还没有 embedding 被缓存过就自然是 0。
+    ⚠️ 同 `debug_count`：`_user` 只用来**要一次登录**，⛔ 别当死参数删掉。
+    """
     count = 0
     sample = []
     for key in redis_client.scan_iter(match="emb:*", count=100):
@@ -325,15 +356,23 @@ async def cache_stats(_admin: str = Depends(require_admin)):
 # ==============================================================================
 
 # 新增命令桶 调试接口：
-
-# 新增命令桶 调试接口：
 @router.get(
-    "/debug/rate_limit/{user_name}",
-    summary="调试接口，查询某用户的剩余令牌数",
+    "/debug/rate_limit",
+    summary="调试接口，查询【自己】的剩余令牌数",
+    description="查询**调用者自己**的限流桶剩余令牌。⚠️ 只查自己 —— "
+                "路径参数 `{user_name}` 已删（`DEC-141`）",
     tags=["调试"]
 )
-async def check_rate_limit(user_name: str, _admin: str = Depends(require_admin)):
-    """查询某用户的剩余令牌数"""
+async def check_rate_limit(user_name: str = Depends(get_current_user_hybrid)):
+    """查询**自己**的剩余令牌数。
+
+    🔴 2026-10-10（`DEC-141`）：`user_name` **从路径参数改成依赖注入的返回值**（同 `check_quota`）。
+
+    ⚠️ **桶在 Redis 里，⛔ 不在进程内存** —— `user_limiter` 是 `access/rate_limiter.py:211`
+    建的 `TokenBucketLimiter`，它的实现是操作 **Redis HASH 的 Lua 脚本**（`_TOKEN_BUCKET_LUA`）。
+    ⚠️ 而 `capacity` / `rate` **是代码常量**（`billing/token_config.py` 的
+    `USER_LIMIT_CAPACITY` / `USER_LIMIT_RATE`），⛔ **不是实时值** ⇒ 前端那一格要标出来。
+    """
     remaining = user_limiter.get_remaining(user_name)
     return {
         "user_name": user_name,
