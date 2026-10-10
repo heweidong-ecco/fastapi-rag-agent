@@ -36,7 +36,7 @@
 - **`owner` 与 `actor` 是两个身份**：admin 接管 alice 的会话时 `owner="alice"`、`actor="admin"`。
   合成一个字段 ⇒ 留痕当场变假话，**而且不报错**。
 - **`list_decisions(owner=..., limit=50, offset=0)` 是必填关键字参数**：`None` = 全量。
-- 🔴 **`offset` 是 2026-10-08 加的**（分页 · `frontend/README.md` §六）——
+- 🔴 **`offset` 是 2026-10-08 加的**（分页 · `frontend-demo/README.md` §六）——
   ⚠️ **翻页要正确，`ORDER BY` 必须是【全序】**：本表是 `created_at DESC, id DESC`，
   第二条排序键 `id` 是**承重的**（连写的几条 `created_at` 极可能同毫秒）。
   ⇒ **不是全序就会漏行/重行，而且不报错**。真库用例 ⇒ `app/tests/test_approval_events_db.py::test_offset_paging_neither_skips_nor_repeats`。

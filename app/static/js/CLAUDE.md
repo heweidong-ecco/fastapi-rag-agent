@@ -38,4 +38,4 @@
 - ⚠️ **请求字面量必须以 `/api/v1` 开头**（页面守卫会扫）
 
 ## 📍 往上读
-- `../CLAUDE.md`（`app/static/`）· `frontend/索引.md` · 仓库根 `CLAUDE.md`
+- `../CLAUDE.md`（`app/static/`）· `frontend-demo/索引.md` · 仓库根 `CLAUDE.md`

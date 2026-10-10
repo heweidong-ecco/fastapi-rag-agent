@@ -56,7 +56,7 @@ Claude Code 在本仓工作时读的**全局约定 + 顶层导航**。
 | `.claude/` | **本仓的门与 agent 配置** | `.claude/CLAUDE.md` |
 | `.github/` | CI 与 PR 模板 | `.github/CLAUDE.md` |
 | `locust/` | 压测（**只有这一个家**） | `locust/CLAUDE.md` |
-| `frontend/` | **前端的设计文档与索引**（⛔ 代码在 `app/static/`） | `frontend/CLAUDE.md` |
+| `frontend/` | **前端的设计文档与索引**（⛔ 代码在 `app/static/`） | `frontend-demo/CLAUDE.md` |
 | `demo/` | 演示（最后一步） | `demo/CLAUDE.md` |
 | `testdata/` | 测试语料与种子 | `testdata/CLAUDE.md` |
 | `fastapi-rag-agent-TODO待办/` | 施工单 / 裁单 / 探针 | 该目录的 `CLAUDE.md` |

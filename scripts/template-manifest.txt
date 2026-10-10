@@ -14,4 +14,4 @@ eefbc0755fc9d564fbc7c44ccf988071f810f8bd072dc6cfde82afaa19c81643  .claude/settin
 670deed6c98892a9681064ee29e1ca77063a801d69eef63ee3caa60d6046292d  scripts/check_doc_orphans.sh  ->  docs/可移植清单-开新项目时搬什么/scaffold-分层claudemd-gates-规矩门/新项目骨架/scripts/check_doc_orphans.sh
 49e89271e186e824b0a34c6bd6dc624489537aad51ce891acc8c1dcd8509bb74  scripts/check_secrets.sh  ->  docs/可移植清单-开新项目时搬什么/scaffold-分层claudemd-gates-规矩门/新项目骨架/scripts/check_secrets.sh
 329a617ca68489d7f2a42052d132428d984727bb9451a48a7791ee9fd5dc97db  scripts/check_ci_job_timeouts.py  ->  docs/可移植清单-开新项目时搬什么/scaffold-分层claudemd-gates-规矩门/新项目骨架/scripts/check_ci_job_timeouts.py
-d38d0e26753c302813b70c9881126ac2ab930e90644173c5f527ac15c41b80d9  scripts/doc-links-ignore.txt  ->  docs/可移植清单-开新项目时搬什么/scaffold-分层claudemd-gates-规矩门/新项目骨架/scripts/doc-links-ignore.txt
+ea78b2db91ace6de7981c3c828892984155e05e061d2bfacd3d942762367a03c  scripts/doc-links-ignore.txt  ->  docs/可移植清单-开新项目时搬什么/scaffold-分层claudemd-gates-规矩门/新项目骨架/scripts/doc-links-ignore.txt

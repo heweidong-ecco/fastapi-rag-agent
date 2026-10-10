@@ -278,7 +278,7 @@ jobs:
           bash scripts/test_check_doc_links.sh
           bash scripts/test_check_doc_orphans.sh
 
-          # ⭐ 索引覆盖门（2026-10-09 加，`DEC-120`）—— `frontend/索引.md` 里声明的覆盖清单，
+          # ⭐ 索引覆盖门（2026-10-09 加，`DEC-120`）—— `frontend-demo/索引.md` 里声明的覆盖清单，
           #   每一份都必须**还在、且已入库**。
           #   🔴 它钉的是业务方那条纪律：「**其他文档更新了，索引列表同时更新**」——
           #      「同步没同步」**本身测不出来**，但「**索引声明覆盖的还在不在**」测得出来。

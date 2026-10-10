@@ -7,7 +7,9 @@
 #
 # ## 为什么要有它
 #
-# 业务方 2026-10-09 立了 `frontend/索引.md`，并给了一条纪律：
+# 业务方 2026-10-09 立了 `frontend-demo/索引.md`，并给了一条纪律：
+# 🔴 2026-10-11：那个目录【已改名】`frontend/` → `frontend-demo/`（业务方裁 ——
+#    本仓以后会有自己的 `app/frontend/`，所以这份前端的索引改叫 demo 的）。
 #   「**其他文档更新了，索引列表同时更新**」
 #
 # 🔴 但「**同步没同步**」这件事**本身测不出来** —— 没有人知道"索引该列什么"。
@@ -33,7 +35,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${REPO_ROOT}"
 
-INDEX="frontend/索引.md"
+INDEX="frontend-demo/索引.md"
 #: 清单低于这个数 ⇒ 当"解析失败"，⛔ 不当"全都没问题"
 MIN_ENTRIES=20
 
@@ -44,15 +46,15 @@ MODE="check"
 if [ "${MODE}" = "self-test" ]; then
   echo "[自测] 造假索引：把清单里的一条删掉 ⇒ 期望 🔴 + 退出码 1"
   TMPD="$(mktemp -d)"; trap 'rm -rf "${TMPD}"' EXIT
-  mkdir -p "${TMPD}/frontend"
+  mkdir -p "${TMPD}/frontend-demo"
   # 删掉清单里的第 3 条（`CHANGELOG.md` 那行），其余原样
   awk 'BEGIN{done=0} /^```index-manifest$/{inb=1;print;next}
        /^```$/{if(inb){inb=0};print;next}
        inb && !done && /^CLAUDE\.md$/{done=1; print "CLAUDE.md"; print "这一条根本不存在.md"; next}
-       {print}' "${INDEX}" > "${TMPD}/frontend/索引.md"
+       {print}' "${INDEX}" > "${TMPD}/frontend-demo/索引.md"
 
   set +e
-  out="$(INDEX_OVERRIDE="${TMPD}/frontend/索引.md" bash "${BASH_SOURCE[0]}" 2>&1)"; rc=$?
+  out="$(INDEX_OVERRIDE="${TMPD}/frontend-demo/索引.md" bash "${BASH_SOURCE[0]}" 2>&1)"; rc=$?
   set -e
   if [ "${rc}" -eq 1 ] && printf '%s' "${out}" | grep -q '这一条根本不存在'; then
     echo "[自测] ✅ 通过（退出码 1，且点名了那条）"

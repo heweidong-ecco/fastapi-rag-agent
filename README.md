@@ -1,5 +1,15 @@
 # RAG Agent API
 
+> ## 👉 看 demo 的，直接进 ⇒ **[`demo/` »](demo/)**
+>
+> ⚠️ **本 README 讲的是【本仓 = 完整版】** —— 怎么把这套服务跑起来、它有哪些接口。
+>
+> 🔴 **demo 是【另一摊】**：它**有自己的 README、自己的清单、自己的部署约束**，
+> 门槛、边界与产出**都跟本仓不一样**（它不是本仓的"删减版"，也不是本仓的子集）。
+> ⇒ **顺着 demo 找过来的**，点上面那个链接 —— GitHub 会直接落到 demo 的页面。
+
+---
+
 一个 **RAG（检索增强生成）+ Agent API 服务** —— 混合检索、重排序、查询改写、引用溯源、
 LangGraph Agent、MCP 工具、Mem0 长期记忆、Token 成本控制。
 构建于 **FastAPI + PostgreSQL(pgvector) + Redis** 之上。
