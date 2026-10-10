@@ -124,7 +124,15 @@ from billing.token_tracker import record_usage
 
 **不建 `CLAUDE.md` 的目录**：`venv/` `venv-ragas/`（依赖）· 被 `.gitignore` 的（`tmp/` `logs/` `archive/` `screenshots/` `self-prompt/` `demo/设置与命令/`）· 自动生成的（`.claude/worktrees/`）· 缓存目录。
 
-**边界**：`CLAUDE.md` 答"这里有什么、在哪"；`ROADMAP` 答"做到哪了"。不要把进度写进 `CLAUDE.md`。
+**边界**：`CLAUDE.md` 答"这里有什么、在哪"；
+**逐模块的"做到哪"⇒ `app/<组>/specs/<模块>.md`** · **前端各刀 ⇒ `frontend/索引.md`** ·
+**阶段级 / 跨模块的经过 ⇒ `docs/history` 那类的 `docs/历史/`** · **`ROADMAP` 答"当前状态与顺序"**。
+
+> 🔴 **2026-10-10 改**：原句是「`ROADMAP` 答"做到哪了"· **不要把进度写进 `CLAUDE.md`**」——
+> 前半句随业务方裁「甲」**改了**（进度**按归属分发**，`ROADMAP` 只留当前那一块）。
+> ⚠️ **后半句仍有效，但要读准**：⛔ **逐模块的过程记录**不许写进 `CLAUDE.md`；
+> **允许**的是**本组【整组级】的进度一两行**（🔴 **必须指向 `specs/`**，⛔ 不展开）——
+> 见 `app/tools/CLAUDE.md` 的「🟡 本组做到哪」那个样子。
 
 ## 七 · 数据文件跟随模块
 
