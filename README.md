@@ -164,6 +164,78 @@ bash dev.sh        # 起 postgres+redis → 等就绪 → 起 uvicorn（热重�
 
 ## 系统架构
 
+### ① 系统架构总览 —— **一张图装下整个系统**
+
+![系统架构总览](docs/architecture.png)
+
+| 层 | 里面是什么 |
+|---|---|
+| **客户层** | 浏览器 · curl / SDK · Swagger `/docs` |
+| **FastAPI 网关层** `rag-api :8000` | **中间件 ×4**（规范化 → 配额 → 限流 → 日志/指标，⚠️ **执行顺序见 ②**）· 路由分派（**3 张路由表**）· 鉴权（API Key + JWT · 三级角色） |
+| **应用层** | **LangGraph Agent ×5**（对话链全齐，含 SSE）· **手写规划执行** `plan_execute`（⚠️ **非 LangGraph**）· **RAG 检索管线**（改写 → 向量 + BM25 → RRF → 重排） |
+| **工具与执行层** | **MCP Server**（工具的**唯一事实源**）· **工具箱 ×7**（`calculator` `date_today` `date_calc` `json_extract` `stats` `web_search` `execute_python`）· **`executor` 容器**（无网 · 非 root · 只读根） |
+| **数据与模型层** | **PostgreSQL + pgvector**（7 张表）· **Redis**（缓存 · 限流桶 · 会话）· **DashScope**（embedding 固定走它）· **Mem0** 长期记忆 |
+| **成本 · 预算 · 可观测** | **四层 token 限额**（单次 · 会话 · 用户日 · 全站日）· 按 key **熔断** · Gradio **成本看板** `/dashboard` · **Prometheus + Grafana** |
+
+> ⚠️ **它不是全仓 60 个模块的清单** —— 那种图**会随重构整体漂移**，而**没有门能钉住**。
+> 这张只画**层次与主链路**；逐模块 ⇒ [项目结构](#-项目结构) 与 `docs/原理/架构.md`。
+
+### ② 一次请求怎么走 —— ⚠️ 中间件顺序陷阱
+
+![请求流与中间件](docs/request-flow.png)
+
+> 🔴 `add_middleware` 内部是 `user_middleware.insert(0, …)`，而洋葱用 `reversed()` 包
+> ⇒ **最后 add 的在最外层、最先执行** ⇒ **实际执行顺序与源码顺序逐层相反**。
+> ⇒ **被 429 拒掉的请求不进日志中间件** ⇒ **不进 Prometheus 指标 · 没有 `X-Request-ID`**。
+
+### ③ 两条检索链 —— 召回来源**不同源**
+
+![两条检索链](docs/retrieval-chains.png)
+
+> 🔴 `/rag/search` 走**完整管线**；`/rag/stream_search` **只做向量（裸 SQL 直查）**，
+> **没有 `mode` 参数**、**不走 BM25 / 不走重排**
+> ⇒ **「检索结果和流式结果对不上」不是 bug，是设计如此。**
+
+### ④ 部署拓扑 —— 6 容器 · 3 张网络
+
+![部署拓扑](docs/deploy-topology.png)
+
+> 🔴 **所有对外端口只绑 `127.0.0.1`**；`exec-net` 是 **`internal: true`** ⇒ **执行器出不了互联网**。
+> ⚠️ **两处未解决**：Grafana 仍是默认口令 · 看板是**手工配置**的（仓库无 provisioning）。
+
+> 📄 **图源是 Mermaid**（`docs/原理/图源/*.mmd`）⇒ 改它 + 跑 `bash docs/原理/图源/出图.sh` 重出。
+> 📄 **文字版（更全，且核过代码）⇒ `docs/原理/架构.md`**。
+
+## 模型端点（⚠️ **两件事别混**）
+
+- **Embedding 固定走** 阿里云百炼 DashScope `text-embedding-v2`（1536 维）。
+- **生成 / 对话 LLM 是可配置的**，而 **`app/core/config.py` 的默认值是 DashScope + `qwen-turbo`/`qwen-plus`**。
+  ⚠️ **新克隆下来跑的是 qwen，不是 DeepSeek** —— 后者只是 **`.env`（不入库）里的取值**，⛔ 不是代码默认值。
+  要切：填 `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL_FAST` / `LLM_MODEL_CHAT` **四个**环境变量
+  （`LLM_API_KEY` 不填则回退用 `DASHSCOPE_API_KEY`）。`.env.example` 第 4–9 行已备好注释模板。
+
+## 技术栈
+
+| 层 | 用什么 |
+|---|---|
+| Web 框架 | **FastAPI** + Uvicorn |
+| 存储 | **PostgreSQL + pgvector**（业务表 + 向量）· **Redis**（缓存 / 限流桶 / 会话） |
+| Agent 编排 | **LangGraph**（`agent_graph` / `agent_graph_advanced*` / `agent_checkpointer`）· **LangChain**（模型与工具抽象） |
+| LLM 客户端 | **`langchain-openai`** 的 `ChatOpenAI`（全仓经 `app/core/llm_factory.make_llm()` **唯一构造**）<br>**裸 `openai` SDK** —— 🔴 **2 处不走 LangChain**：`app/rag/embedding_client.py`（embedding）与 `app/rag/query_rewriter.py`（改写）；它们拿到的是**裸响应**（只有 `.usage`，没有 `usage_metadata`） |
+| Embedding | 阿里云百炼 DashScope `text-embedding-v2`（**固定**） |
+| 重排序 | 本地 `BAAI/bge-reranker-v2-m3`（**真懒加载**，镜像里没装 torch ⇒ 只在开发机跑） |
+| 工具协议 / 记忆 | **MCP**（`app/tools/mcp_server.py`）· **mem0**（本地 Qdrant） |
+| 看板 / 评估 | **Gradio**（成本看板）· **RAGAS**（离线评估，⬜ 未实跑） |
+| 可观测 | `prometheus_client` + Prometheus + Grafana |
+
+🔴 **一处要说清**：`app/agent/plan_execute.py` 是**本仓【手写】的规划-执行循环**，⛔ **不是框架** ——
+它零命中 `langgraph` / `StateGraph`，只 import `langchain_core.messages`（判据：`grep -c yield app/agent/plan_execute.py` ⇒ **0**）。
+⇒ 它是 4 套 Agent 实现里**唯一不建图**的那一套。
+
+📄 逐项 + 落点 ⇒ `docs/原理/架构.md` §1 · 环境变量 ⇒ `docs/契约/环境变量.md`
+
+## 系统架构
+
 ### ① 系统总览 —— 四层
 
 ![系统总览](docs/architecture.png)

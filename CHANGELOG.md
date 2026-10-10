@@ -10,6 +10,21 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- 🔴 **架构图改用 Mermaid 重出**（2026-10-10 · 业务方指出做法错了 · 📄 **`DEC-137`**，**取代 `DEC-136` 的出图路线**）。
+  - 业务方原话：「**用 playwright 做的图，和 Mermaid 做的不一样，你查的别人是用 playwright 做这些结构 /
+    架构 / 框架图吗？错了吧，不能将就工具，没有工具你说，我们配好就是**」。
+  - 🔴 **我错在立场**：`DEC-136` 里我**先看本机有什么、再决定用什么**，把「不装东西」摆到了「**用对工具**」之上，
+    **没查"标准做法是什么"就动手**。查完：README 里的图**标准就是 Mermaid**（GitHub 原生渲染），
+    **没人**拿 HTML 截图当架构图。
+  - 🆕 **装了 `mermaid-cli`（mmdc 12.0.0）** —— ⚠️ **`PUPPETEER_SKIP_DOWNLOAD=true`**，
+    **复用 Playwright 已有的 Chromium**（省掉 ~150 MB 重复下载）。
+    ⛔ **D2 没装**：与 Mermaid 是两套 DSL，装两个只让**维护面翻倍**（业务方问过「两个都需要吗」⇒ **不需要**）。
+  - 🆕 **图源从 `.html` 换成 `.mmd`** + 🆕 **`docs/原理/图源/出图.sh`（一条命令重出）** + `mermaid-config.json`。
+  - 🔴 **图里只放【结构】，说明搬进 README 的表** —— ⚠️ 这是踩了四轮踩出来的（实测出过比例
+    **5.93 / 0.24 / 12.83**，全是读不了的条状）⇒ 结论进 `图源/CLAUDE.md`：**子图之间别连边** ·
+    **父 `TB` 会让子图 `direction` 失效** · **`wrappingWidth` 太小会在节点里断词**。现四张比例 **0.98–1.64**。
+  - 📌 **一条操作约束**：出图用 `bash docs/原理/图源/出图.sh`，⛔ **不许直接改 PNG**（那正是旧图烂掉的原因）。
+
 - 🔴 **架构图【全部重画】—— 图源入库，图能再生成**（2026-10-10 · 业务方指令 · 📄 **`DEC-136`**）。
   - ⛔ **删** `docs/architecture-full.png`（**1.5 MB 旧图**）· 🔁 **重画** `docs/architecture.png`。
   - 🆕 **补三张**（对照 `docs/原理/架构.md` 里两条"只有文字、没人画过"的东西）：

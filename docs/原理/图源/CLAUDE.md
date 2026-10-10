@@ -7,7 +7,7 @@
 
 | 源文件 | 出图 | 画的是什么 |
 |---|---|---|
-| `00-系统总览.mmd` | `docs/architecture.png` | 四层：客户端 → FastAPI 应用 → 存储 → 外部服务 |
+| `00-系统架构总览.mmd` | `docs/architecture.png` | ⭐ **一张图装下整个系统**（六层：客户 → 网关 → 应用 → 工具 → 数据 → 成本/观测）|
 | `01-请求流与中间件.mmd` | `docs/request-flow.png` | **中间件顺序陷阱**（执行顺序与源码顺序逐层相反） |
 | `02-两条检索链.mmd` | `docs/retrieval-chains.png` | `/rag/search` vs `/rag/stream_search` |
 | `03-部署拓扑.mmd` | `docs/deploy-topology.png` | 6 容器 · 3 张网络 · 端口 |
