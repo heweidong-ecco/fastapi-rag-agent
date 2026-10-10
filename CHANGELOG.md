@@ -742,7 +742,43 @@ All notable changes to this project will be documented in this file.
   ⇒ **三处一次改齐**，与去重器统一按 `[A-E]-*.md` 筛。
   📄 `docs/说明/语料重建-开工页.md` · `docs/说明/语料要求.md`
 
+### Changed
+
+- **`SECURITY.md` 重写为【安全策略】（按通行写法，⛔ 不再是过程记录）**（2026-10-10）——
+  - **为什么改**：原文 253 行，绝大部分是**过程记录**（哪条缺口收掉了、怎么收的、逐条变更记录）
+    ⇒ ⛔ **那不是 SECURITY.md 该装的东西**：它是给**外部人**看的**安全策略**。
+  - **写法对照真实项目**（⛔ 非自拟）：GitHub 官方模板（`Supported Versions` + `Reporting a Vulnerability`
+    两节）· `nodejs/node` 的 `SECURITY.md`（38 KB，全是政策、**没有一句"我改了什么"**）·
+    `microsoft/vscode`（543 字节的最小范例）。
+  - **新结构**：`Reporting a Vulnerability`（**⛔ 不用公开 issue**、给私密通道、要带什么、响应预期）·
+    `Supported Versions`（只有 `main`）· `Security Measures`（**做了什么**，一张表）·
+    `Scope and Limitations`（**明确不做什么** + **知情接受的残余风险**）· `Disclosure Policy`。
+  - **过程记录移到哪**：逐条修复依据 ⇒ `CHANGELOG.md`（它本来就是"改了什么"的家）· 决策 ⇒ `docs/decisions/` ·
+    已知缺口的**分析** ⇒ `docs/威胁模型.md`（它本来就有"已接受的残余风险"）。
+    ✅ **移走前逐项核过**：原「已收掉的」那 5 条在 `CHANGELOG.md` 里**都有**（`X-API-Key` 8 处 ·
+    `is_active` 13 处 · 隔离收口 54 处 · `127.0.0.1` 7 处）⇒ ⛔ **没有丢信息**。
+  - ⛔ **全文无 emoji**（原文有 ⚠️/🔴/✅ 当结构标记，那不是通行的写法）。
+  - **顺带修 3 处因此失效的指针**（活文档；⛔ CHANGELOG 与 `docs/decisions/` 是原始记录，**不动**）：
+    `ROADMAP.md` 的 `§3.3`/`§3.4` · `docs/威胁模型.md` 的"（缺口清单）" ·
+    `docs/契约/版本与兼容.md` 的两处同名描述。
+
 ### Fixed
+
+- 🔴 **`SECURITY.md` 把两份"离线"对回实况**（2026-10-10）——
+  - 🔴 **治了一句假话**：§3.1 写着「**仍开 · 已裁 A1 · 未落**」，而 **A1 2026-10-09 当天就随 `#125` 落了**
+    （`app/main.py:417` 已改成 `user_name is None` + docstring 已重写 + 反向守卫在）。
+    ⚠️ **根因**：那批活**分在三个 PR 里**（`#125` 落代码，而 `SECURITY.md` 停在了"未落"的旧稿）——
+    ⛔ **同一个事实两处记录，必然分叉**（本仓老毛病）。
+  - **§五 `SAST` 那行补上 CodeQL 的【实际覆盖】**：一上线报 **6 条**，裁成
+    **3 条 `fixed` · 3 条真缺陷已修 · 6 条带理由 `dismissed`**；并写明
+    **它认不出本仓用的路径净化**（实测三轮：`re.sub` 白名单 / `basename` / `realpath` 守卫**都不认**）
+    与 **`paths-ignore` 的两条局限**（只豁免一个文件 · **能阻止新告警但关不掉已存在的**）。
+  - **「已经收掉的」表补 2 条**（都是 **CodeQL 找出来的真缺陷**）：成本报表 CSV 的**路径注入** ·
+    `str(e)` **异常原文外泄**。
+  - ✅ **全仓 open 告警 = 0**（判据：`gh api .../code-scanning/alerts?state=open` ⇒ 空）。
+  - ⚠️ **§三 那 4 条现在全 ✅**，但**新加了一句防误读**：「**本节为空只说明【已知的】清了，
+    ⛔ 不说明没有未知的**」—— 缺口由 CodeQL / gitleaks / 依赖扫描**持续报**。
+
 
 - 🔴 **修掉 CodeQL 在 `app/` 上报的 3 条【真】告警**（2026-10-10 · 📄 裁定见 commit `e722306`）——
   CodeQL 2026-10-09 上线后在 `app/` 攒了 **6 条**、一直没人裁；逐条读代码后：**3 真 / 3 假阳**。
