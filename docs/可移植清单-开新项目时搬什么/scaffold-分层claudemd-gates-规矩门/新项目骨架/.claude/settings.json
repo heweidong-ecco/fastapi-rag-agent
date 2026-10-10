@@ -1,0 +1,37 @@
+{
+  "$comment": "【项目级】Claude Code 配置（会入库、团队共享）。用户级配置在 ~/.claude/settings.json。从 fastapi-rag-agent 的『可移植清单』打包过来 —— 只留了与语言/框架无关的 hook。",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/pre-commit-gates.py\"",
+            "timeout": 180,
+            "statusMessage": "提交前的门（凭据 / 链接 / 孤儿 / 分层CLAUDE.md）"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/claim-evidence-remind.py\"",
+            "timeout": 10,
+            "statusMessage": "写「不存在 / 唯一」前先出一条命令"
+          },
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/py-compile-remind.py\"",
+            "timeout": 30,
+            "statusMessage": "改完 .py 当场编译一次"
+          }
+        ]
+      }
+    ]
+  }
+}

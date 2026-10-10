@@ -1,263 +1,89 @@
 # RAG Agent API
 
-> ## 📍 找文档？**从仓库根的 [`CLAUDE.md`](CLAUDE.md) 进**（它有一张「📇 本仓目录索引」）
->
-> ⚠️ **2026-10-09 起每一层目录都有自己的 `CLAUDE.md`** —— 那是**那一层的索引表**。
-> `docs/文档地图.md` **已瘦成指针页**，只留「文档放置判据」与「还没有的」那份诚实清单。
->
-> 那是**全项目文档的索引** —— 一页列出「**我想知道 X ⇒ 去哪**」+ 全部文档清单 + **还没建的**。
-> 🔴 **现状/进度/待办** ⇒ 一律以 [`ROADMAP.md`](ROADMAP.md) 为准（**唯一权威**）。
-> 🔴 **接口清单** ⇒ 跑 `bash scripts/list_endpoints.sh`（**不写进文档**，会过期）。
+一个 **RAG（检索增强生成）+ Agent API 服务** —— 混合检索、重排序、查询改写、引用溯源、
+LangGraph Agent、MCP 工具、Mem0 长期记忆、Token 成本控制。
+构建于 **FastAPI + PostgreSQL(pgvector) + Redis** 之上。
 
-> ## 📌 先读这一段：**本仓是「轻量版」**
->
-> 本仓是**受硬件条件约束**（本机 8GB 内存 / 4 核）**经过三轮删减**后留下的**可运行最小集**。
-> 它**不是**这个项目的全貌 —— **完整版还包含相当一部分本仓里没有的模块与能力**，
-> 那些部分**不在本仓的范围内**，也不由本仓的测试覆盖。
->
-> **本仓里保留的这部分**，代码有单元测试与模块级测试覆盖，**是可以跑、可以验的** ——
-> 下面「快速开始」照做即可，`pytest` 也有可对照的基线数字。
->
-> ⚠️ **两点如实说明（别让这段话被误读）**：
-> 1. **被删掉的那部分，本仓无法为它背书** —— 它们的可运行性、测试情况都在本仓之外，
->    本仓既看不到、也验不了。**本段只承诺"本仓里的东西能跑"。**
-> 2. **删减的直接代价已经登记在文档里**，不是"删掉了但功能照旧"：
->    `mode=accurate/full` 与重排序在本机跑不了（装不下 torch + 2.3GB 模型）；
->    具体清单见下方「📊 性能目标」与「⚠️ 已知限制」。
+> ⚠️ **不称"生产级"** —— 本仓的性能数字**全部未实测**（见「性能目标」），且有 5 条已知限制
+> （见「已知限制」）。把一个没有验收数据的东西称作"生产级"是**没有依据的断言**。
 
-一个 RAG（检索增强生成）+ Agent API 服务，集成了混合检索、重排序、查询改写、引用溯源、LangGraph Agent、MCP 工具、Mem0 长期记忆和成本控制等核心能力，构建于 FastAPI、PostgreSQL(pgvector)、Redis 之上。
+> 📌 **本仓是「轻量版」**：受硬件条件约束（本机 **8 GB 内存 / 4 核**）**经过三轮删减**后留下的**可运行最小集**。
+> 它**不是**这个项目的全貌 —— **完整版还包含相当一部分本仓没有的模块与能力**，那些**不在本仓范围内**。
+> **本段只承诺一件事：本仓里的这部分能跑、可验**（下面「快速开始」照做即可，`pytest` 也有可对照的基线）。
 
-> 🔴 2026-09-20 改：原文首句写「一个**生产级的** RAG + Agent API 服务」——
-> **已删去"生产级"**。理由：本仓的性能数字**全部未实测**（见下），
-> 且有三条已知限制；把一个没有验收数据的东西称作"生产级"是**没有依据的断言**。
+---
 
-**模型端点**（⚠️ **两件事别混**）：
-- **Embedding 固定走** 阿里云百炼 DashScope `text-embedding-v2`（1536 维）。
-- **生成/对话 LLM 是可配置的**，而 **`app/core/config.py` 的默认值是 DashScope + `qwen-turbo`/`qwen-plus`**。
-  🔴 **本项目开发机上用的是 DeepSeek**（`.env` 里 `LLM_BASE_URL=https://api.deepseek.com` ·
-  `LLM_MODEL_FAST`/`LLM_MODEL_CHAT=deepseek-v4-flash`），但那是 **`.env`（不入库）里的取值**，
-  **不是代码默认值** —— **新克隆下来跑的是 qwen，不是 DeepSeek。**
-  要切，填 `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL_FAST` / `LLM_MODEL_CHAT` **四个**环境变量
-  （`LLM_API_KEY` 不填则回退用 `DASHSCOPE_API_KEY`）——
-  **`.env.example` 第 4–9 行已备好这四个键的注释模板**（默认注释掉 ⇒ 不填就是 DashScope）。
+## 快速开始
 
-## 📊 性能目标（⚠️ **目标值 —— 不是指标**）
-
-> 🔴 **这三行此前写作「性能指标」，且下面这张表是核对时改的。**
->
-> **仓库里【有】一次旧压测记录**（见 `性能基线报告模板.txt`，2026-06-25，三档并发 10/20/35）——
-> ⚠️ **但那份记录不能用来支撑这三个数，方向甚至相反**：
-
-| 旧记录（2026-06-25） | 值 | 与下表目标对比 |
-| :--- | :--- | :--- |
-| P99 延迟 | **68 / 32 / 28 ms**（10/20/35 并发） | **低于**目标的 800ms ✅ |
-| **错误率** | **77.24% / 96% / 97%** | 🔴 **远糟于**目标的 `< 0.1%` |
-| QPS | 5.1 / 10.5 / 17.8 req/s | — |
-
-> ⚠️ **那次压测跑在坏掉的环境上**：同日 `app/logs/api_2026-06-25.log` 含 **113 条未捕获异常**
-> （`redis:6379` 解析失败、`could not translate host name "postgres"`），**与 77–97% 的错误率自洽**。
-> ⇒ **P99 那几个数不能采信**（失败请求不产生正常延迟样本），**口径也从未复核过**。
->
-> 📌 **所以本表的每一格「现状」都是 ⬜**：不是"没有记录"，而是 **"那份记录不可用"**。
-> `ROADMAP.md` 里那句「P99 / 失败率 / 并发 / Grafana **尚无实测数据**」指的正是这个意思
-> （核查清单 24 项**全部未勾**）。
-
-| 目标 | 目标值 | 现状 |
-| :--- | :--- | :--- |
-| **P99 检索延迟** | `< 800ms` | ⬜ **无可采信数据**（旧记录 28–68ms **跑在坏环境上**，不可用） |
-| **基础检索失败率** | `< 0.1%` | 🔴 **旧记录 77–97%（环境坏，不可用；但说明这条从未达标过）** |
-| **Embedding 缓存命中率** | `> 90%` | ⬜ **未实测** |
-| **多格式文档支持** | PDF, Word, Markdown, HTML | ✅ 已实现（`app/rag/document_parser.py`） |
-
-## 🏗 技术架构
-
-![系统架构图](docs/architecture.png)
-
-**整套系统架构图**（上面那张没画到的部分：MCP 工具层 · 部门制 Agent · 成本控制体系）：
-
-![完整系统架构图](docs/architecture-full.png)
-
-> 📌 **2026-09-20**：这张图原在 `Agent/docs/architecture_full.png`，随 `Agent/` 目录处置搬到 `docs/`。
-> 它是**整套系统**级别的图（另一张 `docs/architecture.png` 只到子系统级）。
->
-> ✅ **已逐项核对，图上组件本仓都有**：
-> FastAPI 网关（路由/认证/限流/日志/文本规范化）· LangGraph **部门制 Agent**
-> （Supervisor + 检索/计算/日期/翻译/ReAct + Checkpointer —— `app/agent/agent_graph_advanced_learning.py:105/134/154/169/197/246`）
-> · **MCP Server 工具注册中心**（`app/tools/mcp_server.py:24`）· RAG 检索管线 · Mem0 / Redis / pgvector
-> · **成本控制体系**（`app/billing/cost_dashboard.py`）· Grafana + Prometheus（`docker-compose.yml:90`）。
->
-> ⚠️ **一处已过时，别照图核代码**：图上工具层画的是 **`rag_search`**，而当前的实际工具是
-> **`fetch_webpage_html`**（`app/agent/agent_graph_advanced_learning.py:47-51`）。⇒ 这张图记录的是**更早一代**的工具集。
-
-## ❓ 常见问题
-
-遇到问题请先查阅 [FAQ 与故障排查](docs/FAQ.md)。
-
-## 🛠 技术栈
-
-**FastAPI** + **PostgreSQL(pgvector)** + **Redis** + **LangGraph**（+ LangChain）。
-重排序本地 `BAAI/bge-reranker-v2-m3`；**Embedding 固定走阿里云百炼 DashScope**；
-**生成 LLM 可换**（本机 `.env` 走 DeepSeek）；Agent 侧还有 **MCP 工具协议**与 **Mem0 长期记忆**。
-
-> 📄 **逐项 + 落点**见 `docs/原理/架构.md` §1 · **环境变量**见 `docs/契约/环境变量.md`
-> 📌 **2026-09-29 压缩**：原表 11 行（含 RAGAS / CI/CD 两行）——
-> 那两行的**状态**已移到 `docs/说明/测试.md` 与「📈 评估体系」，**避免两处真相**。
-
-## ✨ 核心功能
-
--   **多模态检索**：**4 种模式** —— `fast` / `accurate` / **`accurate_norerank`（默认）** / `full`，
-    可灵活组合向量检索、BM25 关键词检索、RRF 融合和 Cross-Encoder 重排序。
-    > 🔴 **2026-09-29 更正**：原文写「**三种模式**（fast / accurate / full）」——
-    > **漏了 `accurate_norerank`，而它恰恰是默认值**（且**不依赖 torch**，是镜像里唯一能用的精确档）。
-    > 另外原文**把 `fast` 说成"只查向量"也不对** —— 它**含 BM25 + RRF**。
-    > 判据：`app/routing/api_v1_rag.py:467-476` 的枚举 · 详见 `docs/契约/接口契约.md` §四。
--   **查询改写**：利用LLM对用户问题进行上下文补全和指代消解，显著提升多轮对话场景下的检索准确率。
--   **引用溯源**：答案**后端**会自动标注信息来源（`[来源:n]` 行内标记 + 结构化 `sources`）。
-    > 🔴 **2026-09-29 更正**：原文写「**支持点击溯源到原始文档块**」—— **"点击"不成立**。
-    > **全仓没有业务前端**（`app/static/` 只有 3 个调试测试页，**无 `package.json`**）⇒
-    > **能点的界面还没做**（属**硬门 B 的前端部分**，排在「后端先行」之后）。
-    > ⚠️ 另：**`citations` 默认 `False`** —— 不显式打开，**连后端都不会给引用**。
-    > 详见 `docs/契约/接口契约.md` §四 · `ROADMAP.md` 功能现状表。
--   **流式输出**：基于 SSE 逐字生成。
-    -   `POST /rag/stream_search`（RAG 端）
-    -   🔵 `POST /agent/langgraph_chat/stream`（**Agent 端 · 2026-10-03 新增** · `DEC-050`）——
-        ⚠️ **Agent 的 30 个端点里只有这 1 条是流式的**，其余 29 条仍全非流式（**硬门 A 缺口未关掉**）。
-        > 📌 **「全仓唯一 SSE 端点」这句 2026-10-03 起失效** —— 现在有 2 条。
-    > 🔴 **2026-09-29 更正**：原文写「**支持真中断，避免 Token 浪费**」—— **不成立**。
-    > 实测：全仓**唯一**的中断处理是 `app/routing/api_v1_rag.py:676` 的 `except asyncio.CancelledError`
-    > ⇒ 只有 `print` + `yield [DONE]`；**全仓无 `is_disconnected` / `aclose`** ⇒ **不关上游 HTTP 流**；
-    > **且全仓无前端、无停止按钮**。
-    > ⇒ 属**硬门 C**，见 `后端补齐清单` **B2**（它自标「**最容易假完成**」）。
--   **认证与权限**：支持API Key和JWT双认证，三级权限控制（管理员/付费用户/免费用户）。
--   **限流与配额**：令牌桶限流 + 每日配额控制。
--   **多格式文档**：支持PDF、Word、Markdown、HTML，含复杂PDF表格和双栏解析。
--   **Agent 能力**：LangGraph 多分支路由、MCP 工具协议、Plan-and-Execute、Mem0 长期记忆、Token 成本控制。
-
-## 📈 评估体系
-
-| 项 | 状态 |
-|---|---|
-| **RAGAS 脚本 + 数据集** | ✅ **已入库**（`app/eval/evaluate_with_ragas.py` · `app/eval/eval_dataset.json` 37 条 + 2 份历史报告） |
-| **是否实跑过** | 🔴 **⬜ 没有** —— 本机 venv **未装** `ragas`/`datasets`，且脚本需 API 在跑 ⇒ **"已入库" ≠ "跑通了"** |
-| 历史评估数字（2026-06-29 **由原系统**跑出） | `faithfulness` 0.6267 · `context_recall` 0.7568 · `context_precision` 0.4369 |
-
-> 🔴 **2026-09-29 压缩（原 22 行 → 6 行）**：原文有一段「**RAGAS 三重缺席**」的更正史 ——
-> **那是历史**，已在 `CHANGELOG.md` 与 `docs/decisions/DEC-022` 留档。
-> ✅ **要当前状态 ⇒ 看上面的表**；要**跑法与前置** ⇒ `docs/说明/测试.md`。
-
-
-## 🚀 快速开始
-
-**前置要求**（⚠️ 2026-09-20 补 —— 原先没写，而 Python 版本是**硬要求**）：
+### 前置要求
 
 | 需要 | 说明 |
 |---|---|
 | **Docker + Docker Compose v2** | **唯一必需** —— 一条 `docker compose up -d` 起全栈（PostgreSQL+pgvector / Redis / API / Prometheus / Grafana） |
-| **磁盘 / 内存** | ⚠️ 要**下载并构建 GB 级镜像**（`app/requirements.txt` 含 torch 系）⇒ **首次启动较慢**。**8GB 内存的机器上实测构建会失败** —— 那是环境天花板，不是配置写错（见「已知限制」） |
-| **Python 3.10** | ⚠️ **只有要跑测试 / 本地改代码时才需要**（`app/Dockerfile` 的基础镜像也是 3.10）。**不要用 `python3`** —— 本机实测 `python3` = **3.14.7**，只有 `python3.10`（3.10.10）可用 |
+| **磁盘 / 内存** | ⚠️ 要**下载并构建 GB 级镜像**（`app/requirements.txt` 含 torch 系）⇒ **首次启动较慢**。**8 GB 内存的机器上实测构建会失败** —— 那是环境天花板，不是配置写错（见「已知限制」） |
+| **Python 3.10** | ⚠️ **只有要跑测试 / 本地改代码时才需要**（`app/Dockerfile` 基础镜像也是 3.10）。**⛔ 别用 `python3`** —— 本机实测它 = 3.14.7，只有 `python3.10` 可用 |
 
-### 1. 克隆项目
+### 1 · 克隆
 
 ```bash
 git clone https://github.com/heweidong-ecco/fastapi-rag-agent.git
 cd fastapi-rag-agent
 ```
 
-> 🔴 2026-09-20 修：此处原为 `git clone https://github.com/你的用户名/rag-agent-api.git`
-> —— **是占位符，照抄必然 `Repository not found`**（已实测）。现改为真实地址。
-
-### 2. 配置环境变量
+### 2 · 配置环境变量
 
 ```bash
 cp .env.example .env
-# `app/core/config.py` 的 validate_config 检查【四项】—— 缺任何一项都【拒绝启动】：
-#   DASHSCOPE_API_KEY   —— Embedding 用（阿里百炼）
-#   POSTGRES_PASSWORD   —— ⚠️ 这一项容易漏！.env.example 里给了个占位值 mysecretpassword，
-#                          不改成真的也能起来（本地 Docker 就是那套），但**不能删/留空**
-#   JWT_SECRET_KEY      —— 随便一串随机值
-#   LOGIN_PASSWORD      —— 管理员登录口令
-# 生成随机值：python3 -c "import secrets; print(secrets.token_urlsafe(24))"
-#
-# 生成/对话 LLM 默认走 DashScope 的 qwen-turbo / qwen-plus；
-# 想换成 DeepSeek 等 OpenAI 兼容端点，取消 .env.example 第 4–9 行的注释并填 LLM_* 四键。
 ```
 
-> 🔴 2026-09-20 修：此处原写「**三项**」——**漏了 `POSTGRES_PASSWORD`**。
-> 实测 `app/core/config.py:58-74` 检查的是 **4 项**；漏写会让"删了这一项 ⇒ 起不来 ⇒ 按本表查不到原因"。
+`app/core/config.py` 的 `validate_config` 检查**四项，缺任何一项都拒绝启动**：
 
-### 3. 启动（**一条命令**）
+| 键 | 说明 |
+|---|---|
+| `DASHSCOPE_API_KEY` | Embedding 用（阿里云百炼） |
+| `POSTGRES_PASSWORD` | ⚠️ **容易漏** —— `.env.example` 给的是占位值 `mysecretpassword`，本地 Docker 用它也能起，但**不能删 / 留空** |
+| `JWT_SECRET_KEY` | 随便一串随机值 |
+| `LOGIN_PASSWORD` | 管理员登录口令 |
+
+> 生成随机值：`python3 -c "import secrets; print(secrets.token_urlsafe(24))"`
+
+**生成 / 对话 LLM 默认走 DashScope 的 `qwen-turbo` / `qwen-plus`**。想换成 DeepSeek 等 OpenAI 兼容端点，
+取消 `.env.example` 第 4–9 行的注释并填 `LLM_*` 四键（详见「模型端点」）。
+
+### 3 · 启动（**一条命令**）
 
 ```bash
-cp .env.example .env      # 上一步填好【四项】必填
 docker compose up -d
 ```
 
-⚠️ **首次会 `build` API 镜像**（`docker-compose.yml:13` 的 `build: context: ./app`），
-而 `app/requirements.txt` 含 torch 系 ⇒ **要下几个 GB、构建较久**。
-**8GB 内存 / Docker 配额较小的机器上实测会失败** —— 那是**环境天花板，不是配置写错了**（见下方「已知限制」）。
+⚠️ **首次会构建 API 镜像**（`app/requirements.txt` 含 torch 系）⇒ 要下几个 GB、构建较久。
+**8 GB 内存的机器上实测会失败** —— 环境天花板，不是配置写错。
 
-> 🔴 **2026-09-20 方向更正**：本段此前写的是「**两条路径**」（轻量：DB 用 Docker + API 跑本机；Docker 全量），
-> **推荐轻量那条，还立了「别用 `docker compose up`」的红线**。**现已收敛成上面这一条** ——
-> 业务方口径：「**不用双 requirements.txt，这样会混，最后肯定是用 docker-compose 一键编排的，
-> 别人 git clone 也是 docker-compose**」、「**整个项目阶段性完成，本来就是要完整明了、简洁的交付**」。
-> ⇒ **删掉分叉**，也**删掉那条红线的理由**（它原本是为"别打断 `agent-eval-gate` 评测"立的，而该顾虑已作废）。
-
-#### ⚠️ 如果你的机器上**已经有** `postgres-rag` / `redis-rag` 容器
+#### 如果机器上**已经有** `postgres-rag` / `redis-rag` 容器
 
 ```bash
 docker ps --format '{{.Names}}' | grep -E 'postgres-rag|redis-rag'
 ```
 
-**有的话先看清它们是不是本仓的** —— `docker compose up` 是**按 compose 项目**工作的，而容器可能不属于本项目。
+**先看清它们是不是本仓的** —— `docker compose up` 按 **compose 项目**工作，而那些容器可能属于别的项目
+（`docker compose ps` 会是空的，即"不认领"）。此时 `up` 会**建新网络**并计划重建同名容器
+⇒ 要么撞名硬失败，要么把已有容器重建掉。**先确认再动手。**
 
-> ⚠️ **这个坑是实测的（2026-09-20）**：本机 `postgres-rag` / `redis-rag` 的
-> `com.docker.compose.project` 是 **`my-fixed-name`**、`config_files` 指向**另一个仓库**的 compose 文件；
-> 本仓 `docker compose ps` **是空的**（不认领它们）。此时 `up` 会计划 **`Container postgres-rag Creating`**
-> + 建新网络 ⇒ **要么撞名硬失败，要么把已有容器重建到 `fastapi-rag-agent_app-net`**。
->
-> ⛔ **原文此处写的是"重建会打断 `agent-eval-gate` 的评测，所以这是红线"—— 该理由已作废**
-> （业务方：「**不用考虑 agent-eval-gate 占用 docker-compose，那个项目已经做完了，我们正常使用**」）。
-> ✅ **但"重建已有容器会断掉指向它的东西"这个现象本身仍然成立** ⇒ 所以是**先确认再动手**，不是无条件禁止。
-
-#### 🔧 本地开发 / 跑测试（**这是开发路径，不是交付路径**）
-
-交付只需要上面那一条命令。**只有当你要在本机跑 `pytest` 或改代码时**，才需要这一套：
-
-```bash
-python3.10 -m venv venv
-venv/bin/pip install -r app/requirements.txt
-cd app && ENABLE_DASHBOARD=false ../venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
-```
-
-> 📌 `bash dev.sh` 干的就是这一步（起 postgres+redis → 等就绪 → 起 uvicorn）。
-> 🔴 **2026-10-07 删掉了原来那句「⚠️ 必须在 `app/` 目录下起 uvicorn（有一处路径按相对位置解析）」** ——
-> 那条约束的根因是 `logger_config.py` 里的 `logs/` 按**相对 CWD** 解析；现已改成基于 `__file__`
-> 的绝对路径，**从哪儿起都一样**。⚠️ 当时写这条的另一个理由是"本机 Docker 起不来"，现在 Docker 可用，一并作废。
->
-> 📌 **依赖清单只有一份：`app/requirements.txt`。** 🔴 2026-09-20 删掉了此前那份"轻量版"
-> `app/requirements-test.txt` —— 业务方口径「**不用双 requirements.txt，这样会混**」。
-> 已核安全性：实测那份是 `requirements.txt` 的**真子集**（含版本约束在内比对整行 ⇒ 只在它里面出现的行 = **空**），
-> 切过去**不丢任何包**。代价是本机会拉 torch 系；但 `app/rag/reranker.py:14` 是真懒加载，
-> **不碰 torch 也能跑**（默认模式 `accurate_norerank`）。
-
-### 4. 验证（**以下输出是 2026-09-20 实测的原文**）
+### 4 · 验证
 
 ```bash
 curl http://localhost:8000/health
 # {"status":"healthy","checks":{"database":"ok","redis":"ok","embedding_api":"deferred to external monitoring"}}
 
-curl http://localhost:8000/api/v1/
-# {"status":"ok","version":"v1"}
-
 curl http://localhost:8000/ready
-# {"status":"ready"}      ← ⚠️ 启动后 10 秒内会返回 503，那是设计行为，不是坏了
+# {"status":"ready"}   ← ⚠️ 启动后 10 秒内会返回 503，那是设计行为，不是坏了
 ```
 
 再取个 token、跑一次真实检索（**这才是"真的跑起来了"**）：
 
 ```bash
-# ⚠️ 先把 .env 里的值载进当前 shell —— 下面两行【原本没写，照抄会拿到空口令 ⇒ 401】
-set -a; . ./.env; set +a          # 或者手写：export LOGIN_USER_NAME=admin LOGIN_PASSWORD='你的口令'
+# ⚠️ 先把 .env 的值载进当前 shell —— 否之会发空口令 ⇒ 401
+set -a; . ./.env; set +a
 
 TOK=$(curl -s -X POST localhost:8000/api/v1/auth/login -H 'Content-Type: application/json' \
   -d "{\"user_name\":\"$LOGIN_USER_NAME\",\"password\":\"$LOGIN_PASSWORD\"}" \
@@ -265,67 +91,222 @@ TOK=$(curl -s -X POST localhost:8000/api/v1/auth/login -H 'Content-Type: applica
 
 curl -s -X POST localhost:8000/api/v1/rag/hybrid_search -H "Authorization: Bearer $TOK" \
   -H 'Content-Type: application/json' -d '{"question":"测试","top_k":3}'
-# 应返回 {"method":"hybrid (vector + bm25)","docs":[...]} —— docs 里的 "from" 字段是 "vector"/"bm25"/"both"
+# ⇒ {"method":"hybrid (vector + bm25)","docs":[...]}   docs 的 "from" 字段是 vector/bm25/both
 ```
 
-> 🔴 2026-09-20 修：`$LOGIN_USER_NAME` / `$LOGIN_PASSWORD` **只存在于 `.env`，它们不是 shell 变量**
-> —— 原版没写怎么把它们导出来，照抄会发出**空用户名/空口令**（`TOK` 取不到，下一句 401）。
-> **这正是本 PR 要消灭的那类"照抄跑不通"。** 已补 `set -a; . ./.env; set +a`。
+> ⚠️ **此时知识库是空的**（新装的库没有文档）⇒ `docs` 会是 `[]`，**正常**。
+> 要看非空结果 ⇒ 按 `docs/demos.md` 灌几篇文档，或参考 `/api/v1/rag/insert`。
 
-> ⚠️ **此时知识库是空的**（新装的库没有文档）⇒ `docs` 会是 `[]`，**这是正常的**。
-> 要看非空结果，先按 `docs/demos.md` 灌几篇文档，或参考 `/api/v1/rag/insert`。
+### 5 · 打开这些界面
 
-### 5. 访问文档
+| 界面 | 地址 |
+|---|---|
+| API 文档（Swagger UI） | http://localhost:8000/docs |
+| 成本看板（Gradio） | http://localhost:8000/dashboard |
+| Grafana | http://localhost:3000（`admin` / `admin`） |
+| Prometheus | http://localhost:9090 |
 
-`docker compose up -d` 起的是**全栈**，所以下面这些都会有：
+### 本地开发 / 跑测试（**开发路径，不是交付路径**）
 
--   Swagger UI：http://localhost:8000/docs
--   成本看板（Gradio）：http://localhost:8000/dashboard
--   Grafana 监控：http://localhost:3000 (admin/admin)
--   Prometheus：http://localhost:9090
+```bash
+python3.10 -m venv venv
+venv/bin/pip install -r app/requirements.txt
+bash dev.sh        # 起 postgres+redis → 等就绪 → 起 uvicorn（热重载）
+```
 
-## 🤖 用另一个 Agent 来测这个项目？
+> 📌 **依赖清单只有一份：`app/requirements.txt`**（刻意不留"轻量版"第二份，避免两处漂移）。
+> 代价是本机会拉 torch 系；但 `app/rag/reranker.py` 是**真懒加载**，
+> **不碰 torch 也能跑**（默认模式 `accurate_norerank`）。
 
-见 **`docs/给Agent的测试与调试指南.md`** —— 里面有可直接粘贴的 Prompt、分层命令行、每个失败的已知原因。
+---
+
+## 核心功能
+
+- **多模态检索** —— **4 种模式**：`fast` / `accurate` / **`accurate_norerank`（默认）** / `full`，
+  可组合**向量检索 + BM25 + RRF 融合 + Cross-Encoder 重排序**。
+  ⚠️ 默认档**不依赖 torch**，是演示镜像里唯一能用的精确档。
+- **查询改写** —— LLM 做上下文补全与指代消解，提升多轮场景的检索准确率。
+- **引用溯源** —— 答案后端自动标注来源（`[来源:n]` 行内标记 + 结构化 `sources`）。
+  ⚠️ **`citations` 默认 `False`** —— 不显式打开，连后端都不会给引用。
+- **流式输出（SSE）** —— **6 条流式端点**（RAG 端 1 条 + 5 条对话链各 1 条），走共享层 `app/routing/sse.py`。
+- **认证与权限** —— API Key + JWT 双认证，三级角色（管理员 / 付费 / 免费）。
+- **限流与配额** —— 令牌桶限流 + **四层 token 限额**（单次 / 会话 / 用户日级 / 全站日级）+ 按 key 熔断。
+- **多格式文档** —— PDF / Word / Markdown / HTML，含复杂 PDF 表格与双栏解析。
+- **Agent 能力** —— LangGraph 多分支路由、MCP 工具协议、Plan-and-Execute、Mem0 长期记忆、Token 成本控制。
+
+## 模型端点（⚠️ **两件事别混**）
+
+- **Embedding 固定走** 阿里云百炼 DashScope `text-embedding-v2`（1536 维）。
+- **生成 / 对话 LLM 是可配置的**，而 **`app/core/config.py` 的默认值是 DashScope + `qwen-turbo`/`qwen-plus`**。
+  ⚠️ **新克隆下来跑的是 qwen，不是 DeepSeek** —— 后者只是 **`.env`（不入库）里的取值**，⛔ 不是代码默认值。
+  要切：填 `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL_FAST` / `LLM_MODEL_CHAT` **四个**环境变量
+  （`LLM_API_KEY` 不填则回退用 `DASHSCOPE_API_KEY`）。`.env.example` 第 4–9 行已备好注释模板。
+
+## 技术栈
+
+| 层 | 用什么 |
+|---|---|
+| Web 框架 | **FastAPI** + Uvicorn |
+| 存储 | **PostgreSQL + pgvector**（业务表 + 向量）· **Redis**（缓存 / 限流桶 / 会话） |
+| Agent 编排 | **LangGraph**（`agent_graph` / `agent_graph_advanced*` / `agent_checkpointer`）· **LangChain**（模型与工具抽象） |
+| LLM 客户端 | **`langchain-openai`** 的 `ChatOpenAI`（全仓经 `app/core/llm_factory.make_llm()` **唯一构造**）<br>**裸 `openai` SDK** —— 🔴 **2 处不走 LangChain**：`app/rag/embedding_client.py`（embedding）与 `app/rag/query_rewriter.py`（改写）；它们拿到的是**裸响应**（只有 `.usage`，没有 `usage_metadata`） |
+| Embedding | 阿里云百炼 DashScope `text-embedding-v2`（**固定**） |
+| 重排序 | 本地 `BAAI/bge-reranker-v2-m3`（**真懒加载**，镜像里没装 torch ⇒ 只在开发机跑） |
+| 工具协议 / 记忆 | **MCP**（`app/tools/mcp_server.py`）· **mem0**（本地 Qdrant） |
+| 看板 / 评估 | **Gradio**（成本看板）· **RAGAS**（离线评估，⬜ 未实跑） |
+| 可观测 | `prometheus_client` + Prometheus + Grafana |
+
+🔴 **一处要说清**：`app/agent/plan_execute.py` 是**本仓【手写】的规划-执行循环**，⛔ **不是框架** ——
+它零命中 `langgraph` / `StateGraph`，只 import `langchain_core.messages`（判据：`grep -c yield app/agent/plan_execute.py` ⇒ **0**）。
+⇒ 它是 4 套 Agent 实现里**唯一不建图**的那一套。
+
+📄 逐项 + 落点 ⇒ `docs/原理/架构.md` §1 · 环境变量 ⇒ `docs/契约/环境变量.md`
+
+## 系统架构
+
+### ① 系统架构总览 —— **一张图装下整个系统**
+
+![系统架构总览](docs/architecture.png)
+
+| 层 | 里面是什么 |
+|---|---|
+| **客户层** | 浏览器 · curl / SDK · Swagger `/docs` |
+| **FastAPI 网关层** `rag-api :8000` | **中间件 ×4**（规范化 → 配额 → 限流 → 日志/指标，⚠️ **执行顺序见 ②**）· 路由分派（**3 张路由表**）· 鉴权（API Key + JWT · 三级角色） |
+| **应用层** | **LangGraph Agent ×5**（对话链全齐，含 SSE）· **手写规划执行** `plan_execute`（⚠️ **非 LangGraph**）· **RAG 检索管线**（改写 → 向量 + BM25 → RRF → 重排） |
+| **工具与执行层** | **MCP Server**（工具的**唯一事实源**）· **工具箱 ×7**（`calculator` `date_today` `date_calc` `json_extract` `stats` `web_search` `execute_python`）· **`executor` 容器**（无网 · 非 root · 只读根） |
+| **数据与模型层** | **PostgreSQL + pgvector**（7 张表）· **Redis**（缓存 · 限流桶 · 会话）· **DashScope**（embedding 固定走它）· **Mem0** 长期记忆 |
+| **成本 · 预算 · 可观测** | **四层 token 限额**（单次 · 会话 · 用户日 · 全站日）· 按 key **熔断** · Gradio **成本看板** `/dashboard` · **Prometheus + Grafana** |
+
+> ⚠️ **它不是全仓 60 个模块的清单** —— 那种图**会随重构整体漂移**，而**没有门能钉住**。
+> 这张只画**层次与主链路**；逐模块 ⇒ [项目结构](#-项目结构) 与 `docs/原理/架构.md`。
+
+### ② 一次请求怎么走 —— ⚠️ 中间件顺序陷阱
+
+![请求流与中间件](docs/request-flow.png)
+
+> 🔴 `add_middleware` 内部是 `user_middleware.insert(0, …)`，而洋葱用 `reversed()` 包
+> ⇒ **最后 add 的在最外层、最先执行** ⇒ **实际执行顺序与源码顺序逐层相反**。
+> ⇒ **被 429 拒掉的请求不进日志中间件** ⇒ **不进 Prometheus 指标 · 没有 `X-Request-ID`**。
+
+### ③ 两条检索链 —— 召回来源**不同源**
+
+![两条检索链](docs/retrieval-chains.png)
+
+> 🔴 `/rag/search` 走**完整管线**；`/rag/stream_search` **只做向量（裸 SQL 直查）**，
+> **没有 `mode` 参数**、**不走 BM25 / 不走重排**
+> ⇒ **「检索结果和流式结果对不上」不是 bug，是设计如此。**
+
+### ④ 部署拓扑 —— 6 容器 · 3 张网络
+
+![部署拓扑](docs/deploy-topology.png)
+
+> 🔴 **所有对外端口只绑 `127.0.0.1`**；`exec-net` 是 **`internal: true`** ⇒ **执行器出不了互联网**。
+> ⚠️ **两处未解决**：Grafana 仍是默认口令 · 看板是**手工配置**的（仓库无 provisioning）。
+
+### ⑤ 端到端链路 —— 一次检索请求**从头走到尾**
+
+![端到端链路](docs/end-to-end.png)
+
+> 上面 ① 是「**有什么**」，这张是「**怎么走**」：客户层 → 网关 4 道 → 检索管线 → 数据层 / 模型层。
+> ⚠️ 网关那段**按【实际执行顺序】画**（`→ 规范化 → 配额 → 限流 → 日志`），⛔ 不是源码顺序（见 ②）。
+
+> 📄 **图源是 Mermaid**（`docs/原理/图源/*.mmd`）⇒ 改它 + 跑 `bash docs/原理/图源/出图.sh` 重出。
+> 📄 **文字版（更全，且核过代码）⇒ `docs/原理/架构.md`**。
+
+## 性能目标（⚠️ **是目标值 —— 不是指标**）
+
+> 🔴 **本表此前写作「性能指标」** —— 已改。仓库里**有**一次旧压测记录（2026-06-25），
+> **但它不能支撑这几个数，方向甚至相反**：那次跑在**坏掉的环境**上（同日日志含 113 条未捕获异常：
+> redis 解析失败 / postgres 域名解析失败），**与 77–97% 的错误率自洽** ⇒ **P99 那几个数不能采信**。
+
+| 目标 | 目标值 | 现状 |
+|---|---|---|
+| P99 检索延迟 | `< 800ms` | ⬜ **无可采信数据** |
+| 基础检索失败率 | `< 0.1%` | ⬜ **从未达标过**（旧记录 77–97%，但那环境本身是坏的） |
+| Embedding 缓存命中率 | `> 90%` | ⬜ 未实测 |
+| 多格式文档支持 | PDF / Word / Markdown / HTML | ✅ 已实现（`app/rag/document_parser.py`） |
+
+## 评估体系
+
+| 项 | 状态 |
+|---|---|
+| **RAGAS 脚本 + 数据集** | ✅ **已入库**（`app/eval/evaluate_with_ragas.py` · `eval_dataset.json` 37 条 + 2 份历史报告） |
+| **是否实跑过** | ⬜ **没有** —— 本机 venv 未装 `ragas`/`datasets`，且脚本需 API 在跑 ⇒ **"已入库" ≠ "跑通了"** |
+| 历史评估数字（2026-06-29 · **由原系统**跑出） | `faithfulness` 0.6267 · `context_recall` 0.7568 · `context_precision` 0.4369 |
+
+📄 跑法与前置 ⇒ `docs/说明/测试.md`
+
+## 已知限制（诚实清单）
+
+> 本仓立过一条规矩：**「后果性断言必须有一条当场可跑的命令支撑」**。下面几条**已知不达标**，免得被当成"已实现"。
+
+| # | 限制 | 影响 |
+|---|---|---|
+| 1 | **浏览器工具已挂起** —— 从工具表里摘掉了（`mcp_server.TOOLS` 两行注释掉）<br>**工具数**：原 **6** → 摘掉两个浏览器工具后 **4** → 2026-10-08 新增 3 个本地工具（`date_calc` `json_extract` `stats`）⇒ **现 7**<br>原因：`app/Dockerfile` 与 `docker-compose.yml` **都没有 `playwright install`** ⇒ **换机器 / 用 Docker 一样跑不了**（不是"本机毛病"）；另本机缓存是 chromium 1228 而 playwright 1.62 要 1234。<br>🔧 要重新启用：装好 chromium 后按 `app/tools/mcp_server.py` 那段注释列的 **4 处一起**取消注释（⚠️ 代价 **+556 MB**） | 少 2 个工具 + 2 个 REST 端点 |
+| 2 | **`mode=accurate/full` 与重排序未验** —— 装不下 torch + `bge-reranker-v2-m3`（2.3 GB） | 默认档 `accurate_norerank` 可用，但这两条路径**本机验不了** |
+| 3 | **性能数字全部未实测** | 见「性能目标」—— 不得作为选型 / 承诺依据 |
+| 4 | **知识库语料良莠不齐** —— `documents` 表 **35/77 行是测试数据** | 同一问题可能命中切题的、也可能命中测试垃圾。**演示前建议先灌一份干净语料** |
+| 5 | **本地 Qdrant 是单实例锁** —— `mem0_client` 在 `memory_store.py` **模块导入期**就开 `./.mem0/qdrant` | 应用跑着时 `pytest` 跑不了。逃生口：从**仓库根**跑 + 设 `MEM0_DIR=<临时目录>`（**两个都要**） |
 
 ## 📁 项目结构
 
-> 🔴 **2026-09-29 删掉了一张手写的目录树**（原来 28 行，列了 20 个文件 + `...`）。
-> **为什么删**：手写的**文件清单必然过期** ——
-> 它列 20 个，实际 `app/` 下有 **68 个 `.py`**；`docs/` 那行还写着「FAQ、架构图、Demo、决策记录」，
-> 而现在是 **7 层 20+ 份**。📌 与「接口清单不写进文档」（跑 `list_endpoints.sh`）**是同一个理由**。
+**代码结构图** —— 仓库顶层 + `app/` 的 **7 个模块组**
+（⚠️ **只到【组】这一层**，⛔ 不列文件 —— 手写的文件清单**必然过期**，本仓有前科）
+
+![代码结构](docs/module-map.png)
+
+| 组 | 职责 |
+|---|---|
+| `core/` | 配置 · 连接 · 缓存 · 指标 · 日志 · 异常 · LLM 工厂 |
+| `routing/` | **HTTP / WS 边界**：3 张路由表 · 依赖 · Schema · SSE |
+| `access/` | 鉴权 · 权限 · 会话 · 限流 |
+| `billing/` | 计量 · 预算 · 熔断 · 成本面板 |
+| `agent/` | Agent 编排 · 计划 · 审批 · 检查点 · 长期记忆 |
+| `rag/` | 检索 · 解析 · 分块 · 向量 · 重排 · 引用 |
+| `tools/` | 工具 · MCP · 执行器 · 缓存 · 健康 |
+
+> ⚠️ **`app/` 是 `sys.path` 的根** ⇒ 导入写 `from core.config import X`（⛔ 不是 `from app.core…`）。
+> 📄 逐层索引 ⇒ 各目录自己的 `CLAUDE.md`（从仓库根那份一层层往下）· 规范 ⇒ `docs/规范/目录结构与分层CLAUDE规范.md`。
+
+## 文档导航
+
+> 🔴 **要找文档 ⇒ 从仓库根 `CLAUDE.md` 进**（它有一张「本仓目录索引」）。
+> 每层目录都有自己的 `CLAUDE.md`，那是**那一层的索引表**。
 
 | 要找… | 去哪 |
 |---|---|
-| **有哪些文档 / 每份干什么** | 从仓库根 `CLAUDE.md` 的「📇 本仓目录索引」**一层层往下**；`docs/文档地图.md` 只剩判据与欠账清单 |
-| **代码怎么组织的**（模块全景 / 请求流 / 依赖枢纽） | **`docs/原理/架构.md`** |
-| **表结构** | `docs/契约/数据模型.md` + **`app/schema.sql`** |
-| **做到哪了 · 下一步 · 顺序** | **`ROADMAP.md` §⑤**（⛔ 现在是它**唯一**回答这三样的地方）· **还没做完的** ⇒ `docs/待办总表.md` |
-| **Demo 做到哪一步了** | 权威 ⇒ **`demo/demo清单.md`**（✅ **已入库**）；施工区在 `demo/设置与命令/`（⚠️ 已 gitignore ⇒ **clone 你看不到**，故此处只给指针） |
+| **这份代码怎么组织的**（模块全景 / 请求流 / 依赖枢纽） | `docs/原理/架构.md` |
+| **接口清单** | 跑 `bash scripts/list_endpoints.sh`（**⛔ 不写进文档** —— 手写的必然过期） |
+| **表结构** | `docs/契约/数据模型.md` + `app/schema.sql` |
+| **常见问题 / 故障排查** | `docs/FAQ.md` |
+| **让另一个 Agent 来测这个项目** | `docs/给Agent的测试与调试指南.md`（含可直接粘贴的 Prompt） |
+| **文档该放哪 / 还没有哪些文档** | `docs/文档地图.md`（⚠️ 2026-10-09 起**已瘦成指针页**，只剩判据与欠账清单） |
+| **一键部署** | `docs/说明/部署.md` |
+| **Demo 做到哪一步** | `demo/demo清单.md`（施工区在 `demo/设置与命令/`，⚠️ 已 gitignore ⇒ clone 看不到） |
 
-> 📌 **关于原 `Agent/` 目录（2026-09-20 已处置）** —— 🔴 **2026-09-29 移往 `docs/历史/`**：
-> 原系统（极狐 GitLab 的 `agent-assistant`）的文档曾以 `Agent/` 随仓携带，
-> 因**与仓根文档大面积重复**而拆解处置。**原文见 `docs/历史/开发历程.md` 与 git 历史 `351f699`。**
+## 项目状态与路线
 
-## 📄 许可证
+**当前阶段**：**后端已完成**，正在做**前端初稿**；终点是**一个能分享的 Demo**（魔搭社区 · 创空间）。
+
+| 想知道 | 去哪 |
+|---|---|
+| **做到哪了 · 下一步 · 执行顺序** | ⭐ **`ROADMAP.md`** 的「🧭 一屏总览」（**首屏**） |
+| **还没做完的** | ⭐ **`docs/待办总表.md`**（唯一权威） |
+| **改动史** | `CHANGELOG.md` |
+| **做过的选择**（备选 / 反悔成本） | `docs/decisions/` |
+
+## 贡献
+
+本仓是**个人项目**，没有开放协作流程，但**欢迎报 bug / 提建议**。
+要改代码或提 PR 前，先读 **[`CONTRIBUTING.md`](CONTRIBUTING.md)** —— 里面有：怎么跑起来 ·
+常用命令 · **提交前要过的门** · 目录约定。
+
+## 安全
+
+- **报告漏洞** ⇒ **[`SECURITY.md`](SECURITY.md)**（**请走私密渠道**，⛔ 不要开公开 issue）
+- 同一份里也写了**安全现状**：已收窄的端口 · 依赖漏洞清零 · CodeQL / gitleaks ·
+  `docs/威胁模型.md`（资产 / 信任边界 / **已接受的残余风险**）
+
+## 许可证
 
 **MIT License** —— 全文见 [`LICENSE`](LICENSE)。
-
-> 🔴 2026-09-20 补：本行此前只写「MIT License」而**仓库里没有 `LICENSE` 文件**
-> （GitHub API 的 `license` 字段也是 `null`）—— **声明与事实不符**。现已补上文件。
-
-> 一键部署文件：[`docs/说明/部署.md`](docs/说明/部署.md)
-> 📌 **2026-09-29 移动**：原来在仓根（`deploy.md`），已按文档体系归入 `docs/说明/`。
-
-## ⚠️ 已知限制（诚实清单）
-
-> 📌 本仓立过一条规矩：**「后果性断言必须有一条当场可跑的命令支撑」**。
-> 下面几条是**已知不达标**的地方，写在这里免得被当成"已实现"。
-
-| # | 限制 | 实测证据 | 影响 |
-|---|---|---|---|
-| 1 | ⏸ **浏览器工具已【挂起】—— 从工具表里摘掉了**（2026-09-21 · N13） | **2026-09-20 更正**：原文写「**在本机**不可用 …… **环境天花板**」—— ⚠️ **那是把"本仓部署方式都不装浏览器"说成了"我这台机器的毛病"**。实测：`app/Dockerfile` 与 `docker-compose.yml` **都没有 `playwright install`**（全仓提及它处**全是文档在解释它跑不了**，无一处是去装）⇒ **换机器 / 用 Docker 一样跑不了。**<br>另有**第二重原因**：本机缓存里是 chromium **1228**（556 MB），而 playwright 1.62 要 **1234** ⇒ **装了旧的也照样跑不了**。<br>**2026-09-21 处置（业务方裁「挂起 + 注释掉 + 标 `# 可扩展能力`」）**：见右 | **已摘掉** —— `mcp_server.TOOLS` 里那两行**已注释**（⇒ **LLM 的工具表由 6 个变 4 个**），两个 REST 端点也一并注释（⇒ `OPENAPI_PATHS` **59 → 57**）。<br>📌 **为什么摘掉而不留着**：那两行在 `TOOLS` 里 ⇒ LLM 的工具表**从 `TOOLS` 派生** ⇒ 留着就等于**给 LLM 一个每调必炸的工具**（实测确认过）。<br>🔧 **重新启用**：装好 chromium 后，按 `app/tools/mcp_server.py` 里那段注释列的 **4 处一起**取消注释（含两条已 skip 的回归用例）。<br>⚠️ **要不要让它真能用，仍是产品决策** —— 实测代价 **+556 MB**（不是先前估的"约 300MB"） |
-| 2 | **`mode=accurate/full` 与重排序未验** | 本机 **8GB 内存 / 4 核**，装不下 torch + `bge-reranker-v2-m3`（2.3GB） | 默认模式是 `accurate_norerank`（**不碰 torch**），故产品可用；但这两条路径**本机验不了** |
-| 3 | **性能数字全部未实测** | 见上方「性能目标」段 | 不得作为选型/承诺依据 |
-| 4 | **知识库语料良莠不齐** | `documents` 表 **35/77 行是测试数据**（`source` = `test` 24 行 + `test_docs` 11 行），含「测试文档一」这类；其余是正经语料 | 结果**时好时坏** —— 同一个问题可能命中切题的（如 `eval_dataset.json#23`）也可能命中测试垃圾。**演示前建议先灌一份干净语料** |
-| 5 | **本地 Qdrant 是单实例锁** | `mem0_client` 在 `memory_store.py` **模块导入期**就开 `./.mem0/qdrant` ⇒ 应用跑着时 `pytest` 跑不了（`Storage folder … already accessed by another instance`） | 跑测试前须停应用；逃生口：从**仓库根**跑 + 设 `MEM0_DIR=<临时目录>`（**两个都要**） |

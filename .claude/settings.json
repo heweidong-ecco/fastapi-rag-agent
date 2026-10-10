@@ -9,7 +9,7 @@
             "type": "command",
             "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/pre-commit-gates.py\"",
             "timeout": 180,
-            "statusMessage": "提交前四道门（凭据 / 链接 / 孤儿 / 模块spec）"
+            "statusMessage": "提交前八道门（凭据 / 链接 / 孤儿 / 模块spec / 路由鉴权 / 静态检查 / 过期导入 / 分层CLAUDE.md）"
           }
         ]
       }

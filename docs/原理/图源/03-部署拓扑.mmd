@@ -1,0 +1,31 @@
+%% 部署拓扑 —— 6 容器 · 3 张网络。内容来源：docker-compose.yml（实测读）
+flowchart TB
+  subgraph H["主机（本机 Docker）—— 一条 docker compose up -d 起全栈"]
+    direction TB
+    subgraph AN["app-net（bridge）"]
+      direction LR
+      API["rag-api<br/>:8000"]
+      PG[("postgres-rag<br/>:5432")]
+      RD[("redis-rag<br/>:6379")]
+    end
+    subgraph EN["exec-net（internal ⇒ 无对外网关）"]
+      direction LR
+      EX["rag-executor<br/>⛔ 无端口"]
+    end
+    subgraph MN["monitor-net（bridge）"]
+      direction LR
+      PR["prometheus<br/>:9090"] --> GR["grafana<br/>:3000"]
+    end
+    API --> PG
+    API --> RD
+    API --> EX
+  end
+
+  classDef appc fill:#eef3ff,stroke:#4d7cfe,color:#1c46c0
+  classDef store fill:#fff4e8,stroke:#e08a2e,color:#7a3d00
+  classDef iso fill:#fff0f0,stroke:#d6336c,color:#a61e4d
+  classDef monc fill:#eaffef,stroke:#2f9e44,color:#14532d
+  class API appc
+  class PG,RD store
+  class EX iso
+  class PR,GR monc

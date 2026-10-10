@@ -1,0 +1,43 @@
+%% 代码结构 —— 仓库顶层 + app/ 的 7 个模块组
+%% 内容来源：app/CLAUDE.md · docs/规范/目录结构与分层CLAUDE规范.md（核过）
+%% ⚠️ 只到【组】这一层，⛔ 不列文件 —— 手写的文件清单必然过期（本仓有前科）
+flowchart LR
+  subgraph APP["app/　应用本体（容器 · 也是 sys.path 的根）"]
+    direction TB
+    A1["core/<br/>配置 · 连接 · 缓存 · 指标 · 日志 · 异常 · LLM 工厂"]
+    A2["routing/<br/>3 张路由表 · 依赖 · Schema · SSE"]
+    A3["access/<br/>鉴权 · 权限 · 会话 · 限流"]
+    A4["billing/<br/>计量 · 预算 · 熔断 · 成本面板"]
+    A5["agent/<br/>编排 · 计划 · 审批 · 检查点 · 长期记忆"]
+    A6["rag/<br/>检索 · 解析 · 分块 · 向量 · 重排 · 引用"]
+    A7["tools/<br/>工具 · MCP · 执行器 · 缓存 · 健康"]
+    A8["static/　真前端<br/>web/*.html · js/*.js（+ node --test）"]
+    A9["tests/　pytest 用例<br/>单跑：pytest app/"]
+    A10["eval/　离线评估<br/>⛔ 不在服务路径上"]
+    A11["alembic/　迁移 · specs/　模板与归档"]
+  end
+
+  subgraph ROOT["仓库顶层"]
+    direction TB
+    R1["docs/<br/>跨模块文档（契约 · 规范 · 原理 · 说明 · 决策 · 复盘 · 历史）"]
+    R2["scripts/<br/>门与工具（含 出图.sh 那类）"]
+    R3[".claude/<br/>门（hook）与 agent 配置 · settings.json"]
+    R4[".github/<br/>CI 与 PR 模板"]
+    R5["frontend/<br/>前端的设计文档与索引（⛔ 代码不在这）"]
+    R6["demo/<br/>演示（最后一步）"]
+    R7["locust/<br/>压测（只有这一个家）"]
+    R8["testdata/<br/>测试语料与种子"]
+    R9["fastapi-rag-agent-TODO待办/<br/>施工单 · 裁单 · 探针"]
+  end
+
+  R1 -.->|"模块自己的规格在 app/&lt;组&gt;/specs/"| APP
+  R3 -.->|"提交前的 7 道门"| APP
+  R4 -.->|"CI 跑同一批门"| APP
+
+  classDef grp fill:#eef3ff,stroke:#4d7cfe,color:#1c46c0
+  classDef root fill:#f6f8fa,stroke:#d0d7de,color:#1f2328
+  classDef fe fill:#eaffef,stroke:#2f9e44,color:#14532d
+  class A1,A2,A3,A4,A5,A6,A7 grp
+  class A8 fe
+  class A9,A10,A11 root
+  class R1,R2,R3,R4,R5,R6,R7,R8,R9 root

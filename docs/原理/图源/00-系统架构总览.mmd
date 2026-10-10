@@ -1,0 +1,79 @@
+%% 系统架构总览 —— 【一张装下整个系统】的分层图
+%% 内容来源：docs/原理/架构.md（核过代码）· mcp_server.TOOLS（实测读）· docker-compose.yml
+%% ⚠️ 每一层 = 一个 subgraph（业界做法）· 标签保持短
+flowchart TB
+  subgraph L0["客户层"]
+    direction LR
+    C1["浏览器"]
+    C2["curl / SDK"]
+    C3["Swagger /docs"]
+  end
+
+  subgraph L1["FastAPI 网关层　rag-api :8000"]
+    direction LR
+    G1["中间件 ×4<br/>规范化 → 配额 → 限流 → 日志/指标"]
+    G2["路由分派<br/>3 张路由表"]
+    G3["鉴权<br/>API Key + JWT · 三级角色"]
+  end
+
+  subgraph L2["应用层 —— Agent 与检索"]
+    direction LR
+    A1["LangGraph Agent ×5<br/>对话链全齐（含 SSE）"]
+    A2["手写规划执行<br/>plan_execute（非 LangGraph）"]
+    A3["RAG 检索管线<br/>改写 → 向量 + BM25 → RRF → 重排"]
+  end
+
+  subgraph L3["工具与执行层"]
+    direction LR
+    T1["MCP Server<br/>工具唯一事实源"]
+    T2["工具箱 ×7<br/>calculator · date_today · date_calc<br/>json_extract · stats · web_search · execute_python"]
+    T3["executor 容器<br/>无网 · 非 root · 只读根"]
+  end
+
+  subgraph L4["数据与模型层"]
+    direction LR
+    D1[("PostgreSQL + pgvector<br/>7 张表")]
+    D2[("Redis<br/>缓存 · 限流桶 · 会话")]
+    D3["DashScope<br/>embedding 固定走它"]
+    D4["Mem0 长期记忆"]
+  end
+
+  subgraph L5["成本 · 预算 · 可观测"]
+    direction LR
+    B1["四层 token 限额<br/>单次 · 会话 · 用户日 · 全站日"]
+    B2["按 key 熔断"]
+    B3["Gradio 成本看板<br/>/dashboard"]
+    B4["Prometheus + Grafana"]
+  end
+
+  C1 --> G1
+  C2 --> G1
+  C3 --> G1
+  G1 --> G2 --> G3
+  G3 --> A1
+  G3 --> A2
+  G3 --> A3
+  A1 --> T1
+  A2 --> T1
+  T1 --> T2
+  T2 --> T3
+  A3 --> D1
+  A3 --> D2
+  A1 --> D4
+  T2 --> D2
+  D3 --> A3
+  A1 --> B1
+  B1 --> B2
+  B1 --> B3
+  B4 -.-> D1
+
+  classDef gw fill:#eef3ff,stroke:#4d7cfe,color:#1c46c0
+  classDef app fill:#f3eeff,stroke:#7c4dfe,color:#3d1c8a
+  classDef tool fill:#fff4e8,stroke:#e08a2e,color:#7a3d00
+  classDef data fill:#eaffef,stroke:#2f9e44,color:#14532d
+  classDef cost fill:#fff0f0,stroke:#d6336c,color:#a61e4d
+  class G1,G2,G3 gw
+  class A1,A2,A3 app
+  class T1,T2,T3 tool
+  class D1,D2,D3,D4 data
+  class B1,B2,B3,B4 cost
