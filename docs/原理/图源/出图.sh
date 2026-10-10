@@ -54,6 +54,8 @@ for src in "${HERE}"/*.mmd; do
     01-*) out="request-flow.png" ;;
     02-*) out="retrieval-chains.png" ;;
     03-*) out="deploy-topology.png" ;;
+    04-*) out="end-to-end.png" ;;
+    05-*) out="module-map.png" ;;
     *)    out="${base}.png" ;;
   esac
   echo "🎨 ${base}.mmd  ⇒  docs/${out}"

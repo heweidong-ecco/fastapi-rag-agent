@@ -1,0 +1,54 @@
+%% 端到端链路 —— 一次检索请求【从头走到尾】
+%% 内容来源：docs/原理/架构.md §2 / §3（核过代码）· mcp_server.TOOLS（实测读）
+%% ⚠️ 这是【一条链】的视角；全景分层见 00-系统架构总览
+flowchart TB
+  subgraph C["客户层"]
+    direction LR
+    C1["浏览器"]
+    C2["curl / SDK"]
+  end
+
+  subgraph G["API 网关层　FastAPI :8000（⚠️ 按【实际执行顺序】画）"]
+    direction LR
+    G1["① 文本规范化"] --> G2["② 配额<br/>按用户按天 token"] --> G3["③ 限流<br/>令牌桶"] --> G4["④ 日志 / 指标"]
+  end
+
+  subgraph P["检索管线　POST /rag/search"]
+    direction LR
+    P1["查询改写<br/>LLM · 缓存 1h"] --> P2["向量检索<br/>pgvector"] --> P3["RRF 融合<br/>k=60"] --> P4["Cross-Encoder 重排<br/>需要 torch"] --> P5["生成答案<br/>+ 标引用"]
+    P1 --> P6["BM25 检索<br/>jieba + rank_bm25"]
+    P6 --> P3
+  end
+
+  subgraph S["数据层"]
+    direction LR
+    S1[("PostgreSQL<br/>+ pgvector")]
+    S2[("Redis<br/>缓存 · 限流桶 · 会话")]
+  end
+
+  subgraph M["模型层"]
+    direction LR
+    M1["阿里百炼 DashScope<br/>Embedding（固定）"]
+    M2["本地 BGE-Reranker<br/>（开发机）"]
+    M3["生成 LLM<br/>默认 qwen · 本机 .env 走 DeepSeek"]
+  end
+
+  C1 --> G1
+  C2 --> G1
+  G4 --> P1
+  P2 --> S1
+  P6 --> S1
+  P1 --> S2
+  P4 --> M2
+  P5 --> M3
+  G2 --> S1
+  G3 --> S2
+
+  classDef gw fill:#eef3ff,stroke:#4d7cfe,color:#1c46c0
+  classDef pipe fill:#f3eeff,stroke:#7c4dfe,color:#3d1c8a
+  classDef data fill:#eaffef,stroke:#2f9e44,color:#14532d
+  classDef model fill:#fff4e8,stroke:#e08a2e,color:#7a3d00
+  class G1,G2,G3,G4 gw
+  class P1,P2,P3,P4,P5,P6 pipe
+  class S1,S2 data
+  class M1,M2,M3 model

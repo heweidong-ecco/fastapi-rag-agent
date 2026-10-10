@@ -203,80 +203,14 @@ bash dev.sh        # 起 postgres+redis → 等就绪 → 起 uvicorn（热重�
 > 🔴 **所有对外端口只绑 `127.0.0.1`**；`exec-net` 是 **`internal: true`** ⇒ **执行器出不了互联网**。
 > ⚠️ **两处未解决**：Grafana 仍是默认口令 · 看板是**手工配置**的（仓库无 provisioning）。
 
+### ⑤ 端到端链路 —— 一次检索请求**从头走到尾**
+
+![端到端链路](docs/end-to-end.png)
+
+> 上面 ① 是「**有什么**」，这张是「**怎么走**」：客户层 → 网关 4 道 → 检索管线 → 数据层 / 模型层。
+> ⚠️ 网关那段**按【实际执行顺序】画**（`→ 规范化 → 配额 → 限流 → 日志`），⛔ 不是源码顺序（见 ②）。
+
 > 📄 **图源是 Mermaid**（`docs/原理/图源/*.mmd`）⇒ 改它 + 跑 `bash docs/原理/图源/出图.sh` 重出。
-> 📄 **文字版（更全，且核过代码）⇒ `docs/原理/架构.md`**。
-
-## 模型端点（⚠️ **两件事别混**）
-
-- **Embedding 固定走** 阿里云百炼 DashScope `text-embedding-v2`（1536 维）。
-- **生成 / 对话 LLM 是可配置的**，而 **`app/core/config.py` 的默认值是 DashScope + `qwen-turbo`/`qwen-plus`**。
-  ⚠️ **新克隆下来跑的是 qwen，不是 DeepSeek** —— 后者只是 **`.env`（不入库）里的取值**，⛔ 不是代码默认值。
-  要切：填 `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL_FAST` / `LLM_MODEL_CHAT` **四个**环境变量
-  （`LLM_API_KEY` 不填则回退用 `DASHSCOPE_API_KEY`）。`.env.example` 第 4–9 行已备好注释模板。
-
-## 技术栈
-
-| 层 | 用什么 |
-|---|---|
-| Web 框架 | **FastAPI** + Uvicorn |
-| 存储 | **PostgreSQL + pgvector**（业务表 + 向量）· **Redis**（缓存 / 限流桶 / 会话） |
-| Agent 编排 | **LangGraph**（`agent_graph` / `agent_graph_advanced*` / `agent_checkpointer`）· **LangChain**（模型与工具抽象） |
-| LLM 客户端 | **`langchain-openai`** 的 `ChatOpenAI`（全仓经 `app/core/llm_factory.make_llm()` **唯一构造**）<br>**裸 `openai` SDK** —— 🔴 **2 处不走 LangChain**：`app/rag/embedding_client.py`（embedding）与 `app/rag/query_rewriter.py`（改写）；它们拿到的是**裸响应**（只有 `.usage`，没有 `usage_metadata`） |
-| Embedding | 阿里云百炼 DashScope `text-embedding-v2`（**固定**） |
-| 重排序 | 本地 `BAAI/bge-reranker-v2-m3`（**真懒加载**，镜像里没装 torch ⇒ 只在开发机跑） |
-| 工具协议 / 记忆 | **MCP**（`app/tools/mcp_server.py`）· **mem0**（本地 Qdrant） |
-| 看板 / 评估 | **Gradio**（成本看板）· **RAGAS**（离线评估，⬜ 未实跑） |
-| 可观测 | `prometheus_client` + Prometheus + Grafana |
-
-🔴 **一处要说清**：`app/agent/plan_execute.py` 是**本仓【手写】的规划-执行循环**，⛔ **不是框架** ——
-它零命中 `langgraph` / `StateGraph`，只 import `langchain_core.messages`（判据：`grep -c yield app/agent/plan_execute.py` ⇒ **0**）。
-⇒ 它是 4 套 Agent 实现里**唯一不建图**的那一套。
-
-📄 逐项 + 落点 ⇒ `docs/原理/架构.md` §1 · 环境变量 ⇒ `docs/契约/环境变量.md`
-
-## 系统架构
-
-### ① 系统总览 —— 四层
-
-![系统总览](docs/architecture.png)
-
-| 层 | 里面是什么 |
-|---|---|
-| **中间件 ×4** | 文本规范化 · 配额 · 限流 · 日志/指标（**执行顺序见 ②**） |
-| **路由层 ×3** | `api_v1`（公开/认证/调试）· `api_v1_rag`（文档/检索/SSE/WS）· `api_v1_agent`（Agent/预算/轨迹） |
-| **能力层** | 检索管线 9 模块 · **Agent 6 套并存**（⚠️ 哪套是产品版本 —— 未裁） · 四层限额与熔断 · 成本记账 |
-| **存储** | PostgreSQL + pgvector（**7 张表**）· Redis（embedding/改写缓存 · 限流桶 · 会话） |
-| **外部服务** | **DashScope**（embedding 固定走它）· **`rag-executor`**（独立容器 · **无网**）· Prometheus + Grafana |
-
-### ② 一次请求怎么走 —— ⚠️ 中间件顺序陷阱
-
-![请求流与中间件](docs/request-flow.png)
-
-> 🔴 `add_middleware` 内部是 `user_middleware.insert(0, …)`，而洋葱用 `reversed()` 包
-> ⇒ **最后 add 的在最外层、最先执行** ⇒ **实际执行顺序与源码顺序逐层相反**。
->
-> 🔴 **两个可观察后果**：
-> 1. **被 429 拒掉的请求不进日志中间件** ⇒ **不进 Prometheus 指标** · **没有 `X-Request-ID`**。
->    📌 查「为什么某次 429 在指标里看不到」—— 先看这条。
-> 2. **配额那层排在最外层第 2 位，且要查 PG** ⇒ **每个请求**（含最终被拒的）都先付一次 `SELECT SUM(…)`。
-
-### ③ 两条检索链 —— 召回来源**不同源**
-
-![两条检索链](docs/retrieval-chains.png)
-
-> 🔴 `/rag/search` 走**完整管线**（改写 + 向量 + BM25 + RRF + 重排）；
-> `/rag/stream_search` **只做向量（裸 SQL 直查）**，**没有 `mode` 参数**、**不走 BM25 / 不走重排**。
-> ⇒ **「检索结果和流式结果对不上」不是 bug，是设计如此。**
-
-### ④ 部署拓扑 —— 6 容器 · 3 张网络
-
-![部署拓扑](docs/deploy-topology.png)
-
-> 🔴 **所有对外端口只绑 `127.0.0.1`**（`8000` 原先是 `0.0.0.0` = 同网段任何人可调）。
-> 🔴 `exec-net` 是 **`internal: true`** ⇒ **执行器出不了互联网**；应用侧**不碰 `docker.sock`**。
-> ⚠️ **两处未解决**：Grafana 仍是默认口令 · 看板是**手工配置**的（仓库无 provisioning）。
-
-> 📄 **图源是 Mermaid**（`docs/原理/图源/*.mmd`）⇒ 改它 + 跑 **`bash docs/原理/图源/出图.sh`** 重出。
 > 📄 **文字版（更全，且核过代码）⇒ `docs/原理/架构.md`**。
 
 ## 性能目标（⚠️ **是目标值 —— 不是指标**）
@@ -308,11 +242,31 @@ bash dev.sh        # 起 postgres+redis → 等就绪 → 起 uvicorn（热重�
 
 | # | 限制 | 影响 |
 |---|---|---|
-| 1 | **浏览器工具已挂起** —— 从工具表里摘掉了（`mcp_server.TOOLS` 两行注释掉，**工具数 6 → 4**）<br>原因：`app/Dockerfile` 与 `docker-compose.yml` **都没有 `playwright install`** ⇒ **换机器 / 用 Docker 一样跑不了**（不是"本机毛病"）；另本机缓存是 chromium 1228 而 playwright 1.62 要 1234。<br>🔧 要重新启用：装好 chromium 后按 `app/tools/mcp_server.py` 那段注释列的 **4 处一起**取消注释（⚠️ 代价 **+556 MB**） | 少 2 个工具 + 2 个 REST 端点 |
+| 1 | **浏览器工具已挂起** —— 从工具表里摘掉了（`mcp_server.TOOLS` 两行注释掉）<br>**工具数**：原 **6** → 摘掉两个浏览器工具后 **4** → 2026-10-08 新增 3 个本地工具（`date_calc` `json_extract` `stats`）⇒ **现 7**<br>原因：`app/Dockerfile` 与 `docker-compose.yml` **都没有 `playwright install`** ⇒ **换机器 / 用 Docker 一样跑不了**（不是"本机毛病"）；另本机缓存是 chromium 1228 而 playwright 1.62 要 1234。<br>🔧 要重新启用：装好 chromium 后按 `app/tools/mcp_server.py` 那段注释列的 **4 处一起**取消注释（⚠️ 代价 **+556 MB**） | 少 2 个工具 + 2 个 REST 端点 |
 | 2 | **`mode=accurate/full` 与重排序未验** —— 装不下 torch + `bge-reranker-v2-m3`（2.3 GB） | 默认档 `accurate_norerank` 可用，但这两条路径**本机验不了** |
 | 3 | **性能数字全部未实测** | 见「性能目标」—— 不得作为选型 / 承诺依据 |
 | 4 | **知识库语料良莠不齐** —— `documents` 表 **35/77 行是测试数据** | 同一问题可能命中切题的、也可能命中测试垃圾。**演示前建议先灌一份干净语料** |
 | 5 | **本地 Qdrant 是单实例锁** —— `mem0_client` 在 `memory_store.py` **模块导入期**就开 `./.mem0/qdrant` | 应用跑着时 `pytest` 跑不了。逃生口：从**仓库根**跑 + 设 `MEM0_DIR=<临时目录>`（**两个都要**） |
+
+## 📁 项目结构
+
+**代码结构图** —— 仓库顶层 + `app/` 的 **7 个模块组**
+（⚠️ **只到【组】这一层**，⛔ 不列文件 —— 手写的文件清单**必然过期**，本仓有前科）
+
+![代码结构](docs/module-map.png)
+
+| 组 | 职责 |
+|---|---|
+| `core/` | 配置 · 连接 · 缓存 · 指标 · 日志 · 异常 · LLM 工厂 |
+| `routing/` | **HTTP / WS 边界**：3 张路由表 · 依赖 · Schema · SSE |
+| `access/` | 鉴权 · 权限 · 会话 · 限流 |
+| `billing/` | 计量 · 预算 · 熔断 · 成本面板 |
+| `agent/` | Agent 编排 · 计划 · 审批 · 检查点 · 长期记忆 |
+| `rag/` | 检索 · 解析 · 分块 · 向量 · 重排 · 引用 |
+| `tools/` | 工具 · MCP · 执行器 · 缓存 · 健康 |
+
+> ⚠️ **`app/` 是 `sys.path` 的根** ⇒ 导入写 `from core.config import X`（⛔ 不是 `from app.core…`）。
+> 📄 逐层索引 ⇒ 各目录自己的 `CLAUDE.md`（从仓库根那份一层层往下）· 规范 ⇒ `docs/规范/目录结构与分层CLAUDE规范.md`。
 
 ## 文档导航
 

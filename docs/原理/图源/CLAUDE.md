@@ -11,6 +11,8 @@
 | `01-请求流与中间件.mmd` | `docs/request-flow.png` | **中间件顺序陷阱**（执行顺序与源码顺序逐层相反） |
 | `02-两条检索链.mmd` | `docs/retrieval-chains.png` | `/rag/search` vs `/rag/stream_search` |
 | `03-部署拓扑.mmd` | `docs/deploy-topology.png` | 6 容器 · 3 张网络 · 端口 |
+| `04-端到端链路.mmd` | `docs/end-to-end.png` | **一次检索请求从头走到尾**（客户 → 网关 → 检索管线 → 数据/模型）|
+| `05-代码结构.mmd` | `docs/module-map.png` | **仓库顶层 + `app/` 的 7 个模块组**（⚠️ 只到【组】这一层，⛔ 不列文件）|
 | `mermaid-config.json` | — | 样式（字体 / 颜色 / 换行宽度） |
 | `出图.sh` | — | ⭐ **渲染脚本**（就是那条命令） |
 
@@ -43,6 +45,8 @@ PUPPETEER_SKIP_DOWNLOAD=true npm i -g @mermaid-js/mermaid-cli
    - **两个子图之间【连边】** ⇒ 被拉成一条横条
    - **父 `TB` + 子图 `direction TB`** ⇒ 子图的 `direction` **被忽略**
    - **`direction` 只在【父 LR + 子图 TB + 子图之间不连边】** 时可靠
+   - 🔴 **`~~~`（隐形连边）也会被算进布局** —— 拿它「定节点顺序」会把整张图拉成 **25:1 的横条**
+     （实测：`18030×702`）⇒ ⛔ **别用它排序**，接受 Mermaid 的自动顺序
 5. ⚠️ **`wrappingWidth` 太小会在节点里【断词】**（实测出现过"清洗 · 改写 · 扩 展"）⇒ 现设 **420**。
 
 ## 📍 往上读

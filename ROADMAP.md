@@ -133,7 +133,7 @@ bash scripts/list_endpoints.sh          # 默认 http://127.0.0.1:8000
 | 限额 · 四层 | ✅ | `R1.1` 单次 · `R1.2` 会话 · `R1.3` 用户日级 · `R1.4` 全局日级（`app/billing/specs/token_config.md`）<br>⚠️ **配额那层对匿名请求完全绕过**（与上面四层不是同一件事） |
 | 熔断 | 🟡 | `app/billing/breaker.py`（按 key 的通用断路器）—— **只接了 `global:` 一条 key** |
 | 成本 / token 可见 | ✅ | `app/billing/token_tracker.py`（9 个汇总函数）· Gradio 看板 `/dashboard` |
-| Agent（4 套实现） | ✅ | `agent_graph.py` · `agent_graph_advanced.py` · `agent_graph_advanced_learning.py` · `plan_execute.py` |
+| Agent（**6 套并存**） | ✅ | `agent_graph.py` · `agent_graph_advanced.py` · `agent_graph_advanced_learning.py` · `plan_execute.py`（**手写，非 LangGraph**）· `agent_checkpointer.py` · **+ 第 6 套藏在 `api_v1_rag.py` 的内联 `AgentExecutor`**（挂 `/ws/agent`）<br>⚠️ **哪套是产品版本 —— 未裁**（属 `M5`）。📄 `docs/原理/架构.md` §1.3 |
 | MCP 工具 | ✅ | `/agent/mcp_chat` · `app/tools/mcp_server.py` |
 | 可观测（Prometheus） | ✅ | `app/core/metrics.py` + `prometheus.yml`（**代码级** ⇒ 上云能带走） |
 | 可观测（Grafana 看板） | 🟡 | ⚠️ **数据源 + 看板是手工配置的**（在 `grafana.db` 里，**仓库无 provisioning**）⇒ 上云会"容器起来了但没看板" |
