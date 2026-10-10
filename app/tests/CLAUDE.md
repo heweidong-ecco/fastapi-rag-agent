@@ -32,6 +32,15 @@
    本仓为此红过多次（`DEC-099 §七`）。
 3. ⚠️ **拿真实服务当判据的用例**（`test_mcp_*`）**会真起子进程** ⇒ 偶尔抖动，
    单跑绿、复跑绿即可判为抖动（`ROADMAP` 有登记）。
+4. 🔴🔴 **⛔ 别用「子进程里 import `main`」当判据**（2026-10-10 实测）。
+   ⚠️ `main` 一被 import 就拉起 `agent.memory_store` ⇒ `mem0` ⇒ 一个**本地 Qdrant 单实例锁**；
+   而 **pytest 这个会话本身已经 import 过 `main`** ⇒ **父进程攥着那把锁**
+   ⇒ 第二个进程当场死在
+   `RuntimeError: Storage folder … is already accessed by another instance of Qdrant client`。
+   🔴 **实测过**：**同一条子进程命令，单独跑成功、在 pytest 里跑必失败**。
+   ⇒ 要判"某个入口的路由表里有没有某条路由"，**走同进程**（`main.app`），
+     ⚠️ 并**显式断言"本进程没 import 过另一个入口"** —— 那类 import 会**就地改掉 `main.app`**。
+   📄 例 ⇒ `app/tests/test_demo_claim.py`（文件头写清了它是怎么绕开的）
 
 ## 📍 往上读
 - `../CLAUDE.md`（`app/`）· `docs/说明/测试.md` · 仓库根 `CLAUDE.md`

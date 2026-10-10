@@ -250,3 +250,90 @@ def test_overview_page_has_primary_and_other_sections():
     assert "<details" not in html and "<nav class=\"tabs\"" not in html, (
         "首页用了折叠/Tab —— 规格明文否决：那会让一半内容默认看不见，与最高判据相拗"
     )
+
+
+# ══════════════════ 凭据那两块（`DEC-143 §四` · 2026-10-10）══════════════════
+#
+# 🔴 这两条钉的东西**本仓从来没做过**：规格 §3.0 一直写着「每张卡上标『要不要 API Key』」，
+#    而 `grep -ic key app/static/web/index.html` 改前是 **0**（`DEC-143 §一·3` 的实测）。
+# ⚠️ 它们钉的是**结构**（在不在 / 默认藏不藏 / 说不说得出"要不要"），
+#    ⛔ **不判文案好不好读** —— 那是业务方的事。
+
+
+def test_every_card_says_whether_it_needs_a_credential():
+    """🔴 **每张卡都要标「要不要凭据」**（规格 §3.0 · `DEC-143 §四`）。
+
+    访客**不知道哪些端点要鉴权** —— 不标，他只会点进去撞一个「先填 API Key」，
+    而那一刻他**不知道该怪自己还是怪系统**（本仓原话：「**95% 的人不知道平台限制和要求**」）。
+
+    ⚠️ **默认必须是 `hidden`**：本仓「完整版」那条路上访客得**自己填一把**，
+       那时说"自动获得"是**假话** ⇒ 那两块只有在 demo 那条路上才由脚本揭开。
+    ⚠️ 断言里**先证明尺子有读数**（本仓 `DEC-065` 那族：空集合断言会一路绿着放行）。
+    """
+    html = _index_html()
+    cards = re.findall(r'<li class="card[^"]*">.*?</li>', html, re.S)
+    assert len(cards) >= 13, f"只匹配到 {len(cards)} 张卡 —— 扫到 13 张才算数（同上面那条门）"
+
+    missing = [c[:50] for c in cards if 'class="cred"' not in c]
+    assert not missing, f"这些卡没标「要不要凭据」⇒ 访客不知道该不该准备凭据：{missing}"
+
+    # ① 每一块默认都得是 `hidden`（demo 那条路才揭开）
+    blocks = re.findall(r'<span class="cred"[^>]*>', html)
+    assert len(blocks) >= 13, f"只认出 {len(blocks)} 块凭据标注 —— 与卡片数（≥13）对不上"
+    not_hidden = [b for b in blocks if "hidden" not in b]
+    assert not not_hidden, (
+        f"这些凭据标注默认没藏起来：{not_hidden}\n"
+        "⇒ 本仓那条路上访客得自己填一把，页面却说「自动获得」= 假话"
+    )
+
+    # ② 每块都得**说出结论**（"要" / "不用"），⛔ 不许是一句含糊话
+    texts = re.findall(r'<span class="cred"[^>]*>(.*?)</span>', html, re.S)
+    vague = [t for t in texts if not (t.lstrip().startswith("要凭据") or t.lstrip().startswith("不用凭据"))]
+    assert not vague, f"这些凭据标注没说清「要不要」：{vague}"
+
+
+def test_credential_banner_is_present_and_true_only_on_the_demo_path():
+    """🔴 首页顶部横幅（`DEC-143 §四`）—— 访客第一眼该看到的是**「我要不要做点什么」**。
+
+    ⚠️ **它默认必须是 `hidden`**：横幅那句「不用注册，也不用填任何东西」在**本仓那条路上是假的**
+       （那儿只有 `scripts/issue_api_key.py`，而它要能登这台机器）⇒ 由脚本按"领到没领到"决定揭不揭。
+    ⚠️ 三个数（额度 / 已用 / 剩余）是**挂点**；取不到就留 `—`，⛔ 不许编一个 0
+       （本仓：「**不许印没有数据源的数**」）。
+    """
+    html = _index_html()
+    m = re.search(r'<section class="panel" id="cred-banner"[^>]*>', html)
+    assert m, "首页没有那条凭据横幅（`id=\"cred-banner\"` · `DEC-143 §四`）"
+    assert "hidden" in m.group(0), (
+        "横幅默认**不**是 `hidden` ⇒ 本仓那条路上会印出「不用注册，也不用填任何东西」—— 那是**假话**"
+    )
+
+    seg = html[m.start():html.find("</section>", m.start())]
+    # 文案口径（`DEC-143 §四` 已过目 · ⛔ 别在这里改说法）
+    for phrase, why in [
+        ("不用注册", "横幅第一句就是「要不要动手」的答案"),
+        ("不用填任何东西", "同上"),
+        ("平台限制", "得让访客把「换浏览器换一把」归给**平台**，⛔ 不是当成我们的 bug"),
+    ]:
+        assert phrase in seg, f"横幅里少了「{phrase}」—— {why}（口径 ⇒ `DEC-143 §四`）"
+    for i in ("cred-limit", "cred-used", "cred-left"):
+        assert f'id="{i}"' in seg, f"横幅里少了「{i}」那个挂点（额度 / 已用 / 剩余 三个数）"
+
+
+def test_no_page_ever_renders_a_credential_plaintext():
+    """🔴🔴 **页面上⛔ 不出现凭据明文**（`DEC-143 §四`）—— 首页这一份。
+
+    **为什么**：显示它**只有风险、没有好处** —— 会被复制、会被转贴，
+    还会让访客以为"这是我要保管的东西"。▸ 本仓那条红线（`DEC-098 §5.4`）要防的正是这个，
+    只不过**它管的是"给访客读的明文说明"**，不管凭据的传递（读法见 `DEC-143 §三`）。
+    ⚠️ 判据扫的是**页面源码**；渲染结果那一面由 `cred.js` 的用例钉（它压根不往 DOM 写凭据）。
+    ⚠️ 反证：往横幅里塞一个 `sk-` 开头的串 ⇒ 本条立刻红。
+    """
+    html = _index_html()
+    hits = re.findall(r"sk-[A-Za-z0-9_-]{16,}", html)
+    assert not hits, f"首页上出现了像凭据的明文：{hits[:3]} —— 页面上⛔ 不许有它"
+    banner = re.search(r'<section class="panel" id="cred-banner".*?</section>', html, re.S)
+    assert banner, "找不到那条横幅 —— 本用例的另一半前提不成立"
+    assert "<input" not in banner.group(0), (
+        "横幅里放了输入框 ⇒ 又把「要自己填」塞回给了访客"
+        "（`DEC-143 §四`：横幅讲的是「**你什么都不用做**」）"
+    )

@@ -69,6 +69,19 @@
   .card-off { opacity: .55; }
   .card-off .badge { margin-left: var(--sp-2); }
 
+  /* 🔴 每张卡那一行「要不要凭据」（规格 §3.0 · `DEC-143 §四`）。
+     ⚠️ **默认 `hidden`**：只有 demo 那条路上页面才把它揭开（见下面那段脚本）。
+     为什么默认藏：本仓「完整版」那条路上**访客手里得自己填一把** ——
+     那时说"自动获得"就是**假话**（本仓立场：⛔ 不许印没有数据源的话）。
+     判据：守卫 `app/tests/test_index_page.py` 的「每张卡都标了要不要凭据」。 */
+  .card .cred { display: block; margin-top: var(--sp-1); font-size: var(--fs-cap);
+                color: var(--fg-dim); }
+  .card .cred b { color: var(--fg); }
+
+  /* 🔴 顶部横幅（`DEC-143 §四` · 访客第一眼）—— ⚠️ 同样**默认 `hidden`**，理由同上。
+     它是**正文第一块**：访客最先要问的不是"有什么功能"，是"我要不要做点什么"。 */
+  #cred-banner { margin: 0 0 var(--sp-4); }
+
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 </head>
@@ -82,6 +95,28 @@
   </header>
 
   <main class="wrap">
+
+    <!-- 🔴🔴 **顶部横幅**（`DEC-143 §四`）—— 访客最先要问的**不是**"有什么功能"，
+         是"**我要不要做点什么**"。这一段就是那个答案，⛔ 别挪到下面去。
+         ⚠️ **文案口径** ⇒ `DEC-143 §四`（业务方已过目），⛔ 别在这里自作主张改说法。
+         ⚠️ **默认 `hidden`**：只有 demo 那条路上才揭开「不用注册，也不用填任何东西」——
+             本仓「完整版」那条路上访客得**自己填一把**，那时这句就是假话。
+         ⚠️ 三个数由脚本**当场读数**填进去；取不到就留 `—`，⛔ **不许编一个 0**。 -->
+    <section class="panel" id="cred-banner" aria-label="凭据怎么来" hidden>
+      <div class="panel-body">
+        <h2 style="margin-top:0">不用注册，也不用填任何东西</h2>
+        <p style="margin:var(--sp-2) 0 0">
+          系统按你的浏览器给你一把<b>临时凭据</b>，并单独记你的额度。
+          ⚠️ 换了浏览器、或者平台重启容器之后，会是一把新的，<b>你上传的东西也跟着重来</b> ——
+          这是<b>平台限制</b>，⛔ 不是故障。
+        </p>
+        <p class="sub" style="margin:var(--sp-3) 0 0">
+          今日额度 <b id="cred-limit">—</b> tokens
+          · 已用 <b id="cred-used">—</b>
+          · 剩余 <b id="cred-left">—</b>
+        </p>
+      </div>
+    </section>
 
     <!-- 🔴🔴 边界标注（规格 §3.6.1 的① · 首屏 · 明文 · 一眼看到）
          ⚠️ 文案【只从 RagPanel 取】—— ⛔ 别在这份 HTML 里再抄一遍。
@@ -104,19 +139,24 @@
     <ul class="panel-grid" id="primary">
       <li class="card card-hover"><a href="/chat">对话</a>
           <span class="why">登录 → 提问 → 逐字流式回答 → 点开引用看原文 → 随时停止。</span>
-          <span class="apis">POST /rag/stream_search（SSE 流式）</span></li>
+          <span class="apis">POST /rag/stream_search（SSE 流式）</span>
+          <span class="cred" hidden>要凭据 · <b>自动获得</b></span></li>
       <li class="card card-hover"><a href="/lab">检索三模式</a>
           <span class="why">向量 / 混合（BM25+RRF）/ 精排，外加查询改写 —— 5 个面板各带参数，跑完看真实分数。</span>
-          <span class="apis">POST /rag/pg_search · /rag/hybrid_search · /rag/rerank_search · /rag/rewrite_search · /rag/search</span></li>
+          <span class="apis">POST /rag/pg_search · /rag/hybrid_search · /rag/rerank_search · /rag/rewrite_search · /rag/search</span>
+          <span class="cred" hidden>要凭据 · <b>自动获得</b></span></li>
       <li class="card card-hover"><a href="/approvals">人工接管</a>
           <span class="why">敏感工具调用会停下来等人批；点开看完整上下文，批准 / 拒绝 / 代填结论。</span>
-          <span class="apis">GET /agent/pending · POST /agent/approve</span></li>
+          <span class="apis">GET /agent/pending · POST /agent/approve</span>
+          <span class="cred" hidden>要凭据 · <b>自动获得</b></span></li>
       <li class="card card-hover"><a href="/cost#cost-overview">成本可见</a>
           <span class="why">每次调用的 token 与费用、按用途与模型分布、月度报告、四层额度 —— 并标明每一格是【读库】还是【进程内存】。</span>
-          <span class="apis">GET /agent/cost/* · /agent/token/budget · /agent/token/history · /agent/token/usage</span></li>
+          <span class="apis">GET /agent/cost/* · /agent/token/budget · /agent/token/history · /agent/token/usage</span>
+          <span class="cred" hidden>要凭据 · <b>自动获得</b></span></li>
       <li class="card card-hover"><a href="/trace">执行轨迹</a>
           <span class="why">一次调用里 agent 走了哪些步、每步花了多少（两轴分屏）。</span>
-          <span class="apis">GET /agent/trace/{thread_id} · /agent/traces</span></li>
+          <span class="apis">GET /agent/trace/{thread_id} · /agent/traces</span>
+          <span class="cred" hidden>要凭据 · <b>自动获得</b></span></li>
     </ul>
 
     <h2 style="margin-top:var(--sp-5)">其他功能</h2>
@@ -125,32 +165,43 @@
     <ul class="panel-grid" id="others">
       <li class="card card-off"><span>知识库</span><span class="badge">未上线</span>
           <span class="why">上传 / 删除文档，自己传一篇就能立刻在对话里问它。施工中（刀 10）。</span>
-          <span class="apis">POST /rag/upload_document · DELETE /rag/documents/{id}</span></li>
+          <span class="apis">POST /rag/upload_document · DELETE /rag/documents/{id}</span>
+          <span class="cred" hidden>要凭据 · <b>自动获得</b></span></li>
       <li class="card card-hover"><a href="/tools#tools">工具 / MCP</a>
           <span class="why">可用工具清单、健康状态、版本、MCP 动态工具表 —— 每格标明它读的是【进程内存】还是【代码常量】。</span>
-          <span class="apis">GET /agent/available_tools · /agent/tool_health · /agent/tool_versions · /agent/mcp_tools_dynamic</span></li>
+          <span class="apis">GET /agent/available_tools · /agent/tool_health · /agent/tool_versions · /agent/mcp_tools_dynamic</span>
+          <span class="cred" hidden>要凭据 · <b>自动获得</b></span></li>
       <li class="card card-hover"><a href="/tools#memory">记忆</a>
           <span class="why">写一条长期记忆 → 换个说法再检索出来（按语义找，⛔ 不是字面匹配）。</span>
-          <span class="apis">POST /agent/memory/add · GET /agent/memory/search</span></li>
+          <span class="apis">POST /agent/memory/add · GET /agent/memory/search</span>
+          <span class="cred" hidden>要凭据 · <b>自动获得</b></span></li>
       <li class="card card-hover"><a href="/system#executor">执行器</a>
           <span class="why">把一段 Python 真发出去跑（无网硬化容器 · 有墙钟上限）；⛔ 执行器不可用时不会偷偷回落本地。</span>
-          <span class="apis">POST /agent/execute_code</span></li>
+          <span class="apis">POST /agent/execute_code</span>
+          <span class="cred" hidden>要凭据 · <b>自动获得</b></span></li>
       <li class="card card-hover"><a href="/cost#cost-budget">预算 / 熔断</a>
           <span class="why">额度检查、单次预估成本、你自己被拦下的次数。在成本看板同一页上。</span>
-          <span class="apis">GET /agent/budget/check · /estimates · /intercepts</span></li>
+          <span class="apis">GET /agent/budget/check · /estimates · /intercepts</span>
+          <span class="cred" hidden>要凭据 · <b>自动获得</b></span></li>
       <li class="card card-hover"><a href="/system#system">系统状态</a>
           <span class="why">健康（依赖在不在）与就绪（能不能接流量）分开看；Prometheus 指标原文。</span>
-          <span class="apis">GET /health · /ready · /metrics</span></li>
+          <span class="apis">GET /health · /ready · /metrics</span>
+          <span class="cred" hidden>不用凭据（<b>这三条是公开的</b>）</span></li>
       <li class="card card-hover"><a href="/eval">评测</a>
           <span class="why">接入 Agent 生产就绪评测门（现状是占位页）。</span>
-          <span class="apis">GET /eval · agent-eval-gate</span></li>
+          <span class="apis">GET /eval · agent-eval-gate</span>
+          <span class="cred" hidden>不用凭据（<b>这页不调接口</b>）</span></li>
       <li class="card card-hover"><a href="/ops">运维探针</a>
           <span class="why">限流桶 / 配额 / 缓存摊开看（调试视角）—— 这四个数是「限流真的在生效」的证据；⚠️ 额度那两格只查得到你自己。</span>
-          <span class="apis">GET /debug/cache_stats · /debug/count · /debug/quota · /debug/rate_limit</span></li>
+          <span class="apis">GET /debug/cache_stats · /debug/count · /debug/quota · /debug/rate_limit</span>
+          <span class="cred" hidden>要凭据 · <b>自动获得</b></span></li>
     </ul>
 
   </main>
 
+<!-- 🔴 凭据（`DEC-143`）：`session.js`（凭据本身）**必须**排在 `cred.js` 与页面脚本之前。 -->
+<script src="/static/js/session.js"></script>
+<script src="/static/js/cred.js"></script>
 <script src="/static/js/panel.js"></script>
 <script>
   'use strict';
@@ -159,17 +210,40 @@
     el.textContent = RagPanel.boundaryText(el.dataset.boundary);
   });
 
-  // 额度那条要【当场读数】。⚠️ 未登录拿不到 ⇒ **保留不带数字的那句**，⛔ 不编数。
-  fetch('/api/v1/agent/token/budget')
-    .then(function (r) { return r.ok ? r.json() : null; })
-    .then(function (b) {
-      if (!b || b.used_today === undefined) return;      // 未登录 / 取不到 ⇒ 不动
-      var el = document.querySelector('[data-boundary="quota"]');
-      el.textContent = RagPanel.boundaryText('quota', {
-        used: b.used_today, limit: b.daily_budget, remaining: b.remaining,
-      });
-    })
-    .catch(function () { /* 同上：取不到就留着不带数字那句 */ });
+  /* 🔴 横幅 + 每张卡那行「要不要凭据」（`DEC-143 §四`）。
+     ⚠️ **只有 demo 那条路（页面真领到了凭据）才揭开** —— 本仓「完整版」那条路上
+        访客得**自己填一把**，那时候说"自动获得"就是**假话**。
+        ⇒ 两块在 HTML 里都默认 `hidden`，揭不揭由这里一处决定。
+     ⚠️ 首页**没有**页头那套控件（`cred-auto` / `save` / …）⇒ `cred.js` 里对应那几处会**跳过**。 */
+  RagCred.mount(function (auto) {
+    // ① **先揭** —— 横幅要说的那句「不用注册」**不依赖那三个数**，
+    //    所以⛔ 别把它和"取到额度了吗"绑在一起（取不到额度时那句话照样成立）。
+    if (auto) {
+      document.querySelectorAll('.card .cred').forEach(function (n) { n.hidden = false; });
+      document.getElementById('cred-banner').hidden = false;
+    }
+
+    // ② 额度那几个数要【当场读数】。⚠️ 未登录 / 没凭据 ⇒ **保留不带数字那句**，⛔ 不编数。
+    //    🔴 手里有凭据时**必须带上它** —— 不带的话 demo 上这条永远 401，横幅那三个数永远是 `—`。
+    var k = RagSession.key();
+    fetch('/api/v1/agent/token/budget', k ? { headers: { 'X-API-Key': k } } : undefined)
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (b) {
+        if (!b || b.used_today === undefined) return;      // 取不到 ⇒ 不动（那三个数留 `—`）
+        document.querySelector('[data-boundary="quota"]').textContent =
+          RagPanel.boundaryText('quota', {
+            used: b.used_today, limit: b.daily_budget, remaining: b.remaining,
+          });
+        // ⚠️ 逐个缺值判断，⛔ 不许把 `undefined` 印出去（本仓：「不许印没有数据源的数」）
+        [['cred-limit', b.daily_budget], ['cred-used', b.used_today], ['cred-left', b.remaining]]
+          .forEach(function (pair) {
+            var v = pair[1];
+            if (v === undefined || v === null) return;
+            document.getElementById(pair[0]).textContent = v;
+          });
+      })
+      .catch(function () { /* 同上：取不到就留着不带数字那句 / 留 `—` */ });
+  });
 </script>
 </body>
 </html>

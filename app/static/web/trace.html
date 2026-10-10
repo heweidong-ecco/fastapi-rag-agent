@@ -65,7 +65,13 @@
     <header class="page-head">
       <h1>执行轨迹与花费</h1>
       <span class="spacer"></span>
-      <label class="field">API Key <input id="apikey" type="password" placeholder="X-API-Key"></label>
+      <!-- 🔴 凭据（`DEC-143`）：demo 那条路上**首访就自动领到** ⇒ 这里只显示「有」，
+           ⛔ 一个字节的明文都不进页面（只显示"有没有"和"还剩多少"）。
+           **领不到**（本仓那条路，那条端点压根不存在）⇒ 落回下面那一对
+           「填 + 保存」= 今天的样子。两块的显隐由 `RagCred.applyMode()` **一处**切。 -->
+      <span class="field" id="cred-auto" hidden>凭据 <b>已自动获得</b><span id="cred-quota"></span></span>
+      <button type="button" id="swapkey" class="btn" hidden>换一把</button>
+      <label class="field" id="cred-manual">API Key <input id="apikey" type="password" placeholder="X-API-Key"></label>
       <button id="save">保存</button>
       <label class="field">thread_id <input id="thread" type="text" placeholder="default"></label>
       <button id="load" class="btn primary">查询</button>
@@ -186,14 +192,20 @@
 </div>
 
 
+<!-- 🔴 凭据（`DEC-143`）：`session.js`（凭据本身）**必须**排在 `cred.js` 与页面脚本之前。 -->
+<script src="/static/js/session.js"></script>
+<script src="/static/js/cred.js"></script>
 <script src="/static/js/panel.js"></script>
 <script src="/static/js/trace.js"></script>
 <script>
 'use strict';
-const KEY_STORE = 'rag_api_key';       // ⚠️ 与 chat.html / approvals.html 同一个 localStorage 键
 const $ = (id) => document.getElementById(id);
 
-function key() { return localStorage.getItem(KEY_STORE) || ''; }
+/* 🔴 凭据**只有一份实现** ⇒ `RagSession`（`/static/js/session.js` · `DEC-143`）。
+   ⛔ 别在这页里再写一份「凭据存在哪个键、怎么取」—— 8 个页面各写一遍正是这一版要收掉的债
+      （改前 8 个页面各有一份；改后全站只剩 `session.js` 那一份）。
+   ⚠️ `key()` 仍是**同步**的、**同签名** ⇒ 页面里其余那些调用一个字没动。 */
+const key = () => RagSession.key();
 
 function notice(msg, bad) {
   const el = $('notice');
@@ -474,17 +486,24 @@ $('loadlist').onclick = async () => {
   }
 };
 
-$('apikey').value = key();
 $('thread').value = RagTrace.readThreadId(location.search);
 $('save').onclick = () => {
-  localStorage.setItem(KEY_STORE, $('apikey').value.trim());
+  RagSession.save($('apikey').value.trim());
   notice('已保存');
   refreshAll();
 };
 $('load').onclick = () => refreshAll();
 $('thread').addEventListener('keydown', (e) => { if (e.key === 'Enter') refreshAll(); });
 
-if (key()) { refreshAll(); } else { notice('先填 API Key', true); }
+/* 🔴 起页面前**先把凭据弄妥**（`DEC-143`）：demo 那条路上首访时手里还没有凭据，
+   照旧发请求的话第一批全是 401 —— 而访客什么都没做错。
+   本仓那条路 `ensureKey()` 立刻回空串 ⇒ 下面这一行与今天**逐字一致**。 */
+RagCred.mount((auto) => {
+  // ⚠️ **只有"自己填"那条路才回填输入框** —— 自动形态下那个框已经收起来了，
+  //    再写进去只会让明文多落在 DOM 里一个地方（`DEC-143 §四`：页面上⛔ 不出现凭据明文）。
+  if (!auto) $('apikey').value = key();
+  if (key()) { refreshAll(); } else { notice('先填 API Key', true); }
+});
 </script>
 </body>
 </html>
