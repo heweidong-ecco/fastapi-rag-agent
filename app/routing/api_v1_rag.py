@@ -6,6 +6,7 @@ import json
 # ⚠️ 2026-10-04 删 `import time`（`DEC-065`）：本文件**只有** `/rag/async_ask` 与
 #    `/rag/parallel_ask` 用 `time.time()`，两条端点已删（全仓已核，见 `grep -n '\btime\b'`）。
 import uuid
+from loguru import logger
 from typing import Literal
 from fastapi import APIRouter, Depends, Path, Query
 
@@ -1130,10 +1131,19 @@ async def agent_websocket(websocket: WebSocket, ws_user_name: str = Depends(requ
                 }))
                 await websocket.send_text(json.dumps({"type": "done"}))
                 
-            except Exception as e:
+            except Exception:
+                # 🔴 2026-10-10（`N23` · CodeQL `py/stack-trace-exposure` **同族**）：
+                #    ⛔ **不把异常原文发给客户端** —— 这一帧是**用户可见**的出口，
+                #    而 `str(e)` 会把 **SQL 片段 / 连接串 / 文件路径**一起带出去。
+                #    ⚠️ **本仓「失败要说出来」那条不变**（⛔ 不许退化成静默/白屏）——
+                #    仍然**说**，只是**不再说内部细节**：细节进服务端日志。
+                #    📌 形状照 `api_v1_agent.py` / `token_tracker.py` 那两处（同族先例）。
+                # ⚠️ `as e` 已去掉 —— 异常对象交给 `logger.exception` 自己取（`sys.exc_info()`），
+                #    留着不用反而会被 `ruff` 的 `F841` 报（本仓的静态检查门会红）。
+                logger.exception("WS /ws/agent 执行失败")
                 await websocket.send_text(json.dumps({
                     "type": "error",
-                    "content": f"Agent 执行出错：{str(e)}"
+                    "content": "Agent 执行出错，请稍后重试（详细信息见服务端日志）"
                 }))
                 await websocket.send_text(json.dumps({"type": "done"}))
     except WebSocketDisconnect:

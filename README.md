@@ -242,7 +242,7 @@ bash dev.sh        # 起 postgres+redis → 等就绪 → 起 uvicorn（热重�
 
 | # | 限制 | 影响 |
 |---|---|---|
-| 1 | **浏览器工具已挂起** —— 从工具表里摘掉了（`mcp_server.TOOLS` 两行注释掉）<br>**工具数**：原 **6** → 摘掉两个浏览器工具后 **4** → 2026-10-08 新增 3 个本地工具（`date_calc` `json_extract` `stats`）⇒ **现 7**<br>原因：`app/Dockerfile` 与 `docker-compose.yml` **都没有 `playwright install`** ⇒ **换机器 / 用 Docker 一样跑不了**（不是"本机毛病"）；另本机缓存是 chromium 1228 而 playwright 1.62 要 1234。<br>🔧 要重新启用：装好 chromium 后按 `app/tools/mcp_server.py` 那段注释列的 **4 处一起**取消注释（⚠️ 代价 **+556 MB**） | 少 2 个工具 + 2 个 REST 端点 |
+| 1 | **浏览器工具已挂起** —— 从工具表里摘掉了（`mcp_server.TOOLS` 两行注释掉）<br>**当前工具数 = 7** —— 判据：`grep -c '^    {"func":' app/tools/mcp_server.py` ⇒ **7**（⚠️ 带 `^` 锚，否则会把**注释掉的那两个**也数进去）<br>**⛔ 没有浏览器工具** —— `app/Dockerfile` 与 `docker-compose.yml` **都没有 `playwright install`** ⇒ **换机器 / 用 Docker 一样跑不了**（⛔ 不是"本机毛病"）。<br>🔧 要重新启用：装好 chromium 后按 `app/tools/mcp_server.py` 那段注释列的 **4 处一起**取消注释（⚠️ 代价 **+556 MB**） | 少 2 个工具 + 2 个 REST 端点 |
 | 2 | **`mode=accurate/full` 与重排序未验** —— 装不下 torch + `bge-reranker-v2-m3`（2.3 GB） | 默认档 `accurate_norerank` 可用，但这两条路径**本机验不了** |
 | 3 | **性能数字全部未实测** | 见「性能目标」—— 不得作为选型 / 承诺依据 |
 | 4 | **知识库语料良莠不齐** —— `documents` 表 **35/77 行是测试数据** | 同一问题可能命中切题的、也可能命中测试垃圾。**演示前建议先灌一份干净语料** |

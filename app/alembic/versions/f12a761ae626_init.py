@@ -1,9 +1,24 @@
 """init
 
 Revision ID: f12a761ae626
-Revises: 
+Revises:
 Create Date: 2026-06-24 19:57:27.895018
 
+🔴🔴 **本链【已作废】—— ⛔ 别对任何真库跑 `alembic upgrade head`。**
+
+理由（2026-10-10 · `N22` 装完 alembic 后第一次真跑离线模式才看见）：
+
+  · **本迁移的 `upgrade()` 里有一句 `op.drop_column('documents', 'requested_by')`** ——
+    而 `requested_by` 是**多用户隔离的承重列**（`DEC-056`，检索侧靠它按人过滤）
+    ⇒ **跑一次就把隔离拆了，而且不报错**。
+  · 它是 **2026-06-24 的 autogenerate 产物** —— 当时 `db_metadata.py` 与活库**对不上**，
+    于是自动生成的 diff **方向是反的**（把活库里有的列当成"该删的"）。
+  · **它也不能从空库 bootstrap** —— 全篇只有 `ALTER` / `DROP`，**默认表已经存在**。
+
+✅ **今天表结构的【真值】是 `app/schema.sql`**（从活库 `pg_dump --schema-only` 生成，头部写着"本文件是生成的"）
+   与 `app/core/db.py` 的 `create_table()`（含那段 `DO $$ … ALTER`）；**⛔ 不是这条迁移链**。
+
+📄 完整说明与待办 ⇒ `app/alembic/CLAUDE.md` · `docs/待办总表.md`
 """
 from typing import Sequence, Union
 
