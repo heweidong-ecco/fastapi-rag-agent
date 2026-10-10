@@ -42,6 +42,11 @@ All notable changes to this project will be documented in this file.
     抽出来过 **`node --check`**（扫目录 ⇒ 新页面自动进网）。
     ⚠️ **在这之前，那段代码没有任何判据** —— 页面守卫读的是**文本**，node 用例只测 `js/*.js` 自己。
     📄 复盘 ⇒ `docs/复盘/2026-10-10-页面里那段JS没有任何门会去跑它.md`
+  - ⚠️ **那道门自己第一版有个洞，是 CI 上的 CodeQL 抓出来的**（同日）：它的正则**区分大小写**
+    ⇒ 页面里写成 `<SCRIPT>` 时**扫不到** ⇒ **那一页被静默跳过**（门看着全绿，其实没测它）。
+    CodeQL 报的是 `Bad HTML filtering regexp`（HIGH），**判得对，不是误报**。
+    ⇒ 已加 `re.I`，并补一条**正控**（`test_inline_script_scan_is_case_insensitive`，去掉 `re.I` 就红）。
+    📌 这又是一次「**守卫的靶子没定准**」—— 同族在这个仓里栽过多次（`N14`）。
 
 - ⚠️ **页头那格额度曾印出 `NaN`** —— `null` 拼进字符串（判空写成 `!== undefined`，挡不住 `null`）。
   ⇒ 判据改成「**它得是个有限的数**」。⚠️ 这条**是被同批写的用例当场抓住的**（未流到用户面前）。
