@@ -20,7 +20,7 @@ const {
   buildRequest,
   persistenceWarning, scopeNote,
   show, fmtNum, roleText, errorPayloadOf,
-  kvRows, tableOf, truncationNotice, emptyReason,
+  kvRows, tableOf, truncationNotice, emptyReason, isEmpty,
 } = require('./ops.js');
 
 /* ══════════════ 1 · 🔴 路径：全带前缀，且【一条都不许带形参】══════════════ */
@@ -228,8 +228,55 @@ test('`cache` 的样本键列表：⛔ 原样印（那是 Redis 键名，⛔ 没
   const t = tableOf('cache', { cached_embeddings_count: 2, sample_keys: ['emb:aaa', 'emb:bbb'] });
   assert.deepStrictEqual(t.cols, ['样本键（最多 5 个）']);
   assert.deepStrictEqual(t.rows, [['emb:aaa'], ['emb:bbb']]);
-  // 不是数组 ⇒ 空表（⛔ 不抛）
-  assert.deepStrictEqual(tableOf('cache', { sample_keys: null }).rows, []);
+});
+
+/* ══════════════ 7b · 🔴🔴 空态判据（**点出来的真缺陷** · 2026-10-10）══════════════
+ *
+ * 开工时页面用的是别页那套判据：`kv 为空 且 表格为空 ⇒ 画空态`。
+ * 而本页**四格永远画得出非空 kv**（空的那支也会画一行「0」）⇒ **那个条件一次都不成立**
+ * ⇒ 施工单点名要的那句「缓存统计为 0 ≠ 坏了」**根本没露出来**（页面上只有一句 `0`
+ * ＋ 一张只有表头、零行的表 ⇒ 读的人看到的就是"坏了"）。
+ * ⚠️ 当时 11 条页面守卫 + 29 条 JS 用例**全绿** —— 它们判的是"有没有那句话"，
+ *    ⛔ 一条都不判**它有没有被画出来**（本仓原话：「用例全绿证不了页面没坏」）。
+ * ⇒ 下面这两组就是"画没画出来"的判据，⛔ 不再只靠截屏。
+ */
+
+test('🔴🔴 `tableOf`：**零行时必须回 `null`** —— 只有表头的空表看着就是坏了', () => {
+  assert.strictEqual(tableOf('cache', { cached_embeddings_count: 0, sample_keys: [] }), null);
+  assert.strictEqual(tableOf('cache', { sample_keys: null }), null);
+  assert.strictEqual(tableOf('cache', {}), null);
+  // ⚠️ 有行时**照常**回表（别一刀切成 null）
+  assert.strictEqual(tableOf('cache', { sample_keys: ['emb:x'] }).rows.length, 1);
+});
+
+test('🔴🔴 `isEmpty`：本页四格的"算不算空" —— 空态提示条由它说了算', () => {
+  // 真的空 ⇒ true（这两种正是 demo 上最常见的：缓存没热过 / 平台重启把库清了）
+  assert.strictEqual(isEmpty('cache', { cached_embeddings_count: 0, sample_keys: [] }), true);
+  assert.strictEqual(isEmpty('count', { total_documents: 0 }), true);
+  // 缺键也算空（形状变了 ⇒ 那格没数据）
+  assert.strictEqual(isEmpty('cache', {}), true);
+  assert.strictEqual(isEmpty('count', {}), true);
+  assert.strictEqual(isEmpty('quota', {}), true);
+  assert.strictEqual(isEmpty('rate', {}), true);
+  // 有数 ⇒ false
+  assert.strictEqual(isEmpty('cache', { cached_embeddings_count: 86 }), false);
+  assert.strictEqual(isEmpty('count', { total_documents: 129 }), false);
+  assert.strictEqual(isEmpty('quota', { remaining: 0 }), false, '剩余 0 是【有数据】，不是空');
+  assert.strictEqual(isEmpty('rate', { remaining_tokens: 0 }), false);
+  assert.strictEqual(isEmpty('quota', { remaining: '无限' }), false, '「无限」是字符串 ⇒ ⛔ 不算空');
+});
+
+test('🔴 `isEmpty` 对【错误形状】必须回 false —— 错是错，⛔ 别被当成"空"', () => {
+  // ⚠️ 认错了会把 401 画成"这一格没有数据（先跑一次）"，把真实拒绝藏起来
+  assert.strictEqual(isEmpty('count', { error: '请提供 API Key', code: 'AUTH_MISSING', status_code: 401 }), false);
+  assert.strictEqual(isEmpty('cache', null), true, 'null payload 仍是空');
+});
+
+test('🔴 四格的"算空"定义**不是同一个数** —— 别照抄别页的判据', () => {
+  // cache/count 数的是**条数**；quota/rate 看的是**那两格在不在**
+  // （它们的 0 是**有效值**：剩余 0 令牌 = 桶空了，那是要看见的，⛔ 不是"没数据"）
+  assert.strictEqual(isEmpty('quota', { user_name: 'a', remaining: 0, daily_limit: 100 }), false);
+  assert.strictEqual(isEmpty('count', { total_documents: 0 }), true);
 });
 
 test('展示模型遇到**空 payload** 不抛', () => {

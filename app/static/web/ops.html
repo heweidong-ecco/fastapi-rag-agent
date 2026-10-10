@@ -253,16 +253,19 @@ function renderOk(out, panelKey, payload) {
 
   const kv = RagOps.kvRows(panelKey, payload);
   if (kv.length) renderKv(out, kv);
-  const tbl = RagOps.tableOf(panelKey, payload);
-  renderTable(out, tbl);
+  // ⚠️ `tableOf` 在**零行**时回 `null` ⇒ 这里自然不画
+  //    （⛔ 别改回"照画一张只有表头的表" —— 那看着就是坏了，2026-10-10 点出来的）。
+  renderTable(out, RagOps.tableOf(panelKey, payload));
 
   const trunc = RagOps.truncationNotice(payload);
   if (trunc) out.appendChild(el('div', 'hint', trunc));
 
-  // 🔴 空态要**解释为什么空** —— 而本页那两句正是这一页的立意
+  // 🔴 空态要**解释为什么空** —— 而本页那几句正是这一页的立意
   //    （「缓存 0 条」与「库里 0 篇」都**不是坏了**）。
-  const hasTableRows = !!(tbl && tbl.rows.length);
-  if (!kv.length && !hasTableRows && !trunc) {
+  // 🔴🔴 判据走 `RagOps.isEmpty()`，⛔ **不是**「kv 为空且表格为空」——
+  //    本页四格**永远**画得出非空 kv（空的那支也会画一行「0」）⇒ 旧判据一次都不会成立，
+  //    于是施工单点名要的那句解释**根本露不出来**（2026-10-10 点出来后才改的）。
+  if (RagOps.isEmpty(panelKey, payload) && !trunc) {
     const box = el('div', 'empty');
     box.appendChild(el('div', '', '这一格没有数据。'));
     box.appendChild(el('div', 'why', RagOps.emptyReason(panelKey)));

@@ -189,7 +189,11 @@ function kvRows(key, p) {
   }
 }
 
-/** 表格型面板：`{cols, rows}`；不是表格 ⇒ `null`。 */
+/** 表格型面板：`{cols, rows}`；不是表格 ⇒ `null`。
+ *
+ * 🔴🔴 **一行都没有时也回 `null`**（2026-10-10 点出来的 · 见 `isEmpty` 上面那段）。
+ *    ⛔ 别把它改回"照画一张只有表头的表" —— 那在读的人眼里**就是坏了**。
+ */
 function tableOf(key, p) {
   const payload = p || {};
   if (errorPayloadOf(payload)) return null;
@@ -197,9 +201,51 @@ function tableOf(key, p) {
     // 🔴 `sample_keys` 是**最多 5 个**样本键 —— 逐条列出来。
     //    ⚠️ **它是 Redis 的键名，原样回**（⛔ 没有脱敏）⇒ 页面**照原样显示**，不做解释性加工。
     const keys = Array.isArray(payload.sample_keys) ? payload.sample_keys : [];
+    if (!keys.length) return null;          // 🔴 空表不画（改见上）
     return { cols: ['样本键（最多 5 个）'], rows: keys.map((k) => [show(k)]) };
   }
   return null;
+}
+
+/**
+ * 🔴🔴 **这一格的数据"是不是空的"** —— 空态提示条该不该出来，**由它说了算**。
+ *
+ * ## 为什么必须单独有这么一条（2026-10-10 **点出来**的真缺陷）
+ *
+ * 开工时页面用的是别页那套判据：`kv 为空 且 表格为空 ⇒ 画空态`。
+ * 而本页**四格全部**都会画出非空的 `kv`（哪怕端点是空的那支）：
+ * · `cache` 回 `{cached_embeddings_count: 0, sample_keys: []}` ⇒ kv 有一行「缓存的嵌入条数 0」
+ * · `quota` 回什么都会有那 5 行（缺的键画 `—`）
+ * ⇒ **那个条件永远不成立 ⇒ 空态提示条一次都不会出现。**
+ *
+ * 🔴 后果**正好打在施工单点名的那一条上**：要求写「**缓存统计为 0 ≠ 坏了** ⇒ 必须解释为什么空」，
+ *    而实际页面上**只有一句 `0`**、外加一张**只有表头、零行**的空表 ——
+ *    读的人看到的**就是"坏了"**，⛔ 恰恰是这条要求要防的。
+ * ⚠️ 而当时 **11 条页面守卫 + 29 条 JS 用例全绿** —— 它们判的是"`emptyReason` 有没有那句话"，
+ *    ⛔ **一条都不判它有没有被画出来**（本仓原话：「**用例全绿证不了页面没坏**」）。
+ *    ⇒ 所以这条判据现在**是可单测的纯逻辑**（在 `ops.test.js` 里），⛔ 不再只靠截屏。
+ *
+ * ⚠️ 四格「算空」的定义**各不相同** —— 它们空的原因不一样（见 `emptyReason`）。
+ */
+function isEmpty(key, p) {
+  const payload = p || {};
+  if (errorPayloadOf(payload)) return false;      // 错就是错，⛔ 别当成"空"
+
+  /** 「压根没这个值」—— ⚠️ **⛔ 不是「不是数字」**：`remaining` 可以是字符串「无限」。 */
+  const blank = (v) => v === undefined || v === null || v === '';
+  /** 「数出来是 0」—— ⚠️ 用 `Number()` 而**不是** `_finiteOrNull`：
+   *  后者对 `'无限'` / `'abc'` 也回 `null` ⇒ 会把**有数据**的那格判成空。 */
+  const isZero = (v) => !blank(v) && Number(v) === 0;
+
+  switch (key) {
+    case 'cache': return blank(payload.cached_embeddings_count) || isZero(payload.cached_embeddings_count);
+    case 'count': return blank(payload.total_documents) || isZero(payload.total_documents);
+    // ⚠️ 这两格看的是「**那两个键在不在**」，⛔ 不是「数是不是 0」——
+    //    `remaining = 0` 是**有效值**（桶空了 / 额度用完了），那正是要看见的，⛔ 不是"没数据"。
+    case 'quota': return blank(payload.remaining);
+    case 'rate':  return blank(payload.remaining_tokens);
+    default: return false;
+  }
 }
 
 /** 截断提示（`test_truncation_declared.py` 那道门管的两种形状）。 */
@@ -240,7 +286,7 @@ const RagOps = {
   buildRequest,
   persistenceWarning, scopeNote,
   show, fmtNum, roleText, errorPayloadOf,
-  kvRows, tableOf, truncationNotice, emptyReason,
+  kvRows, tableOf, truncationNotice, emptyReason, isEmpty,
 };
 
 if (typeof module !== 'undefined' && module.exports) {
