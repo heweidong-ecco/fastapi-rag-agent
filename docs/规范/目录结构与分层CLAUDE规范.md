@@ -123,7 +123,7 @@ from billing.token_tracker import record_usage
 | 真空目录 | 三行小桩（声明"已检视、无特殊约定"），不要 0 字节 |
 
 **不建 `CLAUDE.md` 的目录**：`venv/` `venv-ragas/`（依赖）· 被 `.gitignore` 的（`tmp/` `logs/` `archive/` `screenshots/` `self-prompt/` `demo/设置与命令/`）· 自动生成的（`.claude/worktrees/`）· 缓存目录。
-> ⚠️ **`docs/可移植清单-开新项目时搬什么/新项目骨架/` 是【逐层都有 `CLAUDE.md`】的** ——
+> ⚠️ **`docs/可移植清单-开新项目时搬什么/scaffold-分层claudemd-gates-规矩门/新项目骨架/` 是【逐层都有 `CLAUDE.md`】的** ——
 > 因为它是**要整份拷到新项目**的成品：**拷过去当天就得是绿的**（⛔ 不是「让新项目自己补」）。
 
 > 🔴 **上面这份【就是】门的豁免名单，⛔ 别在别处再造一份。**
