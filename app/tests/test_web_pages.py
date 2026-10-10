@@ -50,6 +50,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+from html.parser import HTMLParser
 
 import pytest
 
@@ -142,38 +143,97 @@ def test_page_url_literals_carry_the_api_prefix(page):
 #      但"解析不了"这一类**从今夜起再也过不去了**。
 #   📄 复盘：`docs/复盘/2026-10-10-页面里那段JS没有任何门会去跑它.md`
 
-_INLINE_SCRIPT = re.compile(r"<script(?![^>]*\bsrc=)[^>]*>(.*?)</script>", re.S | re.I)
-# 🔴 `re.I` **不是可有可无的**（2026-10-10 · CodeQL 抓出来的）：
-#    ⛔ 少了它 ⇒ 页面里写成 `<SCRIPT>` 时**扫不到** ⇒ 那个页面会被**静默跳过**，
-#    而这道门存在的全部理由就是"别让任何一页静默跑不起来"。
-#    📄 它当时报的是 `Bad HTML filtering regexp`（HIGH）—— 判语是"**不匹配大写标签**"，
-#       **判得对**：这不是误报，是我把门的靶子写窄了（本仓同族：`N14` · `守卫的靶子没定准`）。
-#    ⚠️ 正控 ⇒ 下面 `test_inline_script_scan_is_case_insensitive`（取反会红）。
+def _inline_scripts(text):
+    """把页面里**内联**的 `<script>` 正文抽出来（带 `src=` 的是外部文件，⛔ 不算）。
 
+    🔴 **为什么用 `html.parser` 而不是正则**（2026-10-11 · **CodeQL 连着抓了两次**）：
 
-def _inline_scripts(text: str):
-    """页面里**内联**的 `<script>` 正文（带 `src=` 的那些不算 —— 那是外部文件，另有门管）。"""
-    return _INLINE_SCRIPT.findall(text)
+    | 第几次 | 正则漏了什么 | 后果 |
+    |---|---|---|
+    | 1 | **大写** `<SCRIPT>` | 那一页**扫不到** ⇒ **静默跳过** |
+    | 2 | `</script >`（**带空格**） | 同上（或把两段脚本**吞成一段**） |
 
+    ⚠️ **两次都是同一个毛病**：**漏扫 ≠ 通过** —— 正则没覆盖到某种写法，
+    那个页面就被**静默跳过**，**而门照样绿**。这正是这道门存在的理由，也是它最不能犯的错。
+    🔴 而且第 2 次我**事先把那条限制写在注释里当成了"有意不收"**，理由是"本仓页面一处都没有这种写法"
+    —— **那正是本仓明令不许的那种推理**（拿「本仓现在没有」当「不会发生」）。
+    ⇒ 换成 stdlib 的**真解析器**：**"某种写法没覆盖到"这一类洞，一次都没有了**。
 
-def test_inline_script_scan_is_case_insensitive():
-    """⚠️ **下面那道门的【正控】** —— 大写 `<SCRIPT>` 也必须扫得到。
-
-    🔴 **为什么单立一条**（2026-10-10 · CodeQL 在本仓 PR 上抓的 `Bad HTML filtering regexp`）：
-    那个正则一开始**区分大小写** ⇒ 页面里写成 `<SCRIPT>` 时**扫不到**
-    ⇒ **那一页被静默跳过** ⇒ 门**看着全绿，其实没测它**。
-    ⚠️ 这类"**漏扫 ≠ 通过**"是本仓最恨的形态（「空跑 = 静默假通过」）。
-    ⚠️ **反证**：把正则里的 `re.I` 去掉 ⇒ 本条立刻红。
+    ⚠️ 换之前做过的核对：拿它和旧正则跑过 `app/static/` 下**全部 12 个 `.html`**
+    ⇒ **逐页逐段完全一致**（含 `eval.html` / `eval_gate.html` 那两个"一段都没有"的）。
+    ⇒ 所以这是一次**行为不变、鲁棒性变强**的替换。
     """
-    assert _inline_scripts("<SCRIPT>var a=1;</SCRIPT>") == ["var a=1;"], (
-        "大写 `<SCRIPT>` 扫不到 ⇒ 那个页面会被**静默跳过**（而门照样绿）"
-    )
-    assert _inline_scripts('<SCRIPT SRC="/x.js"></SCRIPT>') == [], (
-        "带 `src=` 的是外部文件，不归这道门管 —— ⛔ 别把它算成内联脚本"
-    )
-    assert _inline_scripts("<script>var a=1;</script>") == ["var a=1;"]
-    # ⚠️ 有意**不**收的形态：`</script >`（标签里带空格）HTML 里合法，但本正则不管
-    #    —— 本仓页面**一处都没有**这种写法。⇒ ⛔ 别把它读成"覆盖全了"。
+    p = _InlineScripts()
+    p.feed(text)
+    return ["".join(b) for b in p.blocks]
+
+
+class _InlineScripts(HTMLParser):
+    """收集**内联** `<script>` 的正文。⚠️ 带 `src=` 的⛔ 不算（那是外部文件，另有门管）。
+
+    ⚠️ `handle_comment` 那道补丁不是多余的：老式脚本里 `<!--` 是**脚本内容**，
+    而 `html.parser` 可能把它当注释 ⇒ 不补回去就会**少一段**（而⛔ 门照样绿）。
+    """
+
+    def __init__(self):
+        super().__init__(convert_charrefs=False)
+        self.blocks = []
+        self._depth = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag.lower() != "script":
+            return
+        if any((k or "").lower() == "src" for k, _v in attrs):
+            return                       # 外部文件 ⇒ ⛔ 不归这道门管
+        self._depth += 1
+        self.blocks.append([])
+
+    def handle_data(self, data):
+        if self._depth and self.blocks:
+            self.blocks[-1].append(data)
+
+    def handle_endtag(self, tag):
+        if tag.lower() == "script" and self._depth:
+            self._depth -= 1
+
+    def handle_comment(self, data):
+        if self._depth and self.blocks:
+            self.blocks[-1].append("<!--" + data + "-->")
+
+
+def test_inline_script_scan_never_silently_skips_a_page():
+    """⚠️ **下面那道门的【正控】** —— 认不出某种写法 = 那个页面被**静默跳过**（而门照样绿）。
+
+    🔴 **为什么单立一条**：这道门一开始是**正则**写的，而 **CodeQL 连着抓了它两次**
+    （`Bad HTML filtering regexp` · HIGH）：
+
+    | 第几次 | 漏了什么 | 后果 |
+    |---|---|---|
+    | 1 | **大写** `<SCRIPT>` | 那一页扫不到 ⇒ **静默跳过** |
+    | 2 | `</script >`（**带空格**） | 同上（或把两段脚本**吞成一段**） |
+
+    ⇒ 两次都是"**漏扫 ≠ 通过**"，而这正是本仓最恨的形态（「空跑 = 静默假通过」）。
+    ⇒ 现在换成了 stdlib 的**真解析器**（`html.parser`），这一类洞**一次都没有了**；
+      本条就是钉住它的**正控** —— 下面每一种写法都**必须**被认出来。
+    ⚠️ **反证**：把 `_inline_scripts` 换回「只认小写、不认标签里空格」的老正则 ⇒ 本条立刻红。
+    """
+    for src, why in [
+        ("<script>var a=1;</script>", "最普通那种"),
+        ("<SCRIPT>var a=1;</SCRIPT>", "🔴 大写 ⇒ 第 1 次 CodeQL 报的就是它"),
+        ("<script >var a=1;</script >", "🔴 标签里带空格 ⇒ 第 2 次报的就是它"),
+        ('<script type="text/javascript">var a=1;</script>', "带别的属性"),
+        ("<script>\nvar a=1;\n</script>", "跨行"),
+        ("<script>var a=1;</script><script>var b=2;</script>", "两段脚本（⛔ 不许吞成一段）"),
+    ]:
+        got = [s.strip() for s in _inline_scripts(src)]
+        want = ["var a=1;"] if "b=2" not in src else ["var a=1;", "var b=2;"]
+        assert got == want, f"认不出「{why}」⇒ 那个页面会被静默跳过（拿到的是 {got}）"
+
+    for src, why in [
+        ('<script src="/x.js"></script>', "带 `src=` 的是外部文件"),
+        ('<SCRIPT SRC="/x.js"></SCRIPT>', "同上，大写"),
+    ]:
+        assert _inline_scripts(src) == [], f"{why} ⇒ ⛔ 别把它算成内联脚本（那是别的门管的事）"
 
 
 @pytest.mark.parametrize("page", PAGES, ids=PAGES)
