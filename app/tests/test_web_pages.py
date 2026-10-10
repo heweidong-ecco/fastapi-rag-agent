@@ -47,6 +47,9 @@
 """
 import os
 import re
+import shutil
+import subprocess
+import tempfile
 
 import pytest
 
@@ -111,3 +114,78 @@ def test_page_url_literals_carry_the_api_prefix(page):
         f"（真实路由前缀是 `/api/v1` —— 见 `app/routing/api_v1_agent.py` 的 `APIRouter(prefix=…)`。"
         f"⚠️ **服务端不会报任何错**，页面只是空白/失效。）"
     )
+
+
+# ══════════════ 页面**内联**的 JS 必须真能跑（2026-10-10 立 · 补一个结构缺口）══════════════
+#
+# 🔴🔴 **这道门是拿一个真事故换来的**，事故长这样：
+#   8 个能力页**全部是死的**（一行内联脚本都不执行），而
+#   **982 条 pytest + 283 条 node 用例全绿**。
+#
+# 为什么一条都没红：
+#
+# | 层 | 为什么够不到 |
+# |---|---|
+# | `app/tests/test_*_page.py`（各页守卫） | 它们读的是**页面文本**（正则找标记、比先后）—— **不解析 JS** |
+# | `app/static/js/*.test.js`（node 用例） | 只测 **`js/*.js` 自己**，⛔ 从不加载页面里那段内联脚本 |
+# | 静态检查（ruff 棘轮） | 只管 `.py` |
+#
+# ⇒ **页面里那段内联 JS 没有任何判据** —— 它写错了，全世界的门都是绿的，
+#   只有**把页面真打开**才看得见。这正是本仓那句「**门挂在别处，就等于没有门**」。
+#
+# 具体那次错在**全局重名**：共用脚本 `session.js` 顶层写了 `function key()`，
+# 而经典脚本的顶层 `function` **是全局的** ⇒ 与 8 个页面各自的 `const key` 撞上 ⇒
+# `SyntaxError: Identifier 'key' has already been declared` ⇒ **整段内联脚本作废**。
+#
+# ⭐ 所以这道门钉的是**最外圈、也最便宜**的那一层：**它能解析吗**。
+#   ⇒ ⛔ 它**不管**逻辑对不对（那是各页自己的用例 + `js/*.test.js` 的事）；
+#      但"解析不了"这一类**从今夜起再也过不去了**。
+#   📄 复盘：`docs/复盘/2026-10-10-页面里那段JS没有任何门会去跑它.md`
+
+_INLINE_SCRIPT = re.compile(r"<script(?![^>]*\bsrc=)[^>]*>(.*?)</script>", re.S)
+
+
+def _inline_scripts(text: str):
+    """页面里**内联**的 `<script>` 正文（带 `src=` 的那些不算 —— 那是外部文件，另有门管）。"""
+    return _INLINE_SCRIPT.findall(text)
+
+
+@pytest.mark.parametrize("page", PAGES, ids=PAGES)
+def test_inline_page_script_parses(page):
+    """🔴 **页面内联的 JS 必须能被解析** —— 解析不了 ⇒ 那一整段一行都不执行，页面就是死的。
+
+    判据用的是 **`node --check`**（真解析器），⛔ 不是"用正则数括号"那种自造的近似物。
+    ⚠️ 反证检验：在任一页面的内联脚本里加一句 `const key = 1;`（与全局 `key` 撞名）
+    或写一个语法错 ⇒ 本条立刻红。
+    """
+    with open(os.path.join(static_dir, page), encoding="utf-8") as f:
+        blocks = _inline_scripts(f.read())
+    if not blocks:
+        pytest.skip(f"{page} 本来就没有内联脚本 —— ⛔ 这不是「这条门放过了它」")
+
+    node = shutil.which("node")
+    assert node, (
+        "找不到 `node` ⇒ **这道门根本没法跑**。\n"
+        "⚠️ ⛔ 别把它当通过 —— 这正是本仓「**取不到真值 ≠ 通过**」那条"
+        "（同型：`check_remote_sync.sh` 的退出码 3）。\n"
+        "⇒ 本仓的离线测试 job 本来就跑 `node --test`（`ci.yml`），所以 node 是**前置条件**。"
+    )
+
+    bad = []
+    for i, src in enumerate(blocks):
+        with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as tf:
+            tf.write(src)
+            tmp = tf.name
+        try:
+            r = subprocess.run([node, "--check", tmp], capture_output=True, text=True)
+            if r.returncode != 0:
+                bad.append(f"第 {i + 1} 段：{r.stderr.strip().splitlines()[0] if r.stderr else r.stdout}")
+        finally:
+            os.unlink(tmp)
+    assert not bad, (
+        f"`{page}` 里有内联脚本**解析不过** ⇒ 浏览器里那一整段**一行都不执行**，页面是死的：\n"
+        + "\n".join(bad)
+        + "\n⇒ 最常见的一种是**全局重名**：共用脚本的顶层 `function`/`const` 是**全局的**，"
+          "会与页面自己的顶层绑定撞上（2026-10-10 就是这么栽的）。"
+    )
+

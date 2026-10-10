@@ -156,6 +156,11 @@
            ⚠️ 选项由 `RagSse.CHAINS` 生成（⛔ 不在这里手写 —— 手写就会与 `sse.js` 那份漂移）。 -->
       <label class="field">链 <select id="chain"></select></label>
       <span class="spacer"></span>
+      <!-- 🔴 凭据（`DEC-143`）：demo 那条路上**首访就自动领到**（⇒ 连下面那张登录页都不出现）。
+           ⛔ 一个字节的明文都不进页面。⚠️ 本页**没有** `cred-manual` / `save` 那两块 ——
+           它的"手动"形态就是那张整屏登录页，由 `showLogin()` / `showApp()` 管。 -->
+      <span class="field" id="cred-auto" hidden>凭据 <b>已自动获得</b><span id="cred-quota"></span></span>
+      <button type="button" id="swapkey" class="btn" hidden>换一把</button>
       <span class="hint" id="headhint">逐字回答 · 引用可点开 · 每轮报 token 与费用</span>
     </header>
 
@@ -169,6 +174,9 @@
   </div>
 </div>
 
+<!-- 🔴 凭据（`DEC-143`）：`session.js`（凭据本身）**必须**排在 `cred.js` 与页面脚本之前。 -->
+<script src="/static/js/session.js"></script>
+<script src="/static/js/cred.js"></script>
 <script src="/static/js/sse.js"></script>
 <script>
 'use strict';
@@ -177,7 +185,9 @@
    ⚠️ 引用正则也**只有 sse.js 那一份**（`RagSse.splitCitations`）——
       本文件里再写一份就会与它漂移，而那**不报错**（表现是"点了没反应"）。 */
 
-const KEY_STORE = 'rag_api_key';
+/* 🔴 凭据**只有一份实现** ⇒ `RagSession`（`/static/js/session.js` · `DEC-143`）。
+   ⛔ 别在这页里再写一份「凭据存在哪个键、怎么取」—— 8 个页面各写一遍正是这一版要收掉的债
+      （改前 8 个页面各有一份；改后全站只剩 `session.js` 那一份）。 */
 const THREAD_STORE = 'rag_threads';
 const CHAIN_STORE = 'rag_chain';   // 上一次选的链（刀 2）
 
@@ -189,7 +199,8 @@ let sawDone, sawError, aborted, firstContentAt, sentAt;
 const $ = (id) => document.getElementById(id);
 
 // ---------- 身份 ----------
-function currentKey() { return localStorage.getItem(KEY_STORE) || ''; }
+// ⚠️ 仍是**同步**的、**同签名** ⇒ 本页其余那些调用一个字没动。
+const currentKey = () => RagSession.key();
 
 function showLogin() {
   $('login').hidden = false;
@@ -489,7 +500,7 @@ async function ask() {
       } else {
         aEl.textContent = msg;
       }
-      if (relogin) localStorage.removeItem(KEY_STORE);
+      if (relogin) RagSession.clear();
       // 🔴 2026-10-06 施工实测·订正⑧：起草稿这里**只写了 `metaEl.textContent = '出错'`，
       //    没有置 `exit`** ⇒ `exit` 还是 'incomplete' ⇒ 下面 `finally` 会把这行**覆盖成
       //    「本轮未计费 · 未收到结束标志」** ⇒ 用户看到的**不是"出错"**。
@@ -590,7 +601,7 @@ $('stop').onclick = () => {
 $('save').onclick = () => {
   const k = $('apikey').value.trim();
   if (!k) return;
-  localStorage.setItem(KEY_STORE, k);
+  RagSession.save(k);
   showApp(); renderThreads();
 };
 $('send').onclick = ask;
@@ -615,7 +626,12 @@ $('newthread').onclick = () => { newThread(); renderThreads(); showEmptyLog(); }
   sel.onchange = () => localStorage.setItem(CHAIN_STORE, sel.value);
 })();
 
-(currentKey() ? (showApp(), renderThreads()) : showLogin());
+/* 🔴 起界面前**先把凭据弄妥**（`DEC-143`）：demo 那条路上首访静默领一把 ⇒ **直接进主界面**，
+   ⛔ 不让访客看见那张登录页（他没有任何办法弄到 key）。领不到（本仓那条路）⇒ `showLogin()`
+   = 今天的样子。⚠️ 这一句原本是同步的 —— 改成先领再看，是因为**领一把本身要跑一趟**。 */
+RagCred.mount(() => {
+  if (currentKey()) { showApp(); renderThreads(); } else { showLogin(); }
+});
 </script>
 </body>
 </html>

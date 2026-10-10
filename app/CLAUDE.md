@@ -19,9 +19,13 @@
 | `specs/` | **不归属任何组的 spec**（`main.md`）+ 模板 + 退役归档 | `specs/CLAUDE.md` |
 | `static/` | **真前端**（22 个：`web/*.html` · `js/*.js`） | `static/CLAUDE.md` |
 | `alembic/` | 迁移脚本（6 个） | `alembic/CLAUDE.md` |
+| 🔴 **`demo/`** | **demo 专属代码区** —— ⛔ **本仓的代码不引用它**（业务方 2026-10-10 裁的「甲」）<br>内含 `claim.py` = 访客凭据的发放 | `demo/CLAUDE.md` |
 
-**留在 `app/` 根的 2 个 `.py`**（⛔ 别挪）：
+**留在 `app/` 根的 3 个 `.py`**（⛔ 别挪）：
 - **`main.py`** —— 服务入口。`uvicorn main:app` 与 Docker `CMD` **都绑它** · spec ⇒ `specs/main.md`
+- **`demo_main.py`** —— 🔴 **demo 的入口**（`uvicorn demo_main:app`）·
+  ⚠️ **本仓那条线⛔ 不引用它** ⇒ 这就是「**默认 = 完整版**」的结构保证 ·
+  spec ⇒ `specs/demo_main.md`
 - **`conftest.py`** —— pytest 根 conftest。⭐ **它一留，`app/` 就在 `sys.path` 上** ⇒
   `tests/` 那 94 个用例才能用**裸导入**（`from main import app`）
 
