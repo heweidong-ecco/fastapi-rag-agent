@@ -10,7 +10,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
-- 🔴 **`README.md` 重排成标准结构 + `CLAUDE.md` 重排**（2026-10-10 · 业务方指令）——
+- 🔴 **`README.md` 重排成标准结构 + `CLAUDE.md` 重排**（2026-10-10 · 业务方指令 · 📄 **`DEC-135`**）——
   业务方原话：「**`CLAUDE.md` 结构化处理，和 emoji**」「**`README.md`，标准的 README.md 不是这样的，
   感觉看起来，乱七八糟的**」。
   - **README `331 → 219` 行 · emoji 每行 `0.36 → 0.22`**；
