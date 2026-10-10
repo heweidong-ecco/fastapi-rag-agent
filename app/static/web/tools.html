@@ -34,6 +34,19 @@
   .zone-head:first-of-type { margin-top: var(--sp-4); }
   .zone-head + .hint { margin-top: 0; }
 
+  /* 🔴 「本页⛔不挂的两类接口」那张表 —— ⛔ **不能直接用通用 `.kv`**。
+     通用规则是 `.kv > .k { flex: 0 0 6em }`（给**短键名**用的，如「合计」），
+     而这里那两条的"键"是**长路径**（`/agent/memory_chat (+ /stream)`）且**没有可断行的空格**
+     ⇒ 在 6em 里**逐字竖排**成一列竖条。
+     📌 这是**截图才看出来的**（2026-10-10）：三类结构型用例全绿，
+     因为它们只判"有没有那个标记"，⛔ 不判它长什么样（本仓原话：「**用例全绿证不了页面没坏**」，`frontend/README.md` §十一）。
+     ⇒ 改成一上一下（条目一行、说明一行），并把条目用等宽字体——它本来就是路径/接口名。 */
+  #notexposed-list .kv { flex-direction: column; gap: var(--sp-1); margin: var(--sp-2) 0; }
+  #notexposed-list .kv > .k {
+    flex: none; color: var(--fg); font-family: var(--mono); font-size: var(--fs-cap);
+    word-break: break-word;
+  }
+
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 </head>
@@ -441,14 +454,14 @@ document.querySelectorAll('[data-tools]').forEach(function (section) {
 // 「归别处」那张表 —— ⛔ 静态文字，逐条写明去了哪
 const NOT_HERE = [
   {
-    path: '/agent/memory_chat (+ /stream)',
-    why: '**它已经有入口** —— 两者的**流式版**就在对话页（`/chat`）的链选择器里，'
-       + '名字叫「带记忆的 Agent」⇒ 本页⛔ 不重复挂一个。',
+    path: '/agent/memory_chat（含 /stream）',
+    why: '它已经有入口 —— 两者的【流式版】就在对话页（/chat）的链选择器里，'
+       + '名字叫「带记忆的 Agent」⇒ 本页不重复挂一个。',
   },
   {
     path: '其余 4 条 Agent 链的【非流式】版',
-    why: '规格 §2.1 把它们归到**对话面板**（`/chat`），而对话页现在只接了**流式**那 6 条。'
-       + '⚠️ 这是一处**已知缺口**，已登记 ⇒ `docs/待办总表.md`。⛔ 不属于本页。',
+    why: '规格 §2.1 把它们归到【对话面板】（/chat），而对话页现在只接了【流式】那 6 条。'
+       + '⚠️ 这是一处已知缺口，已登记 ⇒ docs/待办总表.md 。⛔ 不属于本页。',
   },
 ];
 const neList = $('notexposed-list');

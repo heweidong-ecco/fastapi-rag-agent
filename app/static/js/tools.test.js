@@ -285,7 +285,53 @@ test('`mcp` 的空态必须说是【环境】问题，⛔ 不是"工具没了"',
   assert.doesNotMatch(s, /工具都没了/);
 });
 
-/* ══════════════ 7 · 浏览器侧：`RagTools` 这个全局真的存在吗 ══════════════ */
+/* ══════════════ 7 · 结构型守卫：**渲染出去的文字⛔ 不许带 markdown 记号** ══════════════
+ *
+ * 🔴 为什么必须有这条（**2026-10-10 截图才发现的真缺陷**）：
+ *    本页所有数据都是 `textContent` 灌进去的（⛔ 不用 innerHTML）⇒ 文案里的
+ *    `**强调**` 会**原样印成星号**、`` `代码` `` 会**原样印成反引号**。
+ *    ⚠️ 而**当时 34 条用例全绿** —— 它们判的是"有没有这句话 / 是不是这句话"，
+ *    **一条都不判它长什么样**。本仓原话：「**用例全绿证不了页面没坏**」（`frontend/README.md` §十一）。
+ *    ⇒ 所以补这条**结构**判据：**凡是会被渲染出去的字符串，⛔ 不许出现 `**`**。
+ *
+ * ⚠️ **只扫 `**`，⛔ 不扫反引号** —— 本模块的**模板字面量**本身就用反引号（`` `unknown panel: ${key}` ``），
+ *    扫它必然误报。而 `**` 在本仓的 JS 里**没有任何合法用途**（不做幂运算）⇒ 它是干净的针脚。
+ * ⚠️ **要剥掉注释再扫** —— 注释里大量用 `**`（那是给人读的 markdown），⛔ 不是渲染出去的文字。
+ */
+function stripComments(src) {
+  return src
+    .replace(/<!--[\s\S]*?-->/g, '')          // HTML 注释
+    .replace(/\/\*[\s\S]*?\*\//g, '')         // 块注释（含 <style> 里的 CSS）
+    .replace(/(^|[^:])\/\/[^\n]*/g, '$1');    // 行注释（⚠️ 避开 `https://` 那种）
+}
+
+test('🔴 渲染出去的文字⛔ 不许带 markdown 记号（页面一律 textContent ⇒ 会原样印星号）', () => {
+  // ① 行为面：把模块**能渲染出去的**字符串全部取出来验一遍（这条不依赖扫描，最结实）
+  const texts = [];
+  for (const k of Object.keys(PANELS)) {
+    for (const v of [persistenceWarning(k), scopeNote(k), emptyReason(k),
+                     missingRequired(k, {}), missingRequired(k, { content: '', query: '' })]) {
+      if (typeof v === 'string') texts.push(v);
+    }
+  }
+  texts.push(...Object.values(SOURCE_LABELS), ...Object.values(SOURCE_BADGES));
+  assert.ok(texts.length >= 30, `只取到 ${texts.length} 条渲染文案 —— 取样失效了`);
+  const bad = texts.filter((t) => t.includes('**'));
+  assert.deepStrictEqual(bad, [], `这些文案里带了 markdown 的 ** ⇒ 页面上会原样印出星号：${JSON.stringify(bad)}`);
+
+  // ② 源码面：本模块与页面里，**注释之外**也不许出现 `**`
+  const files = {
+    'tools.js': fs.readFileSync(path.join(__dirname, 'tools.js'), 'utf8'),
+    'web/tools.html': fs.readFileSync(path.join(__dirname, '..', 'web', 'tools.html'), 'utf8'),
+  };
+  for (const [name, src] of Object.entries(files)) {
+    const hits = stripComments(src).split('\n')
+      .map((line, i) => [i + 1, line]).filter(([, line]) => line.includes('**'));
+    assert.deepStrictEqual(hits, [], `${name} 里（注释之外）出现了 **：${JSON.stringify(hits)}`);
+  }
+});
+
+/* ══════════════ 8 · 浏览器侧：`RagTools` 这个全局真的存在吗 ══════════════ */
 
 const fs = require('node:fs');
 const path = require('node:path');
