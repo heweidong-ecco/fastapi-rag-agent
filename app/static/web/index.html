@@ -144,9 +144,9 @@
       <li class="card card-hover"><a href="/eval">评测</a>
           <span class="why">接入 Agent 生产就绪评测门（现状是占位页）。</span>
           <span class="apis">GET /eval · agent-eval-gate</span></li>
-      <li class="card card-off"><span>运维探针</span><span class="badge">未上线</span>
-          <span class="why">限流桶 / 配额 / 缓存的可见证据（调试视角）。施工中（刀 7）。</span>
-          <span class="apis">GET /debug/rate_limit/{user} · /debug/cache_stats</span></li>
+      <li class="card card-hover"><a href="/ops">运维探针</a>
+          <span class="why">限流桶 / 配额 / 缓存摊开看（调试视角）—— 这四个数是「限流真的在生效」的证据；⚠️ 额度那两格只查得到你自己。</span>
+          <span class="apis">GET /debug/cache_stats · /debug/count · /debug/quota · /debug/rate_limit</span></li>
     </ul>
 
   </main>

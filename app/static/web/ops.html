@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>运维探针</title>
+<link rel="stylesheet" href="/static/app.css">
+<style>
+  /* 本页只写【页面专属】规则 —— 通用组件与 token 在 `/static/app.css`。⛔ 别在这里另起一套 :root。 */
+
+  #boundary { margin: 0 0 var(--sp-4); }
+
+  .panel-grid > .panel { display: flex; flex-direction: column; }
+  .hint { margin: var(--sp-2) 0 0; color: var(--fg-dim); font-size: var(--fs-cap); line-height: var(--lh-body); }
+  /* ⚠️ `.panel-actions` **不在 `app.css` 里** —— 它是页面级的（`system.html` 也是自己定义的）。 */
+  .panel-actions { margin-top: var(--sp-3); }
+
+  /* 🔴 口径徽标：**两态各一个色** —— 「Redis 里现在的样子」与「真库里的行」
+     对"重启后还在不在"的答案不同 ⇒ ⛔ 不许长成一个样（`DEC-047` 的教训）。 */
+  .src-redis { background: color-mix(in srgb, var(--info) 16%, transparent); color: var(--info); }
+  .src-db    { background: color-mix(in srgb, var(--ok)   16%, transparent); color: var(--ok); }
+
+  /* 🔴🔴 通用 `.kv` 的 `.k` 是**写死的 6em**（它本来是给"短标签 + 值"用的）。
+     本页的标签长（「桶容量（代码常量）」「每日上限（token）」）⇒ 6em 装不下会被**逐字竖排**。
+     ⚠️ 这是**截图才看得出来**的那类问题：用例判的是"值对不对"，⛔ 一条都不判它宽不宽。
+     ⇒ 本页把标签列加宽（同 `tools.html` / `system.html` 的处理，那两处也是截图发现的）。 */
+  .kv > .k { flex: 0 0 11em; }
+
+  .zone-head { margin: var(--sp-5) 0 var(--sp-3); }
+  .zone-head:first-of-type { margin-top: var(--sp-4); }
+  .zone-head + .hint { margin-top: 0; }
+
+  /* 🔴 「本页不挂」那张表 —— ⛔ 不能直接用通用 `.kv`（长路径会逐字竖排，同 `system.html`）。 */
+  #notexposed-list .kv { flex-direction: column; gap: var(--sp-1); margin: var(--sp-2) 0; }
+  #notexposed-list .kv > .k {
+    flex: none; color: var(--fg); font-family: var(--mono); font-size: var(--fs-cap);
+    word-break: break-word;
+  }
+
+  /* 🔴 调试视角那条 —— 它必须**一眼看到**（规格 §3.6.1②：提示在前、接口在后）。 */
+  #debugview { margin: 0 0 var(--sp-4); }
+
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="app-shell">
+
+  <aside class="sidebar">
+    <div class="brand">青云精工 · RAG</div>
+    <nav class="nav">
+      <a href="/chat">对话</a>
+      <a href="/lab">检索实验室</a>
+      <a href="/approvals">人工接管</a>
+      <a href="/cost">成本看板</a>
+      <a href="/trace">执行轨迹</a>
+      <a href="/eval">评测</a>
+    </nav>
+  </aside>
+
+  <div class="main">
+
+    <header class="page-head">
+      <h1>运维探针</h1>
+      <span class="spacer"></span>
+      <label class="field">API Key <input id="apikey" type="password" placeholder="X-API-Key"></label>
+      <button id="save">保存</button>
+    </header>
+
+    <div class="content">
+      <div id="notice"></div>
+
+      <!-- 🔴🔴 【调试视角】这一条必须排在最前（规格 §3.7 + 施工单刀 7 点名的那一条）。
+           ⛔ 不说清，访客会把这页读成"产品功能"，然后拿这里的数去问"为什么我的额度是这样"。 -->
+      <div class="alert warn" id="debugview">
+        <b>这是一页【调试视角】</b> —— 它 <b>⛔ 不是给访客用的产品功能</b>，
+        而是把「<b>限流桶 / 配额 / 缓存</b>」这三个平时看不见的东西<b>摊开给你看</b>的。
+        <div class="hint" style="margin-top:var(--sp-2)">
+          它们之所以值得看，是因为<b>这套系统的限流与配额是【真的在生效】</b> ——
+          ⛔ 不是写在文档里的一句话。⚠️ 想验「429 那张卡长什么样」，去对话页连着快发几次就有了。
+        </div>
+      </div>
+
+      <!-- 🔴🔴 边界标注（规格 §3.6.1 的② · 提示在前、接口在后）
+           ⚠️ 文案【只从 RagPanel 取】—— ⛔ 别在这份 HTML 里再抄一遍。 -->
+      <section class="panel" id="boundary" aria-label="使用前必读（平台与额度边界）">
+        <div class="panel-body">
+          <h2 style="margin-top:0">使用前必读</h2>
+          <div class="panel-boundary" data-boundary="platform_restart"></div>
+          <div class="panel-boundary" data-boundary="quota"></div>
+          <div class="panel-boundary" data-boundary="rate_limit"></div>
+          <div class="panel-boundary" data-boundary="real_api"></div>
+          <h3>怎么验证它真的做完了</h3>
+          <div class="panel-boundary" data-boundary="verify"></div>
+        </div>
+      </section>
+
+      <!-- 🔴 两种来源 —— ⛔ 不写这一段，读的人会把「真库的行数」与「Redis 里的键」当成同一种数。 -->
+      <section class="panel" id="legend">
+        <div class="panel-body">
+          <h2 style="margin-top:0">这一页上的两种来源（⛔ 别混着读）</h2>
+          <p class="hint" style="margin-top:var(--sp-1)">
+            <span class="badge src-redis">Redis</span>
+            —— <b>Redis 里此刻的样子</b>（嵌入缓存键 · 令牌桶）。⚠️ 它<b>不是</b>进程内存，
+            但<b>同样会被平台重启清空</b>。
+          </p>
+          <p class="hint">
+            <span class="badge src-db">真库</span>
+            —— <b>库里的行</b>（文档总数 · 你今日用掉的 token）。
+            ⚠️ 这一格的数是<b>从库里数出来的</b>，⛔ 不是内存里的累计。
+          </p>
+        </div>
+      </section>
+
+      <!-- ⛔ 本页【不进侧边栏】—— 规格 §3.0 把「运维探针」归在「其他功能」，
+           而口径 ② 是「侧边栏只放 5 类【主要功能】」⇒ 入口 = 首页那张卡。 -->
+
+      <h2 class="zone-head">全站口径（⛔ 不是"你的数"）</h2>
+      <p class="hint">这两格说的是<b>整个系统</b>现在的样子 —— 与是谁请求的无关。</p>
+
+      <div class="panel-grid">
+
+        <section class="panel" data-ops="cache">
+          <div class="panel-head">缓存键统计
+            <span class="badge" data-source="redis"></span></div>
+          <div class="panel-body">
+            <div class="panel-boundary slim" data-boundary="platform_restart"></div>
+            <p class="hint" data-meta="persist"></p>
+            <p class="hint" data-meta="scope"></p>
+            <div class="panel-actions"><button class="btn primary" data-run>数一次</button></div>
+            <div class="panel-out" hidden></div>
+          </div>
+        </section>
+
+        <section class="panel" data-ops="count">
+          <div class="panel-head">文档总数
+            <span class="badge" data-source="db"></span></div>
+          <div class="panel-body">
+            <div class="panel-boundary slim" data-boundary="platform_restart"></div>
+            <p class="hint" data-meta="persist"></p>
+            <p class="hint" data-meta="scope"></p>
+            <div class="panel-actions"><button class="btn primary" data-run>数一次</button></div>
+            <div class="panel-out" hidden></div>
+          </div>
+        </section>
+
+      </div>
+
+      <h2 class="zone-head">我自己的额度（🔴 只查得到你自己）</h2>
+      <p class="hint">⚠️ 这两格<b>查不了别人</b> —— 路径里没有"查谁"那个位置了（2026-10-10 起）。</p>
+
+      <div class="panel-grid">
+
+        <section class="panel" data-ops="quota">
+          <div class="panel-head">我的日配额
+            <span class="badge" data-source="db"></span></div>
+          <div class="panel-body">
+            <div class="panel-boundary slim" data-boundary="quota"></div>
+            <p class="hint" data-meta="persist"></p>
+            <p class="hint" data-meta="scope"></p>
+            <div class="panel-actions"><button class="btn primary" data-run>查一次</button></div>
+            <div class="panel-out" hidden></div>
+          </div>
+        </section>
+
+        <section class="panel" data-ops="rate">
+          <div class="panel-head">我的限流桶
+            <span class="badge" data-source="redis"></span></div>
+          <div class="panel-body">
+            <div class="panel-boundary slim" data-boundary="rate_limit"></div>
+            <p class="hint" data-meta="persist"></p>
+            <p class="hint" data-meta="scope"></p>
+            <div class="panel-actions"><button class="btn primary" data-run>查一次</button></div>
+            <div class="panel-out" hidden></div>
+          </div>
+        </section>
+
+      </div>
+
+      <!-- 🔴 **归别处 / 不挂的** —— 规格 §2.14 的口径：不露也要写成一条可读的记录。 -->
+      <section class="panel" id="notexposed" style="margin-top:var(--sp-4)">
+        <div class="panel-head">⛔ 本页【不挂】的那些（写明它们去哪了）</div>
+        <div class="panel-body">
+          <p class="hint" style="margin-top:0">它们不是"没做"，是<b>已经有入口，或有意不给访客</b> —— 每条都写明在哪。</p>
+          <div id="notexposed-list"></div>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</div>
+
+<script src="/static/js/panel.js"></script>
+<script src="/static/js/ops.js"></script>
+<script>
+'use strict';
+/* ⚠️ 本页每个 URL 都从 `RagOps.buildRequest()` 出 —— ⛔ 不写字面量。
+   原因：字面量一旦少 `/api/v1`，页面上**不报任何错**（`DEC-094` 那个 100% 打不开的事故）。
+   ⚠️ 本页四条**全带 `/api/v1`**（与 `system.html` 那三条根路径不同）⇒ 真尺子在 `ops.test.js`。
+   🔴 而 `ops.test.js` 还钉着一条本页特有的事：**四条路径里⛔ 不许出现 `{...}` 形参** ——
+      那是 `DEC-141` 能把它们放开的**唯一前提**。 */
+const KEY_STORE = 'rag_api_key';        // ⚠️ 与 chat / approvals / trace / lab / cost / tools / system 同一个键
+const $ = (id) => document.getElementById(id);
+
+function key() { return localStorage.getItem(KEY_STORE) || ''; }
+
+function notice(msg, bad) {
+  const el = $('notice');
+  el.textContent = msg || '';
+  el.className = msg ? (bad ? 'alert error' : 'alert info') : '';
+}
+
+function el(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text !== undefined) n.textContent = text;   // ⛔ 一律 textContent，别用 innerHTML 拼数据
+  return n;
+}
+
+/* ==================== 渲染 ==================== */
+
+function renderKv(out, rows) {
+  const tbl = el('table', 'tbl');
+  rows.forEach(function (r) {
+    const tr = el('tr');
+    tr.appendChild(el('td', '', r[0]));
+    const td = el('td', 'num');
+    td.textContent = r[1];
+    tr.appendChild(td);
+    tbl.appendChild(tr);
+  });
+  out.appendChild(tbl);
+}
+
+function renderTable(out, spec) {
+  if (!spec) return;
+  const tbl = el('table', 'tbl');
+  const hr = el('tr');
+  spec.cols.forEach(function (h) { hr.appendChild(el('th', '', h)); });
+  const thead = el('thead'); thead.appendChild(hr); tbl.appendChild(thead);
+  const tb = el('tbody');
+  spec.rows.forEach(function (r) {
+    const tr = el('tr');
+    r.forEach(function (cell) { tr.appendChild(el('td', '', cell)); });
+    tb.appendChild(tr);
+  });
+  tbl.appendChild(tb);
+  out.appendChild(tbl);
+}
+
+function renderOk(out, panelKey, payload) {
+  out.innerHTML = '';
+
+  const kv = RagOps.kvRows(panelKey, payload);
+  if (kv.length) renderKv(out, kv);
+  const tbl = RagOps.tableOf(panelKey, payload);
+  renderTable(out, tbl);
+
+  const trunc = RagOps.truncationNotice(payload);
+  if (trunc) out.appendChild(el('div', 'hint', trunc));
+
+  // 🔴 空态要**解释为什么空** —— 而本页那两句正是这一页的立意
+  //    （「缓存 0 条」与「库里 0 篇」都**不是坏了**）。
+  const hasTableRows = !!(tbl && tbl.rows.length);
+  if (!kv.length && !hasTableRows && !trunc) {
+    const box = el('div', 'empty');
+    box.appendChild(el('div', '', '这一格没有数据。'));
+    box.appendChild(el('div', 'why', RagOps.emptyReason(panelKey)));
+    out.appendChild(box);
+  }
+}
+
+/* ==================== 运行 ==================== */
+
+async function runPanel(panelKey, section) {
+  const out = section.querySelector('.panel-out');
+  const btn = section.querySelector('[data-run]');
+
+  notice('');
+  // ⚠️ 本页**没有任何参数**（`DEC-141` 把两条的 `user_name` 形参删了）⇒ 不读 values、不做必填校验。
+  const req = RagOps.buildRequest(panelKey);
+  const url = req.path + RagPanel.paramQuery(req.query);   // query 恒为空 ⇒ 原样是 path
+
+  btn.setAttribute('aria-busy', 'true');
+  btn.disabled = true;
+  out.hidden = false;
+  out.textContent = '请求中…';
+
+  try {
+    const r = await fetch(url, { method: req.method, headers: { 'X-API-Key': key() } });
+    const text = await r.text();
+    let payload = null;
+    try { payload = JSON.parse(text); } catch (e) { payload = null; }
+
+    if (!r.ok) {
+      out.innerHTML = '';
+      // 🔴 非 2xx 时后端回的是**另一个形状**（`{error, code, status_code}`）——
+      //    有就把那句话带出来，⛔ 别只印一个 HTTP 码（那会把"没登录"读成"后端坏了"）。
+      const ep = payload ? RagOps.errorPayloadOf(payload) : null;
+      out.appendChild(el('div', 'alert error', ep
+        ? '服务回 ' + r.status + '：' + ep.message
+        : RagPanel.errorText(r.status) + '（HTTP ' + r.status + '）'));
+      return;
+    }
+    if (payload === null) { out.textContent = '返回的不是 JSON：' + text.slice(0, 300); return; }
+    renderOk(out, panelKey, payload);
+  } catch (e) {
+    out.innerHTML = '';
+    out.appendChild(el('div', 'alert error', '请求发不出去：' + e.message));
+  } finally {
+    btn.removeAttribute('aria-busy');
+    btn.disabled = false;
+  }
+}
+
+/* ==================== 装配 ==================== */
+
+// 边界标注的文案【只从 RagPanel 取】—— ⛔ 别在这里再抄一遍（规格 §3.6.2）
+document.querySelectorAll('[data-boundary]').forEach(function (n) {
+  n.textContent = n.classList.contains('slim')
+    ? RagPanel.boundaryShort(n.dataset.boundary)
+    : RagPanel.boundaryText(n.dataset.boundary);
+});
+
+// 口径徽标：文案与 class 都【从 `RagOps` 取】—— ⛔ 别在 HTML 里手写
+document.querySelectorAll('[data-source]').forEach(function (n) {
+  const s = n.dataset.source;
+  n.className = 'badge ' + RagOps.SOURCE_CLASSES[s];
+  n.textContent = RagOps.SOURCE_BADGES[s];
+  n.title = RagOps.SOURCE_LABELS[s];
+});
+
+document.querySelectorAll('[data-ops]').forEach(function (section) {
+  const k = section.dataset.ops;
+  const persist = RagOps.persistenceWarning(k);
+  const scope = RagOps.scopeNote(k);
+  const pEl = section.querySelector('[data-meta="persist"]');
+  const sEl = section.querySelector('[data-meta="scope"]');
+  if (pEl && persist) pEl.textContent = persist;
+  if (sEl && scope) sEl.textContent = scope;
+
+  section.querySelector('[data-run]').addEventListener('click', function () { runPanel(k, section); });
+});
+
+// 「归别处」那张表 —— ⛔ 静态文字，逐条写明去了哪
+const NOT_HERE = [
+  {
+    path: 'POST /api/v1/rag/benchmark-embedding',
+    why: '它也带着「调试」标签，但它是【真烧钱】的那一条（真调 DashScope 比两次耗时）。'
+       + '2026-10-10 那次放开的是 4 条 /debug/*，⛔ 明确没有把它算进去（DEC-141）。'
+       + '⚠️ 它现在没有可点入口 —— 这是有意的：它是给运维比耗时用的，⛔ 不是给访客点的。',
+  },
+  {
+    path: '/docs · /openapi.json',
+    why: '【文档入口】。⚠️ 最高判据明写「/docs 里列着 ⛔ 不算」—— 它本来就只是给开发者看的。',
+  },
+  {
+    path: '/agent/budget/intercepts（我被拦下的次数）',
+    why: '【本人的】那条在**成本看板的「预算 / 熔断」那一格**上（`/cost#cost-budget`）⇒ ⛔ 不在这页重复挂'
+       + '（口径 ④：同一个入口⛔ 不在一页出现两次）。',
+  },
+];
+
+const neList = $('notexposed-list');
+NOT_HERE.forEach(function (item) {
+  const row = el('div', 'kv');
+  row.appendChild(el('span', 'k', item.path));
+  row.appendChild(el('span', 'v', item.why));
+  neList.appendChild(row);
+});
+
+// 额度那条要【当场读数】（平台重启/额度是"边界"，首页与能力页都要能看到真数）
+function refreshQuota() {
+  fetch('/api/v1/agent/token/budget', { headers: { 'X-API-Key': key() } })
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (b) {
+      if (!b || b.used_today === undefined) return;
+      document.querySelector('[data-boundary="quota"]').textContent = RagPanel.boundaryText('quota', {
+        used: b.used_today, limit: b.daily_budget, remaining: b.remaining,
+      });
+    })
+    .catch(function () { /* 取不到就留着不带数字那句 */ });
+}
+
+$('apikey').value = key();
+$('save').onclick = function () {
+  localStorage.setItem(KEY_STORE, $('apikey').value.trim());
+  notice('已保存 API Key');
+  refreshQuota();
+};
+if (!key()) notice('先填 API Key —— 这四条都要鉴权（⛔ 现在只查得到你自己，查不了别人）');
+refreshQuota();
+</script>
+</body>
+</html>

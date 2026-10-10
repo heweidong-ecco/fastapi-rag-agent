@@ -655,6 +655,23 @@ async def system_page():
     """把人送到系统与执行器页。⚠️ `include_in_schema=False`：它不是 API，⛔ 别混进 openapi。"""
     return RedirectResponse(url="/static/web/system.html", status_code=302)
 
+# 🔴 2026-10-10（施工单**刀 7**）：**运维探针**的入口 URL。形状与上面八条**逐字同款**。
+#    ⚠️ 它盖的是规格 §2.12 那 4 条 `/debug/*` —— 在这之前**一条可点入口都没有**
+#       （按最高判据 = 等于没做）；而它们**恰恰是**「限流桶 / 配额 / 缓存」唯一的可见证据。
+#    🔴 **这一页差点做不成**：那 4 条原先是 `Depends(require_admin)` ⇒ 访客拿普通 key
+#       **4 格全 403**。⇒ 业务方 2026-10-10 裁「顺带放开」，做法见 `DEC-141`
+#       （**删掉 `{user_name}` 越权面**，⛔ 不是放宽管理员校验）。
+#       ⚠️ 所以本页**没有任何输入框** —— 那两条现在只查调用者自己。
+#    🔴 代价已认：这是**新公开路由** ⇒ `check_route_auth.py --baseline` 会 exit 1
+#       ⇒ **已显式写进 `scripts/route-auth-baseline.txt`**（一次有意识的操作）。
+#       ⚠️ 它**不含数据**：真正的边界在它调的那 4 条上 —— **4 条都带鉴权**
+#       （`get_current_user_hybrid`，⛔ 不再是 `require_admin`，但**匿名仍打不到**）。
+#    ⚠️ 本页**同样不进侧边栏**（规格 §3.0 把「运维探针」归「其他功能」）⇒ 入口 = 首页那张卡。
+@app.get("/ops", include_in_schema=False)
+async def ops_page():
+    """把人送到运维探针页。⚠️ `include_in_schema=False`：它不是 API，⛔ 别混进 openapi。"""
+    return RedirectResponse(url="/static/web/ops.html", status_code=302)
+
 # 新增  嵌入了 Prometheus 指标采集
 # 指标暴露接口
 @app.get("/metrics")

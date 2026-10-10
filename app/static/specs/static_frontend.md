@@ -42,6 +42,10 @@
 | 🆕 `app/static/js/system.js` | 262 | **系统与执行器的纯逻辑** —— 四条路径（⚠️ **三条是根路径**）· 两态口径 · `isRaw`（`/metrics` 是 **text/plain** ⇒ ⛔ 不许 `JSON.parse`）· `rawPreview`（截断要报**总行数**）· `errorPayloadOf`（**503 那支是另一个形状**）· `buildRequest`（`execute_code` 的参数**在 query**）—— ⛔ 不碰 DOM、不发请求 |
 | 🆕 `app/static/js/system.test.js` | 307 | `node --test` 用例（**29 条**）—— 🔴 **本文件同时是那四条路径的守卫**，而它**与 `tools.test.js` 那条长得不一样**：它钉的是「**三条根路径 + 一条带 `/api/v1`**」，⛔ **不能照抄「全部以 `/api/v1` 开头」**（照抄会把对的写成错的）。含「渲染文案⛔ 不许带 `**`」那条结构型守卫 |
 | 🆕 `app/tests/test_system_page.py` | 227 | **系统与执行器页守卫**（Python · 不连库）—— 4 条与另几页同构 + **4 条本页特有的**：**四格都在** · **每格都有口径徽标** · 🔴 **`/health` `/ready` `/metrics` ⛔ 不许作为 `fetch` 字面量出现**（它们是**根路径**；写成字面量会被硬约束 #8 拦下，而**那条红会把人引向错误的修法**）· 🔴 **代码那格必须是 `<textarea>` 且 label 带 `code-field`**（见下「看代码会误判」那条 CSS 坑）· **两个分区锚点** · 提示条在按钮之前 |
+| 🆕 `app/static/web/ops.html` | 395 | **运维探针**（2026-10-10 · 施工单**刀 7**）—— 规格 §2.12 那 **4 条 `/debug/*`** 的**唯一可点入口**（在这之前一条入口都没有）。🔴 分两个区（全站口径 2 格 · 我自己的额度 2 格）· 每格标题带**口径徽标**（Redis / 真库）。🔴 **页面顶部有一条【调试视角】声明**（施工单点名；⛔ 不说清就会被读成"产品功能"）· 🔴 **本页没有任何输入框**（见下「看代码会误判」那条） |
+| 🆕 `app/static/js/ops.js` | 251 | **运维探针的纯逻辑** —— 四条路径（⚠️ **全在 `/api/v1` 下，且⛔ 一条都不带形参**）· 两态口径（`redis` / `db`）· `buildRequest`（**恒无参数**）· `persistenceWarning`（四格各说各的：缓存 0 ≠ 坏了 · 数变小是平台重启 · 单位是 token ⛔ 不是次数 · 容量与速率**是代码常量**）· `scopeNote`（全站口径 vs 你自己的）· `roleText` · `kvRows`/`tableOf` · `emptyReason` —— ⛔ 不碰 DOM、不发请求 |
+| 🆕 `app/static/js/ops.test.js` | 320 | `node --test` 用例（**29 条**）—— 🔴 **本文件同时是那四条 `/api/v1` 前缀的守卫**（页面走 helper ⇒ `test_web_pages.py` 对它**空过**）。🔴🔴 还钉一条**本页特有**的：**四条路径里⛔ 不许出现 `{...}` 形参** —— 那是 `DEC-141` 能把它们放开的**唯一前提**。含「渲染文案⛔ 不许带 `**`」那条结构型守卫 + 假 `window` |
+| 🆕 `app/tests/test_ops_page.py` | 267 | **运维探针页守卫**（Python · 不连库）—— 4 条与另几页同构 + **4 条本页特有的**：**四格都在** · **每格都有口径徽标**（`data-source` ∈ `{redis, db}`）· 🔴🔴 **页面里⛔ 不许有任何"查谁"的入口**（`data-param` / `user_name` 都不许有 —— 那两条端点的形参**已被删**，控件会是**假的**）· 🔴🔴 **⛔ 不许出现带 `{...}` 的路径** · 🔴 **【调试视角】声明必须在，且排在面板按钮之前** · 提示条在按钮之前。<br>⚠️ **它自己栽过一次**：头一版把「第一个 `<button>`」当标尺，而页头那颗「保存 API Key」按设计就在最上面 ⇒ **当场红**（2645 vs 2398）。**那是判据选错了量**，已改成比 `data-run` |
 
 ## ✅ 做了什么
 
@@ -237,6 +241,10 @@
 | 🔴 **「执行器挂了会回落本地跑」** | ⛔ **不会** —— 回落**只由配置决定**（`EXECUTOR_URL` 空不空）。若"失败就回落"，**运维停了执行器 ⇒ 代码又回宿主跑，而没人会发现**（`DEC-108` 实测）。⇒ 页面上要写出来，否则访客会以为"没输出 = 代码慢"。<br>⚠️ **而且 `DEMO_MODE` 下 `execute_python` 根本不注册**（创空间单容器 ⇒ 没有执行器）⇒ **演示机上这一格必然失败**，那是**有意的**。 |
 | 🔴🔴 **「多行输入那格只写 `style="display:block"` 就能覆盖 `.field`」** | ⛔ **不能** —— 通用 `.field` 带 **`white-space: nowrap`**，而**那条属性不吃 `display` 的覆盖** ⇒ 行内的 `<span>` 与 `inline-block` 的 `<textarea>` 被逼**同一行**放不下 ⇒ **textarea 溢出到格子外面**。<br>📌 **实测（2026-10-10 刀 6）**：label 在 `x=253` 宽 `338`，而 textarea 跑到 **`x=547`**、标签文字被挤到该行**基线下方**。<br>⚠️ **当时 11 条页面守卫全绿** —— 它们判的是"有没有 `<textarea>`"，⛔ **一条都不判它在哪、有多宽**（「**用例全绿证不了页面没坏**」）。⇒ 修法是**另起一个类**（`.field.code-field`）**同时覆盖 display 与 white-space**，且守卫钉住那个类名。 |
 | 🔴 **「系统与执行器是主要功能，侧边栏该加一条」** | ⛔ **不加** —— 同刀 5 那条理由（规格 §3.0 归「其他功能」）。⇒ 入口 = 首页那两张卡，带锚点 `/system#executor` · `/system#system`。 |
+| 🔴 **「运维探针页是主要功能，侧边栏该加一条」** | ⛔ **不加** —— 同刀 5 / 刀 6 那条理由（规格 §3.0 把「运维探针」归「其他功能」）。⇒ 入口 = **首页那一张卡**（`/ops`，**不带锚点** —— 只有一张卡，⛔ 不需要"同一个 href 出现两次"那个绕法）。 |
+| 🔴🔴 **「`/debug/quota` 与 `/debug/rate_limit` 也是照旧那两条接口，页面该给个『查谁』的输入框」** | ⛔ **不给** —— 那两条的 `{user_name}` **路径参数 2026-10-10 被删了**（`DEC-141`），服务端**只认调用者**。<br>⚠️ 补一个输入框的后果是：它**看起来能查别人**，而服务端**静默忽略那个参数**（查的仍是自己）⇒ **那是个假控件**，比没有更糟。<br>📌 判据：`pytest app/tests/test_ops_page.py -q` 里的 `test_page_has_no_place_to_type_someone_elses_name` + `test_page_has_no_path_parameter_in_any_url`（**两条**，一条管控件、一条管路径）· 路由那一侧在 `app/tests/test_debug_endpoints_self_only.py`。 |
+| 🔴 **「那 4 条以前要管理员 ⇒ 现在放开了 ⇒ 匿名也能打」** | ⛔ **两件事** —— 放开的是「**登录即可**」，**匿名仍然 401**（`AUTH_MISSING`）。<br>⚠️ 这一条**必须写成用例**：不加的话，"把整个 `Depends(...)` 删掉"也能让"没有 `require_admin`"那条断言变绿（本仓那族「拿**动作成功**当**结果正确**」）。⇒ 已经那么写了（`test_anonymous_is_still_rejected_on_all_four`）。<br>⚠️ 另：`/rag/benchmark-embedding` **也带「调试」标签**，但它**真调 DashScope** ⇒ `DEC-141` **⛔ 明确没放开它**，页面「不挂」那张表里写着它去哪了（**哪也不去 —— 它没有可点入口，那是有意的**）。 |
+| 🔴 **「运维探针这一页就是『系统状态』那一页」** | ⛔ **不是** —— `/system` 那页是 `health`/`ready`/`metrics`（**服务自己**的现状）；`/ops` 是**限流桶 / 配额 / 缓存**（运行时**用量与容量**的现状）。两页都归「其他功能」，⛔ 别合并。 |
 
 ## 判据（可打印）
 
@@ -297,8 +305,12 @@ curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' http://127.0.0.1:8000/l
 #   ⇒ 302 http://127.0.0.1:8000/static/web/lab.html
 curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' http://127.0.0.1:8000/cost
 #   ⇒ 302 http://127.0.0.1:8000/static/web/cost.html
-# 🔴 这**六条**必须在 scripts/route-auth-baseline.txt 里（故意公开）—— `check_route_auth.py --baseline` **查不出"路径被删"**
-#    （少一条它报「少了 N 条（修好了）」并 exit 0）⇒ 真正的守卫是那五个 page 用例（2026-10-09 起含 `test_lab_page.py`）
+curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' http://127.0.0.1:8000/ops
+#   ⇒ 302 http://127.0.0.1:8000/static/web/ops.html   （2026-10-10 · 施工单刀 7）
+# 🔴 这**九条**必须在 scripts/route-auth-baseline.txt 里（故意公开）—— `check_route_auth.py --baseline` **查不出"路径被删"**
+#    （少一条它报「少了 N 条（修好了）」并 exit 0）⇒ 真正的守卫是那九个 page 用例
+#    （2026-10-09 起含 `test_lab_page.py`；2026-10-10 起含 `test_tools_page.py` / `test_system_page.py` / `test_ops_page.py`）
+grep -c '^/\(chat\|approvals\|trace\|eval\|lab\|cost\|tools\|system\|ops\)$' scripts/route-auth-baseline.txt   # ⇒ 9
 
 # ②'' 🔴 Eval 占位页（DEC-097 · F3）—— 「按钮指向子页、子页带那一行」两条要能【会动】
 venv/bin/python -m pytest app/tests/test_eval_page.py -q               # ⇒ 5 passed
