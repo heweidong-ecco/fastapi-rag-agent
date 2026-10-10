@@ -1,4 +1,4 @@
-# `app/static/web/` —— 页面（9 个 html）
+# `app/static/web/` —— 页面（10 个 html）
 
 ## 📇 本目录索引
 | 页面 | URL | 说明 |
@@ -8,6 +8,7 @@
 | `cost.html` | `GET /cost` | 成本看板（面板标题带**口径徽标**：读库/进程内存/配置常量） |
 | `lab.html` | `GET /lab` | 检索实验室（5 条检索接口各一个面板） |
 | `tools.html` | `GET /tools` | 🆕 **工具与记忆**（7 格 = 工具 5 + 记忆 2 · 口径徽标**五态**：进程内存/代码常量/真调 MCP/容器磁盘/常量+内存）<br>⚠️ **本页不进侧边栏**（规格 §3.0 归「其他功能」）⇒ 入口 = 首页两张卡，带锚点 `#tools` / `#memory` |
+| `system.html` | `GET /system` | 🆕 **系统与执行器**（4 格 = 执行器 1 + 系统 3 · 口径徽标**两态**：当场真跑/进程内存）<br>⚠️ **本页同样不进侧边栏**（归「其他功能」）⇒ 入口 = 首页两张卡，带锚点 `#executor` / `#system` |
 | `trace.html` | `GET /trace` | 轨迹页（**两轴分屏**） |
 | `approvals.html` | `GET /approvals` | 人工接管队列 |
 | `eval.html` | `GET /eval` | 评估页 |

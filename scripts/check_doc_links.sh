@@ -260,6 +260,27 @@ elif MODE != "quiet":
 
 if bad:
     show("🔴 真断链（**这些要修**）", bad)
+
+    # 🔴 2026-10-10：把【最常见的**那一类**】单独点出来 —— 它已经**连栽 4 次**
+    #    （最后两次都在同一天：`app/<组>/CLAUDE.md` · `app/static/{web,js}/CLAUDE.md`）。
+    #
+    #    这类"断链"**不是路径写错了**，而是把 **markdown 的简写 / 通配**写进了反引号：
+    #      `{web,js}` = 二选一 · `<组>` = 占位 · `…` = 省写 —— **读的人一眼懂**，
+    #      而**本门只会拿它去 `stat()`** ⇒ 必然找不到 ⇒ 报成「真断链」。
+    #
+    #    ⚠️ 为什么把提示放在**这里**而不是写进某份规范：本仓原话「**只有文字就漏**」。
+    #       这行会出现在**每一次**这类红的现场；写在文档里等人去翻，就是第 5 次的开始。
+    #    ⛔ 也**别**去动 `doc-links-ignore.txt` —— 那不是"已知的债"，是**这次真的写错了**。
+    SHORTHAND = re.compile(r"[{}<>*|]|\.\.\.|…")
+    sh = [(f, ln, cand) for (f, ln, cand, _extra) in bad if SHORTHAND.search(cand)]
+    if sh:
+        print(f"\n⚠️ 上面有 {len(sh)} 条**看着像「路径不存在」，其实是【markdown 简写/通配】被当成路径了**：")
+        for f, ln, cand in sh[:6]:
+            print(f"   {f}:{ln}  `{cand}`")
+        print('   ⇒ 读的人一眼懂（`{a,b}` = 二选一 · `<组>` = 占位 · `…` = 省写），')
+        print('     而本门只会拿它去 `stat()` ⇒ 必然找不到。')
+        print('   ⇒ **修法：拆成【一条一条列出来】**，或改用【文字】描述（例：「`app/static/` 下 web 与 js 两份 `CLAUDE.md`」）。')
+
     print(f"\n❌ 有 {len(bad)} 处真断链。")
     sys.exit(1)
 

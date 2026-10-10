@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>系统与执行器</title>
+<link rel="stylesheet" href="/static/app.css">
+<style>
+  /* 本页只写【页面专属】规则 —— 通用组件与 token 在 `/static/app.css`。⛔ 别在这里另起一套 :root。 */
+
+  #boundary { margin: 0 0 var(--sp-4); }
+
+  .panel-grid > .panel { display: flex; flex-direction: column; }
+  .hint { margin: var(--sp-2) 0 0; color: var(--fg-dim); font-size: var(--fs-cap); line-height: var(--lh-body); }
+
+  /* 🔴 口径徽标：**两态各一个色** —— 「当场真跑」与「进程内累计」对
+     "重启后还在不在"的答案不同 ⇒ ⛔ 不许长成一个样（`DEC-047` 的教训）。 */
+  .src-live { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
+  .src-mem  { background: color-mix(in srgb, var(--warn) 20%, transparent); color: var(--warn); }
+
+  .panel-params .field { display: flex; width: 100%; }
+  .panel-params .field input { min-width: 0; flex: 1; }
+
+  /* 🔴🔴 多行输入那一格**必须另起一个类**，⛔ 不能只写 `style="display:block"`。
+     根因（**2026-10-10 截图才量出来的**）：通用 `.field` 带 **`white-space: nowrap`**
+     （它本来是给"标签 + 单行 input"用的）。那条属性**不吃 display 的覆盖** ⇒
+     行内的 `<span>` 与 `inline-block` 的 `<textarea>` 被逼**同一行**放不下
+     ⇒ **textarea 溢出到格子外面**（实测：label 在 x=253 宽 338，而 textarea 跑到 **x=547**），
+        而标签文字被挤到那一行的**基线下方**。
+     ⚠️ **三类结构型用例全绿** —— 它们判的是"有没有那个标记"，
+        ⛔ **一条都不判它在哪、有多宽**（本仓原话：「**用例全绿证不了页面没坏**」）。
+     ⇒ 覆盖要写 **display + white-space 两件**，并给它自己的类名（便于上面那条守卫钉住）。 */
+  .panel-params .field.code-field {
+    display: block; white-space: normal; width: 100%;
+  }
+  .panel-params textarea {
+    display: block; width: 100%; min-height: 6.5em; resize: vertical;
+    font-family: var(--mono); font-size: var(--fs-cap); line-height: var(--lh-body);
+    background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 6px;
+    padding: var(--sp-2);
+  }
+  .panel-actions { margin-top: var(--sp-3); }
+
+  .panel-out td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+  .panel-out table + table { margin-top: var(--sp-3); }
+
+  /* 🔴 `/metrics` 是 text/plain ⇒ 用 <pre> 原样显示（⛔ 不解析、⛔ 不美化）。
+     `overflow-x:auto` 是必须的：指标行很长，不滚的话会把整页撑宽。 */
+  .panel-out pre.raw {
+    margin: var(--sp-2) 0 0; padding: var(--sp-2);
+    background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
+    font-family: var(--mono); font-size: var(--fs-cap); line-height: var(--lh-body);
+    overflow-x: auto; max-height: 26em; overflow-y: auto;
+  }
+
+  .zone-head { margin: var(--sp-5) 0 var(--sp-3); }
+  .zone-head:first-of-type { margin-top: var(--sp-4); }
+  .zone-head + .hint { margin-top: 0; }
+
+  /* 🔴 「本页不挂」那张表 —— ⛔ 不能直接用通用 `.kv`（它的 `.k` 是写死的 6em，
+     长路径会**逐字竖排**；同 `tools.html`，那是**截图才看出来**的）。 */
+  #notexposed-list .kv { flex-direction: column; gap: var(--sp-1); margin: var(--sp-2) 0; }
+  #notexposed-list .kv > .k {
+    flex: none; color: var(--fg); font-family: var(--mono); font-size: var(--fs-cap);
+    word-break: break-word;
+  }
+
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="app-shell">
+
+  <aside class="sidebar">
+    <div class="brand">青云精工 · RAG</div>
+    <nav class="nav">
+      <a href="/chat">对话</a>
+      <a href="/lab">检索实验室</a>
+      <a href="/approvals">人工接管</a>
+      <a href="/cost">成本看板</a>
+      <a href="/trace">执行轨迹</a>
+      <a href="/eval">评测</a>
+    </nav>
+  </aside>
+
+  <div class="main">
+
+    <header class="page-head">
+      <h1>系统与执行器</h1>
+      <span class="spacer"></span>
+      <label class="field">API Key <input id="apikey" type="password" placeholder="X-API-Key"></label>
+      <button id="save">保存</button>
+    </header>
+
+    <div class="content">
+      <div id="notice"></div>
+
+      <!-- 🔴🔴 边界标注（规格 §3.6.1 的② · 提示在前、接口在后）
+           ⚠️ 文案【只从 RagPanel 取】—— ⛔ 别在这份 HTML 里再抄一遍。 -->
+      <section class="panel" id="boundary" aria-label="使用前必读（平台与额度边界）">
+        <div class="panel-body">
+          <h2 style="margin-top:0">使用前必读</h2>
+          <div class="panel-boundary" data-boundary="platform_restart"></div>
+          <div class="panel-boundary" data-boundary="quota"></div>
+          <div class="panel-boundary" data-boundary="rate_limit"></div>
+          <div class="panel-boundary" data-boundary="real_api"></div>
+          <h3>怎么验证它真的做完了</h3>
+          <div class="panel-boundary" data-boundary="verify"></div>
+        </div>
+      </section>
+
+      <!-- 🔴 两种来源 —— ⛔ 不写这一段，读的人会把「进程内累计 0」当成"服务没跑过"。 -->
+      <section class="panel" id="legend">
+        <div class="panel-body">
+          <h2 style="margin-top:0">这一页上的两种来源（⛔ 别混着读）</h2>
+          <p class="hint" style="margin-top:var(--sp-1)">
+            <span class="badge src-live">当场真跑</span>
+            —— <b>每次点都是一次真动作</b>（真执行代码 / 真探一次依赖），⛔ 不是读缓存。
+          </p>
+          <p class="hint">
+            <span class="badge src-mem">进程内存</span>
+            —— 指标是<b>进程内注册表的累计</b>，<b>平台重启容器就归零</b>
+            （这是平台限制，⛔ 不是故障）。
+          </p>
+        </div>
+      </section>
+
+      <!-- ⛔ 本页【不进侧边栏】—— 规格 §3.0 把「执行器 / 系统状态」归在「其他功能」，
+           而口径 ② 是「侧边栏只放 5 类【主要功能】」⇒ 入口 = 首页那两张卡 + 本页直链。 -->
+
+      <h2 class="zone-head" id="executor">执行器</h2>
+      <p class="hint">⭐ <b>这一格是「执行器进容器」那件事的可见证据</b> —— 代码真的被发出去跑，而不是"接口在"。</p>
+
+      <div class="panel-grid">
+
+        <section class="panel" data-system="exec">
+          <div class="panel-head">执行一段 Python
+            <span class="badge" data-source="live"></span></div>
+          <div class="panel-body">
+            <div class="panel-boundary slim" data-boundary="real_api"></div>
+            <p class="hint" data-meta="persist"></p>
+            <p class="hint" data-meta="scope"></p>
+            <div class="panel-params">
+              <label class="field code-field">
+                <span class="hint" style="margin-top:0">代码（⛔ 不要写 <code>import</code> —— 常用模块已经注入好了）</span>
+                <textarea data-param="code" spellcheck="false">print(sum(range(1, 101)))
+print("run in container")</textarea>
+              </label>
+            </div>
+            <p class="hint">⚠️ <b>执行器不可用时【不会】偷偷回落本地跑</b> —— 那正是"宁可失败"的设计
+              （回落等于代码又回到宿主机上跑）。所以看到报错时，先看是不是<b>执行器没起</b>。</p>
+            <div class="panel-actions"><button class="btn primary" data-run>执行</button></div>
+            <div class="panel-out" hidden></div>
+          </div>
+        </section>
+
+      </div>
+
+      <h2 class="zone-head" id="system">系统状态</h2>
+      <p class="hint">⚠️ <b>「健康」与「就绪」不是一回事</b>：前者问"依赖在不在"，后者问"<b>能不能接流量</b>"。</p>
+
+      <div class="panel-grid">
+
+        <section class="panel" data-system="health">
+          <div class="panel-head">健康检查
+            <span class="badge" data-source="live"></span></div>
+          <div class="panel-body">
+            <div class="panel-boundary slim" data-boundary="platform_restart"></div>
+            <p class="hint" data-meta="persist"></p>
+            <p class="hint" data-meta="scope"></p>
+            <p class="hint">⚠️ 依赖挂了时它回 <b>503</b>，而<b>那一支的响应形状与 200 不同</b> ——
+              页面对两种情况都读 body。</p>
+            <div class="panel-actions"><button class="btn primary" data-run>探一次</button></div>
+            <div class="panel-out" hidden></div>
+          </div>
+        </section>
+
+        <section class="panel" data-system="ready">
+          <div class="panel-head">就绪探针
+            <span class="badge" data-source="live"></span></div>
+          <div class="panel-body">
+            <div class="panel-boundary slim" data-boundary="platform_restart"></div>
+            <p class="hint" data-meta="persist"></p>
+            <p class="hint" data-meta="scope"></p>
+            <div class="panel-actions"><button class="btn primary" data-run>探一次</button></div>
+            <div class="panel-out" hidden></div>
+          </div>
+        </section>
+
+        <section class="panel" data-system="metrics">
+          <div class="panel-head">Prometheus 指标
+            <span class="badge" data-source="mem"></span></div>
+          <div class="panel-body">
+            <div class="panel-boundary slim" data-boundary="platform_restart"></div>
+            <p class="hint" data-meta="persist"></p>
+            <p class="hint" data-meta="scope"></p>
+            <p class="hint">🔴 这一格回的是 <b>Prometheus 的纯文本格式</b>（⛔ 不是 JSON）——
+              所以页面<b>原样显示、不解析</b>；行太长时只能自己滚。</p>
+            <div class="panel-actions"><button class="btn primary" data-run>拉一次</button></div>
+            <div class="panel-out" hidden></div>
+          </div>
+        </section>
+
+      </div>
+
+      <!-- 🔴 **归别处 / 不挂的** —— 规格 §2.14 的口径：不露也要写成一条可读的记录。 -->
+      <section class="panel" id="notexposed" style="margin-top:var(--sp-4)">
+        <div class="panel-head">⛔ 本页【不挂】的那些（写明它们去哪了）</div>
+        <div class="panel-body">
+          <p class="hint" style="margin-top:0">它们不是"没做"，是<b>已经有入口，或另有归属</b> —— 每条都写明在哪。</p>
+          <div id="notexposed-list"></div>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</div>
+
+<script src="/static/js/panel.js"></script>
+<script src="/static/js/system.js"></script>
+<script>
+'use strict';
+/* ⚠️ 本页每个 URL 都从 `RagSystem.buildRequest()` / `RagPanel.paramQuery()` 出 —— ⛔ 不写字面量。
+   原因：字面量一旦少 `/api/v1`，页面上**不报任何错**（`DEC-094` 那个 100% 打不开的事故）。
+   🔴 **本页尤其需要这条** —— 它四条路径里有 **3 条本来就是根路径**（`/health` `/ready` `/metrics`），
+      而硬约束 #8 是「每个 URL 字面量必须带 `/api/v1`」⇒ 写字面量会**当场被那道守卫拦下**；
+      走 helper 之后，真尺子在 `system.test.js`（它钉的是"三条根路径 + 一条带前缀"）。 */
+const KEY_STORE = 'rag_api_key';        // ⚠️ 与 chat / approvals / trace / lab / cost / tools 同一个键
+const $ = (id) => document.getElementById(id);
+
+function key() { return localStorage.getItem(KEY_STORE) || ''; }
+
+function notice(msg, bad) {
+  const el = $('notice');
+  el.textContent = msg || '';
+  el.className = msg ? (bad ? 'alert error' : 'alert info') : '';
+}
+
+function readValues(el) {
+  const v = {};
+  el.querySelectorAll('[data-param]').forEach(function (c) {
+    v[c.dataset.param] = (c.type === 'checkbox') ? c.checked : c.value;
+  });
+  return v;
+}
+
+function el(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text !== undefined) n.textContent = text;   // ⛔ 一律 textContent，别用 innerHTML 拼数据
+  return n;
+}
+
+/* ==================== 渲染 ==================== */
+
+function renderKv(out, rows) {
+  const tbl = el('table', 'tbl');
+  rows.forEach(function (r) {
+    const tr = el('tr');
+    tr.appendChild(el('td', '', r[0]));
+    const td = el('td', 'num');
+    td.textContent = r[1];
+    tr.appendChild(td);
+    tbl.appendChild(tr);
+  });
+  out.appendChild(tbl);
+}
+
+function renderTable(out, spec) {
+  if (!spec) return;
+  const tbl = el('table', 'tbl');
+  const hr = el('tr');
+  spec.cols.forEach(function (h) { hr.appendChild(el('th', '', h)); });
+  const thead = el('thead'); thead.appendChild(hr); tbl.appendChild(thead);
+  const tb = el('tbody');
+  spec.rows.forEach(function (r) {
+    const tr = el('tr');
+    r.forEach(function (cell) { tr.appendChild(el('td', '', cell)); });
+    tb.appendChild(tr);
+  });
+  tbl.appendChild(tb);
+  out.appendChild(tbl);
+}
+
+function renderRaw(out, text) {
+  // 🔴 `/metrics` 是 text/plain ⇒ **原样显示**（⛔ 不解析、⛔ 不美化）。
+  const pv = RagSystem.rawPreview(text, 80);
+  const pre = el('pre', 'raw', pv.lines.join('\n'));
+  out.appendChild(pre);
+  if (pv.truncated) {
+    out.appendChild(el('div', 'hint',
+      '上面只显示了前 ' + pv.shown + ' 行 —— 这一份一共 ' + pv.total + ' 行（原文没丢，是页面没全画）。'));
+  }
+}
+
+function renderOk(out, panelKey, payload, rawText) {
+  out.innerHTML = '';
+  if (RagSystem.isRaw(panelKey)) { renderRaw(out, rawText); return; }
+
+  const kv = RagSystem.kvRows(panelKey, payload);
+  if (kv.length) renderKv(out, kv);
+  renderTable(out, RagSystem.tableOf(panelKey, payload));
+
+  const trunc = RagSystem.truncationNotice(payload);
+  if (trunc) out.appendChild(el('div', 'hint', trunc));
+
+  const tbl = RagSystem.tableOf(panelKey, payload);
+  if (!kv.length && !(tbl && tbl.rows.length)) {
+    const box = el('div', 'empty');
+    box.appendChild(el('div', '', '这一格没有数据。'));
+    box.appendChild(el('div', 'why', RagSystem.emptyReason(panelKey)));
+    out.appendChild(box);
+  }
+}
+
+/* ==================== 运行 ==================== */
+
+async function runPanel(panelKey, section) {
+  const out = section.querySelector('.panel-out');
+  const btn = section.querySelector('[data-run]');
+  const values = readValues(section);
+
+  // 🔴 必填项缺了【不发请求】—— 发了必 422，而 422 会被读成"后端坏了"。
+  const miss = RagSystem.missingRequired(panelKey, values);
+  if (miss) { notice(miss, true); out.hidden = true; return; }
+
+  notice('');
+  const req = RagSystem.buildRequest(panelKey, values);
+  // 🔴 参数走 query（`execute_code` 是 POST 但**参数在 query 上**）—— 判据见 `system.js` §2。
+  const url = req.path + RagPanel.paramQuery(req.query);
+
+  btn.setAttribute('aria-busy', 'true');
+  btn.disabled = true;
+  out.hidden = false;
+  out.textContent = '请求中…';
+
+  try {
+    const r = await fetch(url, { method: req.method, headers: { 'X-API-Key': key() } });
+    const text = await r.text();
+
+    // 🔴 `/metrics`：**绝不当 JSON 解**（它是 text/plain ⇒ 解会当场抛）。
+    if (RagSystem.isRaw(panelKey)) {
+      if (!r.ok) {
+        out.innerHTML = '';
+        out.appendChild(el('div', 'alert error', RagPanel.errorText(r.status)
+          + '（HTTP ' + r.status + '）'));
+        return;
+      }
+      renderOk(out, panelKey, null, text);
+      return;
+    }
+
+    let payload = null;
+    try { payload = JSON.parse(text); } catch (e) { payload = null; }
+
+    if (!r.ok) {
+      out.innerHTML = '';
+      const box = el('div', 'alert error');
+      // 🔴 非 2xx 时后端回的**是另一个形状**（`{error, code, status_code}`）——
+      //    有就把那句话带出来，⛔ 别只印一个 HTTP 码（那会把"尚未就绪"读成"坏了"）。
+      const ep = payload ? RagSystem.errorPayloadOf(payload) : null;
+      box.appendChild(el('div', '', ep
+        ? '服务回 ' + r.status + '：' + ep.message
+        : RagPanel.errorText(r.status) + '（HTTP ' + r.status + '）'));
+      out.appendChild(box);
+      return;
+    }
+    if (payload === null) { out.textContent = '返回的不是 JSON：' + text.slice(0, 300); return; }
+    renderOk(out, panelKey, payload, text);
+  } catch (e) {
+    out.innerHTML = '';
+    out.appendChild(el('div', 'alert error', '请求发不出去：' + e.message));
+  } finally {
+    btn.removeAttribute('aria-busy');
+    btn.disabled = false;
+  }
+}
+
+/* ==================== 装配 ==================== */
+
+// 边界标注的文案【只从 RagPanel 取】—— ⛔ 别在这里再抄一遍（规格 §3.6.2）
+document.querySelectorAll('[data-boundary]').forEach(function (n) {
+  n.textContent = n.classList.contains('slim')
+    ? RagPanel.boundaryShort(n.dataset.boundary)
+    : RagPanel.boundaryText(n.dataset.boundary);
+});
+
+// 口径徽标：文案与 class 都【从 `RagSystem` 取】—— ⛔ 别在 HTML 里手写
+document.querySelectorAll('[data-source]').forEach(function (n) {
+  const s = n.dataset.source;
+  n.className = 'badge ' + RagSystem.SOURCE_CLASSES[s];
+  n.textContent = RagSystem.SOURCE_BADGES[s];
+  n.title = RagSystem.SOURCE_LABELS[s];
+});
+
+document.querySelectorAll('[data-system]').forEach(function (section) {
+  const k = section.dataset.system;
+  const persist = RagSystem.persistenceWarning(k);
+  const scope = RagSystem.scopeNote(k);
+  const pEl = section.querySelector('[data-meta="persist"]');
+  const sEl = section.querySelector('[data-meta="scope"]');
+  if (pEl && persist) pEl.textContent = persist;
+  if (sEl && scope) sEl.textContent = scope;
+
+  section.querySelector('[data-run]').addEventListener('click', function () { runPanel(k, section); });
+});
+
+// 「归别处」那张表 —— ⛔ 静态文字，逐条写明去了哪
+const NOT_HERE = [
+  {
+    path: '/api/v1/debug/*（4 条）',
+    why: '【限流桶 / 配额 / 缓存】那四条，规格 §2.12 已裁「单独一个【运维探针】页」⇒ 它们在刀 7，⛔ 不散在这里。',
+  },
+  {
+    path: '/openapi.json · /docs',
+    why: '【文档入口】，不是"系统状态"。⚠️ 而且最高判据明写「/docs 里列着 ⛔ 不算」—— 它们本来就只是给开发者看的。',
+  },
+  {
+    path: '/dashboard（Gradio 看板）',
+    why: '【成本面板】的另一个入口 ⇒ 已经有页（成本看板 `/cost` 的页头那颗按钮），⛔ 不重复挂。',
+  },
+];
+const neList = $('notexposed-list');
+NOT_HERE.forEach(function (item) {
+  const row = el('div', 'kv');
+  row.appendChild(el('span', 'k', item.path));
+  row.appendChild(el('span', 'v', item.why));
+  neList.appendChild(row);
+});
+
+// 额度那条要【当场读数】（平台重启/额度是"边界"，首页与能力页都要能看到真数）
+function refreshQuota() {
+  fetch('/api/v1/agent/token/budget', { headers: { 'X-API-Key': key() } })
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (b) {
+      if (!b || b.used_today === undefined) return;
+      document.querySelector('[data-boundary="quota"]').textContent = RagPanel.boundaryText('quota', {
+        used: b.used_today, limit: b.daily_budget, remaining: b.remaining,
+      });
+    })
+    .catch(function () { /* 取不到就留着不带数字那句 */ });
+}
+
+$('apikey').value = key();
+$('save').onclick = function () {
+  localStorage.setItem(KEY_STORE, $('apikey').value.trim());
+  notice('已保存 API Key');
+  refreshQuota();
+};
+if (!key()) notice('先填 API Key —— 执行那一条要鉴权；/health · /ready · /metrics 三条是公开的');
+refreshQuota();
+</script>
+</body>
+</html>

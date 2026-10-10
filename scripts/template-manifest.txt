@@ -10,7 +10,7 @@ f8cb130c901b864719f4edf887f2b5b7c39a7c7f2c5be6c8832659cc8b2b2617  .claude/hooks/
 d0fb1788e3f099c463d555b102ca06d019a459374b8d3ff57d2e296635ffe187  .claude/hooks/py-compile-remind.py  ->  docs/可移植清单-开新项目时搬什么/scaffold-分层claudemd-gates-规矩门/新项目骨架/.claude/hooks/py-compile-remind.py
 eefbc0755fc9d564fbc7c44ccf988071f810f8bd072dc6cfde82afaa19c81643  .claude/settings.json  ->  docs/可移植清单-开新项目时搬什么/scaffold-分层claudemd-gates-规矩门/新项目骨架/.claude/settings.json
 888ffd6d64fbb574584bc0e3d773688ebb5f6c16c262459bc8425e663f1409e9  scripts/check_layered_claude_md.sh  ->  docs/可移植清单-开新项目时搬什么/scaffold-分层claudemd-gates-规矩门/新项目骨架/scripts/check_layered_claude_md.sh
-e20b42de5ea1def5051741b6cf667d3e50ca177069619f39478565364cfeb397  scripts/check_doc_links.sh  ->  docs/可移植清单-开新项目时搬什么/scaffold-分层claudemd-gates-规矩门/新项目骨架/scripts/check_doc_links.sh
+284a61fb8d75f80fe189b67fd1da568dc64969f6c4eab288565190c3fbcc7a84  scripts/check_doc_links.sh  ->  docs/可移植清单-开新项目时搬什么/scaffold-分层claudemd-gates-规矩门/新项目骨架/scripts/check_doc_links.sh
 670deed6c98892a9681064ee29e1ca77063a801d69eef63ee3caa60d6046292d  scripts/check_doc_orphans.sh  ->  docs/可移植清单-开新项目时搬什么/scaffold-分层claudemd-gates-规矩门/新项目骨架/scripts/check_doc_orphans.sh
 49e89271e186e824b0a34c6bd6dc624489537aad51ce891acc8c1dcd8509bb74  scripts/check_secrets.sh  ->  docs/可移植清单-开新项目时搬什么/scaffold-分层claudemd-gates-规矩门/新项目骨架/scripts/check_secrets.sh
 329a617ca68489d7f2a42052d132428d984727bb9451a48a7791ee9fd5dc97db  scripts/check_ci_job_timeouts.py  ->  docs/可移植清单-开新项目时搬什么/scaffold-分层claudemd-gates-规矩门/新项目骨架/scripts/check_ci_job_timeouts.py

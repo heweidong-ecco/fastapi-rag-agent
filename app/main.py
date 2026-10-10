@@ -639,6 +639,22 @@ async def tools_page():
     """把人送到工具与记忆页。⚠️ `include_in_schema=False`：它不是 API，⛔ 别混进 openapi。"""
     return RedirectResponse(url="/static/web/tools.html", status_code=302)
 
+# 🔴 2026-10-10（施工单**刀 6**）：**系统与执行器**的入口 URL。形状与上面七条**逐字同款**。
+#    ⚠️ 它盖的是规格 §2.9 的 `execute_code` + §2.13 的 `health` · `ready` · `metrics` ——
+#       后**三条是【根路径】**（就在本文件上面几十行），⛔ 不在 `/api/v1` 下。
+#       ⇒ 页面里**一个 URL 字面量都不写**，四条全走 `RagSystem.buildRequest()`
+#         （否则硬约束 #8「URL 字面量必须带 `/api/v1`」会当场把它拦下，而**那条红会把人引向错误的修法**）。
+#    ⭐ 它是「**批② 执行器进容器**」那件事的**唯一可见证据**。
+#    🔴 代价已认：这是**新公开路由** ⇒ `check_route_auth.py --baseline` 会 exit 1
+#       ⇒ **已显式写进 `scripts/route-auth-baseline.txt`**（一次有意识的操作）。
+#       ⚠️ 它**不含数据**：真正的边界在它调的 4 条上 —— `execute_code` **带鉴权**
+#       （`get_current_user_hybrid`），另**三条是有意公开的探活口**（`/health` `/ready` `/metrics`）。
+#    ⚠️ 本页**同样不进侧边栏**（规格 §3.0 把「执行器 / 系统状态」归「其他功能」）⇒ 入口 = 首页那两张卡。
+@app.get("/system", include_in_schema=False)
+async def system_page():
+    """把人送到系统与执行器页。⚠️ `include_in_schema=False`：它不是 API，⛔ 别混进 openapi。"""
+    return RedirectResponse(url="/static/web/system.html", status_code=302)
+
 # 新增  嵌入了 Prometheus 指标采集
 # 指标暴露接口
 @app.get("/metrics")

@@ -132,14 +132,14 @@
       <li class="card card-hover"><a href="/tools#memory">记忆</a>
           <span class="why">写一条长期记忆 → 换个说法再检索出来（按语义找，⛔ 不是字面匹配）。</span>
           <span class="apis">POST /agent/memory/add · GET /agent/memory/search</span></li>
-      <li class="card card-off"><span>执行器</span><span class="badge">未上线</span>
-          <span class="why">在无网硬化容器里跑代码。施工中（刀 6）。</span>
+      <li class="card card-hover"><a href="/system#executor">执行器</a>
+          <span class="why">把一段 Python 真发出去跑（无网硬化容器 · 有墙钟上限）；⛔ 执行器不可用时不会偷偷回落本地。</span>
           <span class="apis">POST /agent/execute_code</span></li>
       <li class="card card-hover"><a href="/cost#cost-budget">预算 / 熔断</a>
           <span class="why">额度检查、单次预估成本、你自己被拦下的次数。在成本看板同一页上。</span>
           <span class="apis">GET /agent/budget/check · /estimates · /intercepts</span></li>
-      <li class="card card-off"><span>系统状态</span><span class="badge">未上线</span>
-          <span class="why">health / ready / Prometheus 指标。施工中（刀 6）。</span>
+      <li class="card card-hover"><a href="/system#system">系统状态</a>
+          <span class="why">健康（依赖在不在）与就绪（能不能接流量）分开看；Prometheus 指标原文。</span>
           <span class="apis">GET /health · /ready · /metrics</span></li>
       <li class="card card-hover"><a href="/eval">评测</a>
           <span class="why">接入 Agent 生产就绪评测门（现状是占位页）。</span>
