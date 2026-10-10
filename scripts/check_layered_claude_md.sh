@@ -131,6 +131,19 @@ PY
 # ⇒ 正例（该绿）与反例（该红）**都要有**，且反例必须真的让它红。
 self_test() {
   local pass=0 fail=0 tmp
+
+  # 🔴🔴 先摘掉**继承来的** git 定向变量 —— **`GIT_DIR` 盖过 `git -C`**。
+  #    `scripts/ci-local.sh` §3.5 会 `export GIT_DIR=<主检出>/.git GIT_WORK_TREE=<主检出>`
+  #    （那是给凭据门用的，见 `DEC-076`）。不摘的话：夹具里的 `git init/add` 会打到
+  #    **主检出**上，而下面 `check "${tmp}"` 读到的也是**主检出** ⇒
+  #    **T2 / T5 永远红**（而 T1 / T3 / T4 会"绿得没意义"—— 它们验的是主检出，不是夹具）。
+  #    📌 **实测（2026-10-10）**：不带这行 ⇒ ci-local 下 `3 通过 / 2 失败`；
+  #       单独跑 ⇒ `5 通过 / 0 失败`。**CI 本身是绿的**（真 CI 里没有这个 env）。
+  #    ⛔ **别改到调用方去**（在 `ci.yml` / `ci-local.sh` 里写 `env -u GIT_DIR …`）——
+  #       那会让"这道门必须自己扛住被继承的 env"这条性质消失。
+  #    📄 同一手法的先例（它还专门拿 T6 钉这一条）⇒ `scripts/test_check_doc_orphans.sh`。
+  unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
+
   tmp="$(mktemp -d)"
   trap 'rm -rf "${tmp}"' RETURN
 
@@ -149,6 +162,10 @@ self_test() {
   mk "archive" 1 no          # ← 豁免名单里的，⛔ 不该红
 
   git -C "${tmp}" init -q >/dev/null 2>&1
+  # 🔴 夹具仓**必须真的建起来** —— 被继承的 `GIT_DIR` 下 `git init` 会**返回 0 却什么都不建**
+  #    （实测，见 `scripts/test_check_doc_orphans.sh` 文件头）。不钉这一条，
+  #    下面五条会"全绿"而**验的根本不是夹具** —— 本仓最恨的那种「空跑 = 静默假通过」。
+  [ -d "${tmp}/.git" ] || { echo "⛔ 夹具仓没建起来：${tmp}/.git 不存在（GIT_DIR 被继承了？）" >&2; exit 2; }
   git -C "${tmp}" add -A >/dev/null 2>&1
 
   # T1 正例：全都有 ⇒ 必须 exit 0

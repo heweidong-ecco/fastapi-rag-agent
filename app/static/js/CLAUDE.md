@@ -8,6 +8,7 @@
 | `sse.js` | `chat`（对话页 · SSE 流式） | `sse.test.js` |
 | `cost.js` | `cost`（成本看板） | `cost.test.js` |
 | `lab.js` | `lab`（检索实验室） | `lab.test.js` |
+| `tools.js` | 🆕 `tools`（工具与记忆） | `tools.test.js` |
 | `trace.js` | `trace`（轨迹页） | `trace.test.js` |
 | `approvals.js` | `approvals`（接管队列） | `approvals.test.js` |
 | `panel.js` | 通用面板 | `panel.test.js` |

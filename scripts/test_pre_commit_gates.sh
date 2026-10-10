@@ -35,6 +35,17 @@ command -v "${PY}" >/dev/null || { echo "⛔ 找不到 python3" >&2; exit 2; }
 
 pass=0; fail=0
 
+# 🔴🔴 **必须先摘掉继承来的 git 定向变量** —— **`GIT_DIR` 盖过 `git -C`**。
+#    `scripts/ci-local.sh` §3.5 会 `export GIT_DIR=<主检出>/.git GIT_WORK_TREE=<主检出>`
+#    （那是给凭据门用的，见 `DEC-076`）。不摘的话，下面夹具那句
+#    `git -C "${FIX}" init/add/commit` **会打到主检出上** ⇒ 夹具**根本不是个仓**
+#    ⇒ 八道门全在**真仓**里跑 ⇒ T3/T7/T8 红（实测 2026-10-10：ci-local 下 5 通过 / 3 失败，
+#    单独跑 8 通过；症状是那句 `warning: re-init: ignored --initial-branch=main`）。
+#    ⛔ **别改到调用方去**（在 `ci.yml` / `ci-local.sh` 里写 `env -u GIT_DIR …`）——
+#       那会让"本自测必须自己扛住被继承的 env"这条性质消失。
+#    📄 同一手法的先例（它还专门拿 T6 钉这一条）⇒ `scripts/test_check_doc_orphans.sh`。
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
+
 jqstr() { "${PY}" -c 'import json,sys;print(json.dumps(sys.argv[1]))' "${1}"; }
 mkjson() { printf '{"cwd":%s,"tool_input":{"command":%s}}' "$(jqstr "${1}")" "$(jqstr "${2}")"; }
 
@@ -59,6 +70,17 @@ trap cleanup EXIT
 mkdir -p "${FIX}/.claude/hooks" "${FIX}/docs" "${FIX}/app/core"
 cp -R "${REPO}/scripts" "${FIX}/scripts"
 cp "${REPO}/.claude/hooks/"*.py "${FIX}/.claude/hooks/"
+# 🔴 **`ruff.toml` 也必须拷** —— 它是第 ⑥ 道门（静态检查）的**规则集**。
+#    本仓那份写的是 `select = ["E9", "F"]`（只开"真错误"，⛔ 不开风格）。
+#    不拷的话，ruff 会退到**它自己的默认规则集**（会带上 `I` / `UP` / `EXE` / `RUF100` / `SIM` …）
+#    ⇒ 夹具里那几十个拷来的 `scripts/*.py` 当场"有新条目" ⇒ **T3 / T7 / T8 恒红**。
+#    📌 **实测（2026-10-10）**：`PATH` 里带 `venv/bin` 时必现 —— 那时 `check_lint_baseline.sh`
+#       才找得到 `ruff`（它优先 `${REPO}/venv/bin/ruff`，夹具里没有 ⇒ 退到 `command -v ruff`）。
+#       ⚠️ **这条为什么难发现**：`ci-local.sh` 会 `export PATH="${PY_BIN_DIR}:${PATH}"`，
+#       而**单独跑**（`PATH` 里没有 `venv/bin`）ruff **根本找不到** ⇒ 门走"未跑"那一支 ⇒ **绿**。
+#       ⇒ 同一份脚本，「单独跑绿、ci-local 红」，而**两边都不是在测同一件事**。
+#    ⛔ **别改成"给夹具单独写一份更松的 ruff.toml"** —— 那测的就不是本仓那条判据了。
+cp "${REPO}/ruff.toml" "${FIX}/ruff.toml"
 # 🔴 **只拷【脚本】，⛔ 不拷它们旁边的 `.md`** —— 本夹具测的是**门的判定逻辑**，
 #    ⛔ 不是"本仓自己的文档有没有断链"。
 #    ⚠️ **实测踩过两次**：一拷 `scripts/CLAUDE.md`，它就引 `.claude/README.md`；
@@ -87,6 +109,10 @@ printf 'X = 1\n' > "${FIX}/app/core/zz_stub.py"
 
 # ⚠️ 用 `git -C <dir>` 形式 —— 命令串里出现「git commit」会触发本仓自己的提交门，白跑一遍
 git -C "${FIX}" init -q -b main
+# 🔴 夹具仓**必须真的建起来** —— 被继承的 `GIT_DIR` 下 `git init` 会**返回 0 却什么都不建**
+#    （实测，见文件头与 `scripts/test_check_doc_orphans.sh`）。不钉这一条，
+#    下面那些用例会"跑在真仓里"而**报出一堆看不懂的红**（正确处置是当场喊停）。
+[ -d "${FIX}/.git" ] || { echo "⛔ 夹具仓没建起来：${FIX}/.git 不存在（GIT_DIR 被继承了？）" >&2; exit 2; }
 git -C "${FIX}" add -A
 git -C "${FIX}" -c user.email=t@t -c user.name=t commit -qm init
 

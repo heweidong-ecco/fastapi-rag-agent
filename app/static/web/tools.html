@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>工具与记忆</title>
+<link rel="stylesheet" href="/static/app.css">
+<style>
+  /* 本页只写【页面专属】规则 —— 通用组件与 token 在 `/static/app.css`。⛔ 别在这里另起一套 :root。 */
+
+  #boundary { margin: 0 0 var(--sp-4); }
+
+  .panel-grid > .panel { display: flex; flex-direction: column; }
+  .hint { margin: var(--sp-2) 0 0; color: var(--fg-dim); font-size: var(--fs-cap); line-height: var(--lh-body); }
+
+  /* 🔴 口径徽标：**五种各一个色** —— 它们对"重启后还在不在"的答案各不相同
+     ⇒ ⛔ 不许长成一个样（看的人会当成同一种数，而本仓为此真栽过：`DEC-047`）。 */
+  .src-mem   { background: color-mix(in srgb, var(--warn) 20%, transparent); color: var(--warn); }
+  .src-const { background: color-mix(in srgb, var(--info) 16%, transparent); color: var(--info); }
+  .src-live  { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
+  .src-disk  { background: color-mix(in srgb, var(--fg-dim) 20%, transparent); color: var(--fg-dim); }
+  .src-mixed { background: color-mix(in srgb, var(--warn) 12%, transparent); color: var(--warn); }
+
+  .panel-params .field { display: flex; width: 100%; }
+  .panel-params .field input { min-width: 0; flex: 1; }
+  .panel-actions { margin-top: var(--sp-3); }
+
+  .panel-out td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+  .panel-out table + table { margin-top: var(--sp-3); }
+  .panel-out h3 { margin-top: var(--sp-3); }
+
+  /* 两个分区的标题 —— 配合锚点 `/tools#tools` · `/tools#memory`（首页两张卡分别指过来）。 */
+  .zone-head { margin: var(--sp-5) 0 var(--sp-3); }
+  .zone-head:first-of-type { margin-top: var(--sp-4); }
+  .zone-head + .hint { margin-top: 0; }
+
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="app-shell">
+
+  <aside class="sidebar">
+    <div class="brand">青云精工 · RAG</div>
+    <nav class="nav">
+      <a href="/chat">对话</a>
+      <a href="/lab">检索实验室</a>
+      <a href="/approvals">人工接管</a>
+      <a href="/cost">成本看板</a>
+      <a href="/trace">执行轨迹</a>
+      <a href="/eval">评测</a>
+    </nav>
+  </aside>
+
+  <div class="main">
+
+    <header class="page-head">
+      <h1>工具与记忆</h1>
+      <span class="spacer"></span>
+      <label class="field">API Key <input id="apikey" type="password" placeholder="X-API-Key"></label>
+      <button id="save">保存</button>
+    </header>
+
+    <div class="content">
+      <div id="notice"></div>
+
+      <!-- 🔴🔴 边界标注（规格 §3.6.1 的② · 提示在前、接口在后）
+           ⚠️ 文案【只从 RagPanel 取】—— ⛔ 别在这份 HTML 里再抄一遍。 -->
+      <section class="panel" id="boundary" aria-label="使用前必读（平台与额度边界）">
+        <div class="panel-body">
+          <h2 style="margin-top:0">使用前必读</h2>
+          <div class="panel-boundary" data-boundary="platform_restart"></div>
+          <div class="panel-boundary" data-boundary="quota"></div>
+          <div class="panel-boundary" data-boundary="rate_limit"></div>
+          <div class="panel-boundary" data-boundary="real_api"></div>
+          <h3>怎么验证它真的做完了</h3>
+          <div class="panel-boundary" data-boundary="verify"></div>
+        </div>
+      </section>
+
+      <!-- 🔴🔴 **这一页最要紧的一段**：同一页上有【五种】来源的数，它们对"重启后还在不在"答案不同。
+           ⛔ 不写这一段，读的人会把"进程内存 0"当成"工具都没了"（本仓真栽过：`DEC-047`）。 -->
+      <section class="panel" id="legend">
+        <div class="panel-body">
+          <h2 style="margin-top:0">这一页上的五种来源（⛔ 别混着读）</h2>
+          <p class="hint" style="margin-top:var(--sp-1)">
+            <span class="badge src-const">代码常量</span>
+            —— 工具表写在代码里，<b>与运行、与重启都无关</b>。（「工具版本」那一格）
+          </p>
+          <p class="hint">
+            <span class="badge src-mem">进程内存</span>
+            —— 数在服务进程的内存里，<b>平台重启容器就归零</b>（这是平台限制，⛔ 不是故障）。
+          </p>
+          <p class="hint">
+            <span class="badge src-mixed">常量+内存</span>
+            —— 一张表里混了两处来源：<b>工具表重启还在、健康状态重启就没了</b>。
+          </p>
+          <p class="hint">
+            <span class="badge src-live">真调 MCP</span>
+            —— <b>当场起一个 MCP client 去拿</b>，⛔ 不是读缓存 ⇒ 比别的格慢，也可能因环境起不来。
+          </p>
+          <p class="hint">
+            <span class="badge src-disk">容器磁盘</span>
+            —— 长期记忆落在<b>容器内的磁盘</b>上。⚠️ <b>平台重启容器同样会丢</b>（单容器、没有挂卷）
+            ⇒ 它其实和"进程内存"一样不耐重启。
+          </p>
+          <p class="hint">
+            ⚠️ <b>演示机上这几格大概率都是「清零态」</b>（容器刚重启）——
+            那不是"系统坏了"，是<b>平台会重启容器</b>。
+          </p>
+        </div>
+      </section>
+
+      <!-- ⛔ 本页【不进侧边栏】—— 规格 §3.0 把「工具 / 记忆」归在「其他功能」，
+           而口径 ② 是「侧边栏只放 5 类【主要功能】」⇒ 入口 = 首页那两张卡 + 本页直链。 -->
+
+      <h2 class="zone-head" id="tools">工具 / MCP</h2>
+      <p class="hint">⭐ <b>这一区就是「MCP 工具」那条能力的可见证据</b> —— 工具从哪来、健不健康、版本多少，都在这儿。</p>
+
+      <!-- 🔴 五格 = 规格 §2.7 的 5 条。⚠️ 路径与方法都从 `RagTools.buildRequest()` 取
+           —— ⛔ 页面里不写 URL 字面量。
+           守卫 ⇒ `app/static/js/tools.test.js`（七条 path 必须带 /api/v1）+
+                 `app/tests/test_tools_page.py`（七格都在 · 口径徽标 · 提示条在按钮之前）。 -->
+      <div class="panel-grid">
+
+        <section class="panel" data-tools="available">
+          <div class="panel-head">可用工具（已剔除不健康的）
+            <span class="badge" data-source="mixed"></span></div>
+          <div class="panel-body">
+            <div class="panel-boundary slim" data-boundary="platform_restart"></div>
+            <p class="hint" data-meta="scope"></p>
+            <p class="hint">🔴 这一格说的是<b>「哪些不是不健康」</b> —— 它<b>包含从没体检过的工具</b>，
+              ⛔ 别读成"每一条都验过而且都好"。不健康的那几条<b>单独列在下面第二张表</b>。</p>
+            <div class="panel-actions"><button class="btn primary" data-run>查询</button></div>
+            <div class="panel-out" hidden></div>
+          </div>
+        </section>
+
+        <section class="panel" data-tools="health">
+          <div class="panel-head">工具健康状态
+            <span class="badge" data-source="mem"></span></div>
+          <div class="panel-body">
+            <div class="panel-boundary slim" data-boundary="platform_restart"></div>
+            <p class="hint" data-meta="scope"></p>
+            <p class="hint" data-meta="persist"></p>
+            <div class="panel-actions"><button class="btn primary" data-run>查询</button></div>
+            <div class="panel-out" hidden></div>
+          </div>
+        </section>
+
+        <section class="panel" data-tools="refresh">
+          <div class="panel-head">手动刷新体检
+            <span class="badge" data-source="mem"></span></div>
+          <div class="panel-body">
+            <div class="panel-boundary slim" data-boundary="platform_restart"></div>
+            <div class="panel-actions"><button class="btn primary" data-run>重跑一次体检</button></div>
+            <p class="hint">⚠️ 它<b>真的会去调每一个工具</b>（含联网的搜索工具）⇒ 比上面那格慢，属正常。</p>
+            <div class="panel-out" hidden></div>
+          </div>
+        </section>
+
+        <section class="panel" data-tools="versions">
+          <div class="panel-head">工具版本
+            <span class="badge" data-source="const"></span></div>
+          <div class="panel-body">
+            <div class="panel-boundary slim" data-boundary="platform_restart"></div>
+            <p class="hint">这一格的<b>来源是代码里的常量表</b> ⇒ 它与运行、与重启都无关，
+              ⛔ 不挂"重启归零"的提示（挂了就是狼来了）。</p>
+            <div class="panel-actions"><button class="btn primary" data-run>查询</button></div>
+            <div class="panel-out" hidden></div>
+          </div>
+        </section>
+
+        <section class="panel" data-tools="mcp">
+          <div class="panel-head">MCP 动态工具表
+            <span class="badge" data-source="live"></span></div>
+          <div class="panel-body">
+            <div class="panel-boundary slim" data-boundary="platform_restart"></div>
+            <p class="hint" data-meta="persist"></p>
+            <p class="hint">⚠️ 表里的名字是 <b>MCP 协议上那个名字</b>；「参数」一列来自工具自己的
+              <code>inputSchema</code>。</p>
+            <div class="panel-actions"><button class="btn primary" data-run>查询</button></div>
+            <div class="panel-out" hidden></div>
+          </div>
+        </section>
+
+      </div>
+
+      <h2 class="zone-head" id="memory">记忆</h2>
+      <p class="hint">长期记忆：<b>写一条进去 → 换个说法检索出来</b>。⚠️ 这两格会<b>真调模型</b>（写的时候要抽取要点）。</p>
+
+      <div class="panel-grid">
+
+        <section class="panel" data-tools="memadd">
+          <div class="panel-head">写入长期记忆
+            <span class="badge" data-source="disk"></span></div>
+          <div class="panel-body">
+            <div class="panel-boundary slim" data-boundary="real_api"></div>
+            <p class="hint" data-meta="scope"></p>
+            <p class="hint" data-meta="persist"></p>
+            <div class="panel-params">
+              <label class="field">要记住的内容 <input data-param="content" type="text"
+                     placeholder="例：我只要美式，不加糖"></label>
+              <label class="field">记忆空间 <input data-param="memory_space" type="text"
+                     placeholder="留空 = default"></label>
+            </div>
+            <p class="hint">🔴 <b>服务端参数在 query 上</b>（这条是 POST，但⛔ 不是发 JSON body）
+              —— 页面已按此拼，⛔ 别改。</p>
+            <div class="panel-actions"><button class="btn primary" data-run>写入</button></div>
+            <div class="panel-out" hidden></div>
+          </div>
+        </section>
+
+        <section class="panel" data-tools="memsearch">
+          <div class="panel-head">检索长期记忆
+            <span class="badge" data-source="disk"></span></div>
+          <div class="panel-body">
+            <div class="panel-boundary slim" data-boundary="real_api"></div>
+            <p class="hint" data-meta="scope"></p>
+            <p class="hint" data-meta="persist"></p>
+            <div class="panel-params">
+              <label class="field">关键词 <input data-param="query" type="text"
+                     placeholder="例：咖啡"></label>
+              <label class="field">记忆空间 <input data-param="memory_space" type="text"
+                     placeholder="留空 = default"></label>
+            </div>
+            <p class="hint">⚠️ 它按<b>语义</b>找，⛔ 不是按字面匹配 —— 换个说法也能找出来。</p>
+            <div class="panel-actions"><button class="btn primary" data-run>检索</button></div>
+            <div class="panel-out" hidden></div>
+          </div>
+        </section>
+
+      </div>
+
+      <!-- 🔴 **有意不露 / 归别处的** —— 规格 §2.14 的口径：不露也要写成一条可读的记录，
+           ⛔ 否则下一个人会以为"忘了做"。 -->
+      <section class="panel" id="notexposed" style="margin-top:var(--sp-4)">
+        <div class="panel-head">⛔ 本页【不挂】的两类接口（写明它们去哪了）</div>
+        <div class="panel-body">
+          <p class="hint" style="margin-top:0">它们不是"没做"，是<b>已经有入口，或另有归属</b> —— 每条都写明在哪。</p>
+          <div id="notexposed-list"></div>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</div>
+
+<script src="/static/js/panel.js"></script>
+<script src="/static/js/tools.js"></script>
+<script>
+'use strict';
+/* ⚠️ 本页每个 URL 都从 `RagTools.buildRequest()` / `RagPanel.paramQuery()` 出 —— ⛔ 不写字面量。
+   原因：字面量一旦少 `/api/v1`，页面上**不报任何错**（`DEC-094` 那个 100% 打不开的事故）。 */
+const KEY_STORE = 'rag_api_key';        // ⚠️ 与 chat / approvals / trace / lab / cost 同一个 localStorage 键
+const $ = (id) => document.getElementById(id);
+
+function key() { return localStorage.getItem(KEY_STORE) || ''; }
+
+function notice(msg, bad) {
+  const el = $('notice');
+  el.textContent = msg || '';
+  el.className = msg ? (bad ? 'alert error' : 'alert info') : '';
+}
+
+function readValues(el) {
+  const v = {};
+  el.querySelectorAll('[data-param]').forEach(function (c) {
+    v[c.dataset.param] = (c.type === 'checkbox') ? c.checked : c.value;
+  });
+  return v;
+}
+
+function el(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text !== undefined) n.textContent = text;   // ⛔ 一律 textContent，别用 innerHTML 拼数据
+  return n;
+}
+
+function detailText(payload) {
+  if (!payload) return '';
+  if (typeof payload.detail === 'string') return payload.detail;
+  if (typeof payload.error === 'string') return payload.error;
+  if (payload.detail) return JSON.stringify(payload.detail);
+  return '';
+}
+
+/* ==================== 渲染 ==================== */
+
+function renderKv(out, rows) {
+  const tbl = el('table', 'tbl');
+  rows.forEach(function (r) {
+    const tr = el('tr');
+    tr.appendChild(el('td', '', r[0]));
+    const td = el('td', 'num');
+    td.textContent = r[1];
+    tr.appendChild(td);
+    tbl.appendChild(tr);
+  });
+  out.appendChild(tbl);
+}
+
+function renderTable(out, spec, title) {
+  if (!spec) return;
+  if (title) out.appendChild(el('h3', '', title));
+  if (!spec.rows.length) {
+    out.appendChild(el('div', 'hint', '这张表是空的 —— 见上面的说明。'));
+    return;
+  }
+  const tbl = el('table', 'tbl');
+  const hr = el('tr');
+  spec.cols.forEach(function (h) { hr.appendChild(el('th', '', h)); });
+  const thead = el('thead'); thead.appendChild(hr); tbl.appendChild(thead);
+  const tb = el('tbody');
+  spec.rows.forEach(function (r) {
+    const tr = el('tr');
+    r.forEach(function (cell) {
+      tr.appendChild(el('td', '', cell));
+    });
+    tb.appendChild(tr);
+  });
+  tbl.appendChild(tb);
+  out.appendChild(tbl);
+}
+
+function renderOk(out, panelKey, payload) {
+  out.innerHTML = '';
+  const kv = RagTools.kvRows(panelKey, payload);
+  if (kv.length) renderKv(out, kv);
+
+  const t1 = RagTools.tableOf(panelKey, payload);
+  renderTable(out, t1);
+  // 🔴 「不健康」是**坏消息** ⇒ 单独一张表，⛔ 不与好消息混一张（`table2Of`）
+  renderTable(out, RagTools.table2Of(panelKey, payload), '不健康的工具');
+  // 命中的记忆原文（`table3Of`）
+  renderTable(out, RagTools.table3Of(panelKey, payload), '命中的记忆');
+
+  const trunc = RagTools.truncationNotice(payload);
+  if (trunc) out.appendChild(el('div', 'hint', trunc));
+
+  const hasAny = kv.length || (t1 && t1.rows.length)
+    || (RagTools.table2Of(panelKey, payload) || {}).rows
+        && RagTools.table2Of(panelKey, payload).rows.length
+    || (RagTools.table3Of(panelKey, payload) || {}).rows
+        && RagTools.table3Of(panelKey, payload).rows.length;
+  if (!hasAny) {
+    const box = el('div', 'empty');
+    box.appendChild(el('div', '', '这一格没有数据。'));
+    box.appendChild(el('div', 'why', RagTools.emptyReason(panelKey)));
+    out.appendChild(box);
+  }
+}
+
+/* ==================== 运行 ==================== */
+
+async function runPanel(panelKey, section) {
+  const out = section.querySelector('.panel-out');
+  const btn = section.querySelector('[data-run]');
+  const values = readValues(section);
+
+  // 🔴 必填项缺了【不发请求】—— 发了必 422，而 422 会被读成"后端坏了"。
+  const miss = RagTools.missingRequired(panelKey, values);
+  if (miss) { notice(miss, true); out.hidden = true; return; }
+
+  notice('');
+  const req = RagTools.buildRequest(panelKey, values);
+  // 🔴 参数走 query（记忆那两条是 POST 但**参数在 query 上**）—— 判据见 `tools.js` §2 那段。
+  const url = req.path + RagPanel.paramQuery(req.query);
+
+  btn.setAttribute('aria-busy', 'true');
+  btn.disabled = true;
+  out.hidden = false;
+  out.textContent = '请求中…';
+
+  try {
+    const r = await fetch(url, { method: req.method, headers: { 'X-API-Key': key() } });
+    const text = await r.text();
+    let payload = null;
+    try { payload = JSON.parse(text); } catch (e) { payload = null; }
+
+    if (!r.ok) {
+      out.innerHTML = '';
+      const box = el('div', 'alert error');
+      box.appendChild(el('div', '', RagPanel.errorText(r.status)
+        + (detailText(payload) ? '（' + detailText(payload) + '）' : '')));
+      out.appendChild(box);
+      return;
+    }
+    if (payload === null) { out.textContent = '返回的不是 JSON：' + text.slice(0, 300); return; }
+    // 🔴 本仓的拒绝形状可能是 **200 + `{"status":"error"}`**（`DEC-088`）—— 只看 `r.ok` 会把"无权"
+    //    当成成功。⚠️ 但本页 `memadd` 的 `status` 正常值就是 `"added"` ⇒ **⛔ 不能把 `status` 一律当错误**。
+    if (payload.error || payload.status === 'error') {
+      out.innerHTML = '';
+      const box = el('div', 'alert error');
+      box.appendChild(el('div', '', '这条接口回了错误：' + (payload.error || payload.detail || payload.status)));
+      out.appendChild(box);
+      return;
+    }
+    renderOk(out, panelKey, payload);
+  } catch (e) {
+    out.innerHTML = '';
+    out.appendChild(el('div', 'alert error', '请求发不出去：' + e.message));
+  } finally {
+    btn.removeAttribute('aria-busy');
+    btn.disabled = false;
+  }
+}
+
+/* ==================== 装配 ==================== */
+
+// 边界标注的文案【只从 RagPanel 取】—— ⛔ 别在这里再抄一遍（规格 §3.6.2）
+document.querySelectorAll('[data-boundary]').forEach(function (n) {
+  // 🔴 面板顶部用【短版】（`.slim`），页面顶部用【完整版】—— 两份都在 `panel.js` 里，
+  //    ⛔ 这份 HTML 一个字都不抄（结构守卫在 `panel.test.js`）。
+  n.textContent = n.classList.contains('slim')
+    ? RagPanel.boundaryShort(n.dataset.boundary)
+    : RagPanel.boundaryText(n.dataset.boundary);
+});
+
+// 口径徽标：文案与 class 都【从 `RagTools` 取】—— ⛔ 别在 HTML 里手写"重启归零"那几句
+document.querySelectorAll('[data-source]').forEach(function (n) {
+  const s = n.dataset.source;
+  n.className = 'badge ' + RagTools.SOURCE_CLASSES[s];
+  n.textContent = RagTools.SOURCE_BADGES[s];
+  n.title = RagTools.SOURCE_LABELS[s];
+});
+
+document.querySelectorAll('[data-tools]').forEach(function (section) {
+  const k = section.dataset.tools;
+  const persist = RagTools.persistenceWarning(k);
+  const scope = RagTools.scopeNote(k);
+  const pEl = section.querySelector('[data-meta="persist"]');
+  const sEl = section.querySelector('[data-meta="scope"]');
+  if (pEl && persist) pEl.textContent = persist;
+  if (sEl && scope) sEl.textContent = scope;
+
+  section.querySelector('[data-run]').addEventListener('click', function () { runPanel(k, section); });
+});
+
+// 「归别处」那张表 —— ⛔ 静态文字，逐条写明去了哪
+const NOT_HERE = [
+  {
+    path: '/agent/memory_chat (+ /stream)',
+    why: '**它已经有入口** —— 两者的**流式版**就在对话页（`/chat`）的链选择器里，'
+       + '名字叫「带记忆的 Agent」⇒ 本页⛔ 不重复挂一个。',
+  },
+  {
+    path: '其余 4 条 Agent 链的【非流式】版',
+    why: '规格 §2.1 把它们归到**对话面板**（`/chat`），而对话页现在只接了**流式**那 6 条。'
+       + '⚠️ 这是一处**已知缺口**，已登记 ⇒ `docs/待办总表.md`。⛔ 不属于本页。',
+  },
+];
+const neList = $('notexposed-list');
+NOT_HERE.forEach(function (item) {
+  const row = el('div', 'kv');
+  row.appendChild(el('span', 'k', item.path));
+  row.appendChild(el('span', 'v', item.why));
+  neList.appendChild(row);
+});
+
+// 额度那条要【当场读数】（平台重启/额度是"边界"，首页与能力页都要能看到真数）
+function refreshQuota() {
+  fetch('/api/v1/agent/token/budget', { headers: { 'X-API-Key': key() } })
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (b) {
+      if (!b || b.used_today === undefined) return;
+      document.querySelector('[data-boundary="quota"]').textContent = RagPanel.boundaryText('quota', {
+        used: b.used_today, limit: b.daily_budget, remaining: b.remaining,
+      });
+    })
+    .catch(function () { /* 取不到就留着不带数字那句 */ });
+}
+
+$('apikey').value = key();
+$('save').onclick = function () {
+  localStorage.setItem(KEY_STORE, $('apikey').value.trim());
+  notice('已保存 API Key');
+  refreshQuota();
+};
+if (!key()) notice('先填 API Key —— 这 7 条接口都要鉴权');
+refreshQuota();
+</script>
+</body>
+</html>

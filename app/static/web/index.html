@@ -126,11 +126,11 @@
       <li class="card card-off"><span>知识库</span><span class="badge">未上线</span>
           <span class="why">上传 / 删除文档，自己传一篇就能立刻在对话里问它。施工中（刀 10）。</span>
           <span class="apis">POST /rag/upload_document · DELETE /rag/documents/{id}</span></li>
-      <li class="card card-off"><span>工具 / MCP</span><span class="badge">未上线</span>
-          <span class="why">可用工具清单、健康状态、MCP 动态工具表。施工中（刀 5）。</span>
-          <span class="apis">GET /agent/available_tools · /agent/mcp_tools_dynamic</span></li>
-      <li class="card card-off"><span>记忆</span><span class="badge">未上线</span>
-          <span class="why">写入 / 检索长期记忆。施工中（刀 5）。</span>
+      <li class="card card-hover"><a href="/tools#tools">工具 / MCP</a>
+          <span class="why">可用工具清单、健康状态、版本、MCP 动态工具表 —— 每格标明它读的是【进程内存】还是【代码常量】。</span>
+          <span class="apis">GET /agent/available_tools · /agent/tool_health · /agent/tool_versions · /agent/mcp_tools_dynamic</span></li>
+      <li class="card card-hover"><a href="/tools#memory">记忆</a>
+          <span class="why">写一条长期记忆 → 换个说法再检索出来（按语义找，⛔ 不是字面匹配）。</span>
           <span class="apis">POST /agent/memory/add · GET /agent/memory/search</span></li>
       <li class="card card-off"><span>执行器</span><span class="badge">未上线</span>
           <span class="why">在无网硬化容器里跑代码。施工中（刀 6）。</span>

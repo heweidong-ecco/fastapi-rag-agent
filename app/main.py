@@ -625,6 +625,20 @@ async def cost_page():
     """把人送到成本看板。⚠️ `include_in_schema=False`：它不是 API，⛔ 别混进 openapi。"""
     return RedirectResponse(url="/static/web/cost.html", status_code=302)
 
+# 🔴 2026-10-10（施工单**刀 5**）：**工具与记忆**的入口 URL。形状与上面六条**逐字同款**。
+#    ⚠️ 它盖的是规格 §2.7 的 5 条 + §2.8 的 `memory/add` · `memory/search` —— 在这之前
+#       **这 7 条一条可点入口都没有**（按最高判据 = 等于没做）。
+#    🔴 代价已认：这是**新公开路由** ⇒ `check_route_auth.py --baseline` 会 exit 1
+#       ⇒ **已显式写进 `scripts/route-auth-baseline.txt`**（一次有意识的操作）。
+#       ⚠️ 它**不含数据**：真正的边界在它调的那 7 条接口上 —— **7 条都带鉴权**
+#       （`get_current_user_hybrid`）。
+#    ⚠️ 本页**不进侧边栏** —— 规格 §3.0 把「工具 / 记忆」归在「其他功能」，
+#       而口径 ② 是「侧边栏只放 5 类【主要功能】」⇒ 入口 = 首页那两张卡（带锚点）。
+@app.get("/tools", include_in_schema=False)
+async def tools_page():
+    """把人送到工具与记忆页。⚠️ `include_in_schema=False`：它不是 API，⛔ 别混进 openapi。"""
+    return RedirectResponse(url="/static/web/tools.html", status_code=302)
+
 # 新增  嵌入了 Prometheus 指标采集
 # 指标暴露接口
 @app.get("/metrics")
