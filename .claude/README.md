@@ -21,7 +21,7 @@
 | 1 | **凭据门** | `scripts/check_secrets.sh` | PUBLIC 仓里混进**明文凭据**（**进了历史就改不掉**） | 🛑 拦 |
 | 2 | **链接检查** | `scripts/check_doc_links.sh` | 文档里**指向不存在的路径** | 🛑 拦 |
 | 3 | **孤儿检查** | `scripts/check_doc_orphans.sh` | 建了文档**但没人指向它**（索引挂空） | 🛑 拦 |
-| 4 | 🆕 **模块 spec 门** | **内联在 hook 里**（不调外部脚本） | **新增了 `app/X.py` 但 `docs/specs/` 下与模块同名的那个 不存在** | 🛑 **拦** |
+| 4 | 🆕 **模块 spec 门** | **内联在 hook 里**（不调外部脚本） | **新增了 `app/**/*.py` 但【同目录】`specs/<模块>.md` 不存在** | 🛑 **拦** |
 | 5 | **路由鉴权门** | `scripts/check_route_auth.py --baseline` | **新引入了没有鉴权依赖的路由**（比基线**变多**） | 🛑 拦 |
 | 6 | **静态检查门**（2026-10-07） | `scripts/check_lint_baseline.sh` | `ruff` 的 `E9`/`F` **比基线变多**（存量认下 ⇒ ⛔ 不是"一条都没有"） | 🛑 拦 |
 | 7 | 🆕 **过期导入门**（2026-10-09） | `scripts/check_stale_imports.sh` | **`app/` 之外的 .py 里，模块搬了家但导入没改**（`from auth import …`） | 🛑 拦 |

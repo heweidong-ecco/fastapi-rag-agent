@@ -4,13 +4,13 @@ PostToolUse hook —— **写完 `app/*.py` 之后，提醒更新它的 spec**�
 
 ## 为什么要有它
 
-`docs/specs/` 是**模块视角**的规格（这个模块做到哪、**看代码会误判什么**）。
+`app/<组>/specs/` 是**模块视角**的规格（这个模块做到哪、**看代码会误判什么**）。
 但 **spec 是人/agent 写的 ⇒ 它会过期**。
 
 `pre-commit-gates.py` 的**第 ④ 道门**只能拦**"新增模块没 spec"**（能机械判）；
 **"改了已有模块要不要更新 spec"是【判断】，机械判不了** ⇒ **只能提醒**。
 
-⇒ **本 hook 就干这一件事：动完 `app/X.py`，提醒你 `docs/specs/X.md` 可能要更新。**
+⇒ **本 hook 就干这一件事：动完 `app/X.py`，提醒你 `app/<组>/specs/X.md` 可能要更新。**
 
 ## 行为
 
@@ -71,7 +71,7 @@ def main() -> int:
     mod = base[:-3]
     # 🔴 2026-10-09（段 2）：spec **与它的模块同目录** —— `app/core/config.py` ⇒ `app/core/specs/config.md`。
     #    `app/` 根的那几个模块（`main.py` 等）⇒ 落在 `app/specs/`。
-    #    ⛔ 别改回 `docs/specs/`：那是这次重构撤掉的"集中索引"。
+    #    ⛔ 别改回【集中式的一处目录】（原先是 `docs/specs/`）：那正是这次重构撤掉的东西。
     _d = os.path.dirname(rel)                      # "app/core" / "app"
     spec_rel = f"{_d}/specs/{mod}.md" if _d != "app" else f"app/specs/{mod}.md"
     spec_abs = os.path.join(cwd, *spec_rel.split("/"))

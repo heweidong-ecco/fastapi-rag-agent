@@ -48,7 +48,8 @@ bash dev.sh          # 起 PG+Redis 容器 + 本地 uvicorn --reload
 
 ```
 1. 读 CLAUDE.md 的「🔴🔴🔴 最高判据」② —— 现在的主线是【后端先行】（DEC-033 🅱️）
-2. 查 ROADMAP.md 的「📋 待办总账」—— 要动的是不是已经在册
+2. 查 `docs/待办总表.md` —— 要动的是不是已经在册（🔴 2026-10-10 起**唯一清单在它那儿**，
+   `ROADMAP.md` 的「📋 待办总账」**只剩指针**）
 3. 动代码前：
    · bug  ⇒ 先 systematic-debugging，再 test-driven-development
    · 新功能 ⇒ 先 brainstorming

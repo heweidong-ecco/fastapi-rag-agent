@@ -17,5 +17,14 @@
 - ⚠️ **代码不在这里，⛔ 别往这儿写 `.py` / `.js`**
 - ⚠️ `frontend/*.fig`（别人给的 8.6 MB 原件）**不入库** —— 要留的是**结论**
 
+## 🔴 动手前先读 `app/static/CLAUDE.md`
+> ⚠️ **本目录【只有设计文档】，代码在 `app/static/`** —— 而 `app/` 是**兄弟目录**，
+> ⛔ **在 `frontend/` 起 claude 时它【不会自动加载】**（兄弟永不加载；只有真读到那儿的文件才懒加载）。
+> ⇒ **只读设计文档就动手 ⇒ 会漏掉下面这几条**（摘录，⛔ 以 `app/static/CLAUDE.md` 为准）：
+> 1. 🔴 **每个页面都要有【可点入口】** —— 最高判据①：「**显示了，才知道你有做**」
+> 2. 🔴 **请求字面量必须以 `/api/v1` 开头**（有页面守卫钉着）
+> 3. ⚠️ **JS 纯逻辑走 `node --test`**（`app/static/js/*.test.js`）· ⛔ **不加 `package.json` / `npm install`**
+> 4. ⚠️ ⛔ **不引外网 CDN**（首页有专门断言）
+
 ## 📍 往上读
-- 仓库根 `CLAUDE.md` · `frontend/索引.md` · `app/static/CLAUDE.md`
+- 仓库根 `CLAUDE.md` · `frontend/索引.md` · **`app/static/CLAUDE.md`（动手前必读）**

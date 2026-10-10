@@ -152,7 +152,7 @@ TTL 只要 **≫ 回满耗时**，语义就完全不变 —— 因为 **`EXPIRE`
 | 文档 | 说明 |
 |---|---|
 | `app/specs/main.md` | **唯一的生产消费者**（`RateLimitMiddleware`）· `resolve_rate_limit_identity()` 的「分桶 ≠ 鉴权」 |
-| `app/specs/main.md` · `docs/specs/归档/quota_limiter.md` | **配额**那一层（⚠️ 与限流**不是一回事**：**限流管频率，配额管总量**）。<br>🔴 **2026-10-03（`DEC-046`）**：配额那层**已在 `main.QuotaMiddleware` 原位改成 token 口径**（见 `main.md`）；`quota_limiter.py` **已删**，其 spec 移入 `归档/` |
+| `app/specs/main.md` · `app/specs/归档/quota_limiter.md` | **配额**那一层（⚠️ 与限流**不是一回事**：**限流管频率，配额管总量**）。<br>🔴 **2026-10-03（`DEC-046`）**：配额那层**已在 `main.QuotaMiddleware` 原位改成 token 口径**（见 `main.md`）；`quota_limiter.py` **已删**，其 spec 移入 `归档/` |
 | `后端补齐清单` **B9** | 匿名按 IP 分桶 · 配额对匿名生效（⏸ **已挂起，挂了钩子**） |
 | `后端补齐清单` **B9-b** | ✅ **已实施** —— `X-API-Key` 分桶加验签（本文件 ⚠️① 的修复） |
 | `docs/说明/测试.md` §六 | 覆盖缺口：「**前者间接**、后者零覆盖」 |

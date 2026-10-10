@@ -17,5 +17,10 @@
 - ⚠️ **CI 不编译本目录**（`ci.yml` 只 `compileall app/`）⇒ 语法错**CI 照样绿**，
   改完自己 `python -m py_compile locust/*.py`
 
+## 🔴 打的是 `app/` 的端点 ⇒ 形状的权威在 `app/`（兄弟目录，⛔ 不自动加载）
+> - 🔴 **上一代那 3 个**被 **`app/tests/test_locust_payload.py`** 守卫着（那 3 个名字就写在该测试里）
+>   ⇒ 改脚本的请求形状时，**同批看它**
+> - ⚠️ 跑法与参数口径 ⇒ `locust/README.md`
+
 ## 📍 往上读
-- 仓库根 `CLAUDE.md`
+- 仓库根 `CLAUDE.md` · **`app/tests/test_locust_payload.py`（形状的权威）**

@@ -68,7 +68,7 @@ bash scripts/check_doc_orphans.sh --quiet >/dev/null 2>&1               # （顺
 ### 3.2 写 spec（**照 `app/specs/README.md` 的模板**）
 
 ```
-docs/specs/<模块名>.md
+app/<组>/specs/<模块名>.md
 ```
 
 **四节，第三节最重要**：

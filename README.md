@@ -300,7 +300,8 @@ curl -s -X POST localhost:8000/api/v1/rag/hybrid_search -H "Authorization: Beare
 | **有哪些文档 / 每份干什么** | 从仓库根 `CLAUDE.md` 的「📇 本仓目录索引」**一层层往下**；`docs/文档地图.md` 只剩判据与欠账清单 |
 | **代码怎么组织的**（模块全景 / 请求流 / 依赖枢纽） | **`docs/原理/架构.md`** |
 | **表结构** | `docs/契约/数据模型.md` + **`app/schema.sql`** |
-| **Demo 做到哪一步了** | 看 **`ROADMAP.md`**；施工区在 `demo/`（⚠️ 已 gitignore ⇒ **clone 你看不到**，故此处只给指针） |
+| **做到哪了 · 下一步 · 顺序** | **`ROADMAP.md` §⑤**（⛔ 现在是它**唯一**回答这三样的地方）· **还没做完的** ⇒ `docs/待办总表.md` |
+| **Demo 做到哪一步了** | 权威 ⇒ **`demo/demo清单.md`**（✅ **已入库**）；施工区在 `demo/设置与命令/`（⚠️ 已 gitignore ⇒ **clone 你看不到**，故此处只给指针） |
 
 > 📌 **关于原 `Agent/` 目录（2026-09-20 已处置）** —— 🔴 **2026-09-29 移往 `docs/历史/`**：
 > 原系统（极狐 GitLab 的 `agent-assistant`）的文档曾以 `Agent/` 随仓携带，

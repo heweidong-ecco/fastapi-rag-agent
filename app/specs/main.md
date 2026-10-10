@@ -102,7 +102,7 @@
 | 文档 | 说明 |
 |---|---|
 | `app/billing/specs/token_tracker.md` | **配额**那一层的数据源（`get_token_budget_info`）—— 本文件只负责在中间件里消费它 |
-| `docs/specs/归档/quota_limiter.md` | ⚰️ **已归档** —— 原先的「每日**次数**」计数器，**2026-10-03 随 `DEC-046` 删除** |
+| `app/specs/归档/quota_limiter.md` | ⚰️ **已归档** —— 原先的「每日**次数**」计数器，**2026-10-03 随 `DEC-046` 删除** |
 | `后端补齐清单` **B9-b** | 限流分桶加验签（**2026-09-30 已做**） |
 | `后端补齐清单` **B12** | 错误文案 + `retry_after`（⚠️ **本文把落点从 1 处更正为 4 处**） |
 | `app/tests/test_rate_limit_identity.py` | `resolve_rate_limit_identity` 的 **8 条**回归测试（⚠️ 2026-10-05 批 3 **一条都没改** —— `None` 与 `"anonymous"` 没有互相污染） |

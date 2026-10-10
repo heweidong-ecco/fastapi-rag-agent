@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
 # spec_status.sh —— **对账**：`app/` 的模块 ↔ **它自己目录下 `specs/` 里的** spec
-# 🔴 2026-10-09（段 2）：spec 已**随模块搬进** `app/<组>/specs/`，⛔ 不再是集中的 `docs/specs/`。
+# 🔴 2026-10-09（段 2）：spec 已**随模块搬进**各自的 `app/<组>/specs/`，
+#    ⛔ **不再是集中在一处**（原先那处叫 `docs/specs/`，已撤）。
 #
 # ## 它回答一个问题
 #
