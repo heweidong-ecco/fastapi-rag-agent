@@ -142,12 +142,38 @@ def test_page_url_literals_carry_the_api_prefix(page):
 #      但"解析不了"这一类**从今夜起再也过不去了**。
 #   📄 复盘：`docs/复盘/2026-10-10-页面里那段JS没有任何门会去跑它.md`
 
-_INLINE_SCRIPT = re.compile(r"<script(?![^>]*\bsrc=)[^>]*>(.*?)</script>", re.S)
+_INLINE_SCRIPT = re.compile(r"<script(?![^>]*\bsrc=)[^>]*>(.*?)</script>", re.S | re.I)
+# 🔴 `re.I` **不是可有可无的**（2026-10-10 · CodeQL 抓出来的）：
+#    ⛔ 少了它 ⇒ 页面里写成 `<SCRIPT>` 时**扫不到** ⇒ 那个页面会被**静默跳过**，
+#    而这道门存在的全部理由就是"别让任何一页静默跑不起来"。
+#    📄 它当时报的是 `Bad HTML filtering regexp`（HIGH）—— 判语是"**不匹配大写标签**"，
+#       **判得对**：这不是误报，是我把门的靶子写窄了（本仓同族：`N14` · `守卫的靶子没定准`）。
+#    ⚠️ 正控 ⇒ 下面 `test_inline_script_scan_is_case_insensitive`（取反会红）。
 
 
 def _inline_scripts(text: str):
     """页面里**内联**的 `<script>` 正文（带 `src=` 的那些不算 —— 那是外部文件，另有门管）。"""
     return _INLINE_SCRIPT.findall(text)
+
+
+def test_inline_script_scan_is_case_insensitive():
+    """⚠️ **下面那道门的【正控】** —— 大写 `<SCRIPT>` 也必须扫得到。
+
+    🔴 **为什么单立一条**（2026-10-10 · CodeQL 在本仓 PR 上抓的 `Bad HTML filtering regexp`）：
+    那个正则一开始**区分大小写** ⇒ 页面里写成 `<SCRIPT>` 时**扫不到**
+    ⇒ **那一页被静默跳过** ⇒ 门**看着全绿，其实没测它**。
+    ⚠️ 这类"**漏扫 ≠ 通过**"是本仓最恨的形态（「空跑 = 静默假通过」）。
+    ⚠️ **反证**：把正则里的 `re.I` 去掉 ⇒ 本条立刻红。
+    """
+    assert _inline_scripts("<SCRIPT>var a=1;</SCRIPT>") == ["var a=1;"], (
+        "大写 `<SCRIPT>` 扫不到 ⇒ 那个页面会被**静默跳过**（而门照样绿）"
+    )
+    assert _inline_scripts('<SCRIPT SRC="/x.js"></SCRIPT>') == [], (
+        "带 `src=` 的是外部文件，不归这道门管 —— ⛔ 别把它算成内联脚本"
+    )
+    assert _inline_scripts("<script>var a=1;</script>") == ["var a=1;"]
+    # ⚠️ 有意**不**收的形态：`</script >`（标签里带空格）HTML 里合法，但本正则不管
+    #    —— 本仓页面**一处都没有**这种写法。⇒ ⛔ 别把它读成"覆盖全了"。
 
 
 @pytest.mark.parametrize("page", PAGES, ids=PAGES)
