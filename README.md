@@ -144,9 +144,21 @@ bash dev.sh        # 起 postgres+redis → 等就绪 → 起 uvicorn（热重�
 
 ## 技术栈
 
-**FastAPI** + **PostgreSQL(pgvector)** + **Redis** + **LangGraph**（+ LangChain）。
-重排序本地 `BAAI/bge-reranker-v2-m3`；Embedding 固定走 DashScope；生成 LLM 可换；
-Agent 侧还有 **MCP 工具协议** 与 **Mem0 长期记忆**。
+| 层 | 用什么 |
+|---|---|
+| Web 框架 | **FastAPI** + Uvicorn |
+| 存储 | **PostgreSQL + pgvector**（业务表 + 向量）· **Redis**（缓存 / 限流桶 / 会话） |
+| Agent 编排 | **LangGraph**（`agent_graph` / `agent_graph_advanced*` / `agent_checkpointer`）· **LangChain**（模型与工具抽象） |
+| LLM 客户端 | **`langchain-openai`** 的 `ChatOpenAI`（全仓经 `app/core/llm_factory.make_llm()` **唯一构造**）<br>**裸 `openai` SDK** —— 🔴 **2 处不走 LangChain**：`app/rag/embedding_client.py`（embedding）与 `app/rag/query_rewriter.py`（改写）；它们拿到的是**裸响应**（只有 `.usage`，没有 `usage_metadata`） |
+| Embedding | 阿里云百炼 DashScope `text-embedding-v2`（**固定**） |
+| 重排序 | 本地 `BAAI/bge-reranker-v2-m3`（**真懒加载**，镜像里没装 torch ⇒ 只在开发机跑） |
+| 工具协议 / 记忆 | **MCP**（`app/tools/mcp_server.py`）· **mem0**（本地 Qdrant） |
+| 看板 / 评估 | **Gradio**（成本看板）· **RAGAS**（离线评估，⬜ 未实跑） |
+| 可观测 | `prometheus_client` + Prometheus + Grafana |
+
+🔴 **一处要说清**：`app/agent/plan_execute.py` 是**本仓【手写】的规划-执行循环**，⛔ **不是框架** ——
+它零命中 `langgraph` / `StateGraph`，只 import `langchain_core.messages`（判据：`grep -c yield app/agent/plan_execute.py` ⇒ **0**）。
+⇒ 它是 4 套 Agent 实现里**唯一不建图**的那一套。
 
 📄 逐项 + 落点 ⇒ `docs/原理/架构.md` §1 · 环境变量 ⇒ `docs/契约/环境变量.md`
 
@@ -204,16 +216,36 @@ Agent 侧还有 **MCP 工具协议** 与 **Mem0 长期记忆**。
 | 要找… | 去哪 |
 |---|---|
 | **这份代码怎么组织的**（模块全景 / 请求流 / 依赖枢纽） | `docs/原理/架构.md` |
-| **做到哪了 · 下一步 · 执行顺序** | **`ROADMAP.md`** 的「🧭 一屏总览」（**首屏**） |
-| **还没做完的** | `docs/待办总表.md`（唯一权威） |
 | **接口清单** | 跑 `bash scripts/list_endpoints.sh`（**⛔ 不写进文档** —— 手写的必然过期） |
 | **表结构** | `docs/契约/数据模型.md` + `app/schema.sql` |
 | **常见问题 / 故障排查** | `docs/FAQ.md` |
-| **常用命令 / 怎么贡献** | `CONTRIBUTING.md` |
 | **让另一个 Agent 来测这个项目** | `docs/给Agent的测试与调试指南.md`（含可直接粘贴的 Prompt） |
 | **文档该放哪 / 还没有哪些文档** | `docs/文档地图.md`（⚠️ 2026-10-09 起**已瘦成指针页**，只剩判据与欠账清单） |
 | **一键部署** | `docs/说明/部署.md` |
 | **Demo 做到哪一步** | `demo/demo清单.md`（施工区在 `demo/设置与命令/`，⚠️ 已 gitignore ⇒ clone 看不到） |
+
+## 项目状态与路线
+
+**当前阶段**：**后端已完成**，正在做**前端初稿**；终点是**一个能分享的 Demo**（魔搭社区 · 创空间）。
+
+| 想知道 | 去哪 |
+|---|---|
+| **做到哪了 · 下一步 · 执行顺序** | ⭐ **`ROADMAP.md`** 的「🧭 一屏总览」（**首屏**） |
+| **还没做完的** | ⭐ **`docs/待办总表.md`**（唯一权威） |
+| **改动史** | `CHANGELOG.md` |
+| **做过的选择**（备选 / 反悔成本） | `docs/decisions/` |
+
+## 贡献
+
+本仓是**个人项目**，没有开放协作流程，但**欢迎报 bug / 提建议**。
+要改代码或提 PR 前，先读 **[`CONTRIBUTING.md`](CONTRIBUTING.md)** —— 里面有：怎么跑起来 ·
+常用命令 · **提交前要过的门** · 目录约定。
+
+## 安全
+
+- **报告漏洞** ⇒ **[`SECURITY.md`](SECURITY.md)**（**请走私密渠道**，⛔ 不要开公开 issue）
+- 同一份里也写了**安全现状**：已收窄的端口 · 依赖漏洞清零 · CodeQL / gitleaks ·
+  `docs/威胁模型.md`（资产 / 信任边界 / **已接受的残余风险**）
 
 ## 许可证
 

@@ -10,6 +10,20 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- 🔴 **`README.md` 对齐 GitHub 高星项目的 README 结构**（2026-10-10 · 业务方指令「**联网搜索下 GitHub 置信度高的项目的 README.md 是怎么写的，参考，回写**」）——
+  **219 → 252 行**。
+  - **参考对象（实测抓的真 README）**：`infiniflow/ragflow` · `langgenius/dify` · `langchain-ai/langgraph`
+    （用 `gh api repos/<r>/readme` 取的**真实节标题**，⛔ 不是凭印象）。
+    **共识**：`Quick start` 靠前 → `Key features` → **架构** → 部署 → 文档指针 →
+    **`Contributing` / `Security` / `License` 各自单列一节**（哪怕只有一句 + 链接）。
+  - **补了三节**：**`## 贡献`**（→ `CONTRIBUTING.md`）· **`## 安全`**（→ `SECURITY.md`，**请走私密渠道**）·
+    **`## 项目状态与路线`**（→ `ROADMAP` / `待办总表` / `CHANGELOG` / `decisions`）。
+  - 🔴 **技术栈改成表，并补两处**：① **裸 `openai` SDK**（2 处不走 LangChain：
+    `embedding_client.py` 与 `query_rewriter.py`）② **`plan_execute` 标明是【手写循环】**，⛔ 不是框架
+    （判据 `grep -c yield app/agent/plan_execute.py` ⇒ 0）。
+  - ⚠️ **我自己造过一个两处真相**：新加的「项目状态与路线」与「文档导航」**重复了三行指针** ⇒
+    已把「文档导航」收成**纯"文档去哪找"**（状态指针只留一处）。
+
 - 🔴 **`README.md` 重排成标准结构 + `CLAUDE.md` 重排**（2026-10-10 · 业务方指令 · 📄 **`DEC-135`**）——
   业务方原话：「**`CLAUDE.md` 结构化处理，和 emoji**」「**`README.md`，标准的 README.md 不是这样的，
   感觉看起来，乱七八糟的**」。
