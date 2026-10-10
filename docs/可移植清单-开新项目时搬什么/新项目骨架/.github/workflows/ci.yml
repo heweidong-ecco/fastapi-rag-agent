@@ -1,0 +1,70 @@
+# ci.yml —— 新项目的 CI 骨架（从 fastapi-rag-agent 打包过来的【最小版】）
+#
+# ## 它现在跑什么
+#   · `doc-gates` —— 四道与语言/框架无关的门（凭据 / 链接 / 孤儿 / 分层CLAUDE.md）+ 它们各自的自测
+#
+# ## 🔴 两条必须保留的东西
+#   ① **每个 job 都带 `timeout-minutes`** —— ⛔ 「卡住」与「跑得很慢」在机器痕迹上**完全一样**；
+#      没有上限时，「卡住」**不是一个显式状态**（有 `check_ci_job_timeouts.py` 在钉这一条）
+#   ② **门要跑在这里，⛔ 不能只在本地 hook 里** —— 本地 hook 只在 Claude 会话里触发，
+#      `--no-verify` / 人直接 commit 都绕得过 ⇒ **不接 CI 就不是门**
+#
+# ⚠️ `scripts/ci-local.sh`（没搬过来）在源项目里的作用是**逐字读这里的 run 块在本机跑** ——
+#    要那个能力就照源项目那份写一份。
+#
+# ⬜ 还没接的（等你长出对应形状再加）：编译检查 / 单元测试 / 静态检查 / 依赖漏洞 / 密钥历史扫描
+
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  doc-gates:
+    name: 文档四道门（凭据 / 链接 / 孤儿 / 分层CLAUDE.md）
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          # ⚠️ 凭据门的 `--diff <base>...<head>`（三点）需要 merge-base ⇒ 必须全量历史
+          fetch-depth: 0
+
+      - name: 查看 Python 版本
+        run: python3 --version
+
+      # ⚠️ 这三道门是**纯 bash + 系统 python3**，无网、无需凭据 ⇒ 不需要装任何依赖。
+      #    判据是**退出码**，⛔ 不是"命令跑了"。
+      - name: 链接门 + 孤儿门
+        run: |
+          bash scripts/check_doc_links.sh
+          bash scripts/check_doc_orphans.sh
+
+      - name: 分层 CLAUDE.md 门
+        run: |
+          bash scripts/check_layered_claude_md.sh
+          bash scripts/check_layered_claude_md.sh --self-test
+
+      - name: CI 形状门（每个 job 必须有 timeout-minutes）
+        run: python3 scripts/check_ci_job_timeouts.py
+
+      # ⚠️ 凭据门在 CI 里**没有 `.env`、没有 `.secret-denylist`** ⇒ 会自动降级为**部分覆盖**，
+      #    结论行会写明覆盖了哪几节。⛔ 别把"通过"读成"和真凭据逐字比过"。
+      - name: 凭据门（只扫本 PR 的新增行）
+        run: |
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.sha }}"
+          if [ -n "${BASE}" ]; then
+            bash scripts/check_secrets.sh --diff "${BASE}...${HEAD}"
+          else
+            SECRETS_GATE_ALLOW_NO_ENV=1 bash scripts/check_secrets.sh --all
+          fi
+
+      - name: 门自己的自测（⛔ 一条测不出「不成立」的守卫 = 没有守卫）
+        run: |
+          bash scripts/check_doc_links.sh --quiet
+          bash scripts/check_doc_orphans.sh >/dev/null
+          echo "（上面两道的自测在源项目里是 test_check_*.sh —— 这里没搬，按需补）"
