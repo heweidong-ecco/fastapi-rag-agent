@@ -472,10 +472,10 @@ bash scripts/list_endpoints.sh          # 默认 http://127.0.0.1:8000
 >
 > ### ✅ 本轮（安全线）已落
 > **3 个端口收窄** · **依赖就地钉死**（**41 行 `==`**；⚠️ 只剩 **6 个 `>=`** —— 它们不在本机 venv 里，
-> 见 `SECURITY.md` §3.3）· **A1 匿名配额给最低档** ·
+> 见 `app/requirements.txt` 的文件头，判据写在原地）· **A1 匿名配额给最低档** ·
 > **C 本地依赖扫描**（它扫出上面这批）· **D CodeQL** · **E gitleaks** · **F 威胁模型** · **H Grafana 口令**
 > ✅ **依赖漏洞清零**（`pyjwt` 当天先升；其余 8 个包 + `openai` 2.x 一次升完 ⇒ **0 条**）
-> 📄 `SECURITY.md`（§3.4 已收口，闭包分析留档）· `docs/decisions/DEC-127`
+> 📄 依据 ⇒ `docs/decisions/DEC-127`（依赖闭包分析）· `CHANGELOG.md`（改了什么）
 >
 > ✅ **PR [#125](https://github.com/heweidong-ecco/fastapi-rag-agent/pull/125)** —— 分支 `fix/security-ports`。
 > ⚠️ **合并纪律**：⛔ **Agent 自己开的 PR 不许自合** —— 要先问业务方「可以合吗」。
